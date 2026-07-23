@@ -32,7 +32,11 @@ const PromptItem: React.FC<{ prompt: Prompt; batchMode?: boolean; selected?: boo
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(prompt.content);
+    if (window.electronAPI?.copyText) {
+      window.electronAPI.copyText(prompt.content);
+    } else {
+      navigator.clipboard.writeText(prompt.content);
+    }
     toast('ÒÑ¸´ÖÆµ½¼ôÌù°å', 'success');
   };
 

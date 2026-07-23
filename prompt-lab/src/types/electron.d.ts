@@ -23,6 +23,7 @@ export interface ElectronAPI {
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;
   onInjectFromContextMenu: (callback: () => void) => () => void;
+  copyText: (text: string) => void;
 }
 
 declare global {

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, clipboard } from 'electron';
 
 // ── 暴露给渲染进程的安全 API ──
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -44,4 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('save-before-quit', callback);
     return () => { ipcRenderer.removeListener('save-before-quit', callback); };
   },
+
+  // 剪贴板（绕过 web 层，避免焦点问题）
+  copyText: (text: string) => clipboard.writeText(text),
 });
