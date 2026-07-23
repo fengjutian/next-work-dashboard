@@ -111,25 +111,21 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     // 先注入诊断 ping，验证 executeJavaScript + console-message 通道
     webview.executeJavaScript(`console.log('__PL_PING__:' + location.href)`).catch(() => {});
 
-    // 注入 fetch hook
+    // 注入 fetch + XHR hook — 嗅探所有网络请求
     webview.executeJavaScript(`
       (function() {
         if (window.__promptlab_injected__) return;
         window.__promptlab_injected__ = true;
 
         const TAG = '__PL_CAPTURE__:';
+        const SNIFF = '__PL_SNIFF__:';
+        console.log('__PL_HOOK__:installed');
 
-        const API_PATTERNS = [
-          { pattern: /chat\\.deepseek\\.com\\/api\\/v\\d+\\/chat\\/completions/i, site: 'deepseek' },
-          { pattern: /chatgpt\\.com\\/backend-api\\/conversation/i, site: 'chatgpt' },
-          { pattern: /kimi\\.moonshot\\.cn\\/api\\/chat/i, site: 'kimi' },
-          { pattern: /tongyi\\.aliyun\\.com\\/api/i, site: 'tongyi' },
-        ];
-
-        function matchApi(url) {
-          for (const e of API_PATTERNS) {
-            if (e.pattern.test(url)) return e.site;
-          }
+        function guessSite(url) {
+          if (url.includes('chat.deepseek.com')) return 'deepseek';
+          if (url.includes('chatgpt.com')) return 'chatgpt';
+          if (url.includes('kimi.moonshot.cn')) return 'kimi';
+          if (url.includes('tongyi.aliyun.com')) return 'tongyi';
           return null;
         }
 
@@ -153,7 +149,12 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
 
         window.fetch = async function(input, init) {
           const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : input.url);
-          const site = matchApi(url);
+          const site = guessSite(url);
+
+          // 嗅探：打印所有 AI 站点的 API 请求 URL（用于诊断）
+          if (site) {
+            console.log(SNIFF + JSON.stringify({ site, url, ct: init?.headers?.['content-type'] || 'none' }));
+          }
 
           if (!site) return origFetch(input, init);
 
@@ -208,6 +209,54 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
 
           return response;
         };
+
+        // ── Hook XMLHttpRequest ──
+        const OrigXHR = window.XMLHttpRequest;
+
+        // ── Hook EventSource ──
+        const OrigES = window.EventSource;
+        window.EventSource = function(url, config) {
+          const site = guessSite(url.toString());
+          if (site) console.log(SNIFF + JSON.stringify({ via: 'eventsource', site, url: url.toString() }));
+          return new OrigES(url, config);
+        };
+
+        // ── Hook XMLHttpRequest ──
+        window.XMLHttpRequest = function() {
+          const xhr = new OrigXHR();
+          const origOpen = xhr.open;
+          let _url = '', _method = '';
+          xhr.open = function(method, url) {
+            _url = url.toString();
+            _method = method;
+            return origOpen.apply(xhr, arguments);
+          };
+          const origSend = xhr.send;
+          xhr.send = function(body) {
+            const site = guessSite(_url);
+            if (site) {
+              console.log(SNIFF + JSON.stringify({ via: 'xhr', site, method: _method, url: _url }));
+              xhr.addEventListener('load', function() {
+                if (xhr.responseText && xhr.responseText.startsWith('data:')) {
+                  // SSE via XHR — parse it
+                  const lines = xhr.responseText.split('\\n');
+                  let content = '';
+                  for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const jsonStr = line.slice(6).trim();
+                    if (jsonStr === '[DONE]') continue;
+                    try { const d = JSON.parse(jsonStr); const delta = d?.choices?.[0]?.delta?.content; if (delta) content += delta; } catch(e) {}
+                  }
+                  if (content) {
+                    console.log(TAG + JSON.stringify({ site, timestamp: Date.now(), requestBody: body, responseContent: content }));
+                  }
+                }
+              });
+            }
+            return origSend.apply(xhr, arguments);
+          };
+          return xhr;
+        };
       })();
     `).catch(() => {});
   }, []);
@@ -227,6 +276,13 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
       injectInterceptor();
     };
     webview.addEventListener('dom-ready', onDomReady);
+
+    // 开发模式：自动打开 webview 的 DevTools 方便诊断（仅首次）
+    const openDevTools = () => {
+      try { webview.openDevTools(); } catch {}
+      webview.removeEventListener('dom-ready', openDevTools);
+    };
+    webview.addEventListener('dom-ready', openDevTools);
     return () => { webview.removeEventListener('dom-ready', onDomReady); };
   }, [tab?.siteId, injectInterceptor]);
 
@@ -240,6 +296,16 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
       // 诊断 ping
       if (msg.startsWith('__PL_PING__:')) {
         console.log('[PromptLab] Pipeline OK, page:', msg.slice(14));
+        return;
+      }
+      // URL 嗅探
+      if (msg.startsWith('__PL_SNIFF__:')) {
+        console.log('[PromptLab] API call:', msg.slice(15));
+        return;
+      }
+      // Hook 安装确认
+      if (msg.startsWith('__PL_HOOK__:')) {
+        console.log('[PromptLab]', msg);
         return;
       }
       // 对话捕获
