@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/shallow';
 import type { Prompt, SiteConfig, Tab, InjectMode, InjectStrategy } from './types';
-import { DEFAULT_SITES, DEFAULT_PROMPTS, CATEGORIES } from './types';
+import { DEFAULT_SITES, CATEGORIES } from './types';
+import { DEFAULT_PROMPTS } from './defaultPrompts';
 
 // ── Store 类型 ──
 

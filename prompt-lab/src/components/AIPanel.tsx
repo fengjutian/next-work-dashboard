@@ -5,30 +5,37 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useStore } from '@/store';
 
-// 获取站点 favicon URL
-function getFavicon(url: string): string {
+// 生成多级 favicon 候选 URL（按优先级排序）
+function getFaviconSources(url: string): string[] {
   try {
-    const host = new URL(url).hostname;
-    return `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
+    const u = new URL(url);
+    const host = u.hostname;
+    const origin = u.origin;
+    return [
+      `https://www.google.com/s2/favicons?domain=${host}&sz=32`,
+      `https://icons.duckduckgo.com/ip3/${host}.ico`,
+      `https://api.faviconkit.com/${host}/32`,
+      `${origin}/favicon.ico`,
+    ];
   } catch {
-    return '';
+    return [];
   }
 }
 
-// favicon 组件，加载失败时显示 Globe 兜底
+// favicon 组件 — 多源 fallback，全失败时显示 Globe 兜底
 const SiteIcon: React.FC<{ url: string; className?: string }> = ({ url, className = 'h-4 w-4' }) => {
-  const [failed, setFailed] = useState(false);
-  const src = getFavicon(url);
+  const sources = getFaviconSources(url);
+  const [sourceIndex, setSourceIndex] = useState(0);
 
-  if (failed || !src) {
+  if (sources.length === 0 || sourceIndex >= sources.length) {
     return <Globe className={`${className} text-zinc-400`} />;
   }
 
   return (
     <img
-      src={src}
+      src={sources[sourceIndex]}
       className={`${className} rounded-sm`}
-      onError={() => setFailed(true)}
+      onError={() => setSourceIndex((i) => i + 1)}
       alt=""
     />
   );
