@@ -118,7 +118,7 @@ export const SettingsSidebar: React.FC = () => {
   const allSites = [...sites].sort((a, b) => a.sortOrder - b.sortOrder);
 
   return (
-    <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-white dark:bg-zinc-950">
+    <div className="h-full flex-1 flex flex-col bg-white dark:bg-zinc-950">
       <div className="px-3 py-3">
         <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
           设置

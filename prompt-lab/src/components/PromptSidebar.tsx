@@ -240,7 +240,7 @@ export const PromptSidebar: React.FC = () => {
 
 
   return (
-    <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-white dark:bg-zinc-950 relative">
+    <div className="h-full flex-1 flex flex-col bg-white dark:bg-zinc-950 relative">
       {/* 搜索框 */}
       <div className="p-3 pb-2">
         <div className="relative">

@@ -11,7 +11,7 @@ import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useStore } from '@/store';
 
-// ── 空状态（无标签页时） ──
+// ── 空状态（无标签页时，仅 AI 模式显示） ──
 
 const EmptyState: React.FC = () => {
   const { sites, openTab } = useStore();
@@ -26,7 +26,7 @@ const EmptyState: React.FC = () => {
             PromptLab
           </h1>
           <p className="text-sm text-zinc-500">
-            在左侧 Activity Bar 选择 AI 打开站点，或选择提示词开始使用
+            在左侧面板选择一个 AI 站点开始使用
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -50,17 +50,21 @@ const EmptyState: React.FC = () => {
   );
 };
 
-// ── 侧边栏内容 ──
+// ── 主内容区 ──
 
-const SidebarContent: React.FC = () => {
-  const { activeActivity } = useStore();
+const MainContent: React.FC = () => {
+  const { activeActivity, tabs } = useStore();
 
   switch (activeActivity) {
     case 'ai':
-      return <AIPanel />;
+    case null:
+      // AI 模式：WebView + 空状态
+      return tabs.length > 0 ? <WebViewContainer /> : <EmptyState />;
     case 'prompts':
+      // 提示词模块占满主区域
       return <PromptSidebar />;
     case 'settings':
+      // 设置模块占满主区域
       return <SettingsSidebar />;
     default:
       return null;
@@ -73,7 +77,6 @@ export default function App() {
   const {
     activeActivity,
     setActiveActivity,
-    tabs,
     injectMode,
     setInjectMode,
     injectStrategy,
@@ -92,6 +95,8 @@ export default function App() {
     }
   }, [theme]);
 
+  const showAIPanel = activeActivity === 'ai';
+
   return (
     <ToastProvider>
     <div className="h-screen flex flex-col">
@@ -103,76 +108,79 @@ export default function App() {
 
         <div className="flex-1" />
 
-        {/* 注入模式切换 */}
-        <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5">
-          <button
-            className={`px-2 py-0.5 rounded-sm transition-colors ${
-              injectMode === 'fill-only'
-                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700'
-            }`}
-            onClick={() => setInjectMode('fill-only')}
-          >
-            仅填充
-          </button>
-          <button
-            className={`px-2 py-0.5 rounded-sm transition-colors ${
-              injectMode === 'fill-and-submit'
-                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700'
-            }`}
-            onClick={() => setInjectMode('fill-and-submit')}
-          >
-            填充并发送
-          </button>
-        </div>
+        {/* 注入模式切换 — 仅 AI 模式显示 */}
+        {activeActivity === 'ai' && (
+          <>
+            <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5">
+              <button
+                className={`px-2 py-0.5 rounded-sm transition-colors ${
+                  injectMode === 'fill-only'
+                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+                onClick={() => setInjectMode('fill-only')}
+              >
+                仅填充
+              </button>
+              <button
+                className={`px-2 py-0.5 rounded-sm transition-colors ${
+                  injectMode === 'fill-and-submit'
+                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+                onClick={() => setInjectMode('fill-and-submit')}
+              >
+                填充并发送
+              </button>
+            </div>
 
-        {/* 追加/替换 */}
-        <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5 ml-1">
-          <button
-            className={`px-2 py-0.5 rounded-sm transition-colors ${
-              injectStrategy === 'replace'
-                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700'
-            }`}
-            onClick={() => setInjectStrategy('replace')}
-          >
-            替换
-          </button>
-          <button
-            className={`px-2 py-0.5 rounded-sm transition-colors ${
-              injectStrategy === 'append'
-                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700'
-            }`}
-            onClick={() => setInjectStrategy('append')}
-          >
-            追加
-          </button>
-        </div>
+            <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5 ml-1">
+              <button
+                className={`px-2 py-0.5 rounded-sm transition-colors ${
+                  injectStrategy === 'replace'
+                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+                onClick={() => setInjectStrategy('replace')}
+              >
+                替换
+              </button>
+              <button
+                className={`px-2 py-0.5 rounded-sm transition-colors ${
+                  injectStrategy === 'append'
+                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+                onClick={() => setInjectStrategy('append')}
+              >
+                追加
+              </button>
+            </div>
+          </>
+        )}
 
         <Button
           variant="ghost"
           size="icon"
           className={`h-7 w-7 ml-1 ${activeActivity === 'settings' ? 'text-blue-500' : ''}`}
-          onClick={() => setActiveActivity(activeActivity === 'settings' ? null : 'settings')}
+          onClick={() => setActiveActivity(activeActivity === 'settings' ? 'ai' : 'settings')}
           title="设置"
         >
           <Settings className="h-4 w-4" />
         </Button>
       </div>
 
-      {/* 主体：Activity Bar + 侧边栏 + 主内容区 */}
+      {/* 主体：Activity Bar + AI 侧边栏 + 主内容区 */}
       <div className="flex flex-1 overflow-hidden">
         {/* VSCode 风格 Activity Bar */}
         <ActivityBar />
 
-        {/* 侧边栏（根据活动切换） */}
-        <SidebarContent />
+        {/* AI 模式的侧边栏：站点列表 + 已打开标签页 */}
+        {showAIPanel && <AIPanel />}
 
-        {/* 主内容区 */}
+        {/* 主内容区：AI=WebView, 提示词=PromptEditor, 设置=Settings */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
+          <MainContent />
         </div>
       </div>
 
