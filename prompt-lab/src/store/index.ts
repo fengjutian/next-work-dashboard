@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useShallow } from 'zustand/shallow';
 import type { Prompt, SiteConfig, Tab, InjectMode, InjectStrategy } from './types';
 import { DEFAULT_SITES, DEFAULT_PROMPTS, CATEGORIES } from './types';
 
@@ -184,7 +185,7 @@ export const useStore = create<AppState>((set, get) => ({
 // ── 派生选择器 ──
 
 export function useFilteredPrompts() {
-  return useStore((s) => {
+  return useStore(useShallow((s) => {
     let list = s.prompts;
 
     if (s.searchQuery) {
@@ -211,19 +212,19 @@ export function useFilteredPrompts() {
       if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
       return b.usageCount - a.usageCount;
     });
-  });
+  }));
 }
 
 export function useAllTags() {
-  return useStore((s) => {
+  return useStore(useShallow((s) => {
     const tags = new Set<string>();
     s.prompts.forEach((p) => p.tags.forEach((t) => tags.add(t)));
     return [...tags].sort();
-  });
+  }));
 }
 
 export function useRecentPrompts(limit = 5) {
-  return useStore((s) => {
+  return useStore(useShallow((s) => {
     const seen = new Set<string>();
     const result: Prompt[] = [];
     for (const entry of s.injectHistory) {
@@ -234,15 +235,15 @@ export function useRecentPrompts(limit = 5) {
       if (result.length >= limit) break;
     }
     return result;
-  });
+  }));
 }
 
 export function useAllCategories() {
-  return useStore((s) => {
+  return useStore(useShallow((s) => {
     const all = [...CATEGORIES];
     s.userCategories.forEach((c) => { if (!all.includes(c)) all.push(c); });
     return all;
-  });
+  }));
 }
 
 export { CATEGORIES };
