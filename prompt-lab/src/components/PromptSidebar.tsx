@@ -216,9 +216,7 @@ const PromptEditor: React.FC<{
 
 // ── 主侧边栏 ──
 
-export const PromptSidebar: React.FC<{ collapsed: boolean }> = ({
-  collapsed,
-}) => {
+export const PromptSidebar: React.FC = () => {
   const {
     searchQuery,
     setSearch,
@@ -227,6 +225,7 @@ export const PromptSidebar: React.FC<{ collapsed: boolean }> = ({
     filterTag,
     setFilterTag,
     selectedPromptId,
+    selectPrompt,
     batchDeletePrompts,
     addCategory,
   } = useStore();
@@ -239,7 +238,6 @@ export const PromptSidebar: React.FC<{ collapsed: boolean }> = ({
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  if (collapsed) return null;
 
   return (
     <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-white dark:bg-zinc-950 relative">

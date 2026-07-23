@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { PanelLeft, PanelRight, Globe, Settings } from 'lucide-react';
+import React from 'react';
+import { Globe, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ActivityBar } from '@/components/ActivityBar';
+import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
+import { SettingsSidebar } from '@/components/SettingsSidebar';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
-import { SettingsPanel } from '@/components/SettingsPanel';
 import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useStore } from '@/store';
@@ -24,7 +26,7 @@ const EmptyState: React.FC = () => {
             PromptLab
           </h1>
           <p className="text-sm text-zinc-500">
-            在左侧选择提示词，然后打开一个 AI 网站开始使用
+            在左侧 Activity Bar 选择 AI 打开站点，或选择提示词开始使用
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -48,13 +50,37 @@ const EmptyState: React.FC = () => {
   );
 };
 
+// ── 侧边栏内容 ──
+
+const SidebarContent: React.FC = () => {
+  const { activeActivity } = useStore();
+
+  switch (activeActivity) {
+    case 'ai':
+      return <AIPanel />;
+    case 'prompts':
+      return <PromptSidebar />;
+    case 'settings':
+      return <SettingsSidebar />;
+    default:
+      return null;
+  }
+};
+
 // ── 根布局 ──
 
 export default function App() {
-  const { sidebarOpen, toggleSidebar, tabs, injectMode, setInjectMode, injectStrategy, setInjectStrategy, theme } =
-    useStore();
+  const {
+    activeActivity,
+    setActiveActivity,
+    tabs,
+    injectMode,
+    setInjectMode,
+    injectStrategy,
+    setInjectStrategy,
+    theme,
+  } = useStore();
   usePersistence();
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 应用主题
   React.useEffect(() => {
@@ -71,19 +97,6 @@ export default function App() {
     <div className="h-screen flex flex-col">
       {/* 顶部工具栏 */}
       <div className="h-10 flex items-center px-3 border-b bg-white dark:bg-zinc-950 gap-2 select-none">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={toggleSidebar}
-        >
-          {sidebarOpen ? (
-            <PanelLeft className="h-4 w-4" />
-          ) : (
-            <PanelRight className="h-4 w-4" />
-          )}
-        </Button>
-
         <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           PromptLab
         </span>
@@ -138,15 +151,26 @@ export default function App() {
           </button>
         </div>
 
-        <Button variant="ghost" size="icon" className="h-7 w-7 ml-1" onClick={() => setSettingsOpen(true)}>
-          <Settings className="h-4 w-4 text-zinc-500" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`h-7 w-7 ml-1 ${activeActivity === 'settings' ? 'text-blue-500' : ''}`}
+          onClick={() => setActiveActivity(activeActivity === 'settings' ? null : 'settings')}
+          title="设置"
+        >
+          <Settings className="h-4 w-4" />
         </Button>
       </div>
 
-      {/* 主体：侧边栏 + WebView */}
+      {/* 主体：Activity Bar + 侧边栏 + 主内容区 */}
       <div className="flex flex-1 overflow-hidden">
-        <PromptSidebar collapsed={!sidebarOpen} />
+        {/* VSCode 风格 Activity Bar */}
+        <ActivityBar />
 
+        {/* 侧边栏（根据活动切换） */}
+        <SidebarContent />
+
+        {/* 主内容区 */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
         </div>
@@ -154,9 +178,6 @@ export default function App() {
 
       {/* 浮动搜索面板 */}
       <CommandPalette />
-
-      {/* 设置面板 */}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
     </ToastProvider>
   );

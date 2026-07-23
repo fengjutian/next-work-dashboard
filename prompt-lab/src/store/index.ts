@@ -19,6 +19,7 @@ interface AppState {
   selectPrompt: (id: string | null) => void;
   setSearch: (q: string) => void;
   setFilterCategory: (c: string | null) => void;
+  setFilterTag: (t: string | null) => void;
   incrementUsage: (id: string) => void;
 
   // ── 注入历史 ──
@@ -46,6 +47,8 @@ interface AppState {
   setLastInjectResult: (r: { success: boolean; error?: string } | null) => void;
 
   // ── UI ──
+  activeActivity: 'ai' | 'prompts' | 'settings' | null;
+  setActiveActivity: (a: 'ai' | 'prompts' | 'settings' | null) => void;
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   theme: 'light' | 'dark' | 'system';
@@ -99,6 +102,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   setSearch: (q) => set({ searchQuery: q }),
   setFilterCategory: (c) => set({ filterCategory: c }),
+  setFilterTag: (t) => set({ filterTag: t }),
 
   incrementUsage: (id) =>
     set((s) => ({
@@ -167,6 +171,8 @@ export const useStore = create<AppState>((set, get) => ({
   setLastInjectResult: (r) => set({ lastInjectResult: r }),
 
   // ── UI ──
+  activeActivity: 'ai' as 'ai' | 'prompts' | 'settings' | null,
+  setActiveActivity: (activeActivity) => set({ activeActivity }),
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   theme: 'system' as const,
