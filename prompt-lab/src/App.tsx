@@ -24,7 +24,7 @@ const EmptyState: React.FC = () => {
         <Globe className="h-12 w-12 text-zinc-300 mx-auto" />
         <div>
           <h1 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
-            PromptLab
+            next-work-dashboard
           </h1>
         </div>
         {enabledSites.length === 0 && (
@@ -74,7 +74,7 @@ export default function App() {
       {/* 顶部工具栏 */}
       <div className="h-10 flex items-center px-3 border-b bg-white dark:bg-zinc-950 gap-2 select-none">
         <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-          PromptLab
+          next-work-dashboard
         </span>
 
         <div className="flex-1" />

@@ -100,6 +100,39 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const { toast } = useToast();
   const prompts = useStore((s) => s.prompts);
   const sites = useStore((s) => s.sites);
+  const [preloadPath, setPreloadPath] = useState<string>('');
+
+  // 获取 webview preload 路径
+  useEffect(() => {
+    (window as any).electronAPI?.getWebviewPreloadPath?.().then((p: string) => {
+      setPreloadPath(p);
+    });
+  }, []);
+
+  // 监听 webview 中的对话捕获事件
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    const handler = (event: Electron.IpcMessageEvent) => {
+      if (event.channel === 'conversation-captured') {
+        const data = event.args[0];
+        if (data?.responseContent) {
+          (window as any).electronAPI?.saveConversation?.({
+            site: data.site || 'unknown',
+            timestamp: data.timestamp || Date.now(),
+            requestBody: data.requestBody,
+            responseContent: data.responseContent,
+          });
+        }
+      }
+    };
+
+    webview.addEventListener('ipc-message', handler);
+    return () => {
+      webview.removeEventListener('ipc-message', handler);
+    };
+  }, [tab?.siteId]);
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
   const site = sites.find((s) => s.id === tab?.siteId);
@@ -247,6 +280,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         ref={webviewRef}
         src={tab.url}
         partition={`persist:site-${tab.siteId}`}
+        preload={preloadPath || undefined}
         style={{ flex: 1 }}
         // @ts-expect-error webview-specific attribute
         allowpopups="true"

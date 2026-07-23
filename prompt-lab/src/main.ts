@@ -1,6 +1,9 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import https from 'node:https';
+import http from 'node:http';
+import { URL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import AutoLaunch from 'electron-auto-launch';
 
@@ -17,7 +20,7 @@ const createWindow = () => {
     height: 800,
     minWidth: 800,
     minHeight: 500,
-    title: 'PromptLab',
+    title: 'next-work-dashboard',
     show: false, // 等 ready-to-show 再显示，避免白屏
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -67,7 +70,7 @@ const createTray = () => {
     },
     { type: 'separator' },
     {
-      label: '退出 PromptLab',
+      label: '退出 next-work-dashboard',
       click: () => {
         // 退出前触发保存
         mainWindow?.webContents.send('save-before-quit');
@@ -80,7 +83,7 @@ const createTray = () => {
     },
   ]);
 
-  tray.setToolTip('PromptLab');
+  tray.setToolTip('next-work-dashboard');
   tray.setContextMenu(contextMenu);
 
   // 双击托盘图标显示窗口
@@ -91,6 +94,106 @@ const createTray = () => {
 };
 
 // ── IPC 处理器 ──
+
+// favicon 缓存：host → base64 data URL
+const faviconCache = new Map<string, string>();
+
+// 用 Node.js HTTP 发起 GET 请求，返回 body 字符串
+function httpGet(urlStr: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const mod = u.protocol === 'https:' ? https : http;
+    const req = mod.get(
+      urlStr,
+      { timeout: 5000, headers: { 'User-Agent': 'next-work-dashboard/1.0' } },
+      (res) => {
+        // 跟随重定向
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          const redirectUrl = new URL(res.headers.location, urlStr).toString();
+          httpGet(redirectUrl).then(resolve).catch(reject);
+          return;
+        }
+        let data = '';
+        res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        res.on('end', () => resolve(data));
+        res.on('error', reject);
+      },
+    );
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', reject);
+  });
+}
+
+// 获取原始二进制数据
+function httpGetBuffer(urlStr: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const mod = u.protocol === 'https:' ? https : http;
+    const req = mod.get(
+      urlStr,
+      { timeout: 5000, headers: { 'User-Agent': 'next-work-dashboard/1.0' } },
+      (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          const redirectUrl = new URL(res.headers.location, urlStr).toString();
+          httpGetBuffer(redirectUrl).then(resolve).catch(reject);
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on('error', reject);
+      },
+    );
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', reject);
+  });
+}
+
+// 从 HTML 中解析 favicon 链接
+function parseFaviconLink(html: string, baseUrl: string): string | null {
+  // 匹配 <link rel="icon" ...> 或 <link rel="shortcut icon" ...>
+  const re = /<link\b[^>]*\brel=["'](?:shortcut\s+)?icon["'][^>]*\bhref=["']([^"']+)["'][^>]*>/i
+    || /<link\b[^>]*\bhref=["']([^"']+)["'][^>]*\brel=["'](?:shortcut\s+)?icon["'][^>]*>/i;
+  const match = html.match(re);
+  if (match) {
+    return new URL(match[1], baseUrl).toString();
+  }
+  return null;
+}
+
+// 获取站点 favicon，返回 base64 data URL
+async function fetchSiteFavicon(siteUrl: string): Promise<string | null> {
+  try {
+    const u = new URL(siteUrl);
+    const host = u.hostname;
+    const cacheKey = host;
+
+    if (faviconCache.has(cacheKey)) return faviconCache.get(cacheKey)!;
+
+    // 1. 解析 HTML 中的 <link rel="icon">
+    const html = await httpGet(siteUrl);
+    let iconUrl = parseFaviconLink(html, siteUrl);
+
+    // 2. 回退到 /favicon.ico
+    if (!iconUrl) {
+      iconUrl = `${u.origin}/favicon.ico`;
+    }
+
+    // 3. 下载图标
+    const buf = await httpGetBuffer(iconUrl);
+
+    // 4. 转 base64 data URL
+    const ext = iconUrl.split('.').pop()?.split('?')[0] || 'ico';
+    const mime = { png: 'image/png', svg: 'image/svg+xml', ico: 'image/x-icon', jpg: 'image/jpeg', jpeg: 'image/jpeg' }[ext] || 'image/x-icon';
+    const b64 = buf.toString('base64');
+    const dataUrl = `data:${mime};base64,${b64}`;
+
+    faviconCache.set(cacheKey, dataUrl);
+    return dataUrl;
+  } catch {
+    return null;
+  }
+}
 
 const setupIPC = () => {
   // WebView 右键菜单 (B05)
@@ -180,7 +283,7 @@ const setupIPC = () => {
   });
 
   // ── 开机启动 (S14) ──
-  const autoLauncher = new AutoLaunch({ name: 'PromptLab' });
+  const autoLauncher = new AutoLaunch({ name: 'next-work-dashboard' });
   ipcMain.handle('auto-launch-get', async () => {
     try { return await autoLauncher.isEnabled(); } catch { return false; }
   });
@@ -194,7 +297,13 @@ const setupIPC = () => {
   });
 
   // ── 数据持久化 ──
-  const dataPath = path.join(app.getPath('userData'), 'promptlab-data.json');
+  const dataPath = path.join(app.getPath('userData'), 'next-work-dashboard-data.json');
+  const exportDir = path.join(app.getPath('documents'), 'next-work-dashboard', 'conversations');
+
+  // ── favicon 获取（主进程 HTTP，绕过浏览器限制）──
+  ipcMain.handle('fetch-favicon', async (_event, siteUrl: string) => {
+    return await fetchSiteFavicon(siteUrl);
+  });
 
   ipcMain.handle('store-save', async (_event, data: string) => {
     try {
@@ -216,6 +325,67 @@ const setupIPC = () => {
       return null;
     }
   });
+
+  // ── 对话捕获存储 ──
+  ipcMain.handle('get-webview-preload-path', () => {
+    return path.join(__dirname, 'webview-preload.js');
+  });
+
+  ipcMain.handle('store-conversation', async (_event, payload: {
+    site: string;
+    timestamp: number;
+    requestBody: unknown;
+    responseContent: string;
+  }) => {
+    try {
+      if (!fs.existsSync(exportDir)) {
+        fs.mkdirSync(exportDir, { recursive: true });
+      }
+
+      const date = new Date(payload.timestamp).toISOString().split('T')[0];
+      const time = new Date(payload.timestamp).toLocaleTimeString('zh-CN');
+      const filePath = path.join(exportDir, `${payload.site}-${date}.md`);
+
+      // 提取用户消息内容
+      let userMsg = '(无法解析)';
+      try {
+        const body = payload.requestBody as Record<string, unknown>;
+        if (body?.messages && Array.isArray(body.messages)) {
+          const lastUser = [...body.messages].reverse().find(
+            (m: Record<string, unknown>) => m.role === 'user'
+          ) as Record<string, unknown> | undefined;
+          if (lastUser?.content) {
+            userMsg = typeof lastUser.content === 'string'
+              ? lastUser.content
+              : JSON.stringify(lastUser.content);
+          }
+        } else if (body?.prompt) {
+          userMsg = String(body.prompt);
+        } else if (body?.query) {
+          userMsg = String(body.query);
+        }
+      } catch { /* keep default */ }
+
+      const entry = [
+        '',
+        `---`,
+        `### 🧑 用户 — ${time}`,
+        '',
+        userMsg,
+        '',
+        `### 🤖 AI — ${time}`,
+        '',
+        payload.responseContent,
+        '',
+      ].join('\n');
+
+      fs.appendFileSync(filePath, entry, 'utf-8');
+
+      return { success: true, filePath };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
 };
 
 // ── 全局快捷键 ──
@@ -234,7 +404,7 @@ const registerShortcuts = () => {
   });
 
   // 从持久化数据加载自定义快捷键
-  const shortcutsPath = path.join(app.getPath('userData'), 'promptlab-data.json');
+  const shortcutsPath = path.join(app.getPath('userData'), 'next-work-dashboard-data.json');
   try {
     if (fs.existsSync(shortcutsPath)) {
       const data = JSON.parse(fs.readFileSync(shortcutsPath, 'utf-8'));

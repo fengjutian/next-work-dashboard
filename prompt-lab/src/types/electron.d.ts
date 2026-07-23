@@ -24,6 +24,14 @@ export interface ElectronAPI {
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;
   onInjectFromContextMenu: (callback: () => void) => () => void;
   copyText: (text: string) => void;
+  fetchFavicon: (siteUrl: string) => Promise<string | null>;
+  saveConversation: (payload: {
+    site: string;
+    timestamp: number;
+    requestBody: unknown;
+    responseContent: string;
+  }) => Promise<{ success: boolean; filePath?: string }>;
+  getWebviewPreloadPath: () => Promise<string>;
 }
 
 declare global {

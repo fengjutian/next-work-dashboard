@@ -1,41 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Globe, PanelLeft, PanelRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useStore } from '@/store';
 
-// 生成多级 favicon 候选 URL（按优先级排序）
-function getFaviconSources(url: string): string[] {
-  try {
-    const u = new URL(url);
-    const host = u.hostname;
-    const origin = u.origin;
-    return [
-      `https://www.google.com/s2/favicons?domain=${host}&sz=32`,
-      `https://icons.duckduckgo.com/ip3/${host}.ico`,
-      `https://api.faviconkit.com/${host}/32`,
-      `${origin}/favicon.ico`,
-    ];
-  } catch {
-    return [];
-  }
-}
-
-// favicon 组件 — 多源 fallback，全失败时显示 Globe 兜底
+// favicon 组件 — 通过主进程 IPC 获取，绕开浏览器限制
 const SiteIcon: React.FC<{ url: string; className?: string }> = ({ url, className = 'h-4 w-4' }) => {
-  const sources = getFaviconSources(url);
-  const [sourceIndex, setSourceIndex] = useState(0);
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
-  if (sources.length === 0 || sourceIndex >= sources.length) {
+  React.useEffect(() => {
+    let cancelled = false;
+    window.electronAPI.fetchFavicon(url).then((result) => {
+      if (!cancelled) {
+        if (result) setDataUrl(result);
+        else setFailed(true);
+      }
+    }).catch(() => {
+      if (!cancelled) setFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (failed || (dataUrl === null && failed)) {
     return <Globe className={`${className} text-zinc-400`} />;
+  }
+
+  if (!dataUrl) {
+    // 加载中，显示占位 Globe
+    return <Globe className={`${className} text-zinc-400 animate-pulse`} />;
   }
 
   return (
     <img
-      src={sources[sourceIndex]}
+      src={dataUrl}
       className={`${className} rounded-sm`}
-      onError={() => setSourceIndex((i) => i + 1)}
+      onError={() => setFailed(true)}
       alt=""
     />
   );

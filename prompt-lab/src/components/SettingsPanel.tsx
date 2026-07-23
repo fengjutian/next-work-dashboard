@@ -1,97 +1,13 @@
-import React, { useState } from 'react';
-import { X, Plus, Trash2, Globe, Monitor, Moon, Sun } from 'lucide-react';
+import React from 'react';
+import { X, Plus, Globe, Monitor, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { ImportExport } from '@/components/ImportExport';
+import { SiteRow } from '@/components/SiteRow';
 import { useStore } from '@/store';
 import type { SiteConfig } from '@/store';
-
-// ── 站点编辑行 ──
-
-const SiteRow: React.FC<{
-  site: SiteConfig;
-  onUpdate: (patch: Partial<SiteConfig>) => void;
-  onDelete: () => void;
-}> = ({ site, onUpdate, onDelete }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="border rounded-md mb-2 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900">
-        <button
-          className={`w-2.5 h-2.5 rounded-full ${
-            site.enabled ? 'bg-green-500' : 'bg-zinc-300'
-          }`}
-          onClick={() => onUpdate({ enabled: !site.enabled })}
-          title={site.enabled ? '已启用，点击禁用' : '已禁用，点击启用'}
-        />
-        <span className="text-sm flex-1 truncate">{site.name}</span>
-        <span className="text-[10px] text-zinc-400 truncate max-w-[200px]">
-          {site.url}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5"
-          onClick={() => setExpanded(!expanded)}
-        >
-          <span className="text-[10px]">{expanded ? '收起' : '编辑'}</span>
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5 text-red-400"
-          onClick={onDelete}
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
-      </div>
-      {expanded && (
-        <div className="px-3 py-2 space-y-2">
-          <div>
-            <label className="text-[10px] text-zinc-500">名称</label>
-            <Input
-              value={site.name}
-              onChange={(e) => onUpdate({ name: e.target.value })}
-              className="h-7 text-xs"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">URL</label>
-            <Input
-              value={site.url}
-              onChange={(e) => onUpdate({ url: e.target.value })}
-              className="h-7 text-xs"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">
-              输入框 CSS 选择器
-            </label>
-            <Input
-              value={site.inputSelector}
-              onChange={(e) => onUpdate({ inputSelector: e.target.value })}
-              className="h-7 text-xs font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] text-zinc-500">
-              发送按钮 CSS 选择器（可选）
-            </label>
-            <Input
-              value={site.submitSelector}
-              onChange={(e) => onUpdate({ submitSelector: e.target.value })}
-              className="h-7 text-xs font-mono"
-              placeholder='留空则只能「仅填充」'
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 // ── 主设置面板 ──
 
@@ -292,7 +208,7 @@ export const SettingsPanel: React.FC<Props> = ({ onClose }) => {
                 关于
               </h4>
               <div className="text-xs text-zinc-500 space-y-1">
-                <p>PromptLab v0.2.0</p>
+                <p>next-work-dashboard v0.2.0</p>
                 <p>Electron + React + shadcn/ui + sql.js</p>
                 <p>数据存储于本地，不上传任何服务器</p>
               </div>

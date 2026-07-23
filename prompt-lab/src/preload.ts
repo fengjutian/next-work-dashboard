@@ -45,6 +45,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('save-before-quit', callback); };
   },
 
+  // 对话捕获：将 webview 中拦截到的对话数据保存到本地
+  saveConversation: (payload: {
+    site: string;
+    timestamp: number;
+    requestBody: unknown;
+    responseContent: string;
+  }) => ipcRenderer.invoke('store-conversation', payload),
+
+  // 获取 webview preload 脚本路径
+  getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
+
   // 剪贴板（绕过 web 层，避免焦点问题）
   copyText: (text: string) => clipboard.writeText(text),
+
+  // favicon 获取（主进程 HTTP，绕过浏览器限制）
+  fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
 });

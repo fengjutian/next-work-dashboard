@@ -1,8 +1,8 @@
 {
-  "name": "prompt-lab",
-  "productName": "PromptLab",
+  "name": "next-work-dashboard",
+  "productName": "next-work-dashboard",
   "version": "0.1.0",
-  "description": "AI 提示词注入桌面应用 — 在 WebView 中打开 AI 网站并一键注入提示词",
+  "description": "next-work-dashboard — AI 提示词注入桌面应用",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {

@@ -28,6 +28,8 @@ export interface SiteConfig {
   submitSelector: string;
   enabled: boolean;
   sortOrder: number;
+  /** API URL 模式，用于网络拦截捕获对话数据（正则字符串） */
+  apiPatterns?: string[];
 }
 
 export interface Tab {

@@ -3,7 +3,7 @@
 ## 1. 项目概述
 
 ### 1.1 项目名称
-**PromptLab**（暂定）— 基于 Electron 的 AI 提示词注入桌面应用。
+**next-work-dashboard**（暂定）— 基于 Electron 的 AI 提示词注入桌面应用。
 
 ### 1.2 项目定位
 一个 Electron 桌面应用，内置 WebView 浏览器，可打开 DeepSeek、ChatGPT、Kimi 等 AI 对话网站，并支持将预设提示词一键注入到网页的输入框中，提升 AI 交互效率。
@@ -21,7 +21,7 @@
 
 ```
 ┌──────────────────────────────────────────────┐
-│                  PromptLab                    │
+│                  next-work-dashboard                    │
 ├─────────────┬───────────────┬────────────────┤
 │  设置模块    │  提示词管理模块  │  浏览器/注入模块  │
 │  Settings   │  Prompt Mgmt  │  WebView+Inject │
@@ -300,7 +300,7 @@ interface AppSettings {
 ```
                   走API模式              走网页DOM注入
               ┌──────────────┐       ┌──────────────┐
-  桌面应用     │ ChatBox       │       │ PromptLab    │  ← 唯一占据
+  桌面应用     │ ChatBox       │       │ next-work-dashboard    │  ← 唯一占据
               │ Jan.ai        │       │ (我们)        │     此格
               │ LM Studio     │       │              │
               └──────────────┘       └──────────────┘
@@ -331,7 +331,7 @@ interface AppSettings {
 | **ChatGPT Prompt Genius** | Content Script + 侧边栏，模板填入 | 变量支持、历史导出 | 仅 ChatGPT |
 | **Superpower ChatGPT** | DOM 注入增强 UI | 对话管理 + 快捷输入 | 已下架 |
 
-> **技术相同，载体不同**：扩展用 Content Script 注入，我们用 Preload 注入——本质是同一类方案。但扩展只能绑一个浏览器，PromptLab 是独立桌面应用。
+> **技术相同，载体不同**：扩展用 Content Script 注入，我们用 Preload 注入——本质是同一类方案。但扩展只能绑一个浏览器，next-work-dashboard 是独立桌面应用。
 
 #### Web 平台
 
@@ -343,9 +343,9 @@ interface AppSettings {
 
 > 这些不涉及注入，是独立的提示词社区或聊天前端。
 
-### 10.3 PromptLab 差异化定位
+### 10.3 next-work-dashboard 差异化定位
 
-| 维度 | PromptLab | ChatBox | AIPRM |
+| 维度 | next-work-dashboard | ChatBox | AIPRM |
 |------|-----------|---------|-------|
 | 需要 API Key | ❌ 不需要 | ✅ 必须 | ❌ 不需要 |
 | 保留官网体验 | ✅ 完整保留 | ❌ 无 | ✅ |
