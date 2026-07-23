@@ -1,42 +1,44 @@
 import React, { useState } from 'react';
-import { Globe, Plus, ExternalLink, X, PanelLeft, PanelRight } from 'lucide-react';
+import { Globe, PanelLeft, PanelRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useStore } from '@/store';
 
+// 获取站点 favicon URL
+function getFavicon(url: string): string {
+  try {
+    const host = new URL(url).hostname;
+    return `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
+  } catch {
+    return '';
+  }
+}
+
+// favicon 组件，加载失败时显示 Globe 兜底
+const SiteIcon: React.FC<{ url: string; className?: string }> = ({ url, className = 'h-4 w-4' }) => {
+  const [failed, setFailed] = useState(false);
+  const src = getFavicon(url);
+
+  if (failed || !src) {
+    return <Globe className={`${className} text-zinc-400`} />;
+  }
+
+  return (
+    <img
+      src={src}
+      className={`${className} rounded-sm`}
+      onError={() => setFailed(true)}
+      alt=""
+    />
+  );
+};
+
 export const AIPanel: React.FC = () => {
-  const { sites, tabs, openTab, setActiveTab, activeTabId, addSite } = useStore();
+  const { sites, tabs, openTab, setActiveTab, activeTabId } = useStore();
   const enabledSites = sites.filter((s) => s.enabled).sort((a, b) => a.sortOrder - b.sortOrder);
 
   const [collapsed, setCollapsed] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newUrl, setNewUrl] = useState('');
-
-  const handleAddSite = () => {
-    if (!newName.trim() || !newUrl.trim()) return;
-    const exists = sites.find((s) => s.url === newUrl.trim());
-    if (exists) {
-      openTab(exists.id);
-    } else {
-      const id = `custom-${Date.now()}`;
-      addSite({
-        id,
-        name: newName.trim(),
-        url: newUrl.trim(),
-        inputSelector: 'textarea',
-        submitSelector: '',
-        enabled: true,
-        sortOrder: sites.length,
-      });
-      openTab(id);
-    }
-    setNewName('');
-    setNewUrl('');
-    setShowAddForm(false);
-  };
 
   // ── 折叠态：窄条 ──
   if (collapsed) {
@@ -59,15 +61,15 @@ export const AIPanel: React.FC = () => {
           return (
             <button
               key={tab.id}
-              className={`w-7 h-7 flex items-center justify-center rounded text-xs font-medium transition-colors ${
+              className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
                 activeTabId === tab.id
-                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                  : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  ? 'bg-blue-100 dark:bg-blue-900 ring-1 ring-blue-300 dark:ring-blue-700'
+                  : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
               }`}
               onClick={() => setActiveTab(tab.id)}
               title={tab.title}
             >
-              {site?.name.slice(0, 2)}
+              {site ? <SiteIcon url={site.url} className="h-4 w-4" /> : tab.title.slice(0, 2)}
             </button>
           );
         })}
@@ -78,22 +80,13 @@ export const AIPanel: React.FC = () => {
         {enabledSites.map((site) => (
           <button
             key={site.id}
-            className="w-7 h-7 flex items-center justify-center rounded text-xs font-medium text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
             onClick={() => openTab(site.id)}
             title={site.name}
           >
-            <Globe className="h-3.5 w-3.5" />
+            <SiteIcon url={site.url} className="h-4 w-4" />
           </button>
         ))}
-
-        {/* 添加站点 */}
-        <button
-          className="w-7 h-7 flex items-center justify-center rounded text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors mt-1"
-          onClick={() => { setCollapsed(false); setShowAddForm(true); }}
-          title="添加站点"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
       </div>
     );
   }
@@ -107,70 +100,18 @@ export const AIPanel: React.FC = () => {
         <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
           AI 站点
         </h3>
-        <div className="flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5"
-            onClick={() => setShowAddForm(!showAddForm)}
-            title="添加站点"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5"
-            onClick={() => setCollapsed(true)}
-            title="折叠面板"
-          >
-            <PanelLeft className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5"
+          onClick={() => setCollapsed(true)}
+          title="折叠面板"
+        >
+          <PanelLeft className="h-3.5 w-3.5" />
+        </Button>
       </div>
 
       <Separator />
-
-      {/* 添加站点表单 */}
-      {showAddForm && (
-        <>
-          <div className="p-3 space-y-2 bg-zinc-50 dark:bg-zinc-900 border-b">
-            <Input
-              className="h-7 text-xs"
-              placeholder="站点名称，如 Claude"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddSite()}
-            />
-            <Input
-              className="h-7 text-xs"
-              placeholder="URL，如 https://claude.ai"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddSite()}
-            />
-            <div className="flex gap-1.5">
-              <Button
-                size="sm"
-                className="h-6 text-xs flex-1"
-                onClick={handleAddSite}
-                disabled={!newName.trim() || !newUrl.trim()}
-              >
-                添加并打开
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 text-xs"
-                onClick={() => { setShowAddForm(false); setNewName(''); setNewUrl(''); }}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          </div>
-          <Separator />
-        </>
-      )}
 
       <ScrollArea className="flex-1">
         <div className="p-3 space-y-4">
@@ -181,24 +122,27 @@ export const AIPanel: React.FC = () => {
                 已打开 ({tabs.length})
               </h4>
               <div className="space-y-0.5">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-2 ${
-                      activeTabId === tab.id
-                        ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
-                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
-                    onClick={() => setActiveTab(tab.id)}
-                  >
-                    <ExternalLink
-                      className={`h-3 w-3 shrink-0 ${
-                        activeTabId === tab.id ? 'text-blue-500' : 'text-zinc-400'
+                {tabs.map((tab) => {
+                  const site = sites.find((s) => s.id === tab.siteId);
+                  return (
+                    <button
+                      key={tab.id}
+                      className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-2 ${
+                        activeTabId === tab.id
+                          ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
+                          : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                       }`}
-                    />
-                    <span className="truncate">{tab.title}</span>
-                  </button>
-                ))}
+                      onClick={() => setActiveTab(tab.id)}
+                    >
+                      {site ? (
+                        <SiteIcon url={site.url} className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <Globe className="h-3 w-3 shrink-0 text-zinc-400" />
+                      )}
+                      <span className="truncate">{tab.title}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -212,17 +156,16 @@ export const AIPanel: React.FC = () => {
               {enabledSites.map((site) => (
                 <button
                   key={site.id}
-                  className="w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 group"
+                  className="w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
                   onClick={() => openTab(site.id)}
                 >
-                  <Globe className="h-3.5 w-3.5 text-zinc-400 group-hover:text-blue-500 transition-colors" />
+                  <SiteIcon url={site.url} className="h-5 w-5 shrink-0" />
                   <span className="flex-1 truncate">{site.name}</span>
-                  <Plus className="h-3 w-3 text-zinc-300 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100" />
                 </button>
               ))}
               {enabledSites.length === 0 && (
                 <p className="text-xs text-zinc-400 py-4 text-center">
-                  点击标题旁 + 添加站点
+                  请在设置中启用 AI 站点
                 </p>
               )}
             </div>
