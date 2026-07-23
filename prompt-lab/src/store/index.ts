@@ -60,6 +60,10 @@ interface AppState {
   pendingInjection: { promptId: string; siteId: string } | null;
   triggerInjection: (promptId: string, siteId: string) => void;
   clearInjection: () => void;
+
+  // 提示词抽屉
+  promptDrawerOpen: boolean;
+  setPromptDrawerOpen: (open: boolean) => void;
 }
 
 // ── 辅助 ──
@@ -186,6 +190,9 @@ export const useStore = create<AppState>((set, get) => ({
   pendingInjection: null,
   triggerInjection: (promptId, siteId) => set({ pendingInjection: { promptId, siteId } }),
   clearInjection: () => set({ pendingInjection: null }),
+
+  promptDrawerOpen: false,
+  setPromptDrawerOpen: (open) => set({ promptDrawerOpen: open }),
 }));
 
 // ── 派生选择器 ──

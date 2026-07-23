@@ -1,10 +1,11 @@
 import React from 'react';
-import { Globe, Settings } from 'lucide-react';
+import { Globe, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
+import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ToastProvider } from '@/components/Toast';
@@ -25,20 +26,6 @@ const EmptyState: React.FC = () => {
           <h1 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
             PromptLab
           </h1>
-          <p className="text-sm text-zinc-500">
-            在左侧面板选择一个 AI 站点开始使用
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {enabledSites.map((site) => (
-            <button
-              key={site.id}
-              className="px-4 py-3 rounded-lg border bg-white dark:bg-zinc-800 hover:border-blue-400 hover:shadow-sm transition-all text-sm text-zinc-700 dark:text-zinc-300"
-              onClick={() => openTab(site.id)}
-            >
-              + {site.name}
-            </button>
-          ))}
         </div>
         {enabledSites.length === 0 && (
           <p className="text-xs text-zinc-400">
@@ -62,6 +49,8 @@ export default function App() {
     injectStrategy,
     setInjectStrategy,
     theme,
+    promptDrawerOpen,
+    setPromptDrawerOpen,
   } = useStore();
   usePersistence();
 
@@ -144,11 +133,11 @@ export default function App() {
         <Button
           variant="ghost"
           size="icon"
-          className={`h-7 w-7 ml-1 ${isSettings ? 'text-blue-500' : ''}`}
-          onClick={() => setActiveActivity(isSettings ? 'ai' : 'settings')}
-          title="设置"
+          className={`h-7 w-7 ml-1 ${promptDrawerOpen ? 'text-blue-500' : ''}`}
+          onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}
+          title="提示词"
         >
-          <Settings className="h-4 w-4" />
+          <MessageSquare className="h-4 w-4" />
         </Button>
       </div>
 
@@ -192,6 +181,9 @@ export default function App() {
 
       {/* 浮动搜索面板 */}
       <CommandPalette />
+
+      {/* 提示词抽屉 */}
+      <PromptDrawer />
     </div>
     </ToastProvider>
   );
