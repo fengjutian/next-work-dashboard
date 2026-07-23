@@ -17,7 +17,7 @@ import type { Prompt } from '@/store';
 
 // ── 提示词列表项 ──
 
-const PromptItem: React.FC<{ prompt: Prompt; batchMode?: boolean; selected?: boolean; onToggleSelect?: () => void }> = ({ prompt, batchMode, selected, onToggleSelect }) => {
+const PromptItem: React.FC<{ prompt: Prompt; batchMode?: boolean; selected?: boolean; onToggleSelect?: () => void; onEdit?: (prompt: Prompt) => void }> = ({ prompt, batchMode, selected, onToggleSelect, onEdit }) => {
   const { selectedPromptId, selectPrompt, deletePrompt, updatePrompt } = useStore();
   const isSelected = selectedPromptId === prompt.id;
   const { toast } = useToast();
@@ -95,7 +95,7 @@ const PromptItem: React.FC<{ prompt: Prompt; batchMode?: boolean; selected?: boo
           <button className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700" onClick={handleCopy} title="复制内容">
             <Copy className="h-3 w-3 text-zinc-400" />
           </button>
-          <button className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700" onClick={(e) => { e.stopPropagation(); selectPrompt(prompt.id); }}>
+          <button className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700" onClick={(e) => { e.stopPropagation(); onEdit?.(prompt); }}>
             <Edit3 className="h-3 w-3 text-zinc-400" />
           </button>
           <button className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900" onClick={(e) => { e.stopPropagation(); if (confirm('确定删除？')) deletePrompt(prompt.id); }}>
@@ -397,6 +397,7 @@ export const PromptSidebar: React.FC<{ collapsed: boolean }> = ({
                     return next;
                   })
                 }
+                onEdit={(prompt) => { setEditingPrompt(prompt); setEditorOpen(true); }}
               />
             ))
           )}
