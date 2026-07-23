@@ -15,9 +15,15 @@ import {
 } from '@/store';
 import type { Prompt } from '@/store';
 
-// ── 提示词列表项 ──
+// ── 提示词卡片 ──
 
-const PromptItem: React.FC<{ prompt: Prompt; batchMode?: boolean; selected?: boolean; onToggleSelect?: () => void; onEdit?: (prompt: Prompt) => void }> = ({ prompt, batchMode, selected, onToggleSelect, onEdit }) => {
+const PromptCard: React.FC<{
+  prompt: Prompt;
+  batchMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  onEdit?: (prompt: Prompt) => void;
+}> = ({ prompt, batchMode, selected, onToggleSelect, onEdit }) => {
   const { selectedPromptId, selectPrompt, deletePrompt, updatePrompt } = useStore();
   const isSelected = selectedPromptId === prompt.id;
   const { toast } = useToast();
@@ -50,56 +56,115 @@ const PromptItem: React.FC<{ prompt: Prompt; batchMode?: boolean; selected?: boo
     updatePrompt(prompt.id, { isPinned: !prompt.isPinned });
   };
 
+  // 内容预览：取前 120 个字符，去掉变量标记
+  const preview = prompt.content
+    .replace(/\{\{.*?\}\}/g, '___')
+    .slice(0, 120) + (prompt.content.length > 120 ? '…' : '');
+
   return (
     <div
-      className={`group px-2 py-1.5 rounded-md cursor-pointer mb-0.5 border transition-colors ${
+      className={`group p-4 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md ${
         (isSelected || selected)
-          ? 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
-          : 'border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800'
+          ? 'bg-blue-50 dark:bg-blue-950 border-blue-400 dark:border-blue-600 shadow-sm'
+          : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-blue-300 dark:hover:border-blue-700'
       }`}
       onClick={handleClick}
     >
-      <div className="flex items-center gap-1">
+      {/* 顶部：置顶 + 收藏 + 标题 */}
+      <div className="flex items-start gap-2 mb-2">
         {batchMode && (
-          <input type="checkbox" checked={selected} onChange={onToggleSelect} className="shrink-0 h-3 w-3" onClick={(e) => e.stopPropagation()} />
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="shrink-0 h-4 w-4 mt-0.5"
+            onClick={(e) => e.stopPropagation()}
+          />
         )}
-        <button
-          className="shrink-0 opacity-30 hover:opacity-100 transition-opacity"
-          onClick={togglePin}
-          title={prompt.isPinned ? '取消置顶' : '置顶'}
-        >
-          <Pin className={`h-3 w-3 ${prompt.isPinned ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'}`} />
-        </button>
-        <button
-          className="shrink-0 opacity-30 hover:opacity-100 transition-opacity"
-          onClick={toggleFavorite}
-          title={prompt.isFavorite ? '取消收藏' : '收藏'}
-        >
-          <Star className={`h-3 w-3 ${prompt.isFavorite ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'}`} />
-        </button>
-        <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate flex-1">
-          {prompt.title}
-        </span>
-        <span className="text-[10px] text-zinc-400">{prompt.usageCount}</span>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+            {prompt.title}
+          </h4>
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-medium">
+              {prompt.category}
+            </span>
+            {prompt.tags.slice(0, 3).map((t) => (
+              <span
+                key={t}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-400"
+              >
+                {t}
+              </span>
+            ))}
+            {prompt.tags.length > 3 && (
+              <span className="text-[10px] text-zinc-400">+{prompt.tags.length - 3}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            onClick={togglePin}
+            title={prompt.isPinned ? '取消置顶' : '置顶'}
+          >
+            <Pin
+              className={`h-3.5 w-3.5 ${
+                prompt.isPinned ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'
+              }`}
+            />
+          </button>
+          <button
+            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            onClick={toggleFavorite}
+            title={prompt.isFavorite ? '取消收藏' : '收藏'}
+          >
+            <Star
+              className={`h-3.5 w-3.5 ${
+                prompt.isFavorite ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'
+              }`}
+            />
+          </button>
+        </div>
       </div>
-      <div className="flex items-center gap-1 mt-0.5">
-        <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1 rounded">
-          {prompt.category}
+
+      {/* 内容预览 */}
+      <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed line-clamp-3 mb-3">
+        {preview}
+      </p>
+
+      {/* 底部：使用次数 + 操作按钮 */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-zinc-400">
+          使用 {prompt.usageCount} 次
         </span>
-        {prompt.tags.slice(0, 2).map((t) => (
-          <span key={t} className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1 rounded">
-            {t}
-          </span>
-        ))}
-        <div className="ml-auto hidden group-hover:flex gap-0.5">
-          <button className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700" onClick={handleCopy} title="复制内容">
-            <Copy className="h-3 w-3 text-zinc-400" />
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            onClick={handleCopy}
+            title="复制内容"
+          >
+            <Copy className="h-3.5 w-3.5 text-zinc-400" />
           </button>
-          <button className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700" onClick={(e) => { e.stopPropagation(); onEdit?.(prompt); }}>
-            <Edit3 className="h-3 w-3 text-zinc-400" />
+          <button
+            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit?.(prompt);
+            }}
+            title="编辑"
+          >
+            <Edit3 className="h-3.5 w-3.5 text-zinc-400" />
           </button>
-          <button className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900" onClick={(e) => { e.stopPropagation(); if (confirm('确定删除？')) deletePrompt(prompt.id); }}>
-            <Trash2 className="h-3 w-3 text-zinc-400 hover:text-red-500" />
+          <button
+            className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm('确定删除？')) deletePrompt(prompt.id);
+            }}
+            title="删除"
+          >
+            <Trash2 className="h-3.5 w-3.5 text-zinc-400 hover:text-red-500" />
           </button>
         </div>
       </div>
@@ -376,28 +441,33 @@ export const PromptSidebar: React.FC = () => {
 
       {/* 列表 */}
       <ScrollArea className="flex-1">
-        <div className="px-3 pb-3">
+        <div className="p-4">
           {prompts.length === 0 ? (
-            <p className="text-xs text-zinc-400 text-center py-8">
+            <p className="text-sm text-zinc-400 text-center py-16">
               没有匹配的提示词
             </p>
           ) : (
-            prompts.map((p) => (
-              <PromptItem
-                key={p.id}
-                prompt={p}
-                batchMode={batchMode}
-                selected={selectedIds.has(p.id)}
-                onToggleSelect={() =>
-                  setSelectedIds((prev) => {
-                    const next = new Set(prev);
-                    next.has(p.id) ? next.delete(p.id) : next.add(p.id);
-                    return next;
-                  })
-                }
-                onEdit={(prompt) => { setEditingPrompt(prompt); setEditorOpen(true); }}
-              />
-            ))
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {prompts.map((p) => (
+                <PromptCard
+                  key={p.id}
+                  prompt={p}
+                  batchMode={batchMode}
+                  selected={selectedIds.has(p.id)}
+                  onToggleSelect={() =>
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      next.has(p.id) ? next.delete(p.id) : next.add(p.id);
+                      return next;
+                    })
+                  }
+                  onEdit={(prompt) => {
+                    setEditingPrompt(prompt);
+                    setEditorOpen(true);
+                  }}
+                />
+              ))}
+            </div>
           )}
         </div>
       </ScrollArea>

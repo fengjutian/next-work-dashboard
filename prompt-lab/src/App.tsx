@@ -50,33 +50,13 @@ const EmptyState: React.FC = () => {
   );
 };
 
-// ── 主内容区 ──
-
-const MainContent: React.FC = () => {
-  const { activeActivity, tabs } = useStore();
-
-  switch (activeActivity) {
-    case 'ai':
-    case null:
-      // AI 模式：WebView + 空状态
-      return tabs.length > 0 ? <WebViewContainer /> : <EmptyState />;
-    case 'prompts':
-      // 提示词模块占满主区域
-      return <PromptSidebar />;
-    case 'settings':
-      // 设置模块占满主区域
-      return <SettingsSidebar />;
-    default:
-      return null;
-  }
-};
-
 // ── 根布局 ──
 
 export default function App() {
   const {
     activeActivity,
     setActiveActivity,
+    tabs,
     injectMode,
     setInjectMode,
     injectStrategy,
@@ -95,7 +75,9 @@ export default function App() {
     }
   }, [theme]);
 
-  const showAIPanel = activeActivity === 'ai';
+  const isAI = activeActivity === 'ai' || activeActivity === null;
+  const isPrompts = activeActivity === 'prompts';
+  const isSettings = activeActivity === 'settings';
 
   return (
     <ToastProvider>
@@ -109,7 +91,7 @@ export default function App() {
         <div className="flex-1" />
 
         {/* 注入模式切换 — 仅 AI 模式显示 */}
-        {activeActivity === 'ai' && (
+        {isAI && (
           <>
             <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5">
               <button
@@ -162,8 +144,8 @@ export default function App() {
         <Button
           variant="ghost"
           size="icon"
-          className={`h-7 w-7 ml-1 ${activeActivity === 'settings' ? 'text-blue-500' : ''}`}
-          onClick={() => setActiveActivity(activeActivity === 'settings' ? 'ai' : 'settings')}
+          className={`h-7 w-7 ml-1 ${isSettings ? 'text-blue-500' : ''}`}
+          onClick={() => setActiveActivity(isSettings ? 'ai' : 'settings')}
           title="设置"
         >
           <Settings className="h-4 w-4" />
@@ -175,12 +157,36 @@ export default function App() {
         {/* VSCode 风格 Activity Bar */}
         <ActivityBar />
 
-        {/* AI 模式的侧边栏：站点列表 + 已打开标签页 */}
-        {showAIPanel && <AIPanel />}
+        {/* AI 侧边栏 — 常驻但仅 AI 模式可见 */}
+        <div style={{ display: isAI ? 'flex' : 'none' }} className="h-full">
+          <AIPanel />
+        </div>
 
-        {/* 主内容区：AI=WebView, 提示词=PromptEditor, 设置=Settings */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <MainContent />
+        {/* 主内容区 — 三个面板常驻，CSS 显隐切换 */}
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          {/* AI 面板：WebView */}
+          <div
+            className="flex-1 flex flex-col"
+            style={{ display: isAI ? 'flex' : 'none' }}
+          >
+            {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
+          </div>
+
+          {/* 提示词面板 */}
+          <div
+            className="flex-1 flex flex-col"
+            style={{ display: isPrompts ? 'flex' : 'none' }}
+          >
+            <PromptSidebar />
+          </div>
+
+          {/* 设置面板 */}
+          <div
+            className="flex-1 flex flex-col"
+            style={{ display: isSettings ? 'flex' : 'none' }}
+          >
+            <SettingsSidebar />
+          </div>
         </div>
       </div>
 
