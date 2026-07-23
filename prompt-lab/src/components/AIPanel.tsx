@@ -12,6 +12,10 @@ const SiteIcon: React.FC<{ url: string; className?: string }> = ({ url, classNam
 
   React.useEffect(() => {
     let cancelled = false;
+    if (!window.electronAPI?.fetchFavicon) {
+      setFailed(true);
+      return;
+    }
     window.electronAPI.fetchFavicon(url).then((result) => {
       if (!cancelled) {
         if (result) setDataUrl(result);

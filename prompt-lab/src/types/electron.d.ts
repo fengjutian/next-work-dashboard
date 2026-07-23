@@ -35,7 +35,7 @@ export interface ElectronAPI {
   listConversations: () => Promise<ConversationFile[]>;
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
-  webviewPreloadPath: string;
+  getWebviewPreloadPath: () => Promise<string>;
 }
 
 export interface ConversationFile {

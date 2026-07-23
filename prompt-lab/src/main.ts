@@ -30,6 +30,12 @@ const createWindow = () => {
     },
   });
 
+  // 注入 webview preload 路径到渲染进程（在页面脚本运行前执行）
+  const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
+  mainWindow.webContents.executeJavaScript(`
+    window.__WEBVIEW_PRELOAD_PATH__ = ${JSON.stringify(`file://${webviewPreloadPath}`)};
+  `);
+
   // 加载页面
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);

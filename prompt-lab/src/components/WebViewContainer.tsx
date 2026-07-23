@@ -100,8 +100,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const { toast } = useToast();
   const prompts = useStore((s) => s.prompts);
   const sites = useStore((s) => s.sites);
-  // webview preload 路径（同步获取，在组件首次渲染时即就绪）
-  const preloadPath = (window as any).electronAPI?.webviewPreloadPath || '';
+  // webview preload 路径（由 main 进程在页面加载前注入，同步可用）
+  const preloadPath = (window as any).__WEBVIEW_PRELOAD_PATH__ || '';
 
   // ── 网络拦截：在 webview 页面中注入 fetch hook ──
   const injectInterceptor = useCallback(() => {
