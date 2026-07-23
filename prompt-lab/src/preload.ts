@@ -53,12 +53,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     responseContent: string;
   }) => ipcRenderer.invoke('store-conversation', payload),
 
-  // 获取 webview preload 脚本路径
-  getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
+  // 对话历史管理
+  listConversations: () => ipcRenderer.invoke('list-conversations'),
+  readConversation: (filePath: string) => ipcRenderer.invoke('read-conversation', filePath),
+  deleteConversation: (filePath: string) => ipcRenderer.invoke('delete-conversation', filePath),
 
   // 剪贴板（绕过 web 层，避免焦点问题）
   copyText: (text: string) => clipboard.writeText(text),
 
   // favicon 获取（主进程 HTTP，绕过浏览器限制）
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
+
+  // webview preload 路径
+  getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 });

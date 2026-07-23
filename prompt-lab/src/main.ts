@@ -196,6 +196,11 @@ async function fetchSiteFavicon(siteUrl: string): Promise<string | null> {
 }
 
 const setupIPC = () => {
+  // 暴露 webview preload 路径给渲染进程
+  ipcMain.handle('get-webview-preload-path', () => {
+    return path.join(__dirname, 'webview-preload.js');
+  });
+
   // WebView 右键菜单 (B05)
   mainWindow?.webContents.on('context-menu', (_event, params) => {
     // 仅在 webview 内触发
@@ -327,10 +332,6 @@ const setupIPC = () => {
   });
 
   // ── 对话捕获存储 ──
-  ipcMain.handle('get-webview-preload-path', () => {
-    return path.join(__dirname, 'webview-preload.js');
-  });
-
   ipcMain.handle('store-conversation', async (_event, payload: {
     site: string;
     timestamp: number;
@@ -382,6 +383,72 @@ const setupIPC = () => {
       fs.appendFileSync(filePath, entry, 'utf-8');
 
       return { success: true, filePath };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // ── 对话历史管理 ──
+  ipcMain.handle('list-conversations', async () => {
+    try {
+      if (!fs.existsSync(exportDir)) return [];
+
+      const list: Array<{
+        site: string;
+        date: string;
+        fileName: string;
+        path: string;
+        size: number;
+      }> = [];
+
+      const files = fs.readdirSync(exportDir).filter((f) => f.endsWith('.md'));
+      for (const file of files) {
+        const match = file.match(/^(.+)-(\d{4}-\d{2}-\d{2})\.md$/);
+        const stat = fs.statSync(path.join(exportDir, file));
+        list.push({
+          site: match?.[1] || 'unknown',
+          date: match?.[2] || '',
+          fileName: file,
+          path: path.join(exportDir, file),
+          size: stat.size,
+        });
+      }
+
+      // 按日期降序排列
+      list.sort((a, b) => b.date.localeCompare(a.date) || a.site.localeCompare(b.site));
+      return list;
+    } catch (err) {
+      return [];
+    }
+  });
+
+  ipcMain.handle('read-conversation', async (_event, filePath: string) => {
+    try {
+      // 安全检查：只允许读取 exportDir 下的文件
+      const resolved = path.resolve(filePath);
+      if (!resolved.startsWith(path.resolve(exportDir))) {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: 'NOT_FOUND' };
+      }
+      const content = fs.readFileSync(resolved, 'utf-8');
+      return { success: true, content };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('delete-conversation', async (_event, filePath: string) => {
+    try {
+      const resolved = path.resolve(filePath);
+      if (!resolved.startsWith(path.resolve(exportDir))) {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      if (fs.existsSync(resolved)) {
+        fs.unlinkSync(resolved);
+      }
+      return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
     }

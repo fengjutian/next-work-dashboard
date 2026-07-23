@@ -5,6 +5,7 @@ import { ActivityBar } from '@/components/ActivityBar';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
+import { ConversationHistory } from '@/components/ConversationHistory';
 import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
@@ -66,6 +67,7 @@ export default function App() {
 
   const isAI = activeActivity === 'ai' || activeActivity === null;
   const isPrompts = activeActivity === 'prompts';
+  const isHistory = activeActivity === 'history';
   const isSettings = activeActivity === 'settings';
 
   return (
@@ -167,6 +169,14 @@ export default function App() {
             style={{ display: isPrompts ? 'flex' : 'none' }}
           >
             <PromptSidebar />
+          </div>
+
+          {/* 历史面板 */}
+          <div
+            className="flex-1 flex flex-col"
+            style={{ display: isHistory ? 'flex' : 'none' }}
+          >
+            <ConversationHistory />
           </div>
 
           {/* 设置面板 */}

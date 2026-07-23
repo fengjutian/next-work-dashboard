@@ -102,36 +102,171 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const sites = useStore((s) => s.sites);
   const [preloadPath, setPreloadPath] = useState<string>('');
 
-  // 获取 webview preload 路径
+  // 获取 webview preload 脚本路径
   useEffect(() => {
     (window as any).electronAPI?.getWebviewPreloadPath?.().then((p: string) => {
-      setPreloadPath(p);
+      if (p) setPreloadPath(`file://${p}`);
     });
   }, []);
 
-  // 监听 webview 中的对话捕获事件
+  // ── 网络拦截：在 webview 页面中注入 fetch hook ──
+  const injectInterceptor = useCallback(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    // 先注入诊断 ping，验证 executeJavaScript + console-message 通道
+    webview.executeJavaScript(`console.log('__PL_PING__:' + location.href)`);
+
+    // 注入 fetch hook
+    webview.executeJavaScript(`
+      (function() {
+        if (window.__promptlab_injected__) return;
+        window.__promptlab_injected__ = true;
+
+        const TAG = '__PL_CAPTURE__:';
+
+        const API_PATTERNS = [
+          { pattern: /chat\\.deepseek\\.com\\/api\\/v\\d+\\/chat\\/completions/i, site: 'deepseek' },
+          { pattern: /chatgpt\\.com\\/backend-api\\/conversation/i, site: 'chatgpt' },
+          { pattern: /kimi\\.moonshot\\.cn\\/api\\/chat/i, site: 'kimi' },
+          { pattern: /tongyi\\.aliyun\\.com\\/api/i, site: 'tongyi' },
+        ];
+
+        function matchApi(url) {
+          for (const e of API_PATTERNS) {
+            if (e.pattern.test(url)) return e.site;
+          }
+          return null;
+        }
+
+        function parseSSE(text) {
+          const lines = text.split('\\n');
+          let content = '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === '[DONE]') continue;
+            try {
+              const d = JSON.parse(jsonStr);
+              const delta = d?.choices?.[0]?.delta?.content;
+              if (delta) content += delta;
+            } catch(e) {}
+          }
+          return content;
+        }
+
+        const origFetch = window.fetch.bind(window);
+
+        window.fetch = async function(input, init) {
+          const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : input.url);
+          const site = matchApi(url);
+
+          if (!site) return origFetch(input, init);
+
+          let requestBody = null;
+          if (init?.body) {
+            try { requestBody = JSON.parse(init.body); } catch(e) { requestBody = init.body; }
+          }
+
+          const response = await origFetch(input, init);
+          const ct = response.headers.get('content-type') || '';
+
+          if (!ct.includes('text/event-stream') && !ct.includes('application/json')) {
+            return response;
+          }
+
+          const cloned = response.clone();
+          const body = cloned.body;
+          if (!body) return response;
+
+          const reader = body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let fullContent = '';
+
+          (async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split('\\n\\n');
+                buffer = parts.pop() || '';
+                for (const part of parts) {
+                  const chunk = parseSSE(part + '\\n\\n');
+                  if (chunk) fullContent += chunk;
+                }
+              }
+              if (buffer.trim()) {
+                const chunk = parseSSE(buffer);
+                if (chunk) fullContent += chunk;
+              }
+              if (fullContent) {
+                console.log(TAG + JSON.stringify({
+                  site: site,
+                  timestamp: Date.now(),
+                  requestBody: requestBody,
+                  responseContent: fullContent
+                }));
+              }
+            } catch(e) {}
+          })();
+
+          return response;
+        };
+      })();
+    `);
+  }, []);
+
+  // dom-ready 时：设置 UA + 注入拦截器
   useEffect(() => {
     const webview = webviewRef.current;
     if (!webview) return;
 
-    const handler = (event: Electron.IpcMessageEvent) => {
-      if (event.channel === 'conversation-captured') {
-        const data = event.args[0];
-        if (data?.responseContent) {
-          (window as any).electronAPI?.saveConversation?.({
-            site: data.site || 'unknown',
-            timestamp: data.timestamp || Date.now(),
-            requestBody: data.requestBody,
-            responseContent: data.responseContent,
-          });
-        }
+    const onDomReady = () => {
+      // 设置真实 Chrome User-Agent，避免被网站检测为 Electron
+      try {
+        webview.setUserAgent(
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        );
+      } catch {}
+      injectInterceptor();
+    };
+    webview.addEventListener('dom-ready', onDomReady);
+    return () => { webview.removeEventListener('dom-ready', onDomReady); };
+  }, [tab?.siteId, injectInterceptor]);
+
+  // 监听 console-message 捕获对话数据 — 同时接收诊断 ping
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+
+    const onConsole = (event: Electron.ConsoleMessageEvent) => {
+      const msg = event.message;
+      // 诊断 ping
+      if (msg.startsWith('__PL_PING__:')) {
+        console.log('[PromptLab] Pipeline OK, page:', msg.slice(14));
+        return;
+      }
+      // 对话捕获
+      if (msg.startsWith('__PL_CAPTURE__:')) {
+        try {
+          const data = JSON.parse(msg.slice(17));
+          if (data?.responseContent) {
+            console.log('[PromptLab] Captured AI response from:', data.site);
+            (window as any).electronAPI?.saveConversation?.({
+              site: data.site || 'unknown',
+              timestamp: data.timestamp || Date.now(),
+              requestBody: data.requestBody,
+              responseContent: data.responseContent,
+            });
+          }
+        } catch { console.log('[PromptLab] Parse error for capture msg'); }
       }
     };
 
-    webview.addEventListener('ipc-message', handler);
-    return () => {
-      webview.removeEventListener('ipc-message', handler);
-    };
+    webview.addEventListener('console-message', onConsole);
+    return () => { webview.removeEventListener('console-message', onConsole); };
   }, [tab?.siteId]);
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);

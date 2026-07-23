@@ -31,7 +31,17 @@ export interface ElectronAPI {
     requestBody: unknown;
     responseContent: string;
   }) => Promise<{ success: boolean; filePath?: string }>;
-  getWebviewPreloadPath: () => Promise<string>;
+  listConversations: () => Promise<ConversationFile[]>;
+  readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+}
+
+export interface ConversationFile {
+  site: string;
+  date: string;
+  fileName: string;
+  path: string;
+  size: number;
 }
 
 declare global {

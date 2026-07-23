@@ -1,10 +1,66 @@
 /**
- * next-work-dashboard WebView Preload — Network Interception
+ * next-work-dashboard WebView Preload — Anti-Detection + Network Interception
  * 
- * 注入到 <webview> 中，hook fetch() 拦截 AI 对话 API 的请求和响应，
- * 通过 sendToHost 将对话数据发送给宿主 React 页面，再由主进程写入本地文件。
+ * 在页面 JS 执行前覆盖浏览器指纹，使 webview 看起来更像真实浏览器，
+ * 避免 AI 网站检测到 Electron 环境后自动退出登录。
+ * 同时 hook fetch() 拦截 AI 对话 API 的请求和响应。
  */
 import { ipcRenderer } from 'electron';
+
+// ── 反检测：覆盖浏览器指纹（必须在最顶部，在页面 JS 之前执行）──
+
+// 去掉 webdriver 标记
+Object.defineProperty(navigator, 'webdriver', {
+  get: () => false,
+  configurable: true,
+  enumerable: true,
+});
+
+// 覆盖 plugins —— 真实 Chrome 有多个插件
+Object.defineProperty(navigator, 'plugins', {
+  get: () => {
+    // 返回一个类 PluginArray 对象
+    const pluginLike = [
+      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+      { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+    ];
+    // 给数组加上 PluginArray 特征
+    Object.setPrototypeOf(pluginLike, PluginArray.prototype);
+    return pluginLike as unknown as PluginArray;
+  },
+  configurable: true,
+  enumerable: true,
+});
+
+// 覆盖 languages
+Object.defineProperty(navigator, 'languages', {
+  get: () => ['zh-CN', 'zh', 'en'],
+  configurable: true,
+  enumerable: true,
+});
+
+// 添加 window.chrome（真实 Chrome 特有）
+Object.defineProperty(window, 'chrome', {
+  get: () => ({
+    runtime: {},
+    loadTimes: () => {},
+    csi: () => {},
+    app: {},
+  }),
+  configurable: true,
+  enumerable: true,
+});
+
+// 移除 Electron 暴露的 process 上下文（如果存在）
+if ((window as any).process?.type) {
+  try { delete (window as any).process; } catch {}
+}
+
+// 移除 require（如果存在）
+if ((window as any).require) {
+  try { delete (window as any).require; } catch {}
+}
 
 // ── AI API URL 模式匹配 ──
 
