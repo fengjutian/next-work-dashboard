@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Globe, Plus, ExternalLink, X } from 'lucide-react';
+import { Globe, Plus, ExternalLink, X, PanelLeft, PanelRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -10,16 +10,15 @@ export const AIPanel: React.FC = () => {
   const { sites, tabs, openTab, setActiveTab, activeTabId, addSite } = useStore();
   const enabledSites = sites.filter((s) => s.enabled).sort((a, b) => a.sortOrder - b.sortOrder);
 
+  const [collapsed, setCollapsed] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
 
   const handleAddSite = () => {
     if (!newName.trim() || !newUrl.trim()) return;
-
     const exists = sites.find((s) => s.url === newUrl.trim());
     if (exists) {
-      // 站点已存在，直接打开
       openTab(exists.id);
     } else {
       const id = `custom-${Date.now()}`;
@@ -34,11 +33,72 @@ export const AIPanel: React.FC = () => {
       });
       openTab(id);
     }
-
     setNewName('');
     setNewUrl('');
     setShowAddForm(false);
   };
+
+  // ── 折叠态：窄条 ──
+  if (collapsed) {
+    return (
+      <div className="h-full w-9 flex-shrink-0 border-r flex flex-col items-center py-2 gap-1 bg-white dark:bg-zinc-950">
+        {/* 展开按钮 */}
+        <button
+          className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 mb-1"
+          onClick={() => setCollapsed(false)}
+          title="展开面板"
+        >
+          <PanelRight className="h-3.5 w-3.5" />
+        </button>
+
+        <Separator className="w-6" />
+
+        {/* 标签页图标 */}
+        {tabs.map((tab) => {
+          const site = sites.find((s) => s.id === tab.siteId);
+          return (
+            <button
+              key={tab.id}
+              className={`w-7 h-7 flex items-center justify-center rounded text-xs font-medium transition-colors ${
+                activeTabId === tab.id
+                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
+                  : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+              onClick={() => setActiveTab(tab.id)}
+              title={tab.title}
+            >
+              {site?.name.slice(0, 2)}
+            </button>
+          );
+        })}
+
+        <div className="flex-1" />
+
+        {/* 快速打开站点 */}
+        {enabledSites.map((site) => (
+          <button
+            key={site.id}
+            className="w-7 h-7 flex items-center justify-center rounded text-xs font-medium text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 transition-colors"
+            onClick={() => openTab(site.id)}
+            title={site.name}
+          >
+            <Globe className="h-3.5 w-3.5" />
+          </button>
+        ))}
+
+        {/* 添加站点 */}
+        <button
+          className="w-7 h-7 flex items-center justify-center rounded text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-500 transition-colors mt-1"
+          onClick={() => { setCollapsed(false); setShowAddForm(true); }}
+          title="添加站点"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  // ── 展开态：完整面板 ──
 
   return (
     <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-white dark:bg-zinc-950">
@@ -47,15 +107,26 @@ export const AIPanel: React.FC = () => {
         <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
           AI 站点
         </h3>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5"
-          onClick={() => setShowAddForm(!showAddForm)}
-          title="添加站点"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5"
+            onClick={() => setShowAddForm(!showAddForm)}
+            title="添加站点"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5"
+            onClick={() => setCollapsed(true)}
+            title="折叠面板"
+          >
+            <PanelLeft className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       <Separator />
@@ -151,7 +222,7 @@ export const AIPanel: React.FC = () => {
               ))}
               {enabledSites.length === 0 && (
                 <p className="text-xs text-zinc-400 py-4 text-center">
-                  点击右上角 + 添加站点
+                  点击标题旁 + 添加站点
                 </p>
               )}
             </div>
