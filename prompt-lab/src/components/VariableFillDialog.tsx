@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import type { PromptVariable } from '@/store';
 
 // 从提示词内容中提取 {{变量名}} 
@@ -67,7 +66,7 @@ export const VariableFillDialog: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40">
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[420px] max-h-[80vh] flex flex-col">
+      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[640px] max-h-[85vh] flex flex-col">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="text-sm font-semibold">
@@ -98,13 +97,13 @@ export const VariableFillDialog: React.FC<Props> = ({
                   <span className="text-zinc-300 ml-1">— {def.description}</span>
                 )}
               </label>
-              <Input
+              <textarea
                 value={values[name] ?? ''}
                 onChange={(e) =>
                   setValues((prev) => ({ ...prev, [name]: e.target.value }))
                 }
                 placeholder={def?.defaultValue || `输入 ${name} 的值...`}
-                className="h-8 text-sm"
+                className="w-full h-20 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-zinc-950"
                 autoFocus={varNames.indexOf(name) === 0}
               />
             </div>
@@ -126,7 +125,7 @@ export const VariableFillDialog: React.FC<Props> = ({
             <Button variant="outline" size="sm" onClick={onCancel}>
               取消
             </Button>
-            <Button size="sm" onClick={handleSubmit}>
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleSubmit}>
               注入
             </Button>
           </div>
