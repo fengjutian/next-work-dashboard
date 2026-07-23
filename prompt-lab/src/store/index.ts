@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/shallow';
-import type { Prompt, SiteConfig, Tab, InjectMode, InjectStrategy } from './types';
+import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy } from './types';
 import { DEFAULT_SITES, CATEGORIES } from './types';
 import { DEFAULT_PROMPTS } from './defaultPrompts';
 
@@ -261,4 +261,4 @@ export function useAllCategories() {
 }
 
 export { CATEGORIES };
-export type { Prompt, SiteConfig, Tab, InjectMode };
+export type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode };

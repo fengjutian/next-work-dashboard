@@ -100,14 +100,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const { toast } = useToast();
   const prompts = useStore((s) => s.prompts);
   const sites = useStore((s) => s.sites);
-  const [preloadPath, setPreloadPath] = useState<string>('');
-
-  // 获取 webview preload 脚本路径
-  useEffect(() => {
-    (window as any).electronAPI?.getWebviewPreloadPath?.().then((p: string) => {
-      if (p) setPreloadPath(`file://${p}`);
-    });
-  }, []);
+  // webview preload 路径（同步获取，在组件首次渲染时即就绪）
+  const preloadPath = (window as any).electronAPI?.webviewPreloadPath || '';
 
   // ── 网络拦截：在 webview 页面中注入 fetch hook ──
   const injectInterceptor = useCallback(() => {
@@ -115,7 +109,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     if (!webview) return;
 
     // 先注入诊断 ping，验证 executeJavaScript + console-message 通道
-    webview.executeJavaScript(`console.log('__PL_PING__:' + location.href)`);
+    webview.executeJavaScript(`console.log('__PL_PING__:' + location.href)`).catch(() => {});
 
     // 注入 fetch hook
     webview.executeJavaScript(`
@@ -215,7 +209,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           return response;
         };
       })();
-    `);
+    `).catch(() => {});
   }, []);
 
   // dom-ready 时：设置 UA + 注入拦截器

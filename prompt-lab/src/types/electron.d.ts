@@ -23,6 +23,7 @@ export interface ElectronAPI {
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;
   onInjectFromContextMenu: (callback: () => void) => () => void;
+  onSaveBeforeQuit: (callback: () => void) => () => void;
   copyText: (text: string) => void;
   fetchFavicon: (siteUrl: string) => Promise<string | null>;
   saveConversation: (payload: {
@@ -34,6 +35,7 @@ export interface ElectronAPI {
   listConversations: () => Promise<ConversationFile[]>;
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  webviewPreloadPath: string;
 }
 
 export interface ConversationFile {

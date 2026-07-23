@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
+import type { SiteConfig } from '@/store';
 
 // ── 持久化 Hook ──
 // 使用 Zustand subscribe（在 React 渲染周期外运行）避免无限重渲染
