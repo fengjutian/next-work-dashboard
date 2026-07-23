@@ -100,237 +100,104 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const { toast } = useToast();
   const prompts = useStore((s) => s.prompts);
   const sites = useStore((s) => s.sites);
-  // webview preload 路径（由 main 进程在页面加载前注入，同步可用）
-  const preloadPath = (window as any).__WEBVIEW_PRELOAD_PATH__ || '';
-
-  // ── 网络拦截：在 webview 页面中注入 fetch hook ──
-  const injectInterceptor = useCallback(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    // 先注入诊断 ping，验证 executeJavaScript + console-message 通道
-    webview.executeJavaScript(`console.log('__PL_PING__:' + location.href)`).catch(() => {});
-
-    // 注入 fetch + XHR hook — 嗅探所有网络请求
-    webview.executeJavaScript(`
-      (function() {
-        if (window.__promptlab_injected__) return;
-        window.__promptlab_injected__ = true;
-
-        const TAG = '__PL_CAPTURE__:';
-        const SNIFF = '__PL_SNIFF__:';
-        console.log('__PL_HOOK__:installed');
-
-        function guessSite(url) {
-          if (url.includes('chat.deepseek.com')) return 'deepseek';
-          if (url.includes('chatgpt.com')) return 'chatgpt';
-          if (url.includes('kimi.moonshot.cn')) return 'kimi';
-          if (url.includes('tongyi.aliyun.com')) return 'tongyi';
-          return null;
-        }
-
-        function parseSSE(text) {
-          const lines = text.split('\\n');
-          let content = '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === '[DONE]') continue;
-            try {
-              const d = JSON.parse(jsonStr);
-              const delta = d?.choices?.[0]?.delta?.content;
-              if (delta) content += delta;
-            } catch(e) {}
-          }
-          return content;
-        }
-
-        const origFetch = window.fetch.bind(window);
-
-        window.fetch = async function(input, init) {
-          const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : input.url);
-          const site = guessSite(url);
-
-          // 嗅探：打印所有 AI 站点的 API 请求 URL（用于诊断）
-          if (site) {
-            console.log(SNIFF + JSON.stringify({ site, url, ct: init?.headers?.['content-type'] || 'none' }));
-          }
-
-          if (!site) return origFetch(input, init);
-
-          let requestBody = null;
-          if (init?.body) {
-            try { requestBody = JSON.parse(init.body); } catch(e) { requestBody = init.body; }
-          }
-
-          const response = await origFetch(input, init);
-          const ct = response.headers.get('content-type') || '';
-
-          if (!ct.includes('text/event-stream') && !ct.includes('application/json')) {
-            return response;
-          }
-
-          const cloned = response.clone();
-          const body = cloned.body;
-          if (!body) return response;
-
-          const reader = body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let fullContent = '';
-
-          (async () => {
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const parts = buffer.split('\\n\\n');
-                buffer = parts.pop() || '';
-                for (const part of parts) {
-                  const chunk = parseSSE(part + '\\n\\n');
-                  if (chunk) fullContent += chunk;
-                }
-              }
-              if (buffer.trim()) {
-                const chunk = parseSSE(buffer);
-                if (chunk) fullContent += chunk;
-              }
-              if (fullContent) {
-                console.log(TAG + JSON.stringify({
-                  site: site,
-                  timestamp: Date.now(),
-                  requestBody: requestBody,
-                  responseContent: fullContent
-                }));
-              }
-            } catch(e) {}
-          })();
-
-          return response;
-        };
-
-        // ── Hook XMLHttpRequest ──
-        const OrigXHR = window.XMLHttpRequest;
-
-        // ── Hook EventSource ──
-        const OrigES = window.EventSource;
-        window.EventSource = function(url, config) {
-          const site = guessSite(url.toString());
-          if (site) console.log(SNIFF + JSON.stringify({ via: 'eventsource', site, url: url.toString() }));
-          return new OrigES(url, config);
-        };
-
-        // ── Hook XMLHttpRequest ──
-        window.XMLHttpRequest = function() {
-          const xhr = new OrigXHR();
-          const origOpen = xhr.open;
-          let _url = '', _method = '';
-          xhr.open = function(method, url) {
-            _url = url.toString();
-            _method = method;
-            return origOpen.apply(xhr, arguments);
-          };
-          const origSend = xhr.send;
-          xhr.send = function(body) {
-            const site = guessSite(_url);
-            if (site) {
-              console.log(SNIFF + JSON.stringify({ via: 'xhr', site, method: _method, url: _url }));
-              xhr.addEventListener('load', function() {
-                if (xhr.responseText && xhr.responseText.startsWith('data:')) {
-                  // SSE via XHR — parse it
-                  const lines = xhr.responseText.split('\\n');
-                  let content = '';
-                  for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const jsonStr = line.slice(6).trim();
-                    if (jsonStr === '[DONE]') continue;
-                    try { const d = JSON.parse(jsonStr); const delta = d?.choices?.[0]?.delta?.content; if (delta) content += delta; } catch(e) {}
-                  }
-                  if (content) {
-                    console.log(TAG + JSON.stringify({ site, timestamp: Date.now(), requestBody: body, responseContent: content }));
-                  }
-                }
-              });
-            }
-            return origSend.apply(xhr, arguments);
-          };
-          return xhr;
-        };
-      })();
-    `).catch(() => {});
-  }, []);
-
-  // dom-ready 时：设置 UA + 注入拦截器
-  useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    const onDomReady = () => {
-      // 设置真实 Chrome User-Agent，避免被网站检测为 Electron
-      try {
-        webview.setUserAgent(
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-        );
-      } catch {}
-      injectInterceptor();
-    };
-    webview.addEventListener('dom-ready', onDomReady);
-
-    // 开发模式：自动打开 webview 的 DevTools 方便诊断（仅首次）
-    const openDevTools = () => {
-      try { webview.openDevTools(); } catch {}
-      webview.removeEventListener('dom-ready', openDevTools);
-    };
-    webview.addEventListener('dom-ready', openDevTools);
-    return () => { webview.removeEventListener('dom-ready', onDomReady); };
-  }, [tab?.siteId, injectInterceptor]);
-
-  // 监听 console-message 捕获对话数据 — 同时接收诊断 ping
-  useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    const onConsole = (event: Electron.ConsoleMessageEvent) => {
-      const msg = event.message;
-      // 诊断 ping
-      if (msg.startsWith('__PL_PING__:')) {
-        console.log('[PromptLab] Pipeline OK, page:', msg.slice(14));
-        return;
-      }
-      // URL 嗅探
-      if (msg.startsWith('__PL_SNIFF__:')) {
-        console.log('[PromptLab] API call:', msg.slice(15));
-        return;
-      }
-      // Hook 安装确认
-      if (msg.startsWith('__PL_HOOK__:')) {
-        console.log('[PromptLab]', msg);
-        return;
-      }
-      // 对话捕获
-      if (msg.startsWith('__PL_CAPTURE__:')) {
-        try {
-          const data = JSON.parse(msg.slice(17));
-          if (data?.responseContent) {
-            console.log('[PromptLab] Captured AI response from:', data.site);
-            (window as any).electronAPI?.saveConversation?.({
-              site: data.site || 'unknown',
-              timestamp: data.timestamp || Date.now(),
-              requestBody: data.requestBody,
-              responseContent: data.responseContent,
-            });
-          }
-        } catch { console.log('[PromptLab] Parse error for capture msg'); }
-      }
-    };
-
-    webview.addEventListener('console-message', onConsole);
-    return () => { webview.removeEventListener('console-message', onConsole); };
-  }, [tab?.siteId]);
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
   const site = sites.find((s) => s.id === tab?.siteId);
+
+  // ── 对话保存：从 DOM 提取对话内容（按钮触发）──
+  const handleSaveConversation = useCallback(async () => {
+    const webview = webviewRef.current;
+    if (!webview || !site) return;
+
+    try {
+      const result = await webview.executeJavaScript(`
+        (function() {
+          // 策略 1：已知选择器
+          const knownSelectors = [
+            '[data-message-author-role]',
+            'article[data-testid^="conversation-turn"]',
+          ];
+          for (const sel of knownSelectors) {
+            const nodes = document.querySelectorAll(sel);
+            if (nodes.length > 1) {
+              const lines = [];
+              for (const el of nodes) {
+                const t = el.textContent?.trim();
+                if (!t || t.length < 3) continue;
+                const role = el.getAttribute('data-message-author-role') || '';
+                const isUser = role === 'user';
+                lines.push('### ' + (isUser ? '🧑 用户' : '🤖 AI'));
+                lines.push('');
+                lines.push(t);
+                lines.push('');
+              }
+              return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'known' });
+            }
+          }
+
+          // 策略 2：查找所有包含大量文本的兄弟元素（对话气泡模式）
+          const all = document.body.querySelectorAll('*');
+          let bestParent = null, bestCount = 0;
+
+          for (const el of all) {
+            if (el.children.length < 2) continue;
+            const children = Array.from(el.children);
+            const textChildren = children.filter(c =>
+              c.textContent && c.textContent.trim().length > 20 &&
+              c.children.length > 0
+            );
+            if (textChildren.length > bestCount) {
+              bestCount = textChildren.length;
+              bestParent = textChildren;
+            }
+          }
+
+          if (bestParent && bestCount > 1) {
+            const lines = [];
+            for (const el of bestParent) {
+              const t = el.textContent?.trim();
+              if (!t || t.length < 10) continue;
+              // 简单启发：包含常见 AI 句式 → AI，否则 → 用户
+              const isAI = /(好的|当然|可以|以下是|根据|我来|这是|Here|Sure|Certainly|I can|Let me)/i.test(t.substring(0, 50));
+              lines.push('### ' + (isAI ? '🤖 AI' : '🧑 用户'));
+              lines.push('');
+              lines.push(t);
+              lines.push('');
+            }
+            return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
+          }
+
+          // 策略 3：兜底 — 整个页面可见文本
+          const bodyText = document.body.innerText?.trim();
+          if (bodyText && bodyText.length > 50) {
+            return JSON.stringify({ success: true, content: '# 页面内容\\n\\n' + bodyText, via: 'fallback' });
+          }
+
+          return JSON.stringify({ success: false });
+        })();
+      `);
+
+      const parsed = JSON.parse(result);
+      if (parsed.success && parsed.content) {
+        const saveResult = await (window as any).electronAPI?.saveConversation?.({
+          site: site.id,
+          timestamp: Date.now(),
+          requestBody: { note: 'DOM extraction' },
+          responseContent: parsed.content,
+        });
+        if (saveResult?.success) {
+          toast('对话已保存', 'success');
+        } else {
+          toast('保存失败: ' + (saveResult?.error || '未知错误'), 'error');
+        }
+      } else {
+        toast('未找到对话内容', 'error');
+      }
+    } catch {
+      toast('保存失败', 'error');
+    }
+  }, [site, toast]);
+
   const [variableDialogOpen, setVariableDialogOpen] = useState(false);
 
   const doInject = useCallback((finalText: string) => {
@@ -457,11 +324,22 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           {tab.url}
         </div>
 
+        {/* 保存对话按钮 */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-xs gap-1"
+          onClick={handleSaveConversation}
+          title="保存当前对话"
+        >
+          保存对话
+        </Button>
+
         {/* 注入按钮 */}
         {selectedPrompt && site && (
           <Button
             size="sm"
-            className="h-6 text-xs gap-1 bg-blue-600 hover:bg-blue-700"
+            className="h-6 text-xs gap-1 bg-blue-600 hover:bg-blue-700 ml-1"
             onClick={handleInject}
           >
             <Send className="h-3 w-3" />
@@ -475,7 +353,6 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         ref={webviewRef}
         src={tab.url}
         partition={`persist:site-${tab.siteId}`}
-        preload={preloadPath || undefined}
         style={{ flex: 1 }}
         // @ts-expect-error webview-specific attribute
         allowpopups="true"

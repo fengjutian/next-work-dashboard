@@ -387,6 +387,7 @@ const setupIPC = () => {
       ].join('\n');
 
       fs.appendFileSync(filePath, entry, 'utf-8');
+      console.log('[PromptLab] Conversation saved to:', filePath);
 
       return { success: true, filePath };
     } catch (err) {
