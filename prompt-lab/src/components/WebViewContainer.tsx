@@ -6,7 +6,7 @@ import { useStore } from '@/store';
 import { VariableFillDialog, extractVariables } from '@/components/VariableFillDialog';
 import type { Prompt } from '@/store';
 
-// ©¤©¤ ±êÇ©À¸ ©¤©¤
+// â”€â”€ æ ‡ç­¾æ  â”€â”€
 
 const TabBar: React.FC = () => {
   const { tabs, activeTabId, sites, openTab, closeTab, setActiveTab } =
@@ -36,7 +36,7 @@ const TabBar: React.FC = () => {
           </button>
         </div>
       ))}
-      {/* ĞÂ½¨±êÇ©ÏÂÀ­ */}
+      {/* æ–°å»ºæ ‡ç­¾ä¸‹æ‹‰ */}
       <div className="relative group">
         <Button
           variant="ghost"
@@ -63,7 +63,7 @@ const TabBar: React.FC = () => {
   );
 };
 
-// ©¤©¤ WebView ÈİÆ÷ ©¤©¤
+// â”€â”€ WebView å®¹å™¨ â”€â”€
 
 declare global {
   namespace JSX {
@@ -155,14 +155,14 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         if (parsed.success) {
           incrementUsage(selectedPrompt.id);
           recordInject(selectedPrompt.id, site.id);
-          toast('×¢Èë³É¹¦', 'success');
+          toast('æ³¨å…¥æˆåŠŸ', 'success');
         } else {
-          toast(parsed.error === 'INPUT_NOT_FOUND' ? 'Î´ÕÒµ½ÊäÈë¿ò£¬Çë¼ì²é CSS Ñ¡ÔñÆ÷' : `×¢ÈëÊ§°Ü: ${parsed.error}`, 'error');
+          toast(parsed.error === 'INPUT_NOT_FOUND' ? 'æœªæ‰¾åˆ°è¾“å…¥æ¡†ï¼Œè¯·æ£€æŸ¥ CSS é€‰æ‹©å™¨' : `æ³¨å…¥å¤±è´¥: ${parsed.error}`, 'error');
         }
       })
       .catch((err: Error) => {
         setLastInjectResult({ success: false, error: err.message });
-        toast(`×¢ÈëÊ§°Ü: ${err.message}`, 'error');
+        toast(`æ³¨å…¥å¤±è´¥: ${err.message}`, 'error');
       });
   }, [selectedPrompt, site, injectMode, injectStrategy, setLastInjectResult, incrementUsage, recordInject, toast]);
 
@@ -176,7 +176,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     }
   }, [selectedPrompt, doInject]);
 
-  // ¼àÌıÀ´×Ô CommandPalette µÄ×¢ÈëĞÅºÅ
+  // ç›‘å¬æ¥è‡ª CommandPalette çš„æ³¨å…¥ä¿¡å·
   useEffect(() => {
     if (!pendingInjection || !tab) return;
     if (pendingInjection.siteId !== tab.siteId) return;
@@ -198,7 +198,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
 
   return (
     <div className="flex-1 flex flex-col relative">
-      {/* µ¼º½À¸ */}
+      {/* å¯¼èˆªæ  */}
       <div className="h-8 flex items-center px-2 gap-1 bg-zinc-50 dark:bg-zinc-900 border-b">
         <Button
           variant="ghost"
@@ -229,7 +229,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           {tab.url}
         </div>
 
-        {/* ×¢Èë°´Å¥ */}
+        {/* æ³¨å…¥æŒ‰é’® */}
         {selectedPrompt && site && (
           <Button
             size="sm"
@@ -237,7 +237,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
             onClick={handleInject}
           >
             <Send className="h-3 w-3" />
-            ×¢Èë¡¸{selectedPrompt.title}¡¹
+            æ³¨å…¥ã€Œ{selectedPrompt.title}ã€
           </Button>
         )}
       </div>
@@ -252,7 +252,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         allowpopups="true"
       />
 
-      {/* ±äÁ¿Ìî³ä¶Ô»°¿ò */}
+      {/* å˜é‡å¡«å……å¯¹è¯æ¡† */}
       {variableDialogOpen && selectedPrompt && (
         <VariableFillDialog
           content={selectedPrompt.content}
@@ -268,7 +268,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   );
 };
 
-// ©¤©¤ µ¼³ö ©¤©¤
+// â”€â”€ å¯¼å‡º â”€â”€
 
 export function WebViewContainer() {
   const tabs = useStore((s) => s.tabs);
