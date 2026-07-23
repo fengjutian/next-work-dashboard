@@ -1,6 +1,8 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, nativeImage } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import started from 'electron-squirrel-startup';
+import AutoLaunch from 'electron-auto-launch';
 
 if (started) app.quit();
 
@@ -67,9 +69,13 @@ const createTray = () => {
     {
       label: '退出 PromptLab',
       click: () => {
-        tray?.destroy();
-        tray = null;
-        app.quit();
+        // 退出前触发保存
+        mainWindow?.webContents.send('save-before-quit');
+        setTimeout(() => {
+          tray?.destroy();
+          tray = null;
+          app.quit();
+        }, 500); // 给 500ms 让渲染进程保存
       },
     },
   ]);
@@ -87,6 +93,23 @@ const createTray = () => {
 // ── IPC 处理器 ──
 
 const setupIPC = () => {
+  // WebView 右键菜单 (B05)
+  mainWindow?.webContents.on('context-menu', (_event, params) => {
+    // 仅在 webview 内触发
+    Menu.buildFromTemplate([
+      {
+        label: '注入选中提示词',
+        enabled: !!params,
+        click: () => {
+          mainWindow?.webContents.send('inject-from-context-menu');
+        },
+      },
+      { type: 'separator' },
+      { label: '复制', role: 'copy' },
+      { label: '粘贴', role: 'paste' },
+    ]).popup();
+  });
+
   // 提示词注入：由渲染进程发起，在主进程中执行
   ipcMain.handle('inject-prompt', async (_event, payload: {
     webviewId: number;
@@ -148,6 +171,51 @@ const setupIPC = () => {
     }
   });
   ipcMain.handle('window-close', () => mainWindow?.close());
+
+  // ── 窗口置顶 (S13) ──
+  ipcMain.handle('window-toggle-always-on-top', () => {
+    const ontop = !mainWindow?.isAlwaysOnTop();
+    mainWindow?.setAlwaysOnTop(ontop);
+    return ontop;
+  });
+
+  // ── 开机启动 (S14) ──
+  const autoLauncher = new AutoLaunch({ name: 'PromptLab' });
+  ipcMain.handle('auto-launch-get', async () => {
+    try { return await autoLauncher.isEnabled(); } catch { return false; }
+  });
+  ipcMain.handle('auto-launch-set', async (_e, enabled: boolean) => {
+    if (enabled) {
+      await autoLauncher.enable();
+    } else {
+      await autoLauncher.disable();
+    }
+    return enabled;
+  });
+
+  // ── 数据持久化 ──
+  const dataPath = path.join(app.getPath('userData'), 'promptlab-data.json');
+
+  ipcMain.handle('store-save', async (_event, data: string) => {
+    try {
+      fs.writeFileSync(dataPath, data, 'utf-8');
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('store-load', async () => {
+    try {
+      if (fs.existsSync(dataPath)) {
+        const raw = fs.readFileSync(dataPath, 'utf-8');
+        return JSON.parse(raw);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
 };
 
 // ── 全局快捷键 ──
@@ -164,6 +232,30 @@ const registerShortcuts = () => {
     // 通知渲染进程打开浮动搜索面板
     mainWindow?.webContents.send('toggle-search-panel');
   });
+
+  // 从持久化数据加载自定义快捷键
+  const shortcutsPath = path.join(app.getPath('userData'), 'promptlab-data.json');
+  try {
+    if (fs.existsSync(shortcutsPath)) {
+      const data = JSON.parse(fs.readFileSync(shortcutsPath, 'utf-8'));
+      if (data.shortcuts) {
+        // Apply custom shortcuts (simplified: just load saved)
+        globalShortcut.unregister('CommandOrControl+Shift+Space');
+        const searchShortcut = data.shortcuts['toggle-search'] || 'CommandOrControl+Shift+Space';
+        try {
+          globalShortcut.register(searchShortcut, () => {
+            if (mainWindow?.isVisible()) {
+              mainWindow.focus();
+            } else {
+              mainWindow?.show();
+              mainWindow?.focus();
+            }
+            mainWindow?.webContents.send('toggle-search-panel');
+          });
+        } catch { /* shortcut registration failed, use default */ }
+      }
+    }
+  } catch { /* ignore load errors */ }
 };
 
 // ── 应用生命周期 ──

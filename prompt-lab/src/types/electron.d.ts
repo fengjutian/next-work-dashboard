@@ -17,6 +17,12 @@ export interface ElectronAPI {
   close: () => Promise<void>;
   injectPrompt: (payload: InjectPayload) => Promise<InjectResult>;
   onToggleSearchPanel: (callback: () => void) => () => void;
+  saveData: (data: string) => Promise<{ success: boolean }>;
+  loadData: () => Promise<unknown>;
+  toggleAlwaysOnTop: () => Promise<boolean>;
+  getAutoLaunch: () => Promise<boolean>;
+  setAutoLaunch: (enabled: boolean) => Promise<boolean>;
+  onInjectFromContextMenu: (callback: () => void) => () => void;
 }
 
 declare global {

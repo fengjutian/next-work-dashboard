@@ -23,4 +23,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('toggle-search-panel', callback);
     };
   },
+
+  // 数据持久化
+  saveData: (data: string) => ipcRenderer.invoke('store-save', data),
+  loadData: () => ipcRenderer.invoke('store-load'),
+
+  // V2 功能
+  toggleAlwaysOnTop: () => ipcRenderer.invoke('window-toggle-always-on-top'),
+  getAutoLaunch: () => ipcRenderer.invoke('auto-launch-get'),
+  setAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('auto-launch-set', enabled),
+
+  // 右键菜单注入事件
+  onInjectFromContextMenu: (callback: () => void) => {
+    ipcRenderer.on('inject-from-context-menu', callback);
+    return () => { ipcRenderer.removeListener('inject-from-context-menu', callback); };
+  },
+
+  // 退出前保存
+  onSaveBeforeQuit: (callback: () => void) => {
+    ipcRenderer.on('save-before-quit', callback);
+    return () => { ipcRenderer.removeListener('save-before-quit', callback); };
+  },
 });

@@ -1,102 +1,81 @@
 import React, { useState } from 'react';
-import { PanelLeft, PanelRight } from 'lucide-react';
-import { Button } from './components/ui/button';
-import { ScrollArea } from './components/ui/scroll-area';
-import { Separator } from './components/ui/separator';
+import { PanelLeft, PanelRight, Globe, Settings } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { PromptSidebar } from '@/components/PromptSidebar';
+import { WebViewContainer } from '@/components/WebViewContainer';
+import { CommandPalette } from '@/components/CommandPalette';
+import { SettingsPanel } from '@/components/SettingsPanel';
+import { ToastProvider } from '@/components/Toast';
+import { usePersistence } from '@/hooks/usePersistence';
+import { useStore } from '@/store';
 
-// â”€â”€ å ä½ç»„ä»¶ â”€â”€
+// ©¤©¤ ¿Õ×´Ì¬£¨ÎŞ±êÇ©Ò³Ê±£© ©¤©¤
 
-const Sidebar = ({ collapsed }: { collapsed: boolean }) => {
-  if (collapsed) return null;
+const EmptyState: React.FC = () => {
+  const { sites, openTab } = useStore();
+  const enabledSites = sites.filter((s) => s.enabled);
 
   return (
-    <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-white dark:bg-zinc-950">
-      {/* æœç´¢æ¡† */}
-      <div className="p-3">
-        <div className="text-sm text-zinc-500 px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-md">
-          ğŸ” æœç´¢æç¤ºè¯...
+    <div className="flex-1 flex items-center justify-center bg-zinc-50 dark:bg-zinc-900">
+      <div className="text-center space-y-6 max-w-md">
+        <Globe className="h-12 w-12 text-zinc-300 mx-auto" />
+        <div>
+          <h1 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
+            PromptLab
+          </h1>
+          <p className="text-sm text-zinc-500">
+            ÔÚ×ó²àÑ¡ÔñÌáÊ¾´Ê£¬È»ºó´ò¿ªÒ»¸ö AI ÍøÕ¾¿ªÊ¼Ê¹ÓÃ
+          </p>
         </div>
-      </div>
-
-      <Separator />
-
-      {/* åˆ†ç±» */}
-      <div className="p-3 border-b">
-        <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 px-2">
-          åˆ†ç±»
-        </div>
-        {['é€šç”¨', 'ç¼–ç¨‹', 'å†™ä½œ', 'ç¿»è¯‘', 'åˆ†æ'].map((cat) => (
-          <div
-            key={cat}
-            className="px-2 py-1 text-sm rounded-md cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-          >
-            {cat}
-          </div>
-        ))}
-      </div>
-
-      {/* æç¤ºè¯åˆ—è¡¨ */}
-      <ScrollArea className="flex-1">
-        <div className="p-3">
-          <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 px-2">
-            æç¤ºè¯
-          </div>
-          {[
-            { title: 'ä»£ç å®¡æŸ¥', category: 'ç¼–ç¨‹' },
-            { title: 'ç¿»è¯‘æˆè‹±æ–‡', category: 'ç¿»è¯‘' },
-            { title: 'æ€»ç»“è¦ç‚¹', category: 'é€šç”¨' },
-          ].map((p) => (
-            <div
-              key={p.title}
-              className="px-2 py-1.5 text-sm rounded-md cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 mb-0.5"
+        <div className="grid grid-cols-2 gap-2">
+          {enabledSites.map((site) => (
+            <button
+              key={site.id}
+              className="px-4 py-3 rounded-lg border bg-white dark:bg-zinc-800 hover:border-blue-400 hover:shadow-sm transition-all text-sm text-zinc-700 dark:text-zinc-300"
+              onClick={() => openTab(site.id)}
             >
-              <div className="text-zinc-800 dark:text-zinc-200">{p.title}</div>
-              <div className="text-xs text-zinc-400">{p.category}</div>
-            </div>
+              + {site.name}
+            </button>
           ))}
         </div>
-      </ScrollArea>
+        {enabledSites.length === 0 && (
+          <p className="text-xs text-zinc-400">
+            ÇëÔÚÉèÖÃÖĞÆôÓÃ AI Õ¾µã
+          </p>
+        )}
+      </div>
     </div>
   );
 };
 
-const MainContent = () => (
-  <div className="flex-1 flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-900">
-    <div className="text-center space-y-4">
-      <h1 className="text-2xl font-bold text-zinc-800 dark:text-zinc-200">
-        PromptLab
-      </h1>
-      <p className="text-zinc-500">
-        AI æç¤ºè¯æ³¨å…¥åŠ©æ‰‹ â€” åœ¨å·¦ä¾§é€‰æ‹©æç¤ºè¯ï¼Œæ³¨å…¥åˆ° AI ç½‘ç«™
-      </p>
-      <div className="flex gap-2 justify-center">
-        {['DeepSeek', 'ChatGPT', 'Kimi'].map((site) => (
-          <div
-            key={site}
-            className="px-4 py-2 rounded-lg border bg-white dark:bg-zinc-800 cursor-pointer hover:border-zinc-400 text-sm"
-          >
-            + {site}
-          </div>
-        ))}
-      </div>
-    </div>
-  </div>
-);
-
-// â”€â”€ æ ¹å¸ƒå±€ â”€â”€
+// ©¤©¤ ¸ù²¼¾Ö ©¤©¤
 
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { sidebarOpen, toggleSidebar, tabs, injectMode, setInjectMode, injectStrategy, setInjectStrategy, theme } =
+    useStore();
+  usePersistence();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Ó¦ÓÃÖ÷Ìâ
+  React.useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [theme]);
 
   return (
+    <ToastProvider>
     <div className="h-screen flex flex-col">
-      {/* é¡¶éƒ¨å·¥å…·æ  */}
-      <div className="h-10 flex items-center px-3 border-b bg-white dark:bg-zinc-950 gap-2">
+      {/* ¶¥²¿¹¤¾ßÀ¸ */}
+      <div className="h-10 flex items-center px-3 border-b bg-white dark:bg-zinc-950 gap-2 select-none">
         <Button
           variant="ghost"
           size="icon"
           className="h-7 w-7"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
+          onClick={toggleSidebar}
         >
           {sidebarOpen ? (
             <PanelLeft className="h-4 w-4" />
@@ -104,16 +83,81 @@ export default function App() {
             <PanelRight className="h-4 w-4" />
           )}
         </Button>
+
         <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           PromptLab
         </span>
+
+        <div className="flex-1" />
+
+        {/* ×¢ÈëÄ£Ê½ÇĞ»» */}
+        <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5">
+          <button
+            className={`px-2 py-0.5 rounded-sm transition-colors ${
+              injectMode === 'fill-only'
+                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-700'
+            }`}
+            onClick={() => setInjectMode('fill-only')}
+          >
+            ½öÌî³ä
+          </button>
+          <button
+            className={`px-2 py-0.5 rounded-sm transition-colors ${
+              injectMode === 'fill-and-submit'
+                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-700'
+            }`}
+            onClick={() => setInjectMode('fill-and-submit')}
+          >
+            Ìî³ä²¢·¢ËÍ
+          </button>
+        </div>
+
+        {/* ×·¼Ó/Ìæ»» */}
+        <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5 ml-1">
+          <button
+            className={`px-2 py-0.5 rounded-sm transition-colors ${
+              injectStrategy === 'replace'
+                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-700'
+            }`}
+            onClick={() => setInjectStrategy('replace')}
+          >
+            Ìæ»»
+          </button>
+          <button
+            className={`px-2 py-0.5 rounded-sm transition-colors ${
+              injectStrategy === 'append'
+                ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-700'
+            }`}
+            onClick={() => setInjectStrategy('append')}
+          >
+            ×·¼Ó
+          </button>
+        </div>
+
+        <Button variant="ghost" size="icon" className="h-7 w-7 ml-1" onClick={() => setSettingsOpen(true)}>
+          <Settings className="h-4 w-4 text-zinc-500" />
+        </Button>
       </div>
 
-      {/* ä¸»ä½“ï¼šä¾§è¾¹æ  + å†…å®¹åŒº */}
+      {/* Ö÷Ìå£º²à±ßÀ¸ + WebView */}
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar collapsed={!sidebarOpen} />
-        <MainContent />
+        <PromptSidebar collapsed={!sidebarOpen} />
+
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
+        </div>
       </div>
+
+      {/* ¸¡¶¯ËÑË÷Ãæ°å */}
+      <CommandPalette />
+
+      {/* ÉèÖÃÃæ°å */}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
+    </ToastProvider>
   );
 }
