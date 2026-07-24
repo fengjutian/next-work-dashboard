@@ -47,6 +47,7 @@ export function usePersistence() {
           prompts: promptsChanged ? newPrompts : store.prompts,
           sites: newSites,
           injectMode: data.injectMode || store.injectMode,
+          theme: data.theme || store.theme,
         });
       });
     }
@@ -64,6 +65,7 @@ export function usePersistence() {
             prompts: state.prompts,
             sites: state.sites,
             injectMode: state.injectMode,
+            theme: state.theme,
           })
         );
       }, 2000);
@@ -82,6 +84,7 @@ export function usePersistence() {
           prompts: state.prompts,
           sites: state.sites,
           injectMode: state.injectMode,
+          theme: state.theme,
         })
       );
     };

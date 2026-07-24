@@ -3,16 +3,17 @@ import { Globe, MessageSquare, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { AIPanel } from '@/components/AIPanel';
-import { PromptSidebar } from '@/components/PromptSidebar';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
-import { ConversationHistory } from '@/components/ConversationHistory';
-import { KnowledgeGraph } from '@/components/KnowledgeGraph';
 import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useStore } from '@/store';
+import { pluginRegistry, registerBuiltInPlugins } from '@/plugins';
+
+// 模块加载时注册所有内置插件（一次性、幂等）
+registerBuiltInPlugins();
 
 // ── 空状态（无标签页时，仅 AI 模式显示） ──
 
@@ -84,10 +85,13 @@ export default function App() {
   }, [theme]);
 
   const isAI = activeActivity === 'ai' || activeActivity === null;
-  const isPrompts = activeActivity === 'prompts';
-  const isHistory = activeActivity === 'history';
   const isSettings = activeActivity === 'settings';
-  const isGraph = activeActivity === 'graph';
+
+  // 根据 activeActivity 找到对应的插件（非 AI/非 settings 时）
+  const activePlugin =
+    !isAI && !isSettings && activeActivity
+      ? pluginRegistry.get(activeActivity)
+      : undefined;
 
   return (
     <ToastProvider>
@@ -166,15 +170,15 @@ export default function App() {
 
       {/* 主体：Activity Bar + AI 侧边栏 + 主内容区 */}
       <div className="flex flex-1 overflow-hidden">
-        {/* VSCode 风格 Activity Bar */}
+        {/* VSCode 风格 Activity Bar — 从插件注册中心动态渲染图标 */}
         <ActivityBar />
 
-        {/* AI 侧边栏 — 常驻但仅 AI 模式可见 */}
+        {/* AI 侧边栏 — 常驻但仅 AI 模式可见（特殊布局：AIPanel 在 ActivityBar 右侧） */}
         <div style={{ display: isAI ? 'flex' : 'none' }} className="h-full">
           <AIPanel />
         </div>
 
-        {/* 主内容区 — 三个面板常驻，CSS 显隐切换 */}
+        {/* 主内容区 — 插件面板动态渲染（保持挂载以保留状态） */}
         <div className="flex-1 flex flex-col overflow-hidden relative">
           {/* AI 面板：WebView */}
           <div
@@ -184,36 +188,28 @@ export default function App() {
             {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
           </div>
 
-          {/* 提示词面板 */}
-          <div
-            className="flex-1 flex flex-col overflow-hidden"
-            style={{ display: isPrompts ? 'flex' : 'none' }}
-          >
-            <PromptSidebar />
-          </div>
+          {/* 动态插件面板 — 由 pluginRegistry 驱动的常驻面板 */}
+          {pluginRegistry.getEnabled()
+            .filter((p) => p.id !== 'ai')
+            .map((p) => {
+              const Panel = p.component;
+              return (
+                <div
+                  key={p.id}
+                  className="flex-1 flex flex-col overflow-hidden"
+                  style={{ display: activeActivity === p.id ? 'flex' : 'none' }}
+                >
+                  <Panel />
+                </div>
+              );
+            })}
 
-          {/* 历史面板 */}
-          <div
-            className="flex-1 flex flex-col overflow-hidden"
-            style={{ display: isHistory ? 'flex' : 'none' }}
-          >
-            <ConversationHistory />
-          </div>
-
-          {/* 设置面板 */}
+          {/* 设置面板 — 底部状态栏触发，非插件 */}
           <div
             className="flex-1 flex flex-col overflow-hidden"
             style={{ display: isSettings ? 'flex' : 'none' }}
           >
             <SettingsSidebar />
-          </div>
-
-          {/* 知识图谱面板 */}
-          <div
-            className="flex-1 flex flex-col overflow-hidden"
-            style={{ display: isGraph ? 'flex' : 'none' }}
-          >
-            <KnowledgeGraph />
           </div>
         </div>
       </div>

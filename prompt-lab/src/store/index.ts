@@ -48,8 +48,8 @@ interface AppState {
   setLastInjectResult: (r: { success: boolean; error?: string } | null) => void;
 
   // ── UI ──
-  activeActivity: 'ai' | 'prompts' | 'settings' | 'history' | 'graph' | null;
-  setActiveActivity: (a: 'ai' | 'prompts' | 'settings' | 'history' | 'graph' | null) => void;
+  activeActivity: string | null;
+  setActiveActivity: (a: string | null) => void;
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   theme: 'light' | 'dark' | 'system';
@@ -184,7 +184,7 @@ export const useStore = create<AppState>((set, get) => ({
   setLastInjectResult: (r) => set({ lastInjectResult: r }),
 
   // ── UI ──
-  activeActivity: 'ai' as 'ai' | 'prompts' | 'settings' | 'history' | 'graph' | null,
+  activeActivity: 'ai' as string | null,
   setActiveActivity: (activeActivity) => set({ activeActivity }),
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
