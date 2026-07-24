@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, RefreshCw, ArrowLeft, ArrowRight, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
@@ -13,6 +14,21 @@ const TabBar: React.FC = () => {
   const { tabs, activeTabId, sites, openTab, closeTab, setActiveTab } =
     useStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const handleToggle = () => {
+    if (!dropdownOpen && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    }
+    setDropdownOpen(!dropdownOpen);
+  };
+
+  const handleOpenTab = (siteId: string) => {
+    openTab(siteId);
+    setDropdownOpen(false);
+  };
 
   return (
     <div className="h-9 flex items-center bg-zinc-100 dark:bg-zinc-900 border-b gap-0.5 px-1 overflow-x-auto">
@@ -39,29 +55,42 @@ const TabBar: React.FC = () => {
         </div>
       ))}
       {/* 新建标签下拉 */}
-      <div className="relative group">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 text-zinc-400 hover:text-zinc-600"
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-        >
-          +
-        </Button>
-        <div className={`absolute top-full left-0 mt-1 bg-white dark:bg-zinc-800 border rounded-md shadow-lg py-1 z-50 min-w-[120px] ${dropdownOpen ? 'block' : 'hidden group-hover:block'}`}>
-          {sites
-            .filter((s) => s.enabled)
-            .map((site) => (
-              <div
-                key={site.id}
-                className="px-3 py-1.5 text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
-                onClick={() => { openTab(site.id); setDropdownOpen(false); }}
-              >
-                {site.name}
-              </div>
-            ))}
-        </div>
-      </div>
+      <Button
+        ref={btnRef}
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 text-zinc-400 hover:text-zinc-600"
+        onClick={handleToggle}
+      >
+        +
+      </Button>
+      {dropdownOpen &&
+        createPortal(
+          <>
+            {/* 点击外部关闭 */}
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setDropdownOpen(false)}
+            />
+            <div
+              className="fixed z-50 bg-white dark:bg-zinc-800 border rounded-md shadow-lg py-1 min-w-[120px]"
+              style={{ top: dropdownPos.top, left: dropdownPos.left }}
+            >
+              {sites
+                .filter((s) => s.enabled)
+                .map((site) => (
+                  <div
+                    key={site.id}
+                    className="px-3 py-1.5 text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
+                    onClick={() => handleOpenTab(site.id)}
+                  >
+                    {site.name}
+                  </div>
+                ))}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 };
