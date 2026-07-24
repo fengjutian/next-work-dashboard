@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Trash2, FolderOpen, FileText, Calendar, RefreshCw } from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
@@ -187,9 +189,11 @@ export const ConversationHistory: React.FC = () => {
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto p-4">
-              <pre className="text-xs font-mono text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">
-                {content || '(空)'}
-              </pre>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <Markdown remarkPlugins={[remarkGfm]}>
+                  {content || '_(空)_'}
+                </Markdown>
+              </div>
             </div>
           )
         ) : (
