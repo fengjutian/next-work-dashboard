@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, MessageSquare } from 'lucide-react';
+import { Globe, MessageSquare, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { AIPanel } from '@/components/AIPanel';
@@ -213,6 +213,21 @@ export default function App() {
 
       {/* 提示词抽屉 */}
       <PromptDrawer />
+
+      {/* 底部状态栏 — 设置 */}
+      <div className="h-8 flex items-center justify-end px-2 border-t bg-zinc-100 dark:bg-zinc-900 select-none flex-shrink-0">
+        <button
+          className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors ${
+            isSettings
+              ? 'text-zinc-900 dark:text-zinc-100 bg-zinc-200 dark:bg-zinc-700'
+              : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'
+          }`}
+          onClick={() => setActiveActivity(isSettings ? null : 'settings')}
+          title="设置"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
+      </div>
     </div>
     </ToastProvider>
   );
