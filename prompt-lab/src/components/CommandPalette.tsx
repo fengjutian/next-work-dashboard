@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search } from 'lucide-react';
+import { Search } from '@/components/icons';
 import { useStore } from '@/store';
 
 // ── 浮动搜索面板 ──

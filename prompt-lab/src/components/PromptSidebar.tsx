@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Plus, Star, Pin, Trash2, Edit3, X, Copy, Check } from 'lucide-react';
+import { Search, Plus, Star, Pin, Trash2, Edit3, X, Copy, Check } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';

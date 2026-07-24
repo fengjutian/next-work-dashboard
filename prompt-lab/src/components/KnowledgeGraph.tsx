@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   RefreshCw, Plus, X, Search, FileText, GitBranch,
   ZoomIn, ZoomOut, Maximize2, RotateCcw,
-} from 'lucide-react';
+} from '@/components/icons';
 import { Graph } from '@antv/g6';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';

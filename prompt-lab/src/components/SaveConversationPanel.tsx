@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Download } from 'lucide-react';
+import { X, Download } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 
 interface Props {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, MessageSquare, Settings } from 'lucide-react';
+import { Globe, MessageSquare, Settings } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { AIPanel } from '@/components/AIPanel';

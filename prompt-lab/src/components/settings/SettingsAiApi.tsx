@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, EyeOff, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle, XCircle, Loader2 } from '@/components/icons';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';

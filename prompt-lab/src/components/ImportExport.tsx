@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Download, Upload } from 'lucide-react';
+import { Download, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import type { Prompt } from '@/store';

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, createContext, useContext } from 'react';
-import { CheckCircle, XCircle, X } from 'lucide-react';
+import { CheckCircle, XCircle, X } from '@/components/icons';
 
 interface Toast {
   id: number;

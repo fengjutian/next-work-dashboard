@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Trash2, FolderOpen, FileText, Calendar, RefreshCw } from 'lucide-react';
+import { Trash2, FolderOpen, FileText, Calendar, RefreshCw } from '@/components/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';

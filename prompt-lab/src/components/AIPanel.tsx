@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, PanelLeft, PanelRight } from 'lucide-react';
+import { Globe, PanelLeft, PanelRight } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';

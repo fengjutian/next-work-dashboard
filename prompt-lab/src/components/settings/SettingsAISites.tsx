@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus } from 'lucide-react';
+import { Plus } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { SiteRow } from '@/components/SiteRow';
 import { useStore } from '@/store';

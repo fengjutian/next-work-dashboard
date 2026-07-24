@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Search, Pin, Star, Copy, Edit3 } from 'lucide-react';
+import { X, Search, Pin, Star, Copy, Edit3 } from '@/components/icons';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/Toast';
 import { useStore, useFilteredPrompts, useAllTags, useAllCategories } from '@/store';

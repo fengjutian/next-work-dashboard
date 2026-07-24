@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, RefreshCw, ArrowLeft, ArrowRight, Send } from 'lucide-react';
+import { X, RefreshCw, ArrowLeft, ArrowRight, Send } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';

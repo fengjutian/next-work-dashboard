@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StickyNote, Trash2 } from 'lucide-react';
+import { StickyNote, Trash2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 

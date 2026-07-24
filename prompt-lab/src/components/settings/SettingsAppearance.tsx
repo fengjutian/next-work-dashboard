@@ -1,5 +1,5 @@
 import React from 'react';
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { Monitor, Moon, Sun } from '@/components/icons';
 import { useStore } from '@/store';
 
 // ── 外观设置 Tab ──
