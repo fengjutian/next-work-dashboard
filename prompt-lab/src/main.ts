@@ -343,6 +343,9 @@ const setupIPC = () => {
     timestamp: number;
     requestBody: unknown;
     responseContent: string;
+    title?: string;
+    notes?: string;
+    createNew?: boolean;
   }) => {
     try {
       if (!fs.existsSync(exportDir)) {
@@ -351,7 +354,14 @@ const setupIPC = () => {
 
       const date = new Date(payload.timestamp).toISOString().split('T')[0];
       const time = new Date(payload.timestamp).toLocaleTimeString('zh-CN');
-      const filePath = path.join(exportDir, `${payload.site}-${date}.md`);
+
+      // 标注保存 / 有标题 → 独立新文件；快速保存 → 追加到按日汇总文件
+      const isNewFile = payload.createNew || !!payload.title;
+      console.log('[store-conversation] isNewFile:', isNewFile, 'title:', payload.title, 'createNew:', payload.createNew, 'site:', payload.site);
+      const fileName = isNewFile
+        ? `${payload.site}-${date}-${payload.timestamp}.md`
+        : `${payload.site}-${date}.md`;
+      const filePath = path.join(exportDir, fileName);
 
       // 提取用户消息内容
       let userMsg = '(无法解析)';
@@ -373,20 +383,28 @@ const setupIPC = () => {
         }
       } catch { /* keep default */ }
 
-      const entry = [
-        '',
-        `---`,
-        `### 🧑 用户 — ${time}`,
-        '',
-        userMsg,
-        '',
-        `### 🤖 AI — ${time}`,
-        '',
-        payload.responseContent,
-        '',
-      ].join('\n');
+      const entryParts: string[] = [];
 
-      fs.appendFileSync(filePath, entry, 'utf-8');
+      // 新文件模式时写入标题和备注
+      if (isNewFile && payload.title) {
+        entryParts.push(`# ${payload.title}`);
+        entryParts.push('');
+        if (payload.notes) {
+          entryParts.push(`> ${payload.notes}`);
+          entryParts.push('');
+        }
+      }
+
+      entryParts.push('', `---`, `### 🧑 用户 — ${time}`, '', userMsg, '', `### 🤖 AI — ${time}`, '', payload.responseContent, '');
+
+      const entry = entryParts.join('\n');
+
+      // 新文件：覆写；旧行为：追加
+      if (isNewFile) {
+        fs.writeFileSync(filePath, entry, 'utf-8');
+      } else {
+        fs.appendFileSync(filePath, entry, 'utf-8');
+      }
       console.log('[PromptLab] Conversation saved to:', filePath);
 
       return { success: true, filePath };
@@ -406,18 +424,35 @@ const setupIPC = () => {
         fileName: string;
         path: string;
         size: number;
+        title?: string;
+        notes?: string;
       }> = [];
 
       const files = fs.readdirSync(exportDir).filter((f) => f.endsWith('.md'));
       for (const file of files) {
-        const match = file.match(/^(.+)-(\d{4}-\d{2}-\d{2})\.md$/);
+        const match = file.match(/^(.+)-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.md$/);
         const stat = fs.statSync(path.join(exportDir, file));
+        const filePath = path.join(exportDir, file);
+
+        // 尝试从文件首行解析标题 (# Title)
+        let title: string | undefined;
+        let notes: string | undefined;
+        try {
+          const head = fs.readFileSync(filePath, 'utf-8').slice(0, 1024);
+          const titleMatch = head.match(/^# (.+)$/m);
+          if (titleMatch) title = titleMatch[1].trim();
+          const notesMatch = head.match(/^> (.+)$/m);
+          if (notesMatch) notes = notesMatch[1].trim();
+        } catch { /* keep undefined */ }
+
         list.push({
           site: match?.[1] || 'unknown',
           date: match?.[2] || '',
           fileName: file,
-          path: path.join(exportDir, file),
+          path: filePath,
           size: stat.size,
+          title,
+          notes,
         });
       }
 

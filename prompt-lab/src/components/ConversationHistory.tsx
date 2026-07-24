@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Trash2, FolderOpen, FileText, Calendar, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
+import { useStore } from '@/store';
 import type { ConversationFile } from '@/types/electron';
 
 // ── 文件列表项 ──
@@ -28,7 +29,7 @@ const FileItem: React.FC<{
     >
       <FileText className="h-3.5 w-3.5 flex-shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium">{file.site}</div>
+        <div className="truncate font-medium">{file.title || file.site}</div>
         <div className="flex items-center gap-2 text-[10px] text-zinc-400">
           <Calendar className="h-3 w-3" />
           {file.date}
@@ -59,21 +60,26 @@ export const ConversationHistory: React.FC = () => {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const conversationSavedAt = useStore((s) => s.conversationSavedAt);
 
   const loadList = useCallback(async () => {
     try {
       const api = (window as any).electronAPI;
-      if (!api?.listConversations) return;
+      if (!api?.listConversations) {
+        console.warn('[ConvHistory] electronAPI.listConversations not available');
+        return;
+      }
       const list = await api.listConversations();
+      console.log('[ConvHistory] loaded', list.length, 'files:', list.map((f: ConversationFile) => f.fileName));
       setFiles(list);
-    } catch {
-      // 静默失败
+    } catch (err) {
+      console.error('[ConvHistory] loadList failed:', err);
     }
   }, []);
 
   useEffect(() => {
     loadList();
-  }, [loadList]);
+  }, [loadList, conversationSavedAt]);
 
   const handleSelect = useCallback(async (file: ConversationFile) => {
     setActivePath(file.path);
@@ -156,7 +162,7 @@ export const ConversationHistory: React.FC = () => {
             <div className="flex flex-col items-center justify-center h-full text-zinc-400 gap-2">
               <FileText className="h-8 w-8" />
               <p className="text-xs">暂无对话记录</p>
-              <p className="text-[10px]">在 AI 页面中对话后将自动保存</p>
+              <p className="text-[10px]">点击 AI 页面中的保存按钮来保存对话</p>
             </div>
           ) : (
             files.map((f) => (

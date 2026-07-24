@@ -50,7 +50,7 @@ export const AIPanel: React.FC = () => {
   const { sites, tabs, openTab, setActiveTab, activeTabId } = useStore();
   const enabledSites = sites.filter((s) => s.enabled).sort((a, b) => a.sortOrder - b.sortOrder);
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   // ── 折叠态：窄条 ──
   if (collapsed) {

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import { VariableFillDialog, extractVariables } from '@/components/VariableFillDialog';
+import { SaveConversationPanel } from '@/components/SaveConversationPanel';
 import type { Prompt } from '@/store';
 
 // ── 标签栏 ──
@@ -100,6 +101,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const { toast } = useToast();
   const prompts = useStore((s) => s.prompts);
   const sites = useStore((s) => s.sites);
+  const notifyConversationSaved = useStore((s) => s.notifyConversationSaved);
 
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
   const site = sites.find((s) => s.id === tab?.siteId);
@@ -204,6 +206,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         });
         if (saveResult?.success) {
           toast('对话已保存', 'success');
+          notifyConversationSaved();
         } else {
           toast('保存失败: ' + (saveResult?.error || '未知错误'), 'error');
         }
@@ -213,9 +216,129 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     } catch {
       toast('保存失败', 'error');
     }
-  }, [site, toast]);
+  }, [site, toast, notifyConversationSaved]);
 
+  const [savePanelOpen, setSavePanelOpen] = useState(false);
   const [variableDialogOpen, setVariableDialogOpen] = useState(false);
+
+  // ── 标注保存侧边栏 ──
+  // 提取对话内容的回调：由面板中的「从页面提取」按钮触发
+  const handleExtractContent = useCallback(async (): Promise<string> => {
+    const webview = webviewRef.current;
+    if (!webview) throw new Error('webview not ready');
+
+    const result = await webview.executeJavaScript(`
+      (function() {
+        const knownSelectors = [
+          '[data-message-author-role]',
+          'article[data-testid^="conversation-turn"]',
+        ];
+        for (const sel of knownSelectors) {
+          const nodes = document.querySelectorAll(sel);
+          if (nodes.length > 1) {
+            const lines = [];
+            for (const el of nodes) {
+              const t = el.textContent?.trim();
+              if (!t || t.length < 3) continue;
+              const role = el.getAttribute('data-message-author-role') || '';
+              const isUser = role === 'user';
+              lines.push('### ' + (isUser ? '🧑 用户' : '🤖 AI'));
+              lines.push('');
+              lines.push(t);
+              lines.push('');
+            }
+            return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'known' });
+          }
+        }
+
+        const all = document.body.querySelectorAll('*');
+        const vw = window.innerWidth, vh = window.innerHeight;
+        let candidates = [];
+        for (const el of all) {
+          if (el.children.length < 2) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 300 || rect.height < 200) continue;
+          if (rect.left > vw * 0.7 || rect.right < vw * 0.3) continue;
+          if (rect.top > vh * 0.6) continue;
+          const children = Array.from(el.children);
+          const textChildren = children.filter(c => {
+            const t = c.textContent?.trim() || '';
+            return t.length > 15 && c.children.length > 0;
+          });
+          if (textChildren.length >= 2) {
+            candidates.push({
+              el: textChildren,
+              count: textChildren.length,
+              area: rect.width * rect.height,
+              centerDist: Math.abs(rect.left + rect.width/2 - vw/2)
+            });
+          }
+        }
+        candidates.sort((a, b) => b.count - a.count || a.centerDist - b.centerDist);
+        const best = candidates[0];
+        if (best && best.count > 1) {
+          const lines = [];
+          for (const el of best.el) {
+            const t = el.textContent?.trim();
+            if (!t || t.length < 5) continue;
+            const isAI = /(好的|当然|可以|以下是|以下为|根据|我来|这是|Here|Sure|Certainly|Let me|I can)/i.test(t.substring(0, 60));
+            lines.push('### ' + (isAI ? '🤖 AI' : '🧑 用户'));
+            lines.push('');
+            lines.push(t);
+            lines.push('');
+          }
+          if (lines.length > 0) {
+            return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
+          }
+        }
+
+        const bodyText = document.body.innerText?.trim();
+        if (bodyText && bodyText.length > 50) {
+          return JSON.stringify({ success: true, content: '# 页面内容\\n\\n' + bodyText, via: 'fallback' });
+        }
+        return JSON.stringify({ success: false });
+      })();
+    `);
+
+    const parsed = JSON.parse(result);
+    if (parsed.success && parsed.content) {
+      return parsed.content;
+    }
+    throw new Error('未找到对话内容');
+  }, []);
+
+  // 面板保存：用户自行填写标题、备注、内容
+  const handleSaveWithInfo = useCallback(async (title: string, notes: string, content: string) => {
+    setSavePanelOpen(false);
+    console.log('[WebViewPanel] handleSaveWithInfo called, title:', title, 'site:', site?.id);
+    try {
+      const api = (window as any).electronAPI;
+      if (!api?.saveConversation) {
+        console.error('[WebViewPanel] electronAPI.saveConversation not available!');
+        toast('保存失败: API 不可用', 'error');
+        return;
+      }
+      const saveResult = await api.saveConversation({
+        site: site?.id,
+        timestamp: Date.now(),
+        requestBody: { note: 'user-saved' },
+        responseContent: content,
+        title,
+        notes: notes || undefined,
+        createNew: true,
+      });
+      console.log('[WebViewPanel] saveResult:', saveResult);
+      if (saveResult?.success) {
+        toast('对话已保存', 'success');
+        notifyConversationSaved();
+      } else {
+        toast('保存失败: ' + (saveResult?.error || '未知错误'), 'error');
+      }
+    } catch (err) {
+      console.error('[WebViewPanel] save failed:', err);
+      toast('保存失败', 'error');
+    }
+  }, [site, toast, notifyConversationSaved]);
 
   const doInject = useCallback((finalText: string) => {
     if (!webviewRef.current || !selectedPrompt || !site) return;
@@ -347,9 +470,20 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           variant="outline"
           className="h-6 text-xs gap-1"
           onClick={handleSaveConversation}
-          title="保存当前对话"
+          title="快速保存当前对话"
         >
-          保存对话
+          保存
+        </Button>
+
+        {/* 标注保存按钮 */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 text-xs gap-1 border-dashed"
+          onClick={() => setSavePanelOpen(true)}
+          title="打开侧边栏填写对话信息后保存"
+        >
+          📝 标注保存
         </Button>
 
         {/* 注入按钮 */}
@@ -365,15 +499,24 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         )}
       </div>
 
-      {/* WebView */}
-      <webview
-        ref={webviewRef}
-        src={tab.url}
-        partition={`persist:site-${tab.siteId}`}
-        style={{ flex: 1 }}
-        // @ts-expect-error webview-specific attribute
-        allowpopups="true"
-      />
+      {/* WebView + 侧边栏 */}
+      <div className="flex-1 flex overflow-hidden">
+        <webview
+          ref={webviewRef}
+          src={tab.url}
+          partition={`persist:site-${tab.siteId}`}
+          style={{ flex: 1 }}
+          // @ts-expect-error webview-specific attribute
+          allowpopups="true"
+        />
+
+        <SaveConversationPanel
+          open={savePanelOpen}
+          onExtract={handleExtractContent}
+          onSave={handleSaveWithInfo}
+          onClose={() => setSavePanelOpen(false)}
+        />
+      </div>
 
       {/* 变量填充对话框 */}
       {variableDialogOpen && selectedPrompt && (

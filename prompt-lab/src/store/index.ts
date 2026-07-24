@@ -65,6 +65,10 @@ interface AppState {
   // 提示词抽屉
   promptDrawerOpen: boolean;
   setPromptDrawerOpen: (open: boolean) => void;
+
+  // 对话保存信号 — 每次保存递增，历史面板监听此值以刷新列表
+  conversationSavedAt: number;
+  notifyConversationSaved: () => void;
 }
 
 // ── 辅助 ──
@@ -194,6 +198,9 @@ export const useStore = create<AppState>((set, get) => ({
 
   promptDrawerOpen: false,
   setPromptDrawerOpen: (open) => set({ promptDrawerOpen: open }),
+
+  conversationSavedAt: 0,
+  notifyConversationSaved: () => set({ conversationSavedAt: Date.now() }),
 }));
 
 // ── 派生选择器 ──

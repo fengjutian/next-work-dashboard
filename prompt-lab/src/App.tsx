@@ -27,11 +27,28 @@ const EmptyState: React.FC = () => {
           <h1 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
             next-work-dashboard
           </h1>
+          {enabledSites.length > 0 ? (
+            <p className="text-sm text-zinc-500">
+              选择一个 AI 站点开始对话
+            </p>
+          ) : (
+            <p className="text-xs text-zinc-400">
+              请在设置中启用 AI 站点
+            </p>
+          )}
         </div>
-        {enabledSites.length === 0 && (
-          <p className="text-xs text-zinc-400">
-            请在设置中启用 AI 站点
-          </p>
+        {enabledSites.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
+            {enabledSites.map((site) => (
+              <button
+                key={site.id}
+                className="px-4 py-3 rounded-lg border bg-white dark:bg-zinc-800 hover:border-blue-400 hover:shadow-sm transition-all text-sm text-zinc-700 dark:text-zinc-300"
+                onClick={() => openTab(site.id)}
+              >
+                + {site.name}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>

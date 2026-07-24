@@ -31,6 +31,9 @@ export interface ElectronAPI {
     timestamp: number;
     requestBody: unknown;
     responseContent: string;
+    title?: string;
+    notes?: string;
+    createNew?: boolean;
   }) => Promise<{ success: boolean; filePath?: string }>;
   listConversations: () => Promise<ConversationFile[]>;
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
@@ -44,6 +47,8 @@ export interface ConversationFile {
   fileName: string;
   path: string;
   size: number;
+  title?: string;
+  notes?: string;
 }
 
 declare global {
