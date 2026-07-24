@@ -101,4 +101,10 @@ export const DEFAULT_SITES: SiteConfig[] = [
   },
 ];
 
+export interface AiApiConfig {
+  apiKey: string;
+  model: 'deepseek-v4-flash' | 'deepseek-v4-pro';
+  baseUrl: string;
+}
+
 export const CATEGORIES = ['通用', '编程', '写作', '翻译', '分析', '设计', '营销'];

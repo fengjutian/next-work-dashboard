@@ -1,11 +1,12 @@
 import React from 'react';
-import { Bot, MessageSquare, History } from 'lucide-react';
+import { Bot, MessageSquare, History, Network } from 'lucide-react';
 import { useStore } from '@/store';
 
 const activities = [
   { id: 'ai' as const, icon: Bot, label: 'AI' },
   { id: 'prompts' as const, icon: MessageSquare, label: '提示词' },
   { id: 'history' as const, icon: History, label: '历史' },
+  { id: 'graph' as const, icon: Network, label: '知识图谱' },
 ];
 
 export const ActivityBar: React.FC = () => {

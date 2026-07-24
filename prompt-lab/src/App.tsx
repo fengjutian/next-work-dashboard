@@ -6,6 +6,7 @@ import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
+import { KnowledgeGraph } from '@/components/KnowledgeGraph';
 import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
@@ -86,6 +87,7 @@ export default function App() {
   const isPrompts = activeActivity === 'prompts';
   const isHistory = activeActivity === 'history';
   const isSettings = activeActivity === 'settings';
+  const isGraph = activeActivity === 'graph';
 
   return (
     <ToastProvider>
@@ -204,6 +206,14 @@ export default function App() {
             style={{ display: isSettings ? 'flex' : 'none' }}
           >
             <SettingsSidebar />
+          </div>
+
+          {/* 知识图谱面板 */}
+          <div
+            className="flex-1 flex flex-col overflow-hidden"
+            style={{ display: isGraph ? 'flex' : 'none' }}
+          >
+            <KnowledgeGraph />
           </div>
         </div>
       </div>

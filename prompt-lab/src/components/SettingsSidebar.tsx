@@ -7,13 +7,15 @@ import { SettingsAppearance } from '@/components/settings/SettingsAppearance';
 import { SettingsShortcuts } from '@/components/settings/SettingsShortcuts';
 import { SettingsDataManagement } from '@/components/settings/SettingsDataManagement';
 import { SettingsAbout } from '@/components/settings/SettingsAbout';
+import { SettingsAiApi } from '@/components/settings/SettingsAiApi';
 import { useStore } from '@/store';
 
 // ── Tab 配置 ──
 
-type SettingsTab = 'ai-sites' | 'appearance' | 'shortcuts' | 'data' | 'about';
+type SettingsTab = 'ai-api' | 'ai-sites' | 'appearance' | 'shortcuts' | 'data' | 'about';
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'ai-api', label: 'AI API' },
   { id: 'ai-sites', label: 'AI 站点' },
   { id: 'appearance', label: '外观' },
   { id: 'shortcuts', label: '快捷键' },
@@ -23,6 +25,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
 
 // 所有 Tab 面板（keep-alive：始终挂载，CSS 显隐）
 const ALL_PANELS: { id: SettingsTab; Component: React.FC }[] = [
+  { id: 'ai-api', Component: SettingsAiApi },
   { id: 'ai-sites', Component: SettingsAISites },
   { id: 'appearance', Component: SettingsAppearance },
   { id: 'shortcuts', Component: SettingsShortcuts },
@@ -33,7 +36,7 @@ const ALL_PANELS: { id: SettingsTab; Component: React.FC }[] = [
 // ── 侧边栏设置面板 ──
 
 export const SettingsSidebar: React.FC = () => {
-  const [activeTab, setActiveTab] = React.useState<SettingsTab>('ai-sites');
+  const [activeTab, setActiveTab] = React.useState<SettingsTab>('ai-api');
   const setActiveActivity = useStore((s) => s.setActiveActivity);
 
   return (

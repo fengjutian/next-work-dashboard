@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/shallow';
-import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy } from './types';
+import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig } from './types';
 import { DEFAULT_SITES, CATEGORIES } from './types';
 import { DEFAULT_PROMPTS } from './defaultPrompts';
 
@@ -48,8 +48,8 @@ interface AppState {
   setLastInjectResult: (r: { success: boolean; error?: string } | null) => void;
 
   // ── UI ──
-  activeActivity: 'ai' | 'prompts' | 'settings' | 'history' | null;
-  setActiveActivity: (a: 'ai' | 'prompts' | 'settings' | 'history' | null) => void;
+  activeActivity: 'ai' | 'prompts' | 'settings' | 'history' | 'graph' | null;
+  setActiveActivity: (a: 'ai' | 'prompts' | 'settings' | 'history' | 'graph' | null) => void;
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   theme: 'light' | 'dark' | 'system';
@@ -65,6 +65,10 @@ interface AppState {
   // 提示词抽屉
   promptDrawerOpen: boolean;
   setPromptDrawerOpen: (open: boolean) => void;
+
+  // AI API
+  aiApi: AiApiConfig;
+  setAiApi: (patch: Partial<AiApiConfig>) => void;
 
   // 对话保存信号 — 每次保存递增，历史面板监听此值以刷新列表
   conversationSavedAt: number;
@@ -180,7 +184,7 @@ export const useStore = create<AppState>((set, get) => ({
   setLastInjectResult: (r) => set({ lastInjectResult: r }),
 
   // ── UI ──
-  activeActivity: 'ai' as 'ai' | 'prompts' | 'settings' | 'history' | null,
+  activeActivity: 'ai' as 'ai' | 'prompts' | 'settings' | 'history' | 'graph' | null,
   setActiveActivity: (activeActivity) => set({ activeActivity }),
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -198,6 +202,14 @@ export const useStore = create<AppState>((set, get) => ({
 
   promptDrawerOpen: false,
   setPromptDrawerOpen: (open) => set({ promptDrawerOpen: open }),
+
+  // AI API
+  aiApi: {
+    apiKey: '',
+    model: 'deepseek-v4-flash',
+    baseUrl: 'https://api.deepseek.com/v1',
+  },
+  setAiApi: (patch) => set((s) => ({ aiApi: { ...s.aiApi, ...patch } })),
 
   conversationSavedAt: 0,
   notifyConversationSaved: () => set({ conversationSavedAt: Date.now() }),
