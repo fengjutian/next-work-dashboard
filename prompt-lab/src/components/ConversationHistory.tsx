@@ -118,20 +118,21 @@ export const ConversationHistory: React.FC = () => {
     }
   }, [activePath, loadList, toast]);
 
-  const handleOpenFolder = useCallback(() => {
-    // 通过主进程打开文件管理器
+  const handleOpenFolder = useCallback(async () => {
     try {
       const api = (window as any).electronAPI;
-      if (!api?.listConversations) return;
-      // 用第一个文件路径推断目录
-      if (files.length > 0) {
-        // 通过 shell 打开文件夹 — 需要新增 IPC，暂时用 toast 提示路径
-        toast(`目录: Documents\\PromptLab\\conversations`, 'success');
+      if (!api?.openConversationFolder) {
+        toast('API 未就绪，请重启应用', 'error');
+        return;
       }
-    } catch {
-      // ignore
+      const result = await api.openConversationFolder();
+      if (!result?.success) {
+        toast(result?.error ? `打开失败: ${result.error}` : '打开文件夹失败', 'error');
+      }
+    } catch (err: any) {
+      toast(`打开失败: ${err?.message || err}`, 'error');
     }
-  }, [files, toast]);
+  }, [toast]);
 
   return (
     <div className="flex h-full">

@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listConversations: () => ipcRenderer.invoke('list-conversations'),
   readConversation: (filePath: string) => ipcRenderer.invoke('read-conversation', filePath),
   deleteConversation: (filePath: string) => ipcRenderer.invoke('delete-conversation', filePath),
+  openConversationFolder: () => ipcRenderer.invoke('open-conversation-folder'),
 
   // 剪贴板（绕过 web 层，避免焦点问题）
   copyText: (text: string) => clipboard.writeText(text),

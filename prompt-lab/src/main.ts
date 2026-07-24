@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, nativeImage, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import https from 'node:https';
@@ -500,6 +500,33 @@ const setupIPC = () => {
       }
       if (fs.existsSync(resolved)) {
         fs.unlinkSync(resolved);
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  // ── 打开对话文件夹 ──
+  ipcMain.handle('open-conversation-folder', async () => {
+    try {
+      if (!fs.existsSync(exportDir)) {
+        fs.mkdirSync(exportDir, { recursive: true });
+      }
+      const shellError = await shell.openPath(exportDir);
+      // shell.openPath returns '' on success, or an error message string on failure
+      if (shellError) {
+        // Fallback: try Windows Explorer / macOS open / Linux xdg-open
+        const { exec } = await import('node:child_process');
+        const platform = process.platform;
+        const cmd = platform === 'win32'
+          ? `explorer "${exportDir}"`
+          : platform === 'darwin'
+            ? `open "${exportDir}"`
+            : `xdg-open "${exportDir}"`;
+        await new Promise<void>((resolve, reject) => {
+          exec(cmd, (err) => (err ? reject(err) : resolve()));
+        });
       }
       return { success: true };
     } catch (err) {
