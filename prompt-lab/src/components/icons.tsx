@@ -12,6 +12,7 @@ import React from 'react';
 
 // ── Font Awesome 6 (solid / 面性) ──
 import {
+  FaBookOpen,
   FaCircleCheck,
   FaCircleXmark,
   FaXmark,
@@ -274,4 +275,8 @@ export const Code: React.FC<IconProps> = ({ className }) => (
 
 export const ShieldCheck: React.FC<IconProps> = ({ className }) => (
   <FaShieldHalved className={className} />
+);
+
+export const BookOpen: React.FC<IconProps> = ({ className }) => (
+  <FaBookOpen className={className} />
 );

@@ -2,13 +2,14 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
 import { KnowledgeGraph } from '@/components/KnowledgeGraph';
 import { NotesPanel } from './notes.plugin';
 import { PluginManagerPanel } from './plugin-manager.plugin';
+import { WereadPanel } from './weread.plugin';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
 
@@ -54,12 +55,20 @@ const builtInPlugins: Plugin[] = [
     order: 4,
   },
   {
+    id: 'weread',
+    name: '微信读书',
+    icon: BookOpen,
+    component: WereadPanel,
+    enabled: true,
+    order: 5,
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
     component: PluginManagerPanel,
     enabled: true,
-    order: 5,
+    order: 6,
   },
 ];
 
