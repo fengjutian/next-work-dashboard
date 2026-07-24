@@ -305,6 +305,9 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                     ['inject', '注入提示词', '向 AI 站点注入文本'],
                     ['external.open', '打开链接', '在外部浏览器打开 URL'],
                     ['data', '私有存储', '插件隔离的键值存储'],
+                    ['preview', '内容预览', '渲染 PDF、图片、Markdown、代码'],
+                    ['file.read', '读取文件', '打开本地文件选择对话框'],
+                    ['file.write', '写入文件', '保存内容到本地文件'],
                   ] as const).map(([perm, title, desc]) => {
                     const checked = formPermissions.includes(perm as PluginPermission);
                     return (

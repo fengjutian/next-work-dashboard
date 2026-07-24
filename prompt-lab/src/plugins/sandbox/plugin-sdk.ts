@@ -93,6 +93,26 @@ export interface PluginSDK {
     delete(key: string): Promise<void>;
     list(): Promise<string[]>;
   };
+
+  /** 内容预览：PDF / 图片 / Markdown / 代码 */
+  preview: {
+    /** 渲染 Markdown 为 HTML */
+    markdown(content: string): Promise<void>;
+    /** 显示图片预览 (base64 或 URL) */
+    image(src: string, alt?: string): Promise<void>;
+    /** 显示 PDF 预览 (base64 或 URL) */
+    pdf(src: string): Promise<void>;
+    /** 语法高亮代码展示 */
+    code(source: string, language?: string): Promise<void>;
+  };
+
+  /** 文件系统操作（需 file.read / file.write 权限） */
+  file: {
+    /** 打开文件选择对话框，返回文件内容 */
+    pickOpen(options?: { accept?: string; multiple?: boolean }): Promise<unknown>;
+    /** 保存文件对话框 */
+    pickSave(content: string, defaultName?: string): Promise<void>;
+  };
 }
 
 // ── 构建 SDK 实例 ──
@@ -130,6 +150,18 @@ const sdk: PluginSDK = {
     set: (key, value) => request('data', 'set', [key, value]),
     delete: (key: string) => request('data', 'delete', [key]),
     list: () => request('data', 'list'),
+  },
+
+  preview: {
+    markdown: (content: string) => request('preview', 'markdown', [content]),
+    image: (src: string, alt?: string) => request('preview', 'image', [src, alt]),
+    pdf: (src: string) => request('preview', 'pdf', [src]),
+    code: (source: string, language?: string) => request('preview', 'code', [source, language]),
+  },
+
+  file: {
+    pickOpen: (options) => request('file', 'pickOpen', [options]),
+    pickSave: (content, defaultName) => request('file', 'pickSave', [content, defaultName]),
   },
 };
 

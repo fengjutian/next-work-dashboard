@@ -276,6 +276,130 @@ export function usePluginBridge({
             return;
           }
 
+          // ── preview (内容预览) ──
+          case 'preview': {
+            if (!permissions.includes('preview')) {
+              respond(requestId, false, undefined, '缺少权限: preview');
+              return;
+            }
+            switch (method) {
+              case 'markdown': {
+                const content = String(args[0] ?? '');
+                // 通过 setContent 事件推送渲染后的 HTML
+                // 简单 Markdown → HTML 转换（内联处理）
+                const html = content
+                  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                  .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                  .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                  .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                  .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                  .replace(/`([^`]+)`/g, '<code>$1</code>')
+                  .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+                  .replace(/\n\n/g, '</p><p>')
+                  .replace(/\n/g, '<br/>');
+                iframeRef.current?.contentWindow?.postMessage(
+                  { event: 'setContent', payload: `<div class="pk-card"><div class="prose">${html}</div></div>` },
+                  '*',
+                );
+                respond(requestId, true);
+                break;
+              }
+              case 'image': {
+                const [src, alt] = args as [string, string?];
+                const imgHtml = `<div class="pk-card" style="text-align:center">
+                  <img src="${src.replace(/"/g, '&quot;')}" alt="${(alt ?? '预览').replace(/"/g, '&quot;')}"
+                       style="max-width:100%;max-height:70vh;border-radius:8px;object-fit:contain"
+                       onerror="this.parentElement.innerHTML='<p style=\\'color:var(--foreground)\\'>图片加载失败</p>'" />
+                  ${alt ? `<p style="margin-top:8px;font-size:12px;color:var(--muted)">${alt.replace(/"/g, '&quot;')}</p>` : ''}
+                </div>`;
+                iframeRef.current?.contentWindow?.postMessage(
+                  { event: 'setContent', payload: imgHtml },
+                  '*',
+                );
+                respond(requestId, true);
+                break;
+              }
+              case 'pdf': {
+                const src = String(args[0] ?? '');
+                // 使用 embed 标签嵌入 PDF
+                const pdfHtml = `<div class="pk-card" style="padding:0;overflow:hidden;height:100%">
+                  <embed src="${src.replace(/"/g, '&quot;')}" type="application/pdf"
+                         style="width:100%;height:100%;min-height:70vh;border:0;border-radius:12px" />
+                </div>`;
+                iframeRef.current?.contentWindow?.postMessage(
+                  { event: 'setContent', payload: pdfHtml },
+                  '*',
+                );
+                respond(requestId, true);
+                break;
+              }
+              case 'code': {
+                const [source, language] = args as [string, string?];
+                const escaped = source
+                  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const codeHtml = `<div class="pk-card">
+                  ${language ? `<div style="margin-bottom:8px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase">${language}</div>` : ''}
+                  <pre style="background:var(--muted,#f4f4f5);padding:16px;border-radius:8px;overflow:auto;font-size:13px;line-height:1.6;font-family:'SF Mono',Menlo,monospace"><code>${escaped}</code></pre>
+                </div>`;
+                iframeRef.current?.contentWindow?.postMessage(
+                  { event: 'setContent', payload: codeHtml },
+                  '*',
+                );
+                respond(requestId, true);
+                break;
+              }
+              default:
+                respond(requestId, false, undefined, `未知 preview 方法: ${method}`);
+                break;
+            }
+            return;
+          }
+
+          // ── file (文件系统) ──
+          case 'file': {
+            switch (method) {
+              case 'pickOpen': {
+                if (!permissions.includes('file.read')) {
+                  respond(requestId, false, undefined, '缺少权限: file.read');
+                  return;
+                }
+                const [options] = args as [{ accept?: string; multiple?: boolean }?];
+                // 通过 Electron dialog 打开文件
+                const api = (window as any).electronAPI;
+                if (!api?.pickFile) {
+                  // fallback: 使用 HTML input
+                  respond(requestId, false, undefined, '文件选择仅在 Electron 环境下可用');
+                  return;
+                }
+                api.pickFile(options ?? {})
+                  .then((result: unknown) => respond(requestId, true, result))
+                  .catch((e: Error) => respond(requestId, false, undefined, e.message));
+                return;
+              }
+              case 'pickSave': {
+                if (!permissions.includes('file.write')) {
+                  respond(requestId, false, undefined, '缺少权限: file.write');
+                  return;
+                }
+                const [content, defaultName] = args as [string, string?];
+                const api = (window as any).electronAPI;
+                if (!api?.saveFile) {
+                  respond(requestId, false, undefined, '文件保存仅在 Electron 环境下可用');
+                  return;
+                }
+                api.saveFile(content, defaultName ?? 'untitled.txt')
+                  .then(() => respond(requestId, true))
+                  .catch((e: Error) => respond(requestId, false, undefined, e.message));
+                return;
+              }
+              default:
+                respond(requestId, false, undefined, `未知 file 方法: ${method}`);
+                break;
+            }
+            return;
+          }
+
           default:
             respond(requestId, false, undefined, `未知 channel: ${channel}`);
             return;

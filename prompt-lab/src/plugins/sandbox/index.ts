@@ -9,4 +9,5 @@ export type {
   TabSnapshot,
   ConvMetaSnapshot,
   ThemeTokens,
+  FilePickResult,
 } from './types';

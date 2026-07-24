@@ -86,6 +86,16 @@ const SDK_SOURCE = `
       delete: function(key) { return request('data', 'delete', [key]); },
       list: function() { return request('data', 'list'); },
     },
+    preview: {
+      markdown: function(c) { return request('preview', 'markdown', [c]); },
+      image: function(src, alt) { return request('preview', 'image', [src, alt]); },
+      pdf: function(src) { return request('preview', 'pdf', [src]); },
+      code: function(source, lang) { return request('preview', 'code', [source, lang]); },
+    },
+    file: {
+      pickOpen: function(opts) { return request('file', 'pickOpen', [opts]); },
+      pickSave: function(content, name) { return request('file', 'pickSave', [content, name]); },
+    },
   };
 })();
 `;
