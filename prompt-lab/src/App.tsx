@@ -149,15 +149,17 @@ export default function App() {
           </>
         )}
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`h-7 w-7 ml-1 ${promptDrawerOpen ? 'text-blue-500' : ''}`}
-          onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}
-          title="提示词"
-        >
-          <MessageSquare className="h-4 w-4" />
-        </Button>
+        {isAI && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`h-7 w-7 ml-1 ${promptDrawerOpen ? 'text-blue-500' : ''}`}
+            onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}
+            title="提示词"
+          >
+            <MessageSquare className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* 主体：Activity Bar + AI 侧边栏 + 主内容区 */}

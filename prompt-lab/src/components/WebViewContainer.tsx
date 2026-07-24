@@ -12,6 +12,7 @@ import type { Prompt } from '@/store';
 const TabBar: React.FC = () => {
   const { tabs, activeTabId, sites, openTab, closeTab, setActiveTab } =
     useStore();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
     <div className="h-9 flex items-center bg-zinc-100 dark:bg-zinc-900 border-b gap-0.5 px-1 overflow-x-auto">
@@ -43,17 +44,18 @@ const TabBar: React.FC = () => {
           variant="ghost"
           size="icon"
           className="h-6 w-6 text-zinc-400 hover:text-zinc-600"
+          onClick={() => setDropdownOpen(!dropdownOpen)}
         >
           +
         </Button>
-        <div className="absolute top-full left-0 mt-1 hidden group-hover:block bg-white dark:bg-zinc-800 border rounded-md shadow-lg py-1 z-50 min-w-[120px]">
+        <div className={`absolute top-full left-0 mt-1 bg-white dark:bg-zinc-800 border rounded-md shadow-lg py-1 z-50 min-w-[120px] ${dropdownOpen ? 'block' : 'hidden group-hover:block'}`}>
           {sites
             .filter((s) => s.enabled)
             .map((site) => (
               <div
                 key={site.id}
                 className="px-3 py-1.5 text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
-                onClick={() => openTab(site.id)}
+                onClick={() => { openTab(site.id); setDropdownOpen(false); }}
               >
                 {site.name}
               </div>

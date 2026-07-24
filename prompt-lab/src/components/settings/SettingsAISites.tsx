@@ -40,27 +40,29 @@ export const SettingsAISites: React.FC = () => {
 
   return (
     <section>
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-[10px] font-semibold text-zinc-500 uppercase">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">
           AI 站点
         </h4>
         <Button
           variant="outline"
           size="sm"
-          className="h-5 text-[10px] gap-1 px-1.5"
+          className="h-6 text-xs gap-1 px-2"
           onClick={handleAddSite}
         >
-          <Plus className="h-2.5 w-2.5" /> 添加
+          <Plus className="h-3 w-3" /> 添加
         </Button>
       </div>
-      {allSites.map((site) => (
-        <SiteRow
-          key={site.id}
-          site={site}
-          onUpdate={(patch) => handleSiteUpdate(site.id, patch)}
-          onDelete={() => handleDeleteSite(site.id)}
-        />
-      ))}
+      <div className="space-y-2">
+        {allSites.map((site) => (
+          <SiteRow
+            key={site.id}
+            site={site}
+            onUpdate={(patch) => handleSiteUpdate(site.id, patch)}
+            onDelete={() => handleDeleteSite(site.id)}
+          />
+        ))}
+      </div>
     </section>
   );
 };
