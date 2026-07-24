@@ -1,17 +1,51 @@
 import React from 'react';
+import { PluginSandbox } from '../sandbox';
+import type { PluginPermission } from '../sandbox/types';
 
 /**
  * DynamicPlugin — 用户自定义插件的通用渲染组件。
  *
- * 用户在插件管理器中输入的内容（支持 Markdown）由此组件渲染。
- * 用作自定义插件的 component 字段。
+ * 支持两种模式：
+ *  1. 旧版 content 模式（向后兼容）：渲染 Markdown 文本
+ *  2. 新版 script 模式：通过 PluginSandbox 运行用户脚本
+ *
+ * 当 script 非空时优先使用 sandbox 模式。
  */
 interface DynamicPluginProps {
   pluginName: string;
-  content: string;
+  /** 旧版：Markdown 内容（向后兼容） */
+  content?: string;
+  /** 新版：JavaScript 脚本 */
+  script?: string;
+  /** 新版：自定义 CSS */
+  style?: string;
+  /** 新版：插件 ID（用于存储隔离） */
+  pluginId?: string;
+  /** 新版：权限声明（默认最小权限） */
+  permissions?: PluginPermission[];
 }
 
-export const DynamicPlugin: React.FC<DynamicPluginProps> = ({ pluginName, content }) => {
+export const DynamicPlugin: React.FC<DynamicPluginProps> = ({
+  pluginName,
+  content,
+  script,
+  style,
+  pluginId,
+  permissions = [],
+}) => {
+  // ── 新版：沙箱模式 ──
+  if (script) {
+    return (
+      <PluginSandbox
+        pluginId={pluginId ?? pluginName}
+        script={script}
+        style={style}
+        permissions={permissions}
+      />
+    );
+  }
+
+  // ── 旧版：静态 Markdown 渲染 ──
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* 头部 */}

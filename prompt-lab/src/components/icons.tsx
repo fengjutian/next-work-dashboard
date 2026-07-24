@@ -30,6 +30,8 @@ import {
   FaDownload,
   FaUpload,
   FaCodeBranch,
+  FaCode,
+  FaShieldHalved,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -260,4 +262,16 @@ export const Maximize2: React.FC<IconProps> = ({ className }) => (
 
 export const RotateCcw: React.FC<IconProps> = ({ className }) => (
   <HiArrowUturnLeft className={className} />
+);
+
+// ═══════════════════════════════════════════════
+// 插件 SDK
+// ═══════════════════════════════════════════════
+
+export const Code: React.FC<IconProps> = ({ className }) => (
+  <FaCode className={className} />
+);
+
+export const ShieldCheck: React.FC<IconProps> = ({ className }) => (
+  <FaShieldHalved className={className} />
 );
