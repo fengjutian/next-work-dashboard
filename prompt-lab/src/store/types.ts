@@ -75,7 +75,7 @@ export const DEFAULT_SITES: SiteConfig[] = [
   {
     id: 'tongyi',
     name: '通义千问',
-    url: 'https://tongyi.aliyun.com/',
+    url: 'https://www.qianwen.com/?source=tongyigw',
     inputSelector: 'textarea[placeholder*="输入"]',
     submitSelector: 'button[class*="send"]',
     enabled: false,
