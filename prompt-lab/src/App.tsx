@@ -165,7 +165,7 @@ export default function App() {
 
           {/* 提示词面板 */}
           <div
-            className="flex-1 flex flex-col"
+            className="flex-1 flex flex-col overflow-hidden"
             style={{ display: isPrompts ? 'flex' : 'none' }}
           >
             <PromptSidebar />
@@ -173,7 +173,7 @@ export default function App() {
 
           {/* 历史面板 */}
           <div
-            className="flex-1 flex flex-col"
+            className="flex-1 flex flex-col overflow-hidden"
             style={{ display: isHistory ? 'flex' : 'none' }}
           >
             <ConversationHistory />
@@ -181,7 +181,7 @@ export default function App() {
 
           {/* 设置面板 */}
           <div
-            className="flex-1 flex flex-col"
+            className="flex-1 flex flex-col overflow-hidden"
             style={{ display: isSettings ? 'flex' : 'none' }}
           >
             <SettingsSidebar />

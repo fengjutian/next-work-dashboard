@@ -135,36 +135,53 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
             }
           }
 
-          // 策略 2：查找所有包含大量文本的兄弟元素（对话气泡模式）
+          // 策略 2：寻找对话区域 — 页面中央、可滚动、包含多条文本的容器
           const all = document.body.querySelectorAll('*');
-          let bestParent = null, bestCount = 0;
+          const vw = window.innerWidth, vh = window.innerHeight;
+          let candidates = [];
 
           for (const el of all) {
             if (el.children.length < 2) continue;
+            const rect = el.getBoundingClientRect();
+            // 排除侧边栏、顶部导航、底部输入区
+            if (rect.width < 300 || rect.height < 200) continue;
+            if (rect.left > vw * 0.7 || rect.right < vw * 0.3) continue;
+            if (rect.top > vh * 0.6) continue;
+
             const children = Array.from(el.children);
-            const textChildren = children.filter(c =>
-              c.textContent && c.textContent.trim().length > 20 &&
-              c.children.length > 0
-            );
-            if (textChildren.length > bestCount) {
-              bestCount = textChildren.length;
-              bestParent = textChildren;
+            const textChildren = children.filter(c => {
+              const t = c.textContent?.trim() || '';
+              return t.length > 15 && c.children.length > 0;
+            });
+
+            if (textChildren.length >= 2) {
+              candidates.push({
+                el: textChildren,
+                count: textChildren.length,
+                area: rect.width * rect.height,
+                centerDist: Math.abs(rect.left + rect.width/2 - vw/2)
+              });
             }
           }
 
-          if (bestParent && bestCount > 1) {
+          // 选文本子元素最多且在中央的
+          candidates.sort((a, b) => b.count - a.count || a.centerDist - b.centerDist);
+          const best = candidates[0];
+
+          if (best && best.count > 1) {
             const lines = [];
-            for (const el of bestParent) {
+            for (const el of best.el) {
               const t = el.textContent?.trim();
-              if (!t || t.length < 10) continue;
-              // 简单启发：包含常见 AI 句式 → AI，否则 → 用户
-              const isAI = /(好的|当然|可以|以下是|根据|我来|这是|Here|Sure|Certainly|I can|Let me)/i.test(t.substring(0, 50));
+              if (!t || t.length < 5) continue;
+              const isAI = /(好的|当然|可以|以下是|以下为|根据|我来|这是|Here|Sure|Certainly|Let me|I can)/i.test(t.substring(0, 60));
               lines.push('### ' + (isAI ? '🤖 AI' : '🧑 用户'));
               lines.push('');
               lines.push(t);
               lines.push('');
             }
-            return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
+            if (lines.length > 0) {
+              return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
+            }
           }
 
           // 策略 3：兜底 — 整个页面可见文本
