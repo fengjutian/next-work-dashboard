@@ -6,6 +6,7 @@ import http from 'node:http';
 import { URL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import AutoLaunch from 'electron-auto-launch';
+import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from './auth/token-store';
 
 if (started) app.quit();
 
@@ -104,6 +105,11 @@ const createTray = () => {
 // favicon 缓存：host → base64 data URL
 const faviconCache = new Map<string, string>();
 
+// 内置 favicon URL — 对已知站点直接使用官方图标，跳过 HTML 解析
+const BUILTIN_FAVICON_URLS: Record<string, string> = {
+  'gemini.google.com': 'https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg',
+};
+
 // 用 Node.js HTTP 发起 GET 请求，返回 body 字符串
 function httpGet(urlStr: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -176,19 +182,24 @@ async function fetchSiteFavicon(siteUrl: string): Promise<string | null> {
 
     if (faviconCache.has(cacheKey)) return faviconCache.get(cacheKey)!;
 
-    // 1. 解析 HTML 中的 <link rel="icon">
-    const html = await httpGet(siteUrl);
-    let iconUrl = parseFaviconLink(html, siteUrl);
+    // 1. 检查内置 favicon URL（跳过 HTML 解析）
+    let iconUrl = BUILTIN_FAVICON_URLS[host] ?? null;
 
-    // 2. 回退到 /favicon.ico
+    // 2. 未命中内置 → 解析 HTML 中的 <link rel="icon">
+    if (!iconUrl) {
+      const html = await httpGet(siteUrl);
+      iconUrl = parseFaviconLink(html, siteUrl);
+    }
+
+    // 3. 回退到 /favicon.ico
     if (!iconUrl) {
       iconUrl = `${u.origin}/favicon.ico`;
     }
 
-    // 3. 下载图标
+    // 4. 下载图标
     const buf = await httpGetBuffer(iconUrl);
 
-    // 4. 转 base64 data URL
+    // 5. 转 base64 data URL
     const ext = iconUrl.split('.').pop()?.split('?')[0] || 'ico';
     const mime = { png: 'image/png', svg: 'image/svg+xml', ico: 'image/x-icon', jpg: 'image/jpeg', jpeg: 'image/jpeg' }[ext] || 'image/x-icon';
     const b64 = buf.toString('base64');
@@ -495,6 +506,25 @@ const setupIPC = () => {
       return { success: false, error: String(err) };
     }
   });
+
+  // ── Token 安全存储 (safeStorage + OS 原生加密) ──
+  ipcMain.handle('auth:is-available', async () => isEncryptionAvailable());
+
+  ipcMain.handle('auth:save-token', async (_event, service: string, token: string, label?: string) => {
+    return saveToken(service, token, label);
+  });
+
+  ipcMain.handle('auth:get-token', async (_event, service: string) => {
+    return getToken(service);
+  });
+
+  ipcMain.handle('auth:delete-token', async (_event, service: string) => {
+    return deleteToken(service);
+  });
+
+  ipcMain.handle('auth:list-services', async () => listServices());
+
+  ipcMain.handle('auth:clear-all', async () => clearAll());
 };
 
 // ── 全局快捷键 ──

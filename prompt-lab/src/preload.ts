@@ -65,4 +65,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
   // webview preload 路径
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
+
+  // ── Token 安全存储 ──
+  auth: {
+    isAvailable: () => ipcRenderer.invoke('auth:is-available'),
+    saveToken: (service: string, token: string, label?: string) =>
+      ipcRenderer.invoke('auth:save-token', service, token, label),
+    getToken: (service: string) => ipcRenderer.invoke('auth:get-token', service),
+    deleteToken: (service: string) => ipcRenderer.invoke('auth:delete-token', service),
+    listServices: () => ipcRenderer.invoke('auth:list-services'),
+    clearAll: () => ipcRenderer.invoke('auth:clear-all'),
+  },
 });

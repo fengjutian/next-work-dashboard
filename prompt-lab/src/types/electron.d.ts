@@ -39,6 +39,14 @@ export interface ElectronAPI {
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   getWebviewPreloadPath: () => Promise<string>;
+  auth: {
+    isAvailable: () => Promise<boolean>;
+    saveToken: (service: string, token: string, label?: string) => Promise<boolean>;
+    getToken: (service: string) => Promise<string | null>;
+    deleteToken: (service: string) => Promise<boolean>;
+    listServices: () => Promise<Array<{ service: string; savedAt: number; label?: string }>>;
+    clearAll: () => Promise<boolean>;
+  };
 }
 
 export interface ConversationFile {

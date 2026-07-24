@@ -81,6 +81,24 @@ export const DEFAULT_SITES: SiteConfig[] = [
     enabled: false,
     sortOrder: 3,
   },
+  {
+    id: 'doubao',
+    name: '豆包',
+    url: 'https://www.doubao.com/chat/',
+    inputSelector: 'textarea[placeholder*="发消息"]',
+    submitSelector: 'button[class*="send"]',
+    enabled: true,
+    sortOrder: 4,
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    url: 'https://gemini.google.com/app',
+    inputSelector: 'div[contenteditable="true"]',
+    submitSelector: 'button[aria-label*="Send"]',
+    enabled: true,
+    sortOrder: 5,
+  },
 ];
 
 export const CATEGORIES = ['通用', '编程', '写作', '翻译', '分析', '设计', '营销'];

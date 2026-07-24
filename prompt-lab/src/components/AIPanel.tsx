@@ -5,8 +5,29 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useStore } from '@/store';
 
+// 根据站点 ID 取色，保证同一站点颜色一致
+const SITE_COLORS = [
+  'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+  'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+  'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+  'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
+  'bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300',
+  'bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-300',
+  'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',
+  'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300',
+];
+
+function hashColor(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  return SITE_COLORS[Math.abs(hash) % SITE_COLORS.length];
+}
+
 // favicon 组件 — 通过主进程 IPC 获取，绕开浏览器限制
-const SiteIcon: React.FC<{ url: string; className?: string }> = ({ url, className = 'h-4 w-4' }) => {
+// name 用于首字母头像兜底；加载中 / 失败时展示该头像
+const SiteIcon: React.FC<{ url: string; name: string; className?: string }> = ({ url, name, className = 'h-4 w-4' }) => {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -27,13 +48,19 @@ const SiteIcon: React.FC<{ url: string; className?: string }> = ({ url, classNam
     return () => { cancelled = true; };
   }, [url]);
 
-  if (failed || (dataUrl === null && failed)) {
-    return <Globe className={`${className} text-zinc-400`} />;
-  }
+  const colorClass = hashColor(url);
+  const letter = name?.trim()?.[0] ?? '?';
 
-  if (!dataUrl) {
-    // 加载中，显示占位 Globe
-    return <Globe className={`${className} text-zinc-400 animate-pulse`} />;
+  // 加载中 / 失败 — 首字母头像
+  if (failed || !dataUrl) {
+    return (
+      <span
+        className={`${className} rounded-sm flex items-center justify-center text-[10px] font-bold ${colorClass} ${!failed && !dataUrl ? 'animate-pulse' : ''}`}
+        title={name}
+      >
+        {letter}
+      </span>
+    );
   }
 
   return (
@@ -81,7 +108,7 @@ export const AIPanel: React.FC = () => {
               onClick={() => setActiveTab(tab.id)}
               title={tab.title}
             >
-              {site ? <SiteIcon url={site.url} className="h-4 w-4" /> : tab.title.slice(0, 2)}
+              {site ? <SiteIcon url={site.url} name={site.name} className="h-4 w-4" /> : tab.title.slice(0, 2)}
             </button>
           );
         })}
@@ -96,7 +123,7 @@ export const AIPanel: React.FC = () => {
             onClick={() => openTab(site.id)}
             title={site.name}
           >
-            <SiteIcon url={site.url} className="h-4 w-4" />
+            <SiteIcon url={site.url} name={site.name} className="h-4 w-4" />
           </button>
         ))}
       </div>
@@ -147,7 +174,7 @@ export const AIPanel: React.FC = () => {
                       onClick={() => setActiveTab(tab.id)}
                     >
                       {site ? (
-                        <SiteIcon url={site.url} className="h-4 w-4 shrink-0" />
+                        <SiteIcon url={site.url} name={site.name} className="h-4 w-4 shrink-0" />
                       ) : (
                         <Globe className="h-3 w-3 shrink-0 text-zinc-400" />
                       )}
@@ -171,7 +198,7 @@ export const AIPanel: React.FC = () => {
                   className="w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
                   onClick={() => openTab(site.id)}
                 >
-                  <SiteIcon url={site.url} className="h-5 w-5 shrink-0" />
+                  <SiteIcon url={site.url} name={site.name} className="h-5 w-5 shrink-0" />
                   <span className="flex-1 truncate">{site.name}</span>
                 </button>
               ))}
