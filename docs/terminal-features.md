@@ -56,7 +56,7 @@ Terminal.tsx  ←→  electronAPI  ←→  terminal-manager  ←→  PTY
 | 包 | 版本 | 用途 |
 |---|---|---|
 | @xterm/xterm | 6.0.0 | 终端渲染引擎 |
-| node-pty | 1.1.0 | 伪终端（PTY） |
+| child_process (built-in) | — | shell 进程管理 (替代 node-pty) |
 | @xterm/addon-fit | 0.11.0 | 自适应大小 |
 | @xterm/addon-webgl | 0.19.0 | GPU 渲染 |
 | @xterm/addon-search | 0.16.0 | 终端内搜索 |

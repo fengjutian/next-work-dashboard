@@ -10,6 +10,7 @@ import { CommandPalette } from '@/components/CommandPalette';
 import { PluginStatusBar } from '@/components/PluginStatusBar';
 import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
+import { useDbPersistence } from '@/hooks/useDbPersistence';
 import { useStore } from '@/store';
 import { pluginRegistry, registerBuiltInPlugins } from '@/plugins';
 
@@ -74,6 +75,7 @@ export default function App() {
     setPromptDrawerOpen,
   } = useStore();
   usePersistence();
+  useDbPersistence();
 
   // 应用主题
   React.useEffect(() => {

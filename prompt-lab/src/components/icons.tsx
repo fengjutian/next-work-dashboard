@@ -35,6 +35,7 @@ import {
   FaShieldHalved,
   FaTerminal,
   FaChevronDown,
+  FaDatabase,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -290,4 +291,9 @@ export const Terminal: React.FC<IconProps> = ({ className }) => (
 
 export const ChevronDown: React.FC<IconProps> = ({ className }) => (
   <FaChevronDown className={className} />
+);
+
+/** 数据库 */
+export const Database: React.FC<IconProps> = ({ className }) => (
+  <FaDatabase className={className} />
 );

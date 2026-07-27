@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
@@ -12,6 +12,7 @@ import { PluginManagerPanel } from './plugin-manager.plugin';
 import { WereadPanel } from './weread.plugin';
 import { WindyPanel } from './windy.plugin';
 import { TerminalPluginPanel } from './terminal.plugin';
+import { DatabaseBrowser } from '@/components/DatabaseBrowser';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
 
@@ -115,6 +116,14 @@ const builtInPlugins: Plugin[] = [
         { id: 'terminal.new', title: '新建终端', category: '终端' },
       ],
     },
+  },
+  {
+    id: 'database',
+    name: '数据库',
+    icon: Database,
+    component: DatabaseBrowser,
+    enabled: true,
+    order: 9,
   },
 ];
 

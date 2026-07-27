@@ -19,6 +19,10 @@ export interface ElectronAPI {
   onToggleSearchPanel: (callback: () => void) => () => void;
   saveData: (data: string) => Promise<{ success: boolean }>;
   loadData: () => Promise<unknown>;
+  db: {
+    load: () => Promise<ArrayBuffer | null>;
+    save: (buffer: ArrayBuffer) => Promise<{ success: boolean; error?: string }>;
+  };
   toggleAlwaysOnTop: () => Promise<boolean>;
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;

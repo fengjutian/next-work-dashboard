@@ -3,6 +3,13 @@ import { useShallow } from 'zustand/shallow';
 import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig } from './types';
 import { DEFAULT_SITES, CATEGORIES } from './types';
 import { DEFAULT_PROMPTS } from './defaultPrompts';
+import {
+  isDbReady,
+  dbLoadPrompts, dbLoadSites,
+  dbInsertPrompt, dbUpdatePrompt, dbDeletePrompt, dbBatchDeletePrompts,
+  dbInsertSite, dbUpdateSite,
+  dbInsertInjectHistory,
+} from '@/db';
 
 // ── Store 类型 ──
 
@@ -70,9 +77,12 @@ interface AppState {
   aiApi: AiApiConfig;
   setAiApi: (patch: Partial<AiApiConfig>) => void;
 
-  // 对话保存信号 — 每次保存递增，历史面板监听此值以刷新列表
+  // 对话保存信号
   conversationSavedAt: number;
   notifyConversationSaved: () => void;
+
+  // 从 DB 加载数据（启动时调用）
+  loadFromDb: () => void;
 }
 
 // ── 辅助 ──
@@ -83,33 +93,42 @@ const genId = () => `${Date.now()}-${idCounter++}`;
 // ── Store ──
 
 export const useStore = create<AppState>((set, get) => ({
-  // ── 提示词 ──
+  // ── 提示词（初始用默认值，DB 有数据时覆盖）──
   prompts: DEFAULT_PROMPTS,
   selectedPromptId: null,
   searchQuery: '',
   filterCategory: null,
   filterTag: null,
 
-  addPrompt: (p) => set((s) => ({ prompts: [...s.prompts, p] })),
+  addPrompt: (p) => {
+    if (isDbReady()) dbInsertPrompt(p);
+    set((s) => ({ prompts: [...s.prompts, p] }));
+  },
 
-  updatePrompt: (id, patch) =>
+  updatePrompt: (id, patch) => {
+    if (isDbReady()) dbUpdatePrompt(id, patch);
     set((s) => ({
       prompts: s.prompts.map((p) =>
         p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p
       ),
-    })),
+    }));
+  },
 
-  deletePrompt: (id) =>
+  deletePrompt: (id) => {
+    if (isDbReady()) dbDeletePrompt(id);
     set((s) => ({
       prompts: s.prompts.filter((p) => p.id !== id),
       selectedPromptId: s.selectedPromptId === id ? null : s.selectedPromptId,
-    })),
+    }));
+  },
 
-  batchDeletePrompts: (ids) =>
+  batchDeletePrompts: (ids) => {
+    if (isDbReady()) dbBatchDeletePrompts(ids);
     set((s) => ({
       prompts: s.prompts.filter((p) => !ids.includes(p.id)),
       selectedPromptId: ids.includes(s.selectedPromptId ?? '') ? null : s.selectedPromptId,
-    })),
+    }));
+  },
 
   selectPrompt: (id) => set({ selectedPromptId: id }),
 
@@ -117,32 +136,47 @@ export const useStore = create<AppState>((set, get) => ({
   setFilterCategory: (c) => set({ filterCategory: c }),
   setFilterTag: (t) => set({ filterTag: t }),
 
-  incrementUsage: (id) =>
+  incrementUsage: (id) => {
+    const p = get().prompts.find((pp) => pp.id === id);
+    if (p && isDbReady()) {
+      const newCount = p.usageCount + 1;
+      dbUpdatePrompt(id, { usageCount: newCount, updatedAt: Date.now() });
+    }
     set((s) => ({
       prompts: s.prompts.map((p) =>
         p.id === id ? { ...p, usageCount: p.usageCount + 1 } : p
       ),
-    })),
+    }));
+  },
 
   // ── 注入历史 ──
   injectHistory: [],
-  recordInject: (promptId, siteId) =>
+  recordInject: (promptId, siteId) => {
+    if (isDbReady()) {
+      dbInsertInjectHistory({ promptId, siteId, success: true, timestamp: Date.now() });
+    }
     set((s) => ({
       injectHistory: [
         { promptId, siteId, timestamp: Date.now() },
         ...s.injectHistory,
-      ].slice(0, 100), // 只保留最近 100 条
-    })),
+      ].slice(0, 100),
+    }));
+  },
 
-  // ── 站点 ──
+  // ── 站点（初始用默认值，DB 有数据时覆盖）──
   sites: DEFAULT_SITES,
-  updateSite: (id, patch) =>
+  updateSite: (id, patch) => {
+    if (isDbReady()) dbUpdateSite(id, patch);
     set((s) => ({
       sites: s.sites.map((site) =>
         site.id === id ? { ...site, ...patch } : site
       ),
-    })),
-  addSite: (site) => set((s) => ({ sites: [...s.sites, site] })),
+    }));
+  },
+  addSite: (site) => {
+    if (isDbReady()) dbInsertSite(site);
+    set((s) => ({ sites: [...s.sites, site] }));
+  },
 
   // ── 标签页 ──
   tabs: [],
@@ -213,6 +247,38 @@ export const useStore = create<AppState>((set, get) => ({
 
   conversationSavedAt: 0,
   notifyConversationSaved: () => set({ conversationSavedAt: Date.now() }),
+
+  // ── DB 加载 ──
+  loadFromDb: () => {
+    if (!isDbReady()) return;
+
+    // 加载 prompts：DB 有数据则覆盖默认值，为空则把默认值写入 DB
+    try {
+      const dbPrompts = dbLoadPrompts();
+      if (dbPrompts.length > 0) {
+        set({ prompts: dbPrompts });
+      } else {
+        // DB 为空 → 状态中已有 DEFAULT_PROMPTS，写入 DB
+        const current = get().prompts;
+        current.forEach((p) => dbInsertPrompt(p));
+      }
+    } catch (err) {
+      console.warn('[store] Failed to load prompts from DB:', err);
+    }
+
+    // 加载 sites
+    try {
+      const dbSites = dbLoadSites();
+      if (dbSites.length > 0) {
+        set({ sites: dbSites });
+      } else {
+        const current = get().sites;
+        current.forEach((s) => dbInsertSite(s));
+      }
+    } catch (err) {
+      console.warn('[store] Failed to load sites from DB:', err);
+    }
+  },
 }));
 
 // ── 派生选择器 ──
@@ -239,7 +305,6 @@ export function useFilteredPrompts() {
       list = list.filter((p) => p.tags.includes(s.filterTag));
     }
 
-    // 排序：置顶优先 → 收藏优先 → 使用次数降序
     return [...list].sort((a, b) => {
       if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
       if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;

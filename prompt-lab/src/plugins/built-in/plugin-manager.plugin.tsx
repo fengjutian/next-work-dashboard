@@ -2,6 +2,7 @@ import React from 'react';
 import { Puzzle, Plus, X, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { DynamicPlugin } from './dynamic.plugin';
+import { isDbReady, dbSetSetting } from '@/db';
 import type { Plugin } from '../types';
 import type { PluginPermission, PluginManifest, PluginConfigDeclaration } from '../sandbox/types';
 
@@ -801,9 +802,12 @@ export const PluginManagerPanel: React.FC = () => {
                           ? 'bg-blue-500'
                           : 'bg-zinc-300 dark:bg-zinc-600'
                       }`}
-                      onClick={() =>
-                        pluginRegistry.setEnabled(plugin.id, !plugin.enabled)
-                      }
+                      onClick={() => {
+                        pluginRegistry.setEnabled(plugin.id, !plugin.enabled);
+                        if (isDbReady()) {
+                          dbSetSetting('plugin.enabled', JSON.stringify(pluginRegistry.getEnabledSnapshot()));
+                        }
+                      }}
                       title={plugin.enabled ? '点击禁用' : '点击启用'}
                     >
                       <span

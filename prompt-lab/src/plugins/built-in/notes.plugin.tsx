@@ -96,14 +96,17 @@ export const NotesPanel: React.FC = () => {
               </p>
             ) : (
               notes.map((note) => (
-                <button
+                <div
                   key={note.id}
-                  className={`w-full text-left px-3 py-2 text-sm border-b border-zinc-100 dark:border-zinc-800 transition-colors group ${
+                  role="button"
+                  tabIndex={0}
+                  className={`w-full text-left px-3 py-2 text-sm border-b border-zinc-100 dark:border-zinc-800 transition-colors group cursor-pointer ${
                     selectedId === note.id
                       ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
                       : 'hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300'
                   }`}
                   onClick={() => setSelectedId(note.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(note.id); } }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="truncate text-xs font-medium">
@@ -123,7 +126,7 @@ export const NotesPanel: React.FC = () => {
                   <p className="text-[10px] text-zinc-400 truncate mt-0.5">
                     {note.content.slice(0, 40) || '空内容'}
                   </p>
-                </button>
+                </div>
               ))
             )}
           </ScrollArea>

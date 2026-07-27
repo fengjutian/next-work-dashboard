@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveData: (data: string) => ipcRenderer.invoke('store-save', data),
   loadData: () => ipcRenderer.invoke('store-load'),
 
+  // SQLite 数据库
+  db: {
+    load: () => ipcRenderer.invoke('db:load'),
+    save: (buffer: ArrayBuffer) => ipcRenderer.invoke('db:save', buffer),
+  },
+
   // V2 功能
   toggleAlwaysOnTop: () => ipcRenderer.invoke('window-toggle-always-on-top'),
   getAutoLaunch: () => ipcRenderer.invoke('auto-launch-get'),

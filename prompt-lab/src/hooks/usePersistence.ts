@@ -1,15 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
-import type { SiteConfig } from '@/store';
 
-// ── 持久化 Hook ──
-// 使用 Zustand subscribe（在 React 渲染周期外运行）避免无限重渲染
-
+/**
+ * 轻量 UI 状态持久化 — 仅保存 theme、injectMode 等非业务数据。
+ * 业务数据（prompts、sites）已由 SQLite 管理，不再保存到 JSON。
+ */
 export function usePersistence() {
   const loaded = useRef(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  // 启动时加载（仅一次）
+  // 启动时加载 UI 状态
   useEffect(() => {
     if (loaded.current) return;
     loaded.current = true;
@@ -17,35 +16,8 @@ export function usePersistence() {
     if (window.electronAPI?.loadData) {
       window.electronAPI.loadData().then((data: any) => {
         if (!data) return;
-
         const store = useStore.getState();
-        const existingPromptIds = new Set(store.prompts.map((p) => p.id));
-        const existingSiteIds = new Set(store.sites.map((s) => s.id));
-
-        // 批量恢复 — 一次 set 避免多轮通知
-        const newPrompts = [...store.prompts];
-        let promptsChanged = false;
-        if (data.prompts?.length) {
-          data.prompts.forEach((p: any) => {
-            if (!existingPromptIds.has(p.id)) {
-              newPrompts.push(p);
-              promptsChanged = true;
-            }
-          });
-        }
-
-        const newSites = store.sites.map((s: SiteConfig) => {
-          const saved = (data.sites || []).find((ss: any) => ss.id === s.id);
-          return saved ? { ...s, ...saved } : s;
-        });
-        (data.sites || []).forEach((s: any) => {
-          if (!existingSiteIds.has(s.id)) newSites.push(s);
-        });
-
-        // 单次 set 合并所有变更
         useStore.setState({
-          prompts: promptsChanged ? newPrompts : store.prompts,
-          sites: newSites,
           injectMode: data.injectMode || store.injectMode,
           theme: data.theme || store.theme,
         });
@@ -53,24 +25,20 @@ export function usePersistence() {
     }
   }, []);
 
-  // 自动保存 — 使用 subscribe 而非 useEffect 避免 deps 循环
+  // 自动保存 UI 状态
   useEffect(() => {
     const unsub = useStore.subscribe((state) => {
       if (!window.electronAPI?.saveData) return;
-
-      clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
+      // 延迟合并写入，避免频繁 IO
+      setTimeout(() => {
         window.electronAPI.saveData(
           JSON.stringify({
-            prompts: state.prompts,
-            sites: state.sites,
             injectMode: state.injectMode,
             theme: state.theme,
           })
         );
       }, 2000);
     });
-
     return unsub;
   }, []);
 
@@ -81,8 +49,6 @@ export function usePersistence() {
       const state = useStore.getState();
       window.electronAPI.saveData(
         JSON.stringify({
-          prompts: state.prompts,
-          sites: state.sites,
           injectMode: state.injectMode,
           theme: state.theme,
         })
