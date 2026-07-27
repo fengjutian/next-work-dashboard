@@ -1,5 +1,41 @@
 import type { ComponentType, FC } from 'react';
 
+// ── 命令定义 ──
+
+export interface PluginCommand {
+  /** 命令 ID，如 'myPlugin.doSomething' */
+  id: string;
+  /** 命令面板中显示的名称 */
+  title: string;
+  /** 可选分类 */
+  category?: string;
+}
+
+// ── 状态栏项 ──
+
+export interface StatusBarItemDef {
+  id: string;
+  text: string;
+  tooltip?: string;
+  /** 'left' | 'right'，默认 'right' */
+  alignment?: 'left' | 'right';
+  /** 排序权重，越小越靠左（left）或靠右（right） */
+  priority?: number;
+  /** 点击触发的命令 ID */
+  command?: string;
+}
+
+// ── 插件贡献声明 ──
+
+export interface PluginContributions {
+  /** 插件提供的命令 */
+  commands?: PluginCommand[];
+  /** 状态栏项 */
+  statusBarItems?: StatusBarItemDef[];
+  /** 附加视图（key = viewId，用于未来扩展侧边栏/面板区域） */
+  views?: Record<string, FC>;
+}
+
 /**
  * 插件接口 — 每个侧边栏面板必须实现此契约。
  *
@@ -26,4 +62,7 @@ export interface Plugin {
 
   /** ActivityBar 中的排序权重，越小越靠前 */
   order: number;
+
+  /** 插件贡献声明（命令、状态栏项、附加视图等） */
+  contributions?: PluginContributions;
 }

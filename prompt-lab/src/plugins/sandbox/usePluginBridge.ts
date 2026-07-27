@@ -400,6 +400,52 @@ export function usePluginBridge({
             return;
           }
 
+          // ── config (插件配置) ──
+          case 'config': {
+            const rawStore = getPluginStore(pluginId);
+            switch (method) {
+              case 'get': {
+                const config = (rawStore as Record<string, any>)['$config'] as Record<string, unknown> | undefined;
+                respond(requestId, true, config?.[String(args[0])] ?? null);
+                break;
+              }
+              case 'getAll': {
+                const config = (rawStore as Record<string, any>)['$config'] as Record<string, unknown> | undefined;
+                respond(requestId, true, config ?? {});
+                break;
+              }
+              case 'set': {
+                const key = String(args[0]);
+                const value = args[1];
+                const cur = (rawStore as Record<string, any>)['$config'] as Record<string, unknown> | undefined ?? {};
+                rawStore['$config'] = { ...cur, [key]: value };
+                setPluginStore(pluginId, rawStore);
+                respond(requestId, true);
+                break;
+              }
+              case 'getDefaults': {
+                // 从插件清单中读取默认配置
+                const userDefsRaw = localStorage.getItem('plugin-manager-user-plugins');
+                let defaults: Record<string, unknown> = {};
+                try {
+                  const defs = JSON.parse(userDefsRaw ?? '[]');
+                  const def = defs.find((d: any) => d.id === pluginId);
+                  if (def?.manifest?.config) {
+                    for (const c of def.manifest.config) {
+                      if (c.default !== undefined) defaults[c.key] = c.default;
+                    }
+                  }
+                } catch { /* ignore */ }
+                respond(requestId, true, defaults);
+                break;
+              }
+              default:
+                respond(requestId, false, undefined, `未知 config 方法: ${method}`);
+                break;
+            }
+            return;
+          }
+
           default:
             respond(requestId, false, undefined, `未知 channel: ${channel}`);
             return;

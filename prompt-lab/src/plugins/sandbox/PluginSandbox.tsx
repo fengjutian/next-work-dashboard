@@ -17,6 +17,7 @@ import { usePluginBridge } from './usePluginBridge';
 // ── SDK 源码字符串化（构建时静态导入） ──
 // plugin-sdk.ts 会导出 default SDK，我们需要它的字符串形式注入 iframe。
 // 简单方案：内联 SDK 函数字符串。生产环境可用 Vite ?raw 导入。
+// ⚠️ 此字符串必须与 plugin-sdk.ts 保持同步，修改 SDK 时两处都要改。
 
 const SDK_SOURCE = `
 (function() {
@@ -96,6 +97,12 @@ const SDK_SOURCE = `
       pickOpen: function(opts) { return request('file', 'pickOpen', [opts]); },
       pickSave: function(content, name) { return request('file', 'pickSave', [content, name]); },
     },
+    config: {
+      get: function(key) { return request('config', 'get', [key]); },
+      getAll: function() { return request('config', 'getAll'); },
+      set: function(key, value) { return request('config', 'set', [key, value]); },
+      getDefaults: function() { return request('config', 'getDefaults'); },
+    },
   };
 })();
 `;
@@ -167,10 +174,6 @@ ${style ? `<style>${style}</style>` : ''}
       srcDoc={srcdoc}
       sandbox="allow-scripts"
       title={`plugin-${pluginId}`}
-      // 阻止导航
-      onBeforeInput={(e) => {
-        // allow
-      }}
     />
   );
 };

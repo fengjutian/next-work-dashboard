@@ -113,6 +113,18 @@ export interface PluginSDK {
     /** 保存文件对话框 */
     pickSave(content: string, defaultName?: string): Promise<void>;
   };
+
+  /** 读取插件配置（仅读，无需权限） */
+  config: {
+    /** 读取单个配置项 */
+    get(key: string): Promise<unknown>;
+    /** 读取所有配置 */
+    getAll(): Promise<Record<string, unknown>>;
+    /** 写入配置项 */
+    set(key: string, value: unknown): Promise<void>;
+    /** 读取默认配置（来自 manifest） */
+    getDefaults(): Promise<Record<string, unknown>>;
+  };
 }
 
 // ── 构建 SDK 实例 ──
@@ -162,6 +174,13 @@ const sdk: PluginSDK = {
   file: {
     pickOpen: (options) => request('file', 'pickOpen', [options]),
     pickSave: (content, defaultName) => request('file', 'pickSave', [content, defaultName]),
+  },
+
+  config: {
+    get: (key: string) => request('config', 'get', [key]),
+    getAll: () => request('config', 'getAll'),
+    set: (key, value) => request('config', 'set', [key, value]),
+    getDefaults: () => request('config', 'getDefaults'),
   },
 };
 

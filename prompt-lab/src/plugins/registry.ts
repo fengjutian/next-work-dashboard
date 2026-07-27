@@ -1,4 +1,4 @@
-import type { Plugin } from './types';
+import type { Plugin, PluginCommand } from './types';
 
 /**
  * PluginRegistry — 全局插件注册中心。
@@ -7,12 +7,28 @@ import type { Plugin } from './types';
  *   1. 启动时调用 register() 注册所有内置插件
  *   2. ActivityBar 调用 getAll() / getEnabled() 渲染图标
  *   3. App.tsx 调用 getEnabled() 动态渲染面板
+ *
+ * 扩展：
+ *   4. 命令系统：registerCommandHandler / executeCommand / getCommands
+ *   5. 状态栏项：通过 Plugin.contributions.statusBarItems 声明
  */
 type Listener = () => void;
+
+/** 命令处理器签名 */
+export type CommandHandler = (...args: unknown[]) => void | Promise<void>;
+
+/** 已注册的命令（含关联插件信息） */
+interface RegisteredCommand extends PluginCommand {
+  /** 所属插件 ID */
+  pluginId: string;
+}
 
 class PluginRegistry {
   private plugins = new Map<string, Plugin>();
   private listeners = new Set<Listener>();
+  private commands = new Map<string, RegisteredCommand>();
+  /** 命令执行器 — 由 App 层通过 registerCommandHandler 注入 */
+  private commandHandlers = new Map<string, CommandHandler>();
 
   /** 订阅变更通知（用于 React 组件触发重渲染） */
   subscribe(fn: Listener): () => void {
@@ -28,8 +44,16 @@ class PluginRegistry {
   register(plugin: Plugin): void {
     if (this.plugins.has(plugin.id)) {
       console.warn(`[PluginRegistry] 覆盖已注册插件: ${plugin.id}`);
+      // 卸载旧命令
+      this.unregisterCommands(plugin.id);
     }
     this.plugins.set(plugin.id, { ...plugin });
+    // 注册插件声明的命令
+    if (plugin.contributions?.commands) {
+      for (const cmd of plugin.contributions.commands) {
+        this.commands.set(cmd.id, { ...cmd, pluginId: plugin.id });
+      }
+    }
     this.notify();
   }
 
@@ -38,8 +62,9 @@ class PluginRegistry {
     for (const p of plugins) this.register(p);
   }
 
-  /** 卸载插件 */
+  /** 卸载插件及其命令 */
   unregister(id: string): boolean {
+    this.unregisterCommands(id);
     const ok = this.plugins.delete(id);
     if (ok) this.notify();
     return ok;
@@ -85,6 +110,54 @@ class PluginRegistry {
       snap[p.id] = p.enabled;
     }
     return snap;
+  }
+
+  // ── 命令系统 ──
+
+  /** 注册命令处理器（由 App 或插件面板注入） */
+  registerCommandHandler(commandId: string, handler: CommandHandler): void {
+    this.commandHandlers.set(commandId, handler);
+  }
+
+  /** 执行命令，返回 true 表示找到并执行了处理器 */
+  executeCommand(commandId: string, ...args: unknown[]): boolean {
+    const handler = this.commandHandlers.get(commandId);
+    if (handler) {
+      handler(...args);
+      return true;
+    }
+    // 回退：如果命令有对应插件面板，激活面板作为默认行为
+    const cmd = this.commands.get(commandId);
+    if (cmd) {
+      const plugin = this.plugins.get(cmd.pluginId);
+      if (plugin?.enabled) {
+        // 通知订阅者激活该插件（由 App 层处理）
+        this.notify();
+        return true;
+      }
+    }
+    console.warn(`[PluginRegistry] 命令 "${commandId}" 未注册处理器`);
+    return false;
+  }
+
+  /** 获取所有已注册命令 */
+  getCommands(): RegisteredCommand[] {
+    return [...this.commands.values()];
+  }
+
+  /** 获取指定插件提供的命令 */
+  getPluginCommands(pluginId: string): RegisteredCommand[] {
+    return this.getCommands().filter((c) => c.pluginId === pluginId);
+  }
+
+  /** 清理指定插件的所有命令 */
+  private unregisterCommands(pluginId: string): void {
+    for (const [cmdId, cmd] of this.commands) {
+      if (cmd.pluginId === pluginId) {
+        this.commands.delete(cmdId);
+        this.commandHandlers.delete(cmdId);
+      }
+    }
   }
 }
 

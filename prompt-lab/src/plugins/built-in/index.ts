@@ -21,6 +21,12 @@ const builtInPlugins: Plugin[] = [
     component: AIPanel,
     enabled: true,
     order: 0,
+    contributions: {
+      commands: [
+        { id: 'ai.newTab', title: '打开新标签页', category: 'AI' },
+        { id: 'ai.closeTab', title: '关闭当前标签页', category: 'AI' },
+      ],
+    },
   },
   {
     id: 'prompts',
@@ -29,6 +35,12 @@ const builtInPlugins: Plugin[] = [
     component: PromptSidebar,
     enabled: true,
     order: 1,
+    contributions: {
+      commands: [
+        { id: 'prompts.create', title: '新建提示词', category: '提示词' },
+        { id: 'prompts.search', title: '搜索提示词', category: '提示词' },
+      ],
+    },
   },
   {
     id: 'history',
@@ -53,6 +65,11 @@ const builtInPlugins: Plugin[] = [
     component: NotesPanel,
     enabled: true,
     order: 4,
+    contributions: {
+      commands: [
+        { id: 'notes.new', title: '新建便签', category: '便签' },
+      ],
+    },
   },
   {
     id: 'weread',
@@ -69,6 +86,12 @@ const builtInPlugins: Plugin[] = [
     component: PluginManagerPanel,
     enabled: true,
     order: 6,
+    contributions: {
+      commands: [
+        { id: 'plugin-manager.create', title: '新建插件', category: '插件管理' },
+        { id: 'plugin-manager.import', title: '导入 .nwd 插件', category: '插件管理' },
+      ],
+    },
   },
 ];
 

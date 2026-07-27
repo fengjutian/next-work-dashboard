@@ -1,9 +1,9 @@
 import React from 'react';
-import { Puzzle, Plus, X, Blocks, Trash2, Code, ShieldCheck } from '@/components/icons';
+import { Puzzle, Plus, X, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { DynamicPlugin } from './dynamic.plugin';
 import type { Plugin } from '../types';
-import type { PluginPermission } from '../sandbox/types';
+import type { PluginPermission, PluginManifest, PluginConfigDeclaration } from '../sandbox/types';
 
 // ── localStorage 持久化 ──
 
@@ -21,6 +21,8 @@ interface UserPluginDef {
   permissions?: PluginPermission[];
   /** 新版：emoji 图标 */
   iconEmoji?: string;
+  /** 新版：插件清单（.nwd 格式） */
+  manifest?: PluginManifest;
 }
 
 function loadUserPlugins(): UserPluginDef[] {
@@ -53,6 +55,14 @@ function rehydrateUserPlugins(): void {
         permissions={def.permissions}
       />
     );
+    // 从 manifest 中提取贡献声明
+    const commands = def.manifest?.config
+      ? def.manifest.config.map((c) => ({
+          id: `${def.id}.setConfig.${c.key}`,
+          title: `设置 ${c.label ?? c.key}`,
+          category: def.name,
+        }))
+      : undefined;
     pluginRegistry.register({
       id: def.id,
       name: def.name,
@@ -60,6 +70,9 @@ function rehydrateUserPlugins(): void {
       component: BoundPlugin,
       enabled: true,
       order: nextOrder + i,
+      contributions: {
+        commands,
+      },
     });
   });
 }
@@ -84,6 +97,12 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
   const [formStyle, setFormStyle] = React.useState('');
   const [formPermissions, setFormPermissions] = React.useState<PluginPermission[]>([]);
   const [activeTab, setActiveTab] = React.useState<'basic' | 'advanced'>('basic');
+  // 清单字段
+  const [formVersion, setFormVersion] = React.useState('0.1.0');
+  const [formDescription, setFormDescription] = React.useState('');
+  const [formAuthor, setFormAuthor] = React.useState('');
+  const [formIconEmoji, setFormIconEmoji] = React.useState('📊');
+  const [formConfig, setFormConfig] = React.useState<PluginConfigDeclaration[]>([]);
 
   // 打开时重置表单
   React.useEffect(() => {
@@ -95,6 +114,11 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       setFormStyle('');
       setFormPermissions([]);
       setActiveTab('basic');
+      setFormVersion('0.1.0');
+      setFormDescription('');
+      setFormAuthor('');
+      setFormIconEmoji('📊');
+      setFormConfig([]);
     }
   }, [open]);
 
@@ -133,6 +157,17 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       return;
     }
 
+    // 构建清单
+    const manifest: PluginManifest = {
+      name,
+      version: formVersion || '0.1.0',
+      description: formDescription || undefined,
+      author: formAuthor || undefined,
+      iconEmoji: formIconEmoji || undefined,
+      permissions: formPermissions,
+      config: formConfig.length > 0 ? formConfig : undefined,
+    };
+
     // 持久化
     const defs = loadUserPlugins();
     const def: UserPluginDef = {
@@ -142,6 +177,8 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       script: formScript || undefined,
       style: formStyle || undefined,
       permissions: formPermissions.length > 0 ? formPermissions : undefined,
+      iconEmoji: formIconEmoji || undefined,
+      manifest,
     };
     defs.push(def);
     saveUserPlugins(defs);
@@ -157,6 +194,16 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
         permissions={formPermissions}
       />
     );
+
+    // 从 manifest config 生成命令
+    const commands = manifest.config
+      ? manifest.config.map((c) => ({
+          id: `${id}.setConfig.${c.key}`,
+          title: `设置 ${c.label ?? c.key}`,
+          category: name,
+        }))
+      : undefined;
+
     pluginRegistry.register({
       id,
       name,
@@ -164,6 +211,9 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       component: BoundPlugin,
       enabled: true,
       order: pluginRegistry.getAll().length,
+      contributions: {
+        commands,
+      },
     });
 
     onCreated();
@@ -174,7 +224,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40">
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[520px] max-h-[85vh] flex flex-col">
+      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[560px] max-h-[85vh] flex flex-col">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
@@ -236,6 +286,54 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                 onChange={(e) => setFormId(e.target.value)}
               />
             </div>
+          </div>
+
+          {/* 清单字段（版本 + 图标 + 描述） */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+                版本
+              </label>
+              <input
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400 font-mono"
+                placeholder="0.1.0"
+                value={formVersion}
+                onChange={(e) => setFormVersion(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+                图标 Emoji
+              </label>
+              <input
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+                placeholder="📊"
+                value={formIconEmoji}
+                onChange={(e) => setFormIconEmoji(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+                作者
+              </label>
+              <input
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+                placeholder="选填"
+                value={formAuthor}
+                onChange={(e) => setFormAuthor(e.target.value)}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              描述
+            </label>
+            <input
+              className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+              placeholder="简短描述插件功能"
+              value={formDescription}
+              onChange={(e) => setFormDescription(e.target.value)}
+            />
           </div>
 
           {/* ── 基础模式：Markdown 内容 ── */}
@@ -366,6 +464,126 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
   );
 };
 
+// ── .nwd 导入/导出 ──
+
+/** 导出单个用户插件为 .nwd (zip 文件) */
+async function exportPlugin(def: UserPluginDef): Promise<void> {
+  try {
+    const manifest = def.manifest ?? {
+      name: def.name,
+      version: '0.1.0',
+      permissions: def.permissions ?? [],
+      iconEmoji: def.iconEmoji,
+    };
+    // 移除内部 id 字段（manifest 不需要）
+    const cleanManifest = { ...manifest };
+    const files: Record<string, string> = {
+      'manifest.json': JSON.stringify(cleanManifest, null, 2),
+      'script.js': def.script ?? def.content ?? '',
+    };
+    if (def.style) files['style.css'] = def.style;
+
+    // 构建 zip（使用简单的文本拼接模拟 .nwd，实际为 JSON bundle）
+    const bundle = JSON.stringify(
+      {
+        format: 'nwd-v1',
+        manifest: cleanManifest,
+        script: files['script.js'],
+        style: def.style ?? null,
+      },
+      null,
+      2,
+    );
+
+    // 通过下载触发
+    const blob = new Blob([bundle], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${def.id}.nwd`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('[exportPlugin] 导出失败', err);
+    alert('导出失败：' + (err as Error).message);
+  }
+}
+
+/** 从 .nwd 文件导入插件 */
+async function importPlugin(file: File): Promise<{ ok: boolean; message: string }> {
+  try {
+    const text = await file.text();
+    const bundle = JSON.parse(text);
+
+    if (bundle.format !== 'nwd-v1') {
+      return { ok: false, message: '不支持的格式，需要 .nwd v1' };
+    }
+
+    const manifest: PluginManifest = bundle.manifest;
+    if (!manifest?.name) {
+      return { ok: false, message: 'manifest.json 缺少 name 字段' };
+    }
+
+    const id = manifest.name.toLowerCase().replace(/\s+/g, '-');
+    const script = bundle.script ?? '';
+    const style = bundle.style ?? '';
+
+    if (!script) {
+      return { ok: false, message: '插件脚本为空' };
+    }
+
+    if (pluginRegistry.get(id)) {
+      return { ok: false, message: `插件 "${id}" 已存在，请先删除旧版本` };
+    }
+
+    const def: UserPluginDef = {
+      id,
+      name: manifest.name,
+      content: '',
+      script,
+      style: style || undefined,
+      permissions: manifest.permissions ?? [],
+      iconEmoji: manifest.iconEmoji,
+      manifest,
+    };
+
+    const defs = loadUserPlugins();
+    defs.push(def);
+    saveUserPlugins(defs);
+
+    // 注册
+    const BoundPlugin: React.FC = () => (
+      <DynamicPlugin
+        pluginName={def.name}
+        script={def.script}
+        style={def.style}
+        pluginId={def.id}
+        permissions={def.permissions}
+      />
+    );
+    const commands = manifest.config
+      ? manifest.config.map((c) => ({
+          id: `${id}.setConfig.${c.key}`,
+          title: `设置 ${c.label ?? c.key}`,
+          category: def.name,
+        }))
+      : undefined;
+    pluginRegistry.register({
+      id,
+      name: def.name,
+      icon: Blocks,
+      component: BoundPlugin,
+      enabled: true,
+      order: pluginRegistry.getAll().length,
+      contributions: { commands },
+    });
+
+    return { ok: true, message: `已导入插件: ${manifest.name} v${manifest.version}` };
+  } catch (err) {
+    return { ok: false, message: '解析失败：' + (err as Error).message };
+  }
+}
+
 // ── 主面板 ──
 
 export const PluginManagerPanel: React.FC = () => {
@@ -408,13 +626,37 @@ export const PluginManagerPanel: React.FC = () => {
             {enabledCount}/{allPlugins.length} 已启用
           </span>
         </div>
-        <button
-          className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-          onClick={() => setDialogOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          新建插件
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* 导入 .nwd */}
+          <button
+            className="flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors"
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.nwd';
+              input.onchange = async () => {
+                const file = input.files?.[0];
+                if (file) {
+                  const result = await importPlugin(file);
+                  alert(result.message);
+                  if (result.ok) setTick((t) => t + 1);
+                }
+              };
+              input.click();
+            }}
+            title="导入 .nwd 插件"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            导入
+          </button>
+          <button
+            className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+            onClick={() => setDialogOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            新建插件
+          </button>
+        </div>
       </div>
 
       {/* 新建插件弹层 */}
@@ -448,15 +690,28 @@ export const PluginManagerPanel: React.FC = () => {
                       : 'border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 opacity-60'
                   }`}
                 >
-                  {/* 删除按钮 — 仅用户插件 */}
+                  {/* 删除/导出按钮 — 仅用户插件 */}
                   {isUserPlugin && (
-                    <button
-                      className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all"
-                      onClick={() => handleDelete(plugin.id)}
-                      title="删除插件"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <>
+                      <button
+                        className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all"
+                        onClick={() => handleDelete(plugin.id)}
+                        title="删除插件"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        className="absolute top-2 left-8 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-blue-500 transition-all"
+                        onClick={() => {
+                          const userDefs = loadUserPlugins();
+                          const def = userDefs.find((d) => d.id === plugin.id);
+                          if (def) exportPlugin(def);
+                        }}
+                        title="导出 .nwd 插件"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </button>
+                    </>
                   )}
 
                   {/* 开关 */}
@@ -542,7 +797,7 @@ export const PluginManagerPanel: React.FC = () => {
 
       {/* 底部提示 */}
       <div className="px-4 py-2 border-t text-[11px] text-zinc-400 flex items-center justify-between">
-        <span>禁用插件会从左侧栏和主内容区隐藏，数据不丢失</span>
+        <span>禁用插件会从左侧栏和主内容区隐藏，数据不丢失 · 悬停卡片显示导出/删除</span>
         <span className="flex items-center gap-1">
           <Blocks className="h-3 w-3 text-green-500" />
           绿色图标 = 自定义插件

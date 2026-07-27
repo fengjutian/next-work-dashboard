@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search } from '@/components/icons';
 import { useStore } from '@/store';
+import { pluginRegistry } from '@/plugins';
 
 // ── 浮动搜索面板 ──
 
@@ -19,15 +20,53 @@ export const CommandPalette: React.FC = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 过滤匹配的提示词
-  const filtered = query
-    ? prompts.filter(
-        (p) =>
-          p.title.toLowerCase().includes(query.toLowerCase()) ||
-          p.content.toLowerCase().includes(query.toLowerCase()) ||
-          p.tags.some((t) => t.toLowerCase().includes(query.toLowerCase()))
-      )
-    : prompts.slice(0, 8);
+  // 命令模式：输入以 '>' 开头
+  const isCommandMode = query.startsWith('>');
+  const cmdQuery = isCommandMode ? query.slice(1).trim() : '';
+
+  // 所有插件命令 — 通过订阅保证实时性
+  const [cmdTick, setCmdTick] = React.useState(0);
+  React.useEffect(
+    () => pluginRegistry.subscribe(() => setCmdTick((t) => t + 1)),
+    [],
+  );
+  const allCommands = React.useMemo(
+    () => pluginRegistry.getCommands(),
+    [cmdTick],
+  );
+
+  // 过滤命令
+  const filteredCommands = React.useMemo(() => {
+    if (!cmdQuery) return allCommands;
+    const q = cmdQuery.toLowerCase();
+    return allCommands.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        c.id.toLowerCase().includes(q) ||
+        (c.category ?? '').toLowerCase().includes(q) ||
+        c.pluginId.toLowerCase().includes(q),
+    );
+  }, [allCommands, cmdQuery]);
+
+  // 过滤提示词（非命令模式）
+  const filteredPrompts = !isCommandMode
+    ? query
+      ? prompts.filter(
+          (p) =>
+            p.title.toLowerCase().includes(query.toLowerCase()) ||
+            p.content.toLowerCase().includes(query.toLowerCase()) ||
+            p.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
+        )
+      : prompts.slice(0, 8)
+    : [];
+
+  // 总结果列表
+  const results = isCommandMode ? filteredCommands : filteredPrompts;
+
+  // 重置选中索引
+  React.useEffect(() => {
+    setSelectedIndex(0);
+  }, [isCommandMode, query]);
 
   // 监听快捷键
   useEffect(() => {
@@ -62,24 +101,28 @@ export const CommandPalette: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
+      setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const prompt = filtered[selectedIndex];
-      if (prompt) handleSelect(prompt);
+      const item = results[selectedIndex];
+      if (isCommandMode) {
+        handleCommandSelect(item as typeof allCommands[0]);
+      } else {
+        handlePromptSelect(item as typeof prompts[0]);
+      }
     }
   };
 
-  // 选择并注入 — 通过 store 信号通知 WebViewPanel 执行注入
-  const handleSelect = useCallback(
+  // 选择并注入提示词
+  const handlePromptSelect = useCallback(
     (prompt: (typeof prompts)[0]) => {
+      if (!prompt) return;
       setVisible(false);
       selectPrompt(prompt.id);
 
-      // 确保有打开的标签
       const currentTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
       if (!currentTab) {
         const firstSite = sites.find((s) => s.enabled);
@@ -90,10 +133,25 @@ export const CommandPalette: React.FC = () => {
       const site = sites.find((s) => s.id === currentTab.siteId);
       if (!site) return;
 
-      // 通过 store 信号触发 WebViewPanel 注入
       useStore.getState().triggerInjection(prompt.id, site.id);
     },
-    [tabs, activeTabId, sites, openTab, selectPrompt]
+    [tabs, activeTabId, sites, openTab, selectPrompt],
+  );
+
+  // 选择并触发命令
+  const handleCommandSelect = useCallback(
+    (cmd: { id: string; title: string; pluginId: string }) => {
+      if (!cmd) return;
+      setVisible(false);
+      // 先激活命令所属插件面板
+      const plugin = pluginRegistry.get(cmd.pluginId);
+      if (plugin?.enabled) {
+        useStore.getState().setActiveActivity(cmd.pluginId);
+      }
+      // 通过 registry 执行命令
+      pluginRegistry.executeCommand(cmd.id);
+    },
+    [],
   );
 
   if (!visible) return null;
@@ -113,7 +171,7 @@ export const CommandPalette: React.FC = () => {
           <input
             ref={inputRef}
             className="flex-1 bg-transparent text-sm outline-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400"
-            placeholder="搜索提示词并注入..."
+            placeholder={isCommandMode ? '输入命令关键词...' : '搜索提示词或输入 > 执行命令...'}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -129,12 +187,43 @@ export const CommandPalette: React.FC = () => {
 
         {/* 结果列表 */}
         <div className="flex-1 overflow-y-auto py-1">
-          {filtered.length === 0 ? (
+          {/* 非命令模式 + 空查询 + 有命令时：提示输入 > */}
+          {!isCommandMode && query === '' && allCommands.length > 0 && (
+            <div className="px-4 py-2 text-[11px] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+              输入 <code className="text-blue-500 bg-blue-50 dark:bg-blue-950 px-1 py-0.5 rounded">{'>'}</code> 查看全部插件命令
+            </div>
+          )}
+
+          {results.length === 0 ? (
             <p className="text-xs text-zinc-400 text-center py-8">
-              没有匹配的提示词
+              {isCommandMode ? '没有匹配的命令' : '没有匹配的提示词'}
             </p>
+          ) : isCommandMode ? (
+            // 命令列表
+            results.map((cmd: any, i) => (
+              <div
+                key={cmd.id}
+                className={`flex items-center gap-3 px-4 py-2 cursor-pointer text-sm ${
+                  i === selectedIndex
+                    ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
+                    : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                }`}
+                onClick={() => handleCommandSelect(cmd)}
+                onMouseEnter={() => setSelectedIndex(i)}
+              >
+                <span className="text-amber-500 shrink-0">⚡</span>
+                <span className="flex-1 truncate">{cmd.title}</span>
+                {cmd.category && (
+                  <span className="text-[10px] text-zinc-400 shrink-0">{cmd.category}</span>
+                )}
+                <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded shrink-0">
+                  {cmd.pluginId}
+                </span>
+              </div>
+            ))
           ) : (
-            filtered.map((prompt, i) => (
+            // 提示词列表
+            results.map((prompt: any, i) => (
               <div
                 key={prompt.id}
                 className={`flex items-center gap-3 px-4 py-2 cursor-pointer text-sm ${
@@ -142,7 +231,7 @@ export const CommandPalette: React.FC = () => {
                     ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
                     : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
                 }`}
-                onClick={() => handleSelect(prompt)}
+                onClick={() => handlePromptSelect(prompt)}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
                 <span className="flex-1 truncate">{prompt.title}</span>
@@ -158,8 +247,9 @@ export const CommandPalette: React.FC = () => {
         {/* 底部提示 */}
         <div className="px-4 py-2 border-t flex gap-3 text-[10px] text-zinc-400">
           <span>↑↓ 导航</span>
-          <span>↵ 注入</span>
+          <span>↵ 选择</span>
           <span>Esc 关闭</span>
+          {!isCommandMode && <span>{'>'} 命令</span>}
         </div>
       </div>
     </div>

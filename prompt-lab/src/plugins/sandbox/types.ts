@@ -31,6 +31,10 @@
  *   file       | pickOpen        | file.read       | 打开文件选择对话框
  *   file       | pickSave        | file.write      | 保存文件对话框
  *   file       | read            | file.read       | 按路径读文件 (base64)
+ *   config     | get             | —               | 读取插件配置项
+ *   config     | getAll          | —               | 读取所有配置
+ *   config     | set             | —               | 写入配置项
+ *   config     | getDefaults     | —               | 读取 manifest 默认配置
  */
 
 // ── 应用数据快照类型 ──
@@ -98,7 +102,7 @@ export interface SandboxMessage {
   payload?: unknown;
 }
 
-export type Channel = 'store' | 'ui' | 'actions' | 'data' | 'preview' | 'file';
+export type Channel = 'store' | 'ui' | 'actions' | 'data' | 'preview' | 'file' | 'config';
 
 // ── 插件权限 ──
 
@@ -125,6 +129,37 @@ export interface FilePickResult {
 
 // ── 用户插件定义（完整版） ──
 
+/** 插件配置项声明 */
+export interface PluginConfigDeclaration {
+  /** 配置 key，建议用 pluginId 前缀如 'myPlugin.maxItems' */
+  key: string;
+  /** 显示标签 */
+  label?: string;
+  /** 描述 */
+  description?: string;
+  /** 类型，默认 'string' */
+  type?: 'string' | 'number' | 'boolean';
+  /** 默认值 */
+  default?: string | number | boolean;
+}
+
+/** 插件清单（对应 .nwd 打包格式的 manifest.json） */
+export interface PluginManifest {
+  /** 与 package.json 对齐的扩展清单 */
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+  /** emoji 图标 */
+  iconEmoji?: string;
+  /** 权限声明 */
+  permissions: PluginPermission[];
+  /** 配置项声明 */
+  config?: PluginConfigDeclaration[];
+  /** 激活事件（预留，当前不支持懒加载） */
+  activationEvents?: string[];
+}
+
 export interface UserPluginDef {
   id: string;
   name: string;
@@ -134,4 +169,6 @@ export interface UserPluginDef {
   permissions: PluginPermission[];
   /** emoji 图标，如 '📊' '⚡' */
   iconEmoji?: string;
+  /** 插件清单（.nwd 格式迁移字段） */
+  manifest?: PluginManifest;
 }

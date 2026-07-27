@@ -7,6 +7,7 @@ import { SettingsSidebar } from '@/components/SettingsSidebar';
 import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
+import { PluginStatusBar } from '@/components/PluginStatusBar';
 import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useStore } from '@/store';
@@ -220,10 +221,11 @@ export default function App() {
       {/* 提示词抽屉 */}
       <PromptDrawer />
 
-      {/* 底部状态栏 — 设置 */}
-      <div className="h-8 flex items-center justify-end px-2 border-t bg-zinc-100 dark:bg-zinc-900 select-none flex-shrink-0">
+      {/* 底部状态栏 — 插件状态栏项 + 设置 */}
+      <div className="h-8 flex items-center px-2 border-t bg-zinc-100 dark:bg-zinc-900 select-none flex-shrink-0 gap-2">
+        <PluginStatusBar />
         <button
-          className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors ${
+          className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
             isSettings
               ? 'text-zinc-900 dark:text-zinc-100 bg-zinc-200 dark:bg-zinc-700'
               : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'
