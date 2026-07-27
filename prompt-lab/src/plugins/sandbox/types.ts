@@ -158,17 +158,28 @@ export interface PluginManifest {
   config?: PluginConfigDeclaration[];
   /** 激活事件（预留，当前不支持懒加载） */
   activationEvents?: string[];
+  /**
+   * 运行时类型：
+   *  - 'sandbox'（默认） — iframe 沙箱，script 是 JS 源码
+   *  - 'kernel' — 直接注入 React 树，bundle 是预编译的 JS 模块
+   */
+  runtime?: 'sandbox' | 'kernel';
 }
 
 export interface UserPluginDef {
   id: string;
   name: string;
   description?: string;
-  script: string;          // JavaScript 源码
+  script: string;          // JavaScript 源码（sandbox 模式）
   style?: string;          // 自定义 CSS
   permissions: PluginPermission[];
   /** emoji 图标，如 '📊' '⚡' */
   iconEmoji?: string;
   /** 插件清单（.nwd 格式迁移字段） */
   manifest?: PluginManifest;
+  /**
+   * 内核插件：预编译的 JS 源码（IIFE/UMD），导出 default React 组件。
+   * 仅在 manifest.runtime === 'kernel' 时使用。
+   */
+  bundle?: string;
 }

@@ -40,6 +40,10 @@ export interface ElectronAPI {
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openConversationFolder: () => Promise<{ success: boolean; error?: string }>;
   getWebviewPreloadPath: () => Promise<string>;
+  /** 打开文件选择对话框，返回文件信息(base64 content) */
+  pickFile: (options?: { accept?: string; multiple?: boolean }) => Promise<FilePickResult | FilePickResult[] | null>;
+  /** 保存文件对话框，写入内容 */
+  saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;
   auth: {
     isAvailable: () => Promise<boolean>;
     saveToken: (service: string, token: string, label?: string) => Promise<boolean>;
@@ -58,6 +62,14 @@ export interface ConversationFile {
   size: number;
   title?: string;
   notes?: string;
+}
+
+export interface FilePickResult {
+  path: string;
+  name: string;
+  size: number;
+  content: string;  // base64
+  mimeType: string;
 }
 
 declare global {

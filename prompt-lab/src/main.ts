@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, globalShortcut, nativeImage, shell, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import https from 'node:https';
@@ -504,6 +504,65 @@ const setupIPC = () => {
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
+    }
+  });
+
+  // ── 文件对话框 ──
+  ipcMain.handle('dialog:pickFile', async (_event, options?: { accept?: string; multiple?: boolean }) => {
+    try {
+      const win = BrowserWindow.getFocusedWindow();
+      const filters = options?.accept
+        ? [{ name: '文件', extensions: options.accept.split(',').map((e) => e.replace(/^\./, '')) }]
+        : [];
+      const result = await dialog.showOpenDialog(win!, {
+        properties: ['openFile'],
+        filters: filters.length > 0 ? filters : undefined,
+      });
+      if (result.canceled || result.filePaths.length === 0) return null;
+
+      const files = await Promise.all(
+        result.filePaths.map(async (filePath) => {
+          const buf = fs.readFileSync(filePath);
+          const name = path.basename(filePath);
+          const ext = path.extname(name).toLowerCase();
+          const mimeMap: Record<string, string> = {
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.xls': 'application/vnd.ms-excel',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.pdf': 'application/pdf',
+            '.json': 'application/json',
+            '.csv': 'text/csv',
+            '.txt': 'text/plain',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+          };
+          return {
+            path: filePath,
+            name,
+            size: buf.length,
+            content: buf.toString('base64'),
+            mimeType: mimeMap[ext] ?? 'application/octet-stream',
+          };
+        }),
+      );
+      return files.length === 1 ? files[0] : files;
+    } catch (err) {
+      return null;
+    }
+  });
+
+  ipcMain.handle('dialog:saveFile', async (_event, content: string, defaultName?: string) => {
+    try {
+      const win = BrowserWindow.getFocusedWindow();
+      const result = await dialog.showSaveDialog(win!, {
+        defaultPath: defaultName ?? 'untitled.txt',
+      });
+      if (result.canceled || !result.filePath) return { success: false };
+      fs.writeFileSync(result.filePath, content, 'utf-8');
+      return { success: true, path: result.filePath };
+    } catch (err) {
+      return { success: false };
     }
   });
 

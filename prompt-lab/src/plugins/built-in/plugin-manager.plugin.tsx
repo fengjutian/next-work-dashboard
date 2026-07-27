@@ -23,6 +23,8 @@ interface UserPluginDef {
   iconEmoji?: string;
   /** 新版：插件清单（.nwd 格式） */
   manifest?: PluginManifest;
+  /** 内核模式：预编译的 JS 源码 */
+  bundle?: string;
 }
 
 function loadUserPlugins(): UserPluginDef[] {
@@ -53,6 +55,7 @@ function rehydrateUserPlugins(): void {
         style={def.style}
         pluginId={def.id}
         permissions={def.permissions}
+        bundle={def.bundle}
       />
     );
     // 从 manifest 中提取贡献声明
@@ -96,13 +99,15 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
   const [formScript, setFormScript] = React.useState('');
   const [formStyle, setFormStyle] = React.useState('');
   const [formPermissions, setFormPermissions] = React.useState<PluginPermission[]>([]);
-  const [activeTab, setActiveTab] = React.useState<'basic' | 'advanced'>('basic');
+  const [activeTab, setActiveTab] = React.useState<'basic' | 'advanced' | 'kernel'>('basic');
   // 清单字段
   const [formVersion, setFormVersion] = React.useState('0.1.0');
   const [formDescription, setFormDescription] = React.useState('');
   const [formAuthor, setFormAuthor] = React.useState('');
   const [formIconEmoji, setFormIconEmoji] = React.useState('📊');
   const [formConfig, setFormConfig] = React.useState<PluginConfigDeclaration[]>([]);
+  // 内核模式
+  const [formBundle, setFormBundle] = React.useState('');
 
   // 打开时重置表单
   React.useEffect(() => {
@@ -119,6 +124,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       setFormAuthor('');
       setFormIconEmoji('📊');
       setFormConfig([]);
+      setFormBundle('');
     }
   }, [open]);
 
@@ -158,6 +164,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
     }
 
     // 构建清单
+    const isKernel = activeTab === 'kernel' && formBundle.trim().length > 0;
     const manifest: PluginManifest = {
       name,
       version: formVersion || '0.1.0',
@@ -166,6 +173,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       iconEmoji: formIconEmoji || undefined,
       permissions: formPermissions,
       config: formConfig.length > 0 ? formConfig : undefined,
+      runtime: isKernel ? 'kernel' : 'sandbox',
     };
 
     // 持久化
@@ -173,12 +181,13 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
     const def: UserPluginDef = {
       id,
       name,
-      content: formContent,
-      script: formScript || undefined,
-      style: formStyle || undefined,
+      content: isKernel ? '' : formContent,
+      script: isKernel ? undefined : (formScript || undefined),
+      style: isKernel ? undefined : (formStyle || undefined),
       permissions: formPermissions.length > 0 ? formPermissions : undefined,
       iconEmoji: formIconEmoji || undefined,
       manifest,
+      bundle: isKernel ? formBundle : undefined,
     };
     defs.push(def);
     saveUserPlugins(defs);
@@ -187,11 +196,12 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
     const BoundPlugin: React.FC = () => (
       <DynamicPlugin
         pluginName={name}
-        content={formContent}
-        script={formScript || undefined}
-        style={formStyle || undefined}
+        content={isKernel ? '' : formContent}
+        script={isKernel ? undefined : (formScript || undefined)}
+        style={isKernel ? undefined : (formStyle || undefined)}
         pluginId={id}
         permissions={formPermissions}
+        bundle={isKernel ? formBundle : undefined}
       />
     );
 
@@ -245,6 +255,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             {([
               ['basic', '基础模式'],
               ['advanced', '高级模式（脚本）'],
+              ['kernel', '内核模式（React）'],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -436,6 +447,69 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
               </div>
             </>
           )}
+
+          {/* ── 内核模式：React 组件 ── */}
+          {activeTab === 'kernel' && (
+            <>
+              {/* 安全警告 */}
+              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-800">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShieldCheck className="h-4 w-4 text-amber-600" />
+                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                    系统级权限
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-600 dark:text-amber-500 leading-relaxed">
+                  内核插件直接注入 React 树，可以访问完整的 Node.js API、Electron API 和文件系统。
+                  仅安装来自可信来源的内核插件。
+                </p>
+              </div>
+
+              {/* Bundle 代码编辑 */}
+              <div>
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 mb-1">
+                  <Code className="h-3.5 w-3.5" />
+                  React 组件源码（IIFE/UMD）
+                  <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-400 resize-none"
+                  rows={12}
+                  placeholder={"// 支持 JSX/TSX 语法，会自动编译\n// 可用变量: React, XLSX, useStore, electronAPI\n// require('xlsx') 返回 XLSX\n\nconst { useState } = React;\n\nfunction ExcelReader() {\n  const [data, setData] = useState(null);\n\n  const loadExcel = async () => {\n    const result = await electronAPI.pickFile({ accept: '.xlsx' });\n    if (!result) return;\n    const wb = XLSX.read(result.content, { type: 'base64' });\n    const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);\n    setData(json);\n  };\n\n  return (\n    <div style={{padding:16}}>\n      <button onClick={loadExcel}\n        style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'#fff',border:'none',cursor:'pointer'}}>\n        打开 Excel\n      </button>\n      {data && <pre style={{marginTop:12,fontSize:12}}>{JSON.stringify(data.slice(0,5), null, 2)}</pre>}\n    </div>\n  );\n}\n\nmodule.exports = ExcelReader;"}
+                  value={formBundle}
+                  onChange={(e) => setFormBundle(e.target.value)}
+                  spellCheck={false}
+                />
+                <p className="text-[10px] text-zinc-400 mt-1">
+                  支持 <strong>JSX/TSX</strong> 语法（Babel 自动编译）。可用 <code>require('xlsx')</code> 返回 SheetJS。
+                  确保末尾 <code>module.exports = 组件名;</code> 导出 React 组件。
+                </p>
+              </div>
+
+              {/* 或从文件加载 */}
+              <button
+                className="w-full py-2 text-xs font-medium text-zinc-500 border border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg hover:border-amber-400 hover:text-amber-600 transition-colors"
+                onClick={() => {
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.accept = '.js,.ts,.jsx,.tsx';
+                  input.onchange = () => {
+                    const file = input.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        setFormBundle(reader.result as string);
+                      };
+                      reader.readAsText(file);
+                    }
+                  };
+                  input.click();
+                }}
+              >
+                或从文件加载 bundle...
+              </button>
+            </>
+          )}
         </div>
 
         {/* 底部按钮 */}
@@ -452,7 +526,7 @@ const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             </button>
             <button
               className="px-4 py-1.5 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors disabled:opacity-40"
-              disabled={!formName.trim()}
+              disabled={!formName.trim() || (activeTab === 'kernel' && !formBundle.trim())}
               onClick={handleCreate}
             >
               创建插件
@@ -477,26 +551,23 @@ async function exportPlugin(def: UserPluginDef): Promise<void> {
     };
     // 移除内部 id 字段（manifest 不需要）
     const cleanManifest = { ...manifest };
-    const files: Record<string, string> = {
-      'manifest.json': JSON.stringify(cleanManifest, null, 2),
-      'script.js': def.script ?? def.content ?? '',
-    };
-    if (def.style) files['style.css'] = def.style;
+    const isKernel = manifest.runtime === 'kernel' && def.bundle;
 
-    // 构建 zip（使用简单的文本拼接模拟 .nwd，实际为 JSON bundle）
-    const bundle = JSON.stringify(
-      {
-        format: 'nwd-v1',
-        manifest: cleanManifest,
-        script: files['script.js'],
-        style: def.style ?? null,
-      },
-      null,
-      2,
-    );
+    // 构建 .nwd JSON bundle
+    const nwdBundle: any = {
+      format: 'nwd-v1',
+      manifest: cleanManifest,
+    };
+    if (isKernel) {
+      nwdBundle.kernelBundle = def.bundle!;
+    } else {
+      nwdBundle.script = def.script ?? def.content ?? '';
+      nwdBundle.style = def.style ?? null;
+    }
+    const bundleStr = JSON.stringify(nwdBundle, null, 2);
 
     // 通过下载触发
-    const blob = new Blob([bundle], { type: 'application/json' });
+    const blob = new Blob([bundleStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -525,10 +596,15 @@ async function importPlugin(file: File): Promise<{ ok: boolean; message: string 
     }
 
     const id = manifest.name.toLowerCase().replace(/\s+/g, '-');
+    const isKernel = manifest.runtime === 'kernel';
     const script = bundle.script ?? '';
     const style = bundle.style ?? '';
+    const kernelBundle = bundle.kernelBundle ?? '';
 
-    if (!script) {
+    if (isKernel && !kernelBundle) {
+      return { ok: false, message: '内核插件缺少 bundle 代码' };
+    }
+    if (!isKernel && !script) {
       return { ok: false, message: '插件脚本为空' };
     }
 
@@ -539,12 +615,13 @@ async function importPlugin(file: File): Promise<{ ok: boolean; message: string 
     const def: UserPluginDef = {
       id,
       name: manifest.name,
-      content: '',
-      script,
+      content: '',  // 旧版 markdown 模式，导入时不使用
+      script: isKernel ? undefined : script,
       style: style || undefined,
       permissions: manifest.permissions ?? [],
       iconEmoji: manifest.iconEmoji,
       manifest,
+      bundle: isKernel ? kernelBundle : undefined,
     };
 
     const defs = loadUserPlugins();
@@ -559,6 +636,7 @@ async function importPlugin(file: File): Promise<{ ok: boolean; message: string 
         style={def.style}
         pluginId={def.id}
         permissions={def.permissions}
+        bundle={def.bundle}
       />
     );
     const commands = manifest.config
@@ -681,6 +759,7 @@ export const PluginManagerPanel: React.FC = () => {
               const userDefs = loadUserPlugins();
               const def = userDefs.find((d) => d.id === plugin.id);
               const isScriptPlugin = def?.script != null && def.script.length > 0;
+              const isKernelPlugin = def?.manifest?.runtime === 'kernel' && def?.bundle != null;
               return (
                 <div
                   key={plugin.id}
@@ -767,6 +846,12 @@ export const PluginManagerPanel: React.FC = () => {
 
                   {/* 类型标签 */}
                   <div className="flex items-center gap-1">
+                    {isKernelPlugin && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 font-medium">
+                        <ShieldCheck className="h-2.5 w-2.5 inline mr-0.5" />
+                        内核
+                      </span>
+                    )}
                     {isScriptPlugin && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 font-medium">
                         <Code className="h-2.5 w-2.5 inline mr-0.5" />

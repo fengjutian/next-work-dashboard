@@ -67,6 +67,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // webview preload 路径
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 
+  // 文件对话框
+  pickFile: (options?: { accept?: string; multiple?: boolean }) =>
+    ipcRenderer.invoke('dialog:pickFile', options),
+  saveFile: (content: string, defaultName?: string) =>
+    ipcRenderer.invoke('dialog:saveFile', content, defaultName),
+
   // ── Token 安全存储 ──
   auth: {
     isAvailable: () => ipcRenderer.invoke('auth:is-available'),
