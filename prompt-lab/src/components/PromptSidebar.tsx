@@ -213,67 +213,72 @@ const PromptEditor: React.FC<{
   };
 
   return (
-    <div className="absolute inset-0 z-50 bg-white dark:bg-zinc-950 flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-sm font-semibold">
-          {prompt ? '编辑提示词' : '新建提示词'}
-        </span>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="flex-1 p-3 space-y-3 overflow-y-auto">
-        <div>
-          <label className="text-xs text-zinc-500 block mb-1">标题</label>
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="提示词标题"
-            className="h-8 text-sm"
-          />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl max-h-[85vh] flex flex-col mx-4" style={{ width: 800 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <span className="text-sm font-semibold">
+            {prompt ? '编辑提示词' : '新建提示词'}
+          </span>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
-        <div>
-          <label className="text-xs text-zinc-500 block mb-1">
-            正文（用 {'{{变量名}}'} 表示占位符）
-          </label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="输入提示词内容..."
-            className="w-full h-32 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+        <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+          <div>
+            <label className="text-xs text-zinc-500 block mb-1">标题</label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="提示词标题"
+              className="h-8 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500 block mb-1">
+              正文（用 {'{{变量名}}'} 表示占位符）
+            </label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="输入提示词内容..."
+              className="w-full h-32 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500 block mb-1">分类</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full h-8 text-sm border rounded-md px-2"
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500 block mb-1">
+              标签（逗号分隔）
+            </label>
+            <Input
+              value={tagsStr}
+              onChange={(e) => setTagsStr(e.target.value)}
+              placeholder="代码, 审查"
+              className="h-8 text-sm"
+            />
+          </div>
         </div>
-        <div>
-          <label className="text-xs text-zinc-500 block mb-1">分类</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full h-8 text-sm border rounded-md px-2"
-          >
-            {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+        <div className="p-4 border-t flex gap-2 justify-end">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={!title.trim()}>
+            保存
+          </Button>
         </div>
-        <div>
-          <label className="text-xs text-zinc-500 block mb-1">
-            标签（逗号分隔）
-          </label>
-          <Input
-            value={tagsStr}
-            onChange={(e) => setTagsStr(e.target.value)}
-            placeholder="代码, 审查"
-            className="h-8 text-sm"
-          />
-        </div>
-      </div>
-      <div className="p-3 border-t flex gap-2 justify-end">
-        <Button variant="outline" size="sm" onClick={onClose}>
-          取消
-        </Button>
-        <Button size="sm" onClick={handleSave} disabled={!title.trim()}>
-          保存
-        </Button>
       </div>
     </div>
   );
