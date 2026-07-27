@@ -76,3 +76,26 @@ Terminal.tsx  ←→  electronAPI  ←→  terminal-manager  ←→  PTY
 | `src/main.ts` | IPC handler (terminal:*, shell:open-external) |
 | `src/preload.ts` | contextBridge API |
 | `src/types/electron.d.ts` | 类型声明 |
+
+---
+
+## 已知问题
+
+### Spectre 库缺失导致 electron-rebuild 失败 (Windows)
+
+**症状**: `MSB8040: 此项目需要缓解了 Spectre 漏洞的库`
+
+**原因**: VS 2022 Build Tools 默认启用 `/Qspectre`，但未安装 Spectre 缓解静态库。
+
+**当前方案**: 
+1. `forge.config.ts` 中 `rebuildConfig` 设为空 `{}`，跳过 electron-rebuild
+2. 手动编译 `node-pty`:
+   ```powershell
+   cd node_modules\node-pty
+   npx node-gyp configure --target=35.7.5 --arch=x64 --dist-url=https://www.electronjs.org/headers --msvs_version=2022
+   # 将所有 .vcxproj 中的 <SpectreMitigation>Spectre</SpectreMitigation> 替换为 <SpectreMitigation>false</SpectreMitigation>
+   npx node-gyp build --target=35.7.5 --arch=x64 --dist-url=https://www.electronjs.org/headers --msvs_version=2022
+   ```
+3. 需要打包时恢复 `rebuildConfig: { onlyModules: ['node-pty'] }`，或安装 Spectre 库
+
+**永久修复**: Visual Studio Installer → 修改 → 单个组件 → 搜索 "Spectre" → 勾选 MSVC v143 的 Spectre 缓解库并安装。

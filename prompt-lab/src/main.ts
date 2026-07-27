@@ -7,7 +7,7 @@ import { URL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import AutoLaunch from 'electron-auto-launch';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from './auth/token-store';
-import { createSession, write, resize, destroySession, destroyAll } from './terminal/terminal-manager';
+/* terminal-manager is lazy-loaded in setupIPC to survive node-pty load failures */
 
 if (started) app.quit();
 
@@ -614,15 +614,38 @@ const setupIPC = () => {
   ipcMain.handle('auth:clear-all', async () => clearAll());
 
   // ── 终端 (Terminal) ──
+  // 使用 lazy import 确保即使 node-pty 加载失败, handler 也已注册并返回明确错误
+
+  let terminalReady = false;
+  let _createSession: ((id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => ReturnType<typeof import('./terminal/terminal-manager').createSession>) | null = null;
+  let _write: ((id: string, data: string) => void) | null = null;
+  let _resize: ((id: string, cols: number, rows: number) => void) | null = null;
+  let _destroySession: ((id: string) => void) | null = null;
+
+  function ensureTerminal() {
+    if (terminalReady) return _createSession;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('./terminal/terminal-manager');
+      _createSession = mod.createSession;
+      _write = mod.write;
+      _resize = mod.resize;
+      _destroySession = mod.destroySession;
+      terminalReady = true;
+      return _createSession;
+    } catch (e) {
+      return null;
+    }
+  }
 
   ipcMain.handle('terminal:create', async (_event, id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => {
+    const create = ensureTerminal();
+    if (!create) return { success: false, error: 'Terminal backend not available — run `npx electron-rebuild -f -w node-pty`' };
     try {
-      const session = createSession(id, cwd, profile);
-      // 注册 data 回调，将 PTY 输出推送到渲染进程
+      const session = create(id, cwd, profile);
       session.pty.onData((data: string) => {
         mainWindow?.webContents.send(`terminal:data:${id}`, data);
       });
-      // 进程退出通知
       session.pty.onExit(({ exitCode }) => {
         mainWindow?.webContents.send(`terminal:exit:${id}`, exitCode);
       });
@@ -633,30 +656,21 @@ const setupIPC = () => {
   });
 
   ipcMain.handle('terminal:write', async (_event, id: string, data: string) => {
-    try {
-      write(id, data);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
+    const create = ensureTerminal();
+    if (!create) return { success: false, error: 'Terminal backend not available' };
+    try { _write!(id, data); return { success: true }; } catch (err) { return { success: false, error: String(err) }; }
   });
 
   ipcMain.handle('terminal:resize', async (_event, id: string, cols: number, rows: number) => {
-    try {
-      resize(id, cols, rows);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
+    const create = ensureTerminal();
+    if (!create) return { success: false, error: 'Terminal backend not available' };
+    try { _resize!(id, cols, rows); return { success: true }; } catch (err) { return { success: false, error: String(err) }; }
   });
 
   ipcMain.handle('terminal:destroy', async (_event, id: string) => {
-    try {
-      destroySession(id);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
+    const create = ensureTerminal();
+    if (!create) return { success: false, error: 'Terminal backend not available' };
+    try { _destroySession!(id); return { success: true }; } catch (err) { return { success: false, error: String(err) }; }
   });
 
   ipcMain.handle('shell:open-external', async (_event, url: string) => {
@@ -727,5 +741,5 @@ app.on('activate', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  destroyAll();
+  try { require('./terminal/terminal-manager').destroyAll(); } catch { /* ignore */ }
 });

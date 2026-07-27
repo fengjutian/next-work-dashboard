@@ -14,7 +14,7 @@ const config: ForgeConfig = {
     },
   },
   rebuildConfig: {
-    onlyModules: ['node-pty'],
+    onlyModules: [],
   },
   makers: [
     new MakerSquirrel({}),
