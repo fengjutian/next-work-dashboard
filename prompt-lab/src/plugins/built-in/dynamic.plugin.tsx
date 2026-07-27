@@ -118,22 +118,42 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
         },
       });
 
+      // 便捷注入函数 — 对齐沙箱 PluginSDK.actions.injectPrompt
+      const injectToAI = async (siteId: string, text: string, autoSubmit = false) => {
+        const store = useStore.getState();
+        const site = store.sites.find((s: any) => s.id === siteId);
+        if (!site) throw new Error(`站点 "${siteId}" 不存在`);
+        const tab = store.tabs.find((t: any) => t.siteId === siteId);
+        if (!tab) throw new Error(`请先打开站点 "${siteId}" 的标签页`);
+        if (!rawAPI?.injectPrompt) throw new Error('electronAPI.injectPrompt 不可用');
+
+        await rawAPI.injectPrompt({
+          webviewId: parseInt(String(tab.id).replace(/\D/g, ''), 10) || 0,
+          text,
+          inputSelector: site.inputSelector,
+          submitSelector: site.submitSelector || undefined,
+          autoSubmit,
+        });
+        store.recordInject?.('plugin:' + pluginId, siteId);
+      };
+
       const globals = {
         React,
         XLSX,
         useStore,
         electronAPI,
+        injectToAI,
       };
 
       // eslint-disable-next-line no-new-func
       const fn = new Function(
         'exports', 'module', 'require',
-        'React', 'XLSX', 'useStore', 'electronAPI',
+        'React', 'XLSX', 'useStore', 'electronAPI', 'injectToAI',
         code,
       );
       fn(
         exports, module, require,
-        globals.React, globals.XLSX, globals.useStore, globals.electronAPI,
+        globals.React, globals.XLSX, globals.useStore, globals.electronAPI, globals.injectToAI,
       );
 
       // 取导出的组件

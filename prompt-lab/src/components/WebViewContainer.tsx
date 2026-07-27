@@ -98,20 +98,6 @@ const TabBar: React.FC = () => {
 // ── WebView 容器 ──
 
 declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      webview: React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & {
-          src?: string;
-          partition?: string;
-          allowpopups?: string;
-          style?: React.CSSProperties;
-          ref?: React.Ref<Electron.WebviewTag>;
-        },
-        HTMLElement
-      >;
-    }
-  }
   interface HTMLElementTagNameMap {
     webview: Electron.WebviewTag;
   }
@@ -536,6 +522,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           ref={webviewRef}
           src={tab.url}
           partition={`persist:site-${tab.siteId}`}
+          preload={(window as any).__WEBVIEW_PRELOAD_PATH__ ?? ''}
+          useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
           style={{ flex: 1 }}
           // @ts-expect-error webview-specific attribute
           allowpopups="true"
