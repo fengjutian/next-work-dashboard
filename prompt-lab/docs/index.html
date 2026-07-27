@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>next-work-dashboard — AI 提示词注入桌面应用</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#09090b;color:#fafafa;line-height:1.6;min-height:100vh}
+    .hero{text-align:center;padding:80px 24px 48px;background:linear-gradient(180deg,#18181b 0%,#09090b 100%)}
+    .hero h1{font-size:2.5rem;font-weight:700;margin-bottom:12px;background:linear-gradient(135deg,#a78bfa,#3b82f6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .hero p{font-size:1.1rem;color:#a1a1aa;max-width:640px;margin:0 auto}
+    .container{max-width:900px;margin:0 auto;padding:0 24px 80px}
+    h2{font-size:1.4rem;font-weight:600;margin:40px 0 16px;color:#e4e4e7}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+    .card{padding:24px;border-radius:12px;background:#18181b;border:1px solid #27272a}
+    .card h3{font-size:1rem;margin-bottom:8px;color:#fafafa}
+    .card p{font-size:.9rem;color:#a1a1aa}
+    .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:16px 0}
+    .feature{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:8px;background:#18181b;border:1px solid #27272a;font-size:.9rem}
+    .feature .icon{font-size:1.2rem;flex-shrink:0}
+    .links{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
+    .links a{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:.9rem;font-weight:500;transition:all .15s}
+    .links .primary{background:#3b82f6;color:#fff}
+    .links .primary:hover{background:#2563eb}
+    .links .secondary{background:#27272a;color:#d4d4d8}
+    .links .secondary:hover{background:#3f3f46}
+    table{width:100%;border-collapse:collapse;margin:16px 0}
+    th,td{padding:10px 14px;text-align:left;border-bottom:1px solid #27272a;font-size:.9rem}
+    th{color:#a1a1aa;font-weight:500}
+    td{color:#d4d4d8}
+    code{background:#27272a;padding:2px 6px;border-radius:4px;font-size:.85em}
+    .tag{display:inline-flex;padding:2px 10px;border-radius:9999px;font-size:.75rem;font-weight:600}
+    .tag-green{background:#064e3b;color:#6ee7b7}
+    .tag-yellow{background:#78350f;color:#fcd34d}
+    footer{text-align:center;padding:32px;color:#52525b;font-size:.8rem;border-top:1px solid #27272a}
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>next-work-dashboard</h1>
+  <p>基于 Electron 的 AI 提示词注入桌面应用 — 打开任意 AI 网站，一键注入预设提示词，提升 AI 交互效率。</p>
+  <div class="links" style="justify-content:center;margin-top:32px">
+    <a class="primary" href="https://github.com/fengjutian/next-work-dashboard" target="_blank">GitHub 仓库</a>
+    <a class="secondary" href="project-intro-and-deploy.html">项目介绍 &amp; 部署</a>
+    <a class="secondary" href="plugin-architecture.html">插件架构</a>
+  </div>
+</div>
+
+<div class="container">
+
+<h2>核心能力</h2>
+<div class="features">
+  <div class="feature"><span class="icon">🌐</span> 多站点 WebView — 同时打开 DeepSeek、ChatGPT、Kimi 等</div>
+  <div class="feature"><span class="icon">⚡</span> 一键注入 — 点击提示词自动填入 AI 输入框</div>
+  <div class="feature"><span class="icon">📦</span> 提示词管理 — CRUD + 分类/标签/变量模板</div>
+  <div class="feature"><span class="icon">🔍</span> Spotlight 面板 — Ctrl+K 全局搜索</div>
+  <div class="feature"><span class="icon">🧩</span> 插件系统 — 双层架构，支持用户自定义 JS 插件</div>
+  <div class="feature"><span class="icon">🔒</span> 纯本地 — 无需 API Key，数据不上传</div>
+</div>
+
+<h2>技术栈</h2>
+<table>
+  <tr><th>层</th><th>选型</th></tr>
+  <tr><td>框架</td><td>Electron 35</td></tr>
+  <tr><td>渲染</td><td>React 18 + TypeScript 5.4</td></tr>
+  <tr><td>UI</td><td>shadcn/ui + Tailwind CSS 3</td></tr>
+  <tr><td>状态管理</td><td>Zustand 5</td></tr>
+  <tr><td>持久化</td><td>sql.js + drizzle-orm</td></tr>
+  <tr><td>构建</td><td>electron-forge 7 + Vite 5</td></tr>
+</table>
+
+<h2>功能完成度</h2>
+<div class="cards">
+  <div class="card">
+    <h3>浏览器 / 注入 <span class="tag tag-green">100%</span></h3>
+    <p>多标签 WebView、选择器注入、事件模拟、自动发送、Session 持久化</p>
+  </div>
+  <div class="card">
+    <h3>提示词管理 <span class="tag tag-green">88%</span></h3>
+    <p>CRUD、分类/标签、变量模板 {{占位符}}、导入导出、收藏/置顶</p>
+  </div>
+  <div class="card">
+    <h3>设置模块 <span class="tag tag-yellow">40%</span></h3>
+    <p>站点配置、主题切换、快捷键、窗口置顶、开机启动</p>
+  </div>
+</div>
+
+<h2>文档</h2>
+<table>
+  <tr><td><a href="project-intro-and-deploy.html">📖 项目介绍与部署文档</a></td><td>技术架构、开发环境、构建部署、数据存储</td></tr>
+  <tr><td><a href="plugin-architecture.html">🧩 插件架构设计文档</a></td><td>双层架构、PluginRegistry、沙箱协议、SDK API 参考</td></tr>
+  <tr><td><a href="https://github.com/fengjutian/next-work-dashboard/blob/main/REQUIREMENTS.md">📋 需求文档</a></td><td>完整功能需求、竞品分析、版本规划</td></tr>
+  <tr><td><a href="https://github.com/fengjutian/next-work-dashboard/blob/main/FEATURE_CHECKLIST.md">✅ 功能对照表</a></td><td>44 项需求的实现状态追踪</td></tr>
+</table>
+
+<h2>快速开始</h2>
+<pre style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:20px;font-size:.85rem;overflow-x:auto">
+<code>git clone https://github.com/fengjutian/next-work-dashboard.git
+cd next-work-dashboard/prompt-lab
+npm install
+npm start</code></pre>
+
+<h2>构建分发</h2>
+<pre style="background:#18181b;border:1px solid #27272a;border-radius:8px;padding:20px;font-size:.85rem;overflow-x:auto"><code>npm run make  # 产出 Windows .exe / macOS .zip / Linux .deb .rpm</code></pre>
+
+</div>
+
+<footer>
+  next-work-dashboard v0.1.0 · MIT License · <a href="https://github.com/fengjutian/next-work-dashboard" style="color:#52525b">github.com/fengjutian/next-work-dashboard</a>
+</footer>
+
+</body>
+</html>
