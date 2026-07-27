@@ -6,7 +6,9 @@
 **next-work-dashboard**（暂定）— 基于 Electron 的 AI 提示词注入桌面应用。
 
 ### 1.2 项目定位
-一个 Electron 桌面应用，内置 WebView 浏览器，可打开 DeepSeek、ChatGPT、Kimi 等 AI 对话网站，并支持将预设提示词一键注入到网页的输入框中，提升 AI 交互效率。
+**本项目的目标是打造下一代工作平台**（Next-Gen Work Dashboard）—— 一个集成 AI 辅助、多引擎搜索、提示词管理、工作流自动化的统一工作入口。
+
+当前阶段聚焦于：一个 Electron 桌面应用，内置 WebView 浏览器，可打开 DeepSeek、ChatGPT、Kimi 等 AI 对话网站以及 Google、Bing、百度等搜索引擎，并支持将预设提示词一键注入到网页的输入框中，提升 AI 交互效率。
 
 ### 1.3 目标用户
 - 高频使用多个 AI 对话平台的用户

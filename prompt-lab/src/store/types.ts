@@ -99,6 +99,42 @@ export const DEFAULT_SITES: SiteConfig[] = [
     enabled: true,
     sortOrder: 5,
   },
+  {
+    id: 'google',
+    name: 'Google',
+    url: 'https://www.google.com/',
+    inputSelector: 'textarea[name="q"], input[name="q"]',
+    submitSelector: '',
+    enabled: true,
+    sortOrder: 6,
+  },
+  {
+    id: 'bing',
+    name: 'Bing',
+    url: 'https://www.bing.com/',
+    inputSelector: 'input[name="q"], #sb_form_q',
+    submitSelector: '',
+    enabled: true,
+    sortOrder: 7,
+  },
+  {
+    id: 'baidu',
+    name: '百度',
+    url: 'https://www.baidu.com/',
+    inputSelector: 'input[name="wd"], #kw',
+    submitSelector: '',
+    enabled: true,
+    sortOrder: 8,
+  },
+  {
+    id: 'zhihu',
+    name: '知乎搜索',
+    url: 'https://zhihu.sogou.com/',
+    inputSelector: 'input[name="query"], #query',
+    submitSelector: '',
+    enabled: true,
+    sortOrder: 9,
+  },
 ];
 
 export interface AiApiConfig {
