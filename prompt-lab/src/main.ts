@@ -7,6 +7,7 @@ import { URL } from 'node:url';
 import started from 'electron-squirrel-startup';
 import AutoLaunch from 'electron-auto-launch';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from './auth/token-store';
+import { createSession, write, resize, destroySession, destroyAll } from './terminal/terminal-manager';
 
 if (started) app.quit();
 
@@ -611,6 +612,56 @@ const setupIPC = () => {
   ipcMain.handle('auth:list-services', async () => listServices());
 
   ipcMain.handle('auth:clear-all', async () => clearAll());
+
+  // ── 终端 (Terminal) ──
+
+  ipcMain.handle('terminal:create', async (_event, id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => {
+    try {
+      const session = createSession(id, cwd, profile);
+      // 注册 data 回调，将 PTY 输出推送到渲染进程
+      session.pty.onData((data: string) => {
+        mainWindow?.webContents.send(`terminal:data:${id}`, data);
+      });
+      // 进程退出通知
+      session.pty.onExit(({ exitCode }) => {
+        mainWindow?.webContents.send(`terminal:exit:${id}`, exitCode);
+      });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('terminal:write', async (_event, id: string, data: string) => {
+    try {
+      write(id, data);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('terminal:resize', async (_event, id: string, cols: number, rows: number) => {
+    try {
+      resize(id, cols, rows);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('terminal:destroy', async (_event, id: string) => {
+    try {
+      destroySession(id);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('shell:open-external', async (_event, url: string) => {
+    await shell.openExternal(url);
+  });
 };
 
 // ── 全局快捷键 ──
@@ -676,4 +727,5 @@ app.on('activate', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  destroyAll();
 });

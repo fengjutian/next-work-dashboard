@@ -83,4 +83,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listServices: () => ipcRenderer.invoke('auth:list-services'),
     clearAll: () => ipcRenderer.invoke('auth:clear-all'),
   },
+
+  // ── 终端 (Terminal) ──
+  terminal: {
+    create: (id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) =>
+      ipcRenderer.invoke('terminal:create', id, cwd, profile),
+    write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data),
+    resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', id, cols, rows),
+    destroy: (id: string) => ipcRenderer.invoke('terminal:destroy', id),
+    onData: (id: string, callback: (data: string) => void) => {
+      const channel = `terminal:data:${id}`;
+      const handler = (_event: Electron.IpcRendererEvent, data: string) => callback(data);
+      ipcRenderer.on(channel, handler);
+      return () => { ipcRenderer.removeListener(channel, handler); };
+    },
+    onExit: (id: string, callback: (exitCode: number) => void) => {
+      const channel = `terminal:exit:${id}`;
+      const handler = (_event: Electron.IpcRendererEvent, exitCode: number) => callback(exitCode);
+      ipcRenderer.on(channel, handler);
+      return () => { ipcRenderer.removeListener(channel, handler); };
+    },
+  },
+
+  // Shell 操作
+  shell: {
+    openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
+  },
 });

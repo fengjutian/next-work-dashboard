@@ -33,6 +33,8 @@ import {
   FaCodeBranch,
   FaCode,
   FaShieldHalved,
+  FaTerminal,
+  FaChevronDown,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -279,4 +281,13 @@ export const ShieldCheck: React.FC<IconProps> = ({ className }) => (
 
 export const BookOpen: React.FC<IconProps> = ({ className }) => (
   <FaBookOpen className={className} />
+);
+
+/** 终端 / 控制台 */
+export const Terminal: React.FC<IconProps> = ({ className }) => (
+  <FaTerminal className={className} />
+);
+
+export const ChevronDown: React.FC<IconProps> = ({ className }) => (
+  <FaChevronDown className={className} />
 );

@@ -9,9 +9,13 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpack: '**/node_modules/node-pty/**',
+    },
   },
-  rebuildConfig: {},
+  rebuildConfig: {
+    onlyModules: ['node-pty'],
+  },
   makers: [
     new MakerSquirrel({}),
     new MakerZIP({}, ['darwin']),

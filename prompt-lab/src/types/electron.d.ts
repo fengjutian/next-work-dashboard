@@ -52,6 +52,17 @@ export interface ElectronAPI {
     listServices: () => Promise<Array<{ service: string; savedAt: number; label?: string }>>;
     clearAll: () => Promise<boolean>;
   };
+  terminal: {
+    create: (id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => Promise<{ success: boolean; error?: string }>;
+    write: (id: string, data: string) => Promise<{ success: boolean; error?: string }>;
+    resize: (id: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
+    destroy: (id: string) => Promise<{ success: boolean; error?: string }>;
+    onData: (id: string, callback: (data: string) => void) => () => void;
+    onExit: (id: string, callback: (exitCode: number) => void) => () => void;
+  };
+  shell: {
+    openExternal: (url: string) => Promise<void>;
+  };
 }
 
 export interface ConversationFile {
