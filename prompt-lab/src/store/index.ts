@@ -9,6 +9,7 @@ import {
   dbInsertPrompt, dbUpdatePrompt, dbDeletePrompt, dbBatchDeletePrompts,
   dbInsertSite, dbUpdateSite,
   dbInsertInjectHistory,
+  dbGetSetting, dbSetSetting,
 } from '@/db';
 
 // ── Store 类型 ──
@@ -211,9 +212,19 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ── 注入 ──
   injectMode: 'fill-only',
-  setInjectMode: (mode) => set({ injectMode: mode }),
+  setInjectMode: (mode) => {
+    set({ injectMode: mode });
+    if (isDbReady()) {
+      try { dbSetSetting('injectMode', mode); } catch { /* ignore */ }
+    }
+  },
   injectStrategy: 'replace',
-  setInjectStrategy: (strategy) => set({ injectStrategy: strategy }),
+  setInjectStrategy: (strategy) => {
+    set({ injectStrategy: strategy });
+    if (isDbReady()) {
+      try { dbSetSetting('injectStrategy', strategy); } catch { /* ignore */ }
+    }
+  },
   lastInjectResult: null,
   setLastInjectResult: (r) => set({ lastInjectResult: r }),
 
@@ -223,12 +234,22 @@ export const useStore = create<AppState>((set, get) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   theme: 'system' as const,
-  setTheme: (theme) => set({ theme }),
+  setTheme: (theme) => {
+    set({ theme });
+    if (isDbReady()) {
+      try { dbSetSetting('theme', theme); } catch { /* ignore */ }
+    }
+  },
   userCategories: [],
-  addCategory: (c) =>
-    set((s) =>
-      s.userCategories.includes(c) ? s : { userCategories: [...s.userCategories, c] }
-    ),
+  addCategory: (c) => {
+    const next = get().userCategories.includes(c)
+      ? get().userCategories
+      : [...get().userCategories, c];
+    set({ userCategories: next });
+    if (isDbReady()) {
+      try { dbSetSetting('userCategories', JSON.stringify(next)); } catch { /* ignore */ }
+    }
+  },
 
   pendingInjection: null,
   triggerInjection: (promptId, siteId) => set({ pendingInjection: { promptId, siteId } }),
@@ -243,7 +264,15 @@ export const useStore = create<AppState>((set, get) => ({
     model: 'deepseek-v4-flash',
     baseUrl: 'https://api.deepseek.com/v1',
   },
-  setAiApi: (patch) => set((s) => ({ aiApi: { ...s.aiApi, ...patch } })),
+  setAiApi: (patch) => {
+    set((s) => {
+      const next = { ...s.aiApi, ...patch };
+      if (isDbReady()) {
+        try { dbSetSetting('aiApi', JSON.stringify(next)); } catch { /* ignore */ }
+      }
+      return { aiApi: next };
+    });
+  },
 
   conversationSavedAt: 0,
   notifyConversationSaved: () => set({ conversationSavedAt: Date.now() }),
@@ -278,6 +307,41 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       console.warn('[store] Failed to load sites from DB:', err);
     }
+
+    // 加载 AI API 配置
+    try {
+      const raw = dbGetSetting('aiApi');
+      if (raw) {
+        const saved = JSON.parse(raw);
+        set({ aiApi: { ...get().aiApi, ...saved } });
+      }
+    } catch (err) {
+      console.warn('[store] Failed to load aiApi from DB:', err);
+    }
+
+    // 加载主题
+    try {
+      const v = dbGetSetting('theme');
+      if (v === 'light' || v === 'dark' || v === 'system') set({ theme: v });
+    } catch { /* ignore */ }
+
+    // 加载注入模式
+    try {
+      const v = dbGetSetting('injectMode');
+      if (v === 'fill-only' || v === 'fill-and-submit') set({ injectMode: v });
+    } catch { /* ignore */ }
+
+    // 加载注入策略
+    try {
+      const v = dbGetSetting('injectStrategy');
+      if (v === 'replace' || v === 'append') set({ injectStrategy: v });
+    } catch { /* ignore */ }
+
+    // 加载用户分类
+    try {
+      const raw = dbGetSetting('userCategories');
+      if (raw) set({ userCategories: JSON.parse(raw) });
+    } catch { /* ignore */ }
   },
 }));
 

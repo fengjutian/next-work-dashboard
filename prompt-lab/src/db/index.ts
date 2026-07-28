@@ -1,4 +1,6 @@
 import initSqlJs, { type Database as SqlJsDatabase, type QueryExecResult } from 'sql.js';
+// Vite ?url import — ensures the wasm is served with correct MIME type
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { drizzle, type SQLJsDatabase } from 'drizzle-orm/sql-js';
 import { eq, inArray } from 'drizzle-orm';
 import * as schema from './schema';
@@ -11,7 +13,9 @@ let _sqlDb: SqlJsDatabase | null = null;
 // ═══════════════════════════════════════════
 
 export async function initDb(buffer?: ArrayBuffer): Promise<SQLJsDatabase<typeof schema>> {
-  const SQL = await initSqlJs();
+  const SQL = await initSqlJs({
+    locateFile: () => sqlWasmUrl,
+  });
   if (buffer && buffer.byteLength > 0) {
     _sqlDb = new SQL.Database(new Uint8Array(buffer));
   } else {

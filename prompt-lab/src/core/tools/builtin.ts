@@ -116,4 +116,93 @@ export const builtInTools: ToolDefinition[] = [
       }
     },
   },
+  {
+    name: 'fetch_url',
+    description: '获取网页或 API 的内容（HTTP GET），返回文本或 JSON',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '要请求的 URL，必须以 http:// 或 https:// 开头' },
+      },
+      required: ['url'],
+    },
+    execute: async (args) => {
+      const url = String(args.url);
+      if (!/^https?:\/\//.test(url)) return '错误：URL 必须以 http:// 或 https:// 开头';
+      try {
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; next-work-dashboard/1.0)' },
+        });
+        if (!resp.ok) return `HTTP ${resp.status} ${resp.statusText}`;
+        const contentType = resp.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const json = await resp.json();
+          return JSON.stringify(json, null, 2).slice(0, 3000);
+        }
+        const text = await resp.text();
+        // 截断过长响应
+        return text.length > 5000 ? text.slice(0, 5000) + '\n...(truncated)' : text;
+      } catch (e: any) {
+        return `请求失败: ${e.message}`;
+      }
+    },
+  },
+  {
+    name: 'write_file',
+    description: '将内容写入文件（通过 Electron 保存对话框选择路径）',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: '要写入的文件内容' },
+        filename: { type: 'string', description: '建议的文件名，如 output.md' },
+      },
+      required: ['content'],
+    },
+    execute: async (args) => {
+      const content = String(args.content);
+      const filename = args.filename ? String(args.filename) : 'output.txt';
+      try {
+        const api = (window as any).electronAPI;
+        if (!api?.saveFile) {
+          // 浏览器 fallback：触发下载
+          const blob = new Blob([content], { type: 'text/plain' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = filename;
+          a.click();
+          return `已触发下载: ${filename}`;
+        }
+        const result = await api.saveFile({ content, defaultName: filename });
+        return result?.success ? `文件已保存: ${result.path || filename}` : `保存失败: ${result?.error || '未知错误'}`;
+      } catch (e: any) {
+        return `写入文件失败: ${e.message}`;
+      }
+    },
+  },
+  {
+    name: 'list_files',
+    description: '列出目录中的文件（通过 Electron 打开目录对话框）',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '目录路径（可选，不填则弹出选择对话框）' },
+      },
+      required: [],
+    },
+    execute: async () => {
+      try {
+        const api = (window as any).electronAPI;
+        if (!api?.pickDirectory) {
+          return '(需要 Electron 环境才能浏览目录)';
+        }
+        const result = await api.pickDirectory();
+        if (!result) return '(未选择目录)';
+        return result.files
+          ? result.files.slice(0, 50).map((f: any) => `${f.isDir ? '📁' : '📄'} ${f.name}  ${f.size ? `(${f.size} bytes)` : ''}`).join('\n')
+          : `目录: ${result.path}`;
+      } catch (e: any) {
+        return `列出文件失败: ${e.message}`;
+      }
+    },
+  },
 ];
