@@ -37,6 +37,7 @@ import {
   FaChevronDown,
   FaDatabase,
   FaRobot,
+  FaWrench,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -301,4 +302,8 @@ export const Database: React.FC<IconProps> = ({ className }) => (
 
 export const Robot: React.FC<IconProps> = ({ className }) => (
   <FaRobot className={className} />
+);
+
+export const Wrench: React.FC<IconProps> = ({ className }) => (
+  <FaWrench className={className} />
 );

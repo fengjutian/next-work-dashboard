@@ -31,3 +31,22 @@ export type {
   LLMProvider,
   OpenAIConfig,
 } from './llm';
+
+// 工具系统
+export type {
+  ToolDefinition,
+  ToolCall,
+  ToolResult,
+} from './tools';
+export {
+  registerTool,
+  registerTools,
+  getTool,
+  listTools,
+  getToolSchemas,
+  executeToolCall,
+} from './tools';
+
+// ReAct Agent
+export { runAgent } from './agent';
+export type { AgentMessage, AgentStep, AgentOptions } from './agent';
