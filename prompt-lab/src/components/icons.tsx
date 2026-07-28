@@ -36,6 +36,7 @@ import {
   FaTerminal,
   FaChevronDown,
   FaDatabase,
+  FaRobot,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -296,4 +297,8 @@ export const ChevronDown: React.FC<IconProps> = ({ className }) => (
 /** 数据库 */
 export const Database: React.FC<IconProps> = ({ className }) => (
   <FaDatabase className={className} />
+);
+
+export const Robot: React.FC<IconProps> = ({ className }) => (
+  <FaRobot className={className} />
 );

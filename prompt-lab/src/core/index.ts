@@ -1,0 +1,33 @@
+// ── Core 模块 — IDE/UI 无关的纯逻辑层 ──
+
+// 注入引擎
+export {
+  extractVariables,
+  fillVariables,
+  buildInjectionScript,
+  parseInjectResult,
+} from './injector';
+export type { InjectOptions, InjectResult } from './injector';
+
+// 对话内容提取
+export {
+  buildConversationExtractScript,
+  parseExtractResult,
+} from './conversation-extractor';
+export type { ExtractResult } from './conversation-extractor';
+
+// LLM 对话引擎
+export {
+  createOpenAIProvider,
+  registerProvider,
+  getProvider,
+  listProviders,
+} from './llm';
+export type {
+  ChatMessage,
+  ChatOptions,
+  ChatChunk,
+  ModelInfo,
+  LLMProvider,
+  OpenAIConfig,
+} from './llm';

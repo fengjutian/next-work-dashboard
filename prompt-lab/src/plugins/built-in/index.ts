@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
@@ -13,6 +13,7 @@ import { WereadPanel } from './weread.plugin';
 import { WindyPanel } from './windy.plugin';
 import { TerminalPluginPanel } from './terminal.plugin';
 import { DatabaseBrowser } from '@/components/DatabaseBrowser';
+import { ChatPanel } from '@/components/ChatPanel';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
 
@@ -32,12 +33,25 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'chat',
+    name: 'AI 对话',
+    icon: Robot,
+    component: ChatPanel,
+    enabled: true,
+    order: 1,
+    contributions: {
+      commands: [
+        { id: 'chat.clear', title: '清空对话', category: 'AI 对话' },
+      ],
+    },
+  },
+  {
     id: 'prompts',
     name: '提示词',
     icon: MessageSquare,
     component: PromptSidebar,
     enabled: true,
-    order: 1,
+    order: 2,
     contributions: {
       commands: [
         { id: 'prompts.create', title: '新建提示词', category: '提示词' },
@@ -51,7 +65,7 @@ const builtInPlugins: Plugin[] = [
     icon: History,
     component: ConversationHistory,
     enabled: true,
-    order: 2,
+    order: 3,
   },
   {
     id: 'graph',
@@ -59,15 +73,15 @@ const builtInPlugins: Plugin[] = [
     icon: Network,
     component: KnowledgeGraph,
     enabled: true,
-    order: 3,
+    order: 4,
   },
   {
     id: 'notes',
     name: '便签',
     icon: StickyNote,
     component: NotesPanel,
-    enabled: true,
-    order: 4,
+    enabled: false,
+    order: 5,
     contributions: {
       commands: [
         { id: 'notes.new', title: '新建便签', category: '便签' },
@@ -79,16 +93,16 @@ const builtInPlugins: Plugin[] = [
     name: '微信读书',
     icon: BookOpen,
     component: WereadPanel,
-    enabled: true,
-    order: 5,
+    enabled: false,
+    order: 6,
   },
   {
     id: 'windy',
     name: 'Windy',
     icon: Globe,
     component: WindyPanel,
-    enabled: true,
-    order: 6,
+    enabled: false,
+    order: 7,
   },
   {
     id: 'plugin-manager',
@@ -96,7 +110,7 @@ const builtInPlugins: Plugin[] = [
     icon: Puzzle,
     component: PluginManagerPanel,
     enabled: true,
-    order: 7,
+    order: 8,
     contributions: {
       commands: [
         { id: 'plugin-manager.create', title: '新建插件', category: '插件管理' },
@@ -109,8 +123,8 @@ const builtInPlugins: Plugin[] = [
     name: '终端',
     icon: Terminal,
     component: TerminalPluginPanel,
-    enabled: true,
-    order: 8,
+    enabled: false,
+    order: 9,
     contributions: {
       commands: [
         { id: 'terminal.new', title: '新建终端', category: '终端' },
@@ -123,7 +137,7 @@ const builtInPlugins: Plugin[] = [
     icon: Database,
     component: DatabaseBrowser,
     enabled: true,
-    order: 9,
+    order: 10,
   },
 ];
 

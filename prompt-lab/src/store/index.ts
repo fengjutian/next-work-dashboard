@@ -345,4 +345,4 @@ export function useAllCategories() {
 }
 
 export { CATEGORIES };
-export type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode };
+export type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy };

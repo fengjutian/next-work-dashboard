@@ -4,8 +4,14 @@ import { X, RefreshCw, ArrowLeft, ArrowRight, Send } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
-import { VariableFillDialog, extractVariables } from '@/components/VariableFillDialog';
+import { VariableFillDialog } from '@/components/VariableFillDialog';
 import { SaveConversationPanel } from '@/components/SaveConversationPanel';
+import {
+  extractVariables,
+  buildInjectionScript,
+  buildConversationExtractScript,
+  parseExtractResult,
+} from '@/core';
 import type { Prompt } from '@/store';
 
 // ── 标签栏 ──
@@ -129,91 +135,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     if (!webview || !site) return;
 
     try {
-      const result = await webview.executeJavaScript(`
-        (function() {
-          // 策略 1：已知选择器
-          const knownSelectors = [
-            '[data-message-author-role]',
-            'article[data-testid^="conversation-turn"]',
-          ];
-          for (const sel of knownSelectors) {
-            const nodes = document.querySelectorAll(sel);
-            if (nodes.length > 1) {
-              const lines = [];
-              for (const el of nodes) {
-                const t = el.textContent?.trim();
-                if (!t || t.length < 3) continue;
-                const role = el.getAttribute('data-message-author-role') || '';
-                const isUser = role === 'user';
-                lines.push('### ' + (isUser ? '🧑 用户' : '🤖 AI'));
-                lines.push('');
-                lines.push(t);
-                lines.push('');
-              }
-              return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'known' });
-            }
-          }
-
-          // 策略 2：寻找对话区域 — 页面中央、可滚动、包含多条文本的容器
-          const all = document.body.querySelectorAll('*');
-          const vw = window.innerWidth, vh = window.innerHeight;
-          let candidates = [];
-
-          for (const el of all) {
-            if (el.children.length < 2) continue;
-            const rect = el.getBoundingClientRect();
-            // 排除侧边栏、顶部导航、底部输入区
-            if (rect.width < 300 || rect.height < 200) continue;
-            if (rect.left > vw * 0.7 || rect.right < vw * 0.3) continue;
-            if (rect.top > vh * 0.6) continue;
-
-            const children = Array.from(el.children);
-            const textChildren = children.filter(c => {
-              const t = c.textContent?.trim() || '';
-              return t.length > 15 && c.children.length > 0;
-            });
-
-            if (textChildren.length >= 2) {
-              candidates.push({
-                el: textChildren,
-                count: textChildren.length,
-                area: rect.width * rect.height,
-                centerDist: Math.abs(rect.left + rect.width/2 - vw/2)
-              });
-            }
-          }
-
-          // 选文本子元素最多且在中央的
-          candidates.sort((a, b) => b.count - a.count || a.centerDist - b.centerDist);
-          const best = candidates[0];
-
-          if (best && best.count > 1) {
-            const lines = [];
-            for (const el of best.el) {
-              const t = el.textContent?.trim();
-              if (!t || t.length < 5) continue;
-              const isAI = /(好的|当然|可以|以下是|以下为|根据|我来|这是|Here|Sure|Certainly|Let me|I can)/i.test(t.substring(0, 60));
-              lines.push('### ' + (isAI ? '🤖 AI' : '🧑 用户'));
-              lines.push('');
-              lines.push(t);
-              lines.push('');
-            }
-            if (lines.length > 0) {
-              return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
-            }
-          }
-
-          // 策略 3：兜底 — 整个页面可见文本
-          const bodyText = document.body.innerText?.trim();
-          if (bodyText && bodyText.length > 50) {
-            return JSON.stringify({ success: true, content: '# 页面内容\\n\\n' + bodyText, via: 'fallback' });
-          }
-
-          return JSON.stringify({ success: false });
-        })();
-      `);
-
-      const parsed = JSON.parse(result);
+      const result = await webview.executeJavaScript(buildConversationExtractScript());
+      const parsed = parseExtractResult(result);
       if (parsed.success && parsed.content) {
         const saveResult = await (window as any).electronAPI?.saveConversation?.({
           site: site.id,
@@ -244,80 +167,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     const webview = webviewRef.current;
     if (!webview) throw new Error('webview not ready');
 
-    const result = await webview.executeJavaScript(`
-      (function() {
-        const knownSelectors = [
-          '[data-message-author-role]',
-          'article[data-testid^="conversation-turn"]',
-        ];
-        for (const sel of knownSelectors) {
-          const nodes = document.querySelectorAll(sel);
-          if (nodes.length > 1) {
-            const lines = [];
-            for (const el of nodes) {
-              const t = el.textContent?.trim();
-              if (!t || t.length < 3) continue;
-              const role = el.getAttribute('data-message-author-role') || '';
-              const isUser = role === 'user';
-              lines.push('### ' + (isUser ? '🧑 用户' : '🤖 AI'));
-              lines.push('');
-              lines.push(t);
-              lines.push('');
-            }
-            return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'known' });
-          }
-        }
-
-        const all = document.body.querySelectorAll('*');
-        const vw = window.innerWidth, vh = window.innerHeight;
-        let candidates = [];
-        for (const el of all) {
-          if (el.children.length < 2) continue;
-          const rect = el.getBoundingClientRect();
-          if (rect.width < 300 || rect.height < 200) continue;
-          if (rect.left > vw * 0.7 || rect.right < vw * 0.3) continue;
-          if (rect.top > vh * 0.6) continue;
-          const children = Array.from(el.children);
-          const textChildren = children.filter(c => {
-            const t = c.textContent?.trim() || '';
-            return t.length > 15 && c.children.length > 0;
-          });
-          if (textChildren.length >= 2) {
-            candidates.push({
-              el: textChildren,
-              count: textChildren.length,
-              area: rect.width * rect.height,
-              centerDist: Math.abs(rect.left + rect.width/2 - vw/2)
-            });
-          }
-        }
-        candidates.sort((a, b) => b.count - a.count || a.centerDist - b.centerDist);
-        const best = candidates[0];
-        if (best && best.count > 1) {
-          const lines = [];
-          for (const el of best.el) {
-            const t = el.textContent?.trim();
-            if (!t || t.length < 5) continue;
-            const isAI = /(好的|当然|可以|以下是|以下为|根据|我来|这是|Here|Sure|Certainly|Let me|I can)/i.test(t.substring(0, 60));
-            lines.push('### ' + (isAI ? '🤖 AI' : '🧑 用户'));
-            lines.push('');
-            lines.push(t);
-            lines.push('');
-          }
-          if (lines.length > 0) {
-            return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
-          }
-        }
-
-        const bodyText = document.body.innerText?.trim();
-        if (bodyText && bodyText.length > 50) {
-          return JSON.stringify({ success: true, content: '# 页面内容\\n\\n' + bodyText, via: 'fallback' });
-        }
-        return JSON.stringify({ success: false });
-      })();
-    `);
-
-    const parsed = JSON.parse(result);
+    const result = await webview.executeJavaScript(buildConversationExtractScript());
+    const parsed = parseExtractResult(result);
     if (parsed.success && parsed.content) {
       return parsed.content;
     }
@@ -361,43 +212,12 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     if (!webviewRef.current || !selectedPrompt || !site) return;
 
     const webview = webviewRef.current;
-    const autoSubmit = injectMode === 'fill-and-submit';
-
-    const script = `
-      (function() {
-        const input = document.querySelector('${site.inputSelector}');
-        if (!input) return JSON.stringify({ success: false, error: 'INPUT_NOT_FOUND' });
-
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-          HTMLTextAreaElement.prototype, 'value'
-        )?.set || Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype, 'value'
-        )?.set;
-
-        const safeText = ${JSON.stringify(finalText)};
-        ${injectStrategy === 'append' ? 'const appendMode = true;' : 'const appendMode = false;'}
-
-        if (nativeSetter) {
-          nativeSetter.call(input, appendMode ? (input.value + safeText) : safeText);
-        } else {
-          input.value = appendMode ? (input.value + safeText) : safeText;
-        }
-
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-
-        ${
-          autoSubmit && site.submitSelector
-            ? `setTimeout(() => {
-                 const btn = document.querySelector('${site.submitSelector}');
-                 if (btn) btn.click();
-               }, 200);`
-            : ''
-        }
-
-        return JSON.stringify({ success: true });
-      })();
-    `;
+    const script = buildInjectionScript({
+      site,
+      text: finalText,
+      mode: injectMode,
+      strategy: injectStrategy,
+    });
 
     webview
       .executeJavaScript(script)
