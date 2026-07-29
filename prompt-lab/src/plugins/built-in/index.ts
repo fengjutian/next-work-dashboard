@@ -10,6 +10,7 @@ import { KnowledgeGraph } from '@/components/KnowledgeGraph';
 import { NotesPanel } from './notes.plugin';
 import { PluginManagerPanel } from './plugin-manager.plugin';
 import { WereadPanel } from './weread.plugin';
+import { TranslationPanel } from './translation.plugin';
 import { WindyPanel } from './windy.plugin';
 import { TerminalPluginPanel } from './terminal.plugin';
 import { DatabaseBrowser } from '@/components/DatabaseBrowser';
@@ -95,6 +96,14 @@ const builtInPlugins: Plugin[] = [
     component: WereadPanel,
     enabled: false,
     order: 6,
+  },
+  {
+    id: 'translator',
+    name: '百度翻译',
+    icon: Globe,
+    component: TranslationPanel,
+    enabled: false,
+    order: 11,
   },
   {
     id: 'windy',

@@ -1,6 +1,4 @@
 import initSqlJs, { type Database as SqlJsDatabase, type QueryExecResult } from 'sql.js';
-// Vite ?url import — ensures the wasm is served with correct MIME type
-import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { drizzle, type SQLJsDatabase } from 'drizzle-orm/sql-js';
 import { eq, inArray } from 'drizzle-orm';
 import * as schema from './schema';
@@ -13,9 +11,27 @@ let _sqlDb: SqlJsDatabase | null = null;
 // ═══════════════════════════════════════════
 
 export async function initDb(buffer?: ArrayBuffer): Promise<SQLJsDatabase<typeof schema>> {
-  const SQL = await initSqlJs({
-    locateFile: () => sqlWasmUrl,
-  });
+  // 方案 1：尝试从 public/ 目录加载 wasm（Vite 静态资源）
+  // 方案 2：如果失败，回退到 node_modules 路径（Electron file:// 协议下生效）
+  const wasmUrl = '/sql-wasm.wasm';
+  let SQL: Awaited<ReturnType<typeof initSqlJs>>;
+
+  try {
+    // 先尝试直接 fetch wasm binary，绕过 WebAssembly.instantiateStreaming 的 MIME 问题
+    const resp = await fetch(wasmUrl);
+    if (resp.ok) {
+      const wasmBinary = await resp.arrayBuffer();
+      SQL = await initSqlJs({ wasmBinary });
+    } else {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+  } catch {
+    // 回退：尝试 locateFile 方式（适合 file:// 协议）
+    SQL = await initSqlJs({
+      locateFile: (file: string) => `/${file}`,
+    });
+  }
+
   if (buffer && buffer.byteLength > 0) {
     _sqlDb = new SQL.Database(new Uint8Array(buffer));
   } else {

@@ -18,6 +18,7 @@ declare module 'sql.js' {
 
   interface SqlJsConfig {
     locateFile?: (file: string) => string;
+    wasmBinary?: ArrayBuffer;
   }
 
   export type { Database, QueryExecResult, SqlJsStatic, SqlJsConfig };
