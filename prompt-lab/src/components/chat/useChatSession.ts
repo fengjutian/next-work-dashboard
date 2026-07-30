@@ -79,11 +79,11 @@ export function useChatSession() {
   useEffect(() => { providerRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
 
-  // 提示词注入
+  // 提示词注入（仅启用状态的提示词）
   useEffect(() => {
     if (selectedPromptId && promptDrawerOpen === false) {
       const p = prompts.find((pp) => pp.id === selectedPromptId);
-      if (p && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); inputRef.current?.focus(); }
+      if (p && p.enabled !== false && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); inputRef.current?.focus(); }
     }
   }, [selectedPromptId, promptDrawerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 

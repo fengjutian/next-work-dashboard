@@ -1,9 +1,11 @@
-import React from 'react';
-import { Send, Robot, Settings, Trash2, Plus, Download, ChevronDown } from '@/components/icons';
+import React, { useState } from 'react';
+import { Wrench, MessageSquare, Send, Robot, Settings, Trash2, Plus, Download, ChevronDown } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { useChatSession, MODELS } from './chat/useChatSession';
 import { MessageBubble } from './chat/MessageBubble';
+import { ToolManagerDialog } from './chat/ToolManagerDialog';
+import { PromptManagerDialog } from './chat/PromptManagerDialog';
 
 // ── 空状态 ──
 
@@ -25,6 +27,8 @@ export const ChatPanel: React.FC = () => {
   const promptDrawerOpen = useStore((s) => s.promptDrawerOpen);
   const setPromptDrawerOpen = useStore((s) => s.setPromptDrawerOpen);
   const setActiveActivity = useStore((s) => s.setActiveActivity);
+  const [toolManagerOpen, setToolManagerOpen] = useState(false);
+  const [promptManagerOpen, setPromptManagerOpen] = useState(false);
 
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
@@ -64,8 +68,14 @@ export const ChatPanel: React.FC = () => {
             {agentMode ? 'Agent ✓' : 'Agent'}
           </button>
 
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" onClick={() => setToolManagerOpen(true)} title="工具管理">
+            <Wrench className="h-3.5 w-3.5" />
+          </Button>
+
           <Button variant="ghost" size="icon" className={`h-7 w-7 text-[10px] ${sysPromptOpen || systemPrompt ? 'text-blue-500' : 'text-zinc-400'}`} onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词">Sys</Button>
-          <Button variant="ghost" size="sm" className="h-7 text-xs text-zinc-400" onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}>提示词</Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" onClick={() => setPromptManagerOpen(true)} title="提示词管理">
+            <MessageSquare className="h-3.5 w-3.5" />
+          </Button>
           {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-red-500" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>}
           {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400" onClick={handleExport} title="导出 Markdown"><Download className="h-3.5 w-3.5" /></Button>}
           {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400" onClick={() => setActiveActivity('settings')}><Settings className="h-3.5 w-3.5" /></Button>}
@@ -150,6 +160,11 @@ export const ChatPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 工具管理弹层 */}
+      <ToolManagerDialog open={toolManagerOpen} onClose={() => setToolManagerOpen(false)} />
+      {/* 提示词管理弹层 */}
+      <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)} />
     </div>
   );
 };

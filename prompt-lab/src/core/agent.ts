@@ -2,7 +2,7 @@
 // 实现 think → act → observe 循环，直到 LLM 给出最终答案
 
 import type { LLMProvider, ChatMessage } from './llm';
-import { getToolSchemas, executeToolCall } from './tools';
+import { getEnabledToolSchemas, executeToolCall } from './tools';
 import type { ToolCall, ToolResult } from './tools';
 
 // ── 类型 ──
@@ -53,7 +53,7 @@ export async function* runAgent(
   const maxSteps = options.maxSteps ?? 5;
 
   // 构建包含工具定义的 system message
-  const toolSchemas = getToolSchemas();
+  const toolSchemas = getEnabledToolSchemas();
   const toolListText = toolSchemas
     .map((t) => {
       const props = Object.entries(t.function.parameters.properties)

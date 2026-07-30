@@ -15,6 +15,10 @@ export {
   getTool,
   listTools,
   getToolSchemas,
+  getEnabledToolSchemas,
+  setToolEnabled,
+  isToolEnabled,
+  getToolEnabledMap,
   executeToolCall,
 } from './registry';
 

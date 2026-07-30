@@ -15,6 +15,8 @@ export interface Prompt {
   variables: PromptVariable[];
   isFavorite: boolean;
   isPinned: boolean;
+  /** 是否启用，未设置时默认为 true */
+  enabled?: boolean;
   usageCount: number;
   createdAt: number;
   updatedAt: number;
