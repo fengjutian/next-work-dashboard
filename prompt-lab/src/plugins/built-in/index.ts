@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
@@ -11,6 +11,7 @@ import { NotesPanel } from '../notes';
 import { WordPreviewPanel } from '../word-preview';
 import { ExcelPreviewPanel } from '../excel-preview';
 import { PptPreviewPanel } from '../ppt-preview';
+import { ExcalidrawPanel } from '../excalidraw';
 import { PluginManagerPanel } from '../plugin-manager';
 import { WereadPanel } from '../weread';
 import { TranslationPanel } from '../translation';
@@ -155,6 +156,20 @@ const builtInPlugins: Plugin[] = [
       commands: [
         { id: 'ppt-preview.open', title: '打开 PPT 文件', category: 'PPT 演示' },
         { id: 'ppt-preview.export', title: '导出 PPTX', category: 'PPT 演示' },
+      ],
+    },
+  },
+  {
+    id: 'excalidraw',
+    name: 'Excalidraw 白板',
+    icon: Draw,
+    component: ExcalidrawPanel,
+    enabled: true,
+    order: 15,
+    contributions: {
+      commands: [
+        { id: 'excalidraw.export', title: '导出图片', category: 'Excalidraw' },
+        { id: 'excalidraw.clear', title: '清空画布', category: 'Excalidraw' },
       ],
     },
   },

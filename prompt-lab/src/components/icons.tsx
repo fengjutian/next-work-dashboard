@@ -41,6 +41,7 @@ import {
   FaFileWord,
   FaFilePowerpoint,
   FaFileExcel,
+  FaPencil,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -324,4 +325,9 @@ export const Excel: React.FC<IconProps> = ({ className }) => (
 /** PPT 演示文稿 */
 export const Ppt: React.FC<IconProps> = ({ className }) => (
   <FaFilePowerpoint className={className} />
+);
+
+/** Excalidraw 白板绘图 */
+export const Draw: React.FC<IconProps> = ({ className }) => (
+  <FaPencil className={className} />
 );
