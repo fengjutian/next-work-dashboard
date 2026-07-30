@@ -149,7 +149,7 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
       const fn = new Function(
         'exports', 'module', 'require',
         'React', 'XLSX', 'useStore', 'electronAPI', 'injectToAI',
-        code,
+        `//# sourceURL=kernel-${pluginId}.js\n${code}`,
       );
       fn(
         exports, module, require,

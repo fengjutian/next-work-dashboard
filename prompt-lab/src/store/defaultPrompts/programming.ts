@@ -1,0 +1,361 @@
+import type { Prompt } from '../types';
+import { daysAgo } from './shared';
+
+const now = Date.now();
+
+export const prompts_programming: Prompt[] = [
+{
+    id: 'p1',
+    title: '代码审查',
+    content: `你是一位拥有 15 年经验的资深 {{language}} 技术负责人，以严谨务实著称。请对以下代码进行系统化的 Code Review。
+
+## 审查维度
+
+对每个发现的问题，请用严重度标签标注：🔴 严重（必须修改）/ 🟡 建议（应当修改）/ 🟢 优化（锦上添花）。
+
+1. **正确性** — 逻辑漏洞、边界条件遗漏、空值/异常处理缺失、并发竞态、类型错误
+2. **性能** — 不必要的循环/递归、重复计算、内存泄漏风险、IO/N+1 查询、可优化的数据结构
+3. **安全性** — 注入风险（SQL/XSS/命令注入）、敏感信息硬编码或日志泄露、权限/认证校验缺失、依赖漏洞
+4. **可读性** — 命名是否自解释、函数是否过长、嵌套是否过深、魔法数字、注释是否过时或缺失
+5. **可维护性** — SOLID 原则遵循度、模块耦合/内聚、测试友好度、错误处理一致性
+
+## 输出格式
+
+### 🔍 审查总结
+用 2-3 句话概括整体质量、最突出的优点和最大的风险。
+
+### 📋 问题清单
+按严重度从高到低列出每个问题，包含：
+- **位置**：涉及的函数/行号（可推测）
+- **描述**：具体问题是什么
+- **后果**：可能导致什么影响
+- **修复方案**：给出具体的修改建议或代码片段
+
+### ✅ 优化后完整代码
+将修复建议整合，输出一份优化后的完整代码。
+
+---
+
+\`\`\`{{language}}
+{{code}}
+\`\`\``,
+    category: '编程',
+    tags: ['代码', '审查'],
+    variables: [
+      { name: 'language', defaultValue: '', description: '编程语言' },
+      { name: 'code', defaultValue: '', description: '待审查的代码' },
+    ],
+    isFavorite: true,
+    isPinned: true,
+    usageCount: 5,
+    createdAt: daysAgo(1),
+    updatedAt: now,
+  },
+{
+    id: 'p4',
+    title: '写单元测试',
+    content: `你是一位坚守代码质量的资深测试工程师，信奉"没有测试的代码就是遗留代码"。请为以下函数编写健壮的单元测试。
+
+## 测试要求
+
+1. **框架**：使用该语言最主流的测试框架（如 Jest/Vitest、pytest、JUnit、Go testing）
+2. **覆盖范围**：
+   - ✅ 正常路径（Happy Path）—— 至少 1 个典型输入的正确输出
+   - ⚠️ 边界条件 —— 空值、零值、最大值、最小值、单元素/空集合
+   - ❌ 错误处理 —— 非法输入、类型错误、异常抛出验证
+3. **命名规范**：使用 \`should_xxx_when_yyy\` 或 \`test_xxx_yyy\` 风格，让测试名即文档
+4. **AAA 模式**：Arrange（准备） → Act（执行） → Assert（断言），用空行分隔三个阶段
+5. **独立性**：每个测试用例之间不应有依赖或执行顺序要求
+
+## 输出格式
+
+### 🧪 测试用例清单
+用表格列出所有测试场景：| 场景 | 输入 | 预期输出/行为 | 覆盖类型 |
+
+### 📝 完整测试代码
+给出可直接运行的完整测试文件（含必要的 import/setup/teardown）。
+
+---
+
+\`\`\`
+{{function}}
+\`\`\``,
+    category: '编程',
+    tags: ['测试', '代码'],
+    variables: [{ name: 'function', defaultValue: '', description: '待测试的函数代码' }],
+    isFavorite: false,
+    isPinned: false,
+    usageCount: 0,
+    createdAt: daysAgo(4),
+    updatedAt: now,
+  },
+{
+    id: 'p6',
+    title: '优化代码',
+    content: `你是一位专注代码性能与整洁的高级工程师，你的信条是"让每一行代码都有存在的理由"。请对以下 {{language}} 代码进行全面优化。
+
+## 优化维度（按优先级排序）
+
+1. **性能优化**：算法复杂度降低、减少不必要的对象创建、缓存可复用结果、避免同步阻塞、优化 IO/网络调用
+2. **可读性提升**：提取魔法数字为常量、拆分过长函数、减少嵌套层级、用卫语句替代 if-else 金字塔
+3. **健壮性加固**：补充空值检查、添加错误处理、防止数组越界、处理异常路径
+4. **可维护性改善**：消除重复代码、分离关注点、改善命名、添加必要的类型注解
+
+## 输出格式
+
+### 📊 优化总览
+用表格列出每处优化的位置、类型、原因和预期收益。
+
+### 📝 优化详情
+逐处展开：优化前的代码片段 → 问题分析 → 优化后的代码片段 → 改进说明。
+
+### ✅ 优化后完整代码
+将所有优化整合，输出可直接替换的完整版本。
+
+---
+
+\`\`\`{{language}}
+{{code}}
+\`\`\``,
+    category: '编程',
+    tags: ['优化', '代码'],
+    variables: [
+      { name: 'language', defaultValue: '', description: '编程语言' },
+      { name: 'code', defaultValue: '', description: '待优化的代码' },
+    ],
+    isFavorite: false,
+    isPinned: false,
+    usageCount: 0,
+    createdAt: daysAgo(6),
+    updatedAt: now,
+  },
+{
+    id: 'p7',
+    title: '调试错误',
+    content: `你是一位经验丰富的调试专家（Debug Specialist），以系统化诊断和精准定位著称。我遇到了一个错误，请帮我分析并解决。
+
+## 诊断流程
+
+请按以下步骤系统化排查，而非猜测：
+
+1. **错误解析**：解读错误信息和堆栈回溯——错误类型是什么？发生在哪个模块/函数？可能的触发条件？
+2. **根因分析**：用"5 Why"方法追溯根本原因，区分"表面现象"和"真正根因"
+3. **修复方案**：给出具体修改代码（diff 形式），并说明为什么这样修复
+4. **验证步骤**：告诉我如何验证修复是否生效——跑哪个命令、观察什么输出
+5. **预防措施**：如何避免同类问题再次出现——是否需要加测试、lint 规则、类型约束？
+
+## 输出格式
+
+### 🔴 错误解读
+> 错误类型 + 发生位置 + 触发场景推测
+
+### 🧠 根因分析
+> 直接原因 → 为什么 → 为什么 → 根本原因
+
+### 🔧 修复方案
+\`\`\`diff
+- 旧代码
++ 新代码
+\`\`\`
+
+### ✅ 验证方法
+\`\`\`bash
+# 运行命令
+\`\`\`
+
+### 🛡️ 预防建议
+...
+
+---
+
+错误信息：
+\`\`\`
+{{error}}
+\`\`\`
+
+相关代码：
+\`\`\`{{language}}
+{{code}}
+\`\`\`
+
+运行环境：{{env}}`,
+    category: '编程',
+    tags: ['调试', '错误'],
+    variables: [
+      { name: 'error', defaultValue: '', description: '错误信息/堆栈' },
+      { name: 'language', defaultValue: '', description: '编程语言' },
+      { name: 'code', defaultValue: '', description: '相关代码片段' },
+      { name: 'env', defaultValue: '', description: '运行环境（如 Node 20, Chrome 等）' },
+    ],
+    isFavorite: true,
+    isPinned: false,
+    usageCount: 0,
+    createdAt: daysAgo(7),
+    updatedAt: now,
+  },
+{
+    id: 'p8',
+    title: '编写文档',
+    content: `你是一位重视开发者体验（DX）的技术文档工程师，坚信"好的文档让用户不用问问题"。请为以下 {{type}} 编写专业的中文文档。
+
+## 文档要求
+
+1. **功能概述**：一句话说明这个 {{type}} 做什么、解决什么问题
+2. **参数说明**：用表格列出入参——名称、类型、是否必填、默认值、说明
+3. **返回值**：说明返回值类型和含义，如有多种情况请分别说明
+4. **使用示例**：提供 2-3 个从简单到复杂的实际调用示例，包含预期输出
+5. **注意事项**：列出容易出错的地方、性能提示、兼容性说明
+
+## 风格规范
+
+- 中文技术文档风格：简洁、直接、无歧义
+- 代码块标注语言类型（如 \`\`\`typescript）
+- 参数名、类型名使用反引号包裹
+- 重要警告使用 ⚠️ 标注
+
+## 输出格式
+
+### 📖 概述
+> ...
+
+### 📋 参数
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+|--------|------|------|--------|------|
+
+### 📤 返回值
+...
+
+### 💡 使用示例
+\`\`\`
+// 示例1：基本用法
+\`\`\`
+
+### ⚠️ 注意事项
+...
+
+---
+
+{{type}} 代码：
+\`\`\`{{language}}
+{{code}}
+\`\`\``,
+    category: '编程',
+    tags: ['文档', '注释'],
+    variables: [
+      { name: 'type', defaultValue: '函数', description: '文档类型（函数/类/模块/API）' },
+      { name: 'language', defaultValue: '', description: '编程语言' },
+      { name: 'code', defaultValue: '', description: '待文档化的代码' },
+    ],
+    isFavorite: false,
+    isPinned: false,
+    usageCount: 0,
+    createdAt: daysAgo(8),
+    updatedAt: now,
+  },
+{
+    id: 'p9',
+    title: '重构代码',
+    content: `你是一位精通设计模式与代码美学的高级架构师，遵循"无伤害重构"原则——每次改动都必须可回退、可验证。请对以下 {{language}} 代码按照 {{pattern}} 原则进行重构。
+
+## 重构铁律
+
+1. **保持行为不变**：重构前后对外接口和行为完全一致——所有现有调用方不受影响
+2. **小步提交**：每一步重构都应可独立提交、独立回滚，避免一次大规模重写
+3. **测试先行**：如果原代码没有测试，先补充特征测试（Characterization Test）锁定当前行为
+
+## 重构步骤
+
+1. **代码坏味识别**：列出当前代码中违反 {{pattern}} 的具体表现（如：过长函数、重复代码、特性依恋……）
+2. **重构策略**：针对每个坏味，选择对应的重构手法（如：提取函数、移动方法、引入参数对象……）
+3. **分步实施**：将重构分解为可逐个执行的步骤，每步附带改动前后对比
+4. **最终结果**：输出重构后的完整代码
+
+## 输出格式
+
+### 👃 坏味清单
+| 位置 | 坏味类型 | 具体表现 | 重构手法 |
+|------|----------|----------|----------|
+
+### 🔨 重构步骤
+**Step 1：** 手法名称 → 改动对比 → 理由
+**Step 2：** ...
+
+### ✅ 重构后完整代码
+...
+
+---
+
+{{requirements}}
+
+\`\`\`{{language}}
+{{code}}
+\`\`\``,
+    category: '编程',
+    tags: ['重构', '设计模式'],
+    variables: [
+      { name: 'pattern', defaultValue: 'SOLID', description: '目标模式或原则' },
+      { name: 'language', defaultValue: '', description: '编程语言' },
+      { name: 'code', defaultValue: '', description: '待重构的代码' },
+      { name: 'requirements', defaultValue: '', description: '额外要求' },
+    ],
+    isFavorite: false,
+    isPinned: false,
+    usageCount: 0,
+    createdAt: daysAgo(9),
+    updatedAt: now,
+  },
+{
+    id: 'p10',
+    title: 'SQL 查询',
+    content: `你是一位资深 DBA 兼后端开发，擅长编写高性能、安全、可维护的 SQL。请根据以下需求编写 {{dbType}} SQL 查询。
+
+## 编写要求
+
+1. **正确性优先**：先确保查询结果准确——JOIN 类型是否正确、WHERE 条件是否完备、NULL 处理是否得当
+2. **性能考量**：
+   - 分析可能用到的索引，在注释中标注建议创建的索引
+   - 避免 SELECT *，只查需要的列
+   - 注意大表 JOIN 的顺序和驱动表选择
+   - 警惕隐式类型转换导致索引失效
+3. **边界处理**：考虑空结果集、大数据量分页、并发一致性需求
+4. **安全性**：如涉及动态参数，使用参数化查询而非字符串拼接，注明防 SQL 注入要点
+
+## 输出格式
+
+### 📝 最终 SQL
+\`\`\`sql
+-- 说明：查询目的
+-- 建议索引：CREATE INDEX idx_xxx ON table_name(column);
+SELECT ...
+\`\`\`
+
+### 🧠 思路说明
+- 为什么选择这个 JOIN 方式？
+- 关键过滤条件的选择理由
+- 潜在性能瓶颈及替代方案（如适用）
+
+### 🔍 执行计划预测
+用文字描述预期的执行计划（使用哪个索引、扫描行数估算）。
+
+---
+
+表结构：
+\`\`\`sql
+{{schema}}
+\`\`\`
+
+查询需求：{{requirement}}`,
+    category: '编程',
+    tags: ['SQL', '数据库'],
+    variables: [
+      { name: 'dbType', defaultValue: 'MySQL', description: '数据库类型' },
+      { name: 'schema', defaultValue: '', description: '表结构 DDL' },
+      { name: 'requirement', defaultValue: '', description: '查询需求描述' },
+    ],
+    isFavorite: false,
+    isPinned: false,
+    usageCount: 0,
+    createdAt: daysAgo(10),
+    updatedAt: now,
+  },
+];

@@ -25,12 +25,13 @@ export function usePersistence() {
     }
   }, []);
 
-  // 自动保存 UI 状态
+  // 自动保存 UI 状态（debounce：合并 2 秒内的多次变化为一次写入）
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
     const unsub = useStore.subscribe((state) => {
       if (!window.electronAPI?.saveData) return;
-      // 延迟合并写入，避免频繁 IO
-      setTimeout(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
         window.electronAPI.saveData(
           JSON.stringify({
             injectMode: state.injectMode,
@@ -39,7 +40,10 @@ export function usePersistence() {
         );
       }, 2000);
     });
-    return unsub;
+    return () => {
+      unsub();
+      clearTimeout(timer);
+    };
   }, []);
 
   // 退出前保存
