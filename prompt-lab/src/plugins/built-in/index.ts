@@ -2,13 +2,14 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
 import { KnowledgeGraph } from '@/components/KnowledgeGraph';
 import { NotesPanel } from '../notes';
 import { WordPreviewPanel } from '../word-preview';
+import { ExcelPreviewPanel } from '../excel-preview';
 import { PluginManagerPanel } from '../plugin-manager';
 import { WereadPanel } from '../weread';
 import { TranslationPanel } from '../translation';
@@ -125,6 +126,20 @@ const builtInPlugins: Plugin[] = [
       commands: [
         { id: 'word-preview.open', title: '打开 Word 文档', category: 'Word 预览' },
         { id: 'word-preview.close', title: '关闭当前文档', category: 'Word 预览' },
+      ],
+    },
+  },
+  {
+    id: 'excel-preview',
+    name: 'Excel 编辑',
+    icon: Excel,
+    component: ExcelPreviewPanel,
+    enabled: true,
+    order: 13,
+    contributions: {
+      commands: [
+        { id: 'excel-preview.open', title: '打开 Excel 文件', category: 'Excel 编辑' },
+        { id: 'excel-preview.save', title: '保存当前表格', category: 'Excel 编辑' },
       ],
     },
   },

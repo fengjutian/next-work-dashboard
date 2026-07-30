@@ -39,6 +39,7 @@ import {
   FaRobot,
   FaWrench,
   FaFileWord,
+  FaFileExcel,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -312,4 +313,9 @@ export const Wrench: React.FC<IconProps> = ({ className }) => (
 /** Word 文档 */
 export const Word: React.FC<IconProps> = ({ className }) => (
   <FaFileWord className={className} />
+);
+
+/** Excel 表格 */
+export const Excel: React.FC<IconProps> = ({ className }) => (
+  <FaFileExcel className={className} />
 );
