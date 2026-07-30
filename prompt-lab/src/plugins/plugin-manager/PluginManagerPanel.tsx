@@ -1,7 +1,7 @@
 import React from 'react';
 import { Puzzle, Plus, X, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
-import { DynamicPlugin } from './dynamic.plugin';
+import { DynamicPlugin } from '../dynamic';
 import { isDbReady, dbSetSetting } from '@/db';
 import type { Plugin } from '../types';
 import type { PluginPermission, PluginManifest, PluginConfigDeclaration } from '../sandbox/types';

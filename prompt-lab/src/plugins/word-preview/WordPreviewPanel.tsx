@@ -1,70 +1,29 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { FileText, Eye, Upload, X } from '@/components/icons';
+import { FileText, Upload, X } from '@/components/icons';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { INITIAL_PREVIEW_STATE } from './types';
+import { convertDocxToHtml } from './convert';
 
 /**
- * Word Preview 插件 — V1：纯预览模式
+ * Word Preview 插件面板 — V1：纯预览模式
  *
  * 功能：
  *  - 选择本地 .docx 文件
  *  - 拖拽 .docx 文件到预览区
  *  - 使用 mammoth.js 将 docx → HTML
  *  - 文档风格渲染（白色纸张 + 适当宽度）
- *  - 显示文件名、转换状态
  *
- * 依赖：mammoth (MIT)
+ * 依赖：mammoth (MIT) — 通过 convert.ts 动态 import
  */
-
-interface PreviewState {
-  status: 'idle' | 'loading' | 'loaded' | 'error';
-  fileName: string | null;
-  html: string | null;
-  error: string | null;
-}
-
-const initial: PreviewState = {
-  status: 'idle',
-  fileName: null,
-  html: null,
-  error: null,
-};
-
 export const WordPreviewPanel: React.FC = () => {
-  const [state, setState] = useState<PreviewState>(initial);
+  const [state, setState] = useState(INITIAL_PREVIEW_STATE);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadDocx = useCallback(async (file: File) => {
-    if (!file.name.endsWith('.docx')) {
-      setState({ status: 'error', fileName: file.name, html: null, error: '仅支持 .docx 格式文件' });
-      return;
-    }
-
     setState({ status: 'loading', fileName: file.name, html: null, error: null });
-
-    try {
-      const mammoth: any = await import('mammoth');
-      const arrayBuffer = await file.arrayBuffer();
-      const result = await mammoth.convertToHtml({ arrayBuffer });
-
-      if (result.messages.length > 0) {
-        console.warn('[WordPreview] mammoth conversion messages:', result.messages);
-      }
-
-      setState({
-        status: 'loaded',
-        fileName: file.name,
-        html: result.value,
-        error: null,
-      });
-    } catch (err: any) {
-      setState({
-        status: 'error',
-        fileName: file.name,
-        html: null,
-        error: err?.message ?? '文件解析失败，请确认文件格式正确',
-      });
-    }
+    const result = await convertDocxToHtml(file);
+    setState(result);
   }, []);
 
   // 文件选择
@@ -72,8 +31,7 @@ export const WordPreviewPanel: React.FC = () => {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) loadDocx(file);
-      // 重置以允许重复选择同一文件
-      e.target.value = '';
+      e.target.value = ''; // 重置以允许重复选择同一文件
     },
     [loadDocx],
   );
@@ -102,9 +60,8 @@ export const WordPreviewPanel: React.FC = () => {
     [loadDocx],
   );
 
-  // 清除
   const clear = useCallback(() => {
-    setState(initial);
+    setState(INITIAL_PREVIEW_STATE);
   }, []);
 
   return (
