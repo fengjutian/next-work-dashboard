@@ -2,12 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
 import { createOpenAIProvider, registerTools, runAgent } from '@/core';
 import { builtInTools } from '@/core/tools';
+import { pluginTools } from '@/core/tools/plugin-tools';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 
 // ── 一次性工具注册 ──
 let toolsRegistered = false;
-if (!toolsRegistered) { registerTools(builtInTools); toolsRegistered = true; }
+if (!toolsRegistered) { registerTools(builtInTools); registerTools(pluginTools); toolsRegistered = true; }
 
 // ── 模型列表 ──
 export const MODELS = [

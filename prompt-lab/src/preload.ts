@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),
 
+  // 按路径读取文件（供 AI 工具使用）
+  readFileBuffer: (filePath: string) =>
+    ipcRenderer.invoke('dialog:readFileBuffer', filePath),
+
   // ── Token 安全存储 ──
   auth: {
     isAvailable: () => ipcRenderer.invoke('auth:is-available'),

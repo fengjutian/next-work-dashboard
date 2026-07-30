@@ -313,6 +313,44 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  // ── 按路径读取文件（供 AI 工具使用） ──
+  ipcMain.handle('dialog:readFileBuffer', async (_event, filePath: string) => {
+    try {
+      const resolved = path.resolve(filePath);
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: '文件不存在' };
+      }
+      const buf = fs.readFileSync(resolved);
+      const ext = path.extname(resolved).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xls': 'application/vnd.ms-excel',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.pdf': 'application/pdf',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.json': 'application/json',
+        '.csv': 'text/csv',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+      };
+      return {
+        success: true,
+        data: buf.toString('base64'),
+        mimeType: mimeMap[ext] ?? 'application/octet-stream',
+        name: path.basename(resolved),
+        size: buf.length,
+      };
+    } catch (err: any) {
+      return { success: false, error: String(err?.message ?? err) };
+    }
+  });
+
   // ── 文件对话框 ──
   ipcMain.handle('dialog:pickFile', async (_event, options?: { accept?: string; multiple?: boolean }) => {
     try {

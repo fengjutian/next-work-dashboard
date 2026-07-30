@@ -19,3 +19,4 @@ export {
 } from './registry';
 
 export { builtInTools } from './builtin';
+export { pluginTools } from './plugin-tools';
