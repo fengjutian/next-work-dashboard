@@ -41,6 +41,7 @@ import {
   FaFileWord,
   FaFilePowerpoint,
   FaFileExcel,
+  FaFilePdf,
   FaPencil,
 } from 'react-icons/fa6';
 
@@ -330,4 +331,9 @@ export const Ppt: React.FC<IconProps> = ({ className }) => (
 /** Excalidraw 白板绘图 */
 export const Draw: React.FC<IconProps> = ({ className }) => (
   <FaPencil className={className} />
+);
+
+/** PDF 文件 */
+export const Pdf: React.FC<IconProps> = ({ className }) => (
+  <FaFilePdf className={className} />
 );
