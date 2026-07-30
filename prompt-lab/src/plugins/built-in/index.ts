@@ -2,12 +2,13 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
 import { KnowledgeGraph } from '@/components/KnowledgeGraph';
 import { NotesPanel } from './notes.plugin';
+import { WordPreviewPanel } from './word-preview.plugin';
 import { PluginManagerPanel } from './plugin-manager.plugin';
 import { WereadPanel } from './weread.plugin';
 import { TranslationPanel } from './translation.plugin';
@@ -112,6 +113,20 @@ const builtInPlugins: Plugin[] = [
     component: WindyPanel,
     enabled: false,
     order: 7,
+  },
+  {
+    id: 'word-preview',
+    name: 'Word 预览',
+    icon: Word,
+    component: WordPreviewPanel,
+    enabled: true,
+    order: 12,
+    contributions: {
+      commands: [
+        { id: 'word-preview.open', title: '打开 Word 文档', category: 'Word 预览' },
+        { id: 'word-preview.close', title: '关闭当前文档', category: 'Word 预览' },
+      ],
+    },
   },
   {
     id: 'plugin-manager',

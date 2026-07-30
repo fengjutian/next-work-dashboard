@@ -38,6 +38,7 @@ import {
   FaDatabase,
   FaRobot,
   FaWrench,
+  FaFileWord,
 } from 'react-icons/fa6';
 
 // ── Heroicons v2 (outline / 线性) ──
@@ -306,4 +307,9 @@ export const Robot: React.FC<IconProps> = ({ className }) => (
 
 export const Wrench: React.FC<IconProps> = ({ className }) => (
   <FaWrench className={className} />
+);
+
+/** Word 文档 */
+export const Word: React.FC<IconProps> = ({ className }) => (
+  <FaFileWord className={className} />
 );

@@ -9,7 +9,7 @@ import {
   dbInsertPrompt, dbUpdatePrompt, dbDeletePrompt, dbBatchDeletePrompts,
   dbInsertSite, dbUpdateSite,
   dbInsertInjectHistory,
-  dbGetSetting, dbSetSetting,
+  dbGetSetting, dbSetSetting, flushDbToDisk,
 } from '@/db';
 
 // ── Store 类型 ──
@@ -216,6 +216,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ injectMode: mode });
     if (isDbReady()) {
       try { dbSetSetting('injectMode', mode); } catch { /* ignore */ }
+      flushDbToDisk();
     }
   },
   injectStrategy: 'replace',
@@ -223,6 +224,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ injectStrategy: strategy });
     if (isDbReady()) {
       try { dbSetSetting('injectStrategy', strategy); } catch { /* ignore */ }
+      flushDbToDisk();
     }
   },
   lastInjectResult: null,
@@ -238,6 +240,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ theme });
     if (isDbReady()) {
       try { dbSetSetting('theme', theme); } catch { /* ignore */ }
+      flushDbToDisk();
     }
   },
   userCategories: [],
@@ -248,6 +251,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ userCategories: next });
     if (isDbReady()) {
       try { dbSetSetting('userCategories', JSON.stringify(next)); } catch { /* ignore */ }
+      flushDbToDisk();
     }
   },
 
@@ -269,6 +273,7 @@ export const useStore = create<AppState>((set, get) => ({
       const next = { ...s.aiApi, ...patch };
       if (isDbReady()) {
         try { dbSetSetting('aiApi', JSON.stringify(next)); } catch { /* ignore */ }
+        flushDbToDisk();
       }
       return { aiApi: next };
     });

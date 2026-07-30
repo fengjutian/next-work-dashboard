@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { initDb, exportDb, isDbReady } from '@/db';
+import { initDb, isDbReady, flushDbToDisk } from '@/db';
 import { useStore } from '@/store';
 
 let _initialized = false;
@@ -46,29 +46,17 @@ export function useDbPersistence() {
       } catch { /* 恢复失败不阻塞启动 */ }
     })();
 
-    // 定期自动保存（每 30 秒）
+    // 定期自动保存（每 30 秒，作为安全网）
     const interval = setInterval(async () => {
-      try {
-        if (!isDbReady()) return;
-        const data = exportDb();
-        if (window.electronAPI?.db?.save) {
-          await window.electronAPI.db.save(data.buffer);
-        }
-      } catch { /* ignore */ }
+      await flushDbToDisk();
     }, 30000);
 
     // 退出前保存
-    const beforeUnload = async () => {
-      try {
-        if (!isDbReady()) return;
-        const data = exportDb();
-        if (window.electronAPI?.db?.save) {
-          await window.electronAPI.db.save(data.buffer);
-        }
-      } catch { /* ignore */ }
+    const beforeUnload = () => {
+      flushDbToDisk();
     };
     window.addEventListener('beforeunload', beforeUnload);
-    const cleanup = window.electronAPI?.onSaveBeforeQuit?.(beforeUnload as () => void);
+    const cleanup = window.electronAPI?.onSaveBeforeQuit?.(beforeUnload);
 
     return () => {
       clearInterval(interval);

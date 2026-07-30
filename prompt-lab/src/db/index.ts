@@ -285,3 +285,20 @@ export function getTableInfo(): Array<{ table: string; columns: Array<{ name: st
   }
   return tables;
 }
+
+// ═══════════════════════════════════════════
+// 持久化到磁盘（立即 flush）
+// ═══════════════════════════════════════════
+
+/** 将内存中的 SQLite DB 立即写入磁盘文件。在关键设置变更后调用，避免依赖定时器/quit 时机。 */
+export async function flushDbToDisk(): Promise<void> {
+  if (!_sqlDb) return;
+  try {
+    const data = _sqlDb.export();
+    // 通过 electronAPI 写入磁盘（仅在 Electron 渲染进程下可用）
+    const win = window as unknown as { electronAPI?: { db?: { save?: (buf: ArrayBuffer) => Promise<unknown> } } };
+    if (win.electronAPI?.db?.save) {
+      await win.electronAPI.db.save(data.buffer);
+    }
+  } catch { /* 静默失败 — 下次定时器仍会保存 */ }
+}
