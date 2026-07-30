@@ -39,6 +39,7 @@ import {
   FaRobot,
   FaWrench,
   FaFileWord,
+  FaFilePowerpoint,
   FaFileExcel,
 } from 'react-icons/fa6';
 
@@ -318,4 +319,9 @@ export const Word: React.FC<IconProps> = ({ className }) => (
 /** Excel 表格 */
 export const Excel: React.FC<IconProps> = ({ className }) => (
   <FaFileExcel className={className} />
+);
+
+/** PPT 演示文稿 */
+export const Ppt: React.FC<IconProps> = ({ className }) => (
+  <FaFilePowerpoint className={className} />
 );
