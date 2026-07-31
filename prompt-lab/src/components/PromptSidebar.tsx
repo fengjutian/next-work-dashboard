@@ -110,7 +110,7 @@ const PromptCard: React.FC<{
           >
             <Pin
               className={`h-3.5 w-3.5 ${
-                prompt.isPinned ? 'text-amber-500 fill-amber-500' : 'text-foreground'
+                prompt.isPinned ? 'text-warning fill-amber-500' : 'text-foreground'
               }`}
             />
           </button>
@@ -121,7 +121,7 @@ const PromptCard: React.FC<{
           >
             <Star
               className={`h-3.5 w-3.5 ${
-                prompt.isFavorite ? 'text-amber-500 fill-amber-500' : 'text-foreground'
+                prompt.isFavorite ? 'text-warning fill-amber-500' : 'text-foreground'
               }`}
             />
           </button>
@@ -157,14 +157,14 @@ const PromptCard: React.FC<{
             <Edit3 className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           <button
-            className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+            className="p-1 rounded hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               if (confirm('确定删除？')) deletePrompt(prompt.id);
             }}
             title="删除"
           >
-            <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-red-500" />
+            <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
           </button>
         </div>
       </div>
@@ -411,7 +411,7 @@ export const PromptSidebar: React.FC = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 text-red-500"
+              className="h-6 w-6 text-destructive"
               onClick={() => {
                 if (confirm(`确定删除 ${selectedIds.size} 条提示词？`)) {
                   batchDeletePrompts([...selectedIds]);

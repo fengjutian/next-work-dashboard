@@ -138,7 +138,7 @@ export const PluginManagerPanel: React.FC = () => {
       <div className="px-4 py-2 border-t text-[11px] text-muted-foreground flex items-center justify-between">
         <span>禁用插件会从左侧栏和主内容区隐藏，数据不丢失 · 悬停卡片显示导出/删除</span>
         <span className="flex items-center gap-1">
-          <Blocks className="h-3 w-3 text-green-500" />
+          <Blocks className="h-3 w-3 text-success" />
           绿色图标 = 自定义插件
         </span>
       </div>
@@ -173,14 +173,14 @@ const PluginCard: React.FC<PluginCardProps> = ({
     className={`relative flex flex-col items-center gap-3 p-4 rounded-xl border transition-all group ${
       plugin.enabled
         ? 'border-border bg-card hover:shadow-md'
-        : 'border-border border-border bg-background/50 opacity-60'
+        : 'border-border bg-background/50 opacity-60'
     }`}
   >
     {/* 删除/导出按钮 — 仅用户插件 */}
     {isUserPlugin && (
       <>
         <button
-          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-all"
+          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
           onClick={() => onDelete(plugin.id)}
           title="删除插件"
         >
@@ -200,7 +200,7 @@ const PluginCard: React.FC<PluginCardProps> = ({
     <div className="absolute top-2 right-2">
       <button
         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
-          plugin.enabled ? 'bg-primary' : 'bg-zinc-300 dark:bg-zinc-600'
+          plugin.enabled ? 'bg-primary' : 'bg-input'
         }`}
         onClick={() => onToggle(plugin.id)}
         title={plugin.enabled ? '点击禁用' : '点击启用'}
@@ -217,8 +217,8 @@ const PluginCard: React.FC<PluginCardProps> = ({
     <div className={`p-3 rounded-xl ${
       plugin.enabled
         ? isUserPlugin
-          ? 'bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400'
-          : 'bg-primary-light bg-primary-light text-primary'
+          ? 'bg-success/10 bg-success/10 text-success text-success'
+          : 'bg-primary-light text-primary'
         : 'bg-muted text-muted-foreground'
     }`}>
       <Icon className="h-7 w-7" />
@@ -244,7 +244,7 @@ const PluginCard: React.FC<PluginCardProps> = ({
     {/* 类型标签 */}
     <div className="flex items-center gap-1">
       {isKernelPlugin && (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 font-medium">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/10 bg-warning/10 text-warning text-warning font-medium">
           <ShieldCheck className="h-2.5 w-2.5 inline mr-0.5" />
           内核
         </span>
@@ -256,12 +256,12 @@ const PluginCard: React.FC<PluginCardProps> = ({
         </span>
       )}
       {isUserPlugin && !isScriptPlugin && (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400 font-medium">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 bg-success/10 text-success text-success font-medium">
           自定义
         </span>
       )}
       {plugin.enabled ? (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-light bg-primary-light text-primary font-medium">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-light text-primary font-medium">
           已启用
         </span>
       ) : (

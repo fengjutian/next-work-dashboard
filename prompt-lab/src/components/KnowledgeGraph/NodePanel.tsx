@@ -26,7 +26,7 @@ const NodeTag: React.FC<NodeTagProps> = ({ node, onRemove }) => {
     >
       {node.label}
       <button
-        className="hover:text-red-500 transition-colors"
+        className="hover:text-destructive transition-colors"
         onClick={() => onRemove(node.id)}
         title="删除"
       >

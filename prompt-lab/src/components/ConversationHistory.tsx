@@ -20,9 +20,9 @@ const FileItem: React.FC<{
 
   return (
     <div
-      className={`group flex items-center gap-2 px-3 py-2 cursor-pointer text-xs border-b border-border border-border transition-colors ${
+      className={`group flex items-center gap-2 px-3 py-2 cursor-pointer text-xs border-b border-border transition-colors ${
         isActive
-          ? 'bg-primary-light bg-primary-light text-primary'
+          ? 'bg-primary-light text-primary'
           : 'hover:bg-background dark:hover:bg-muted/50 text-muted-foreground'
       }`}
       onClick={onClick}
@@ -40,7 +40,7 @@ const FileItem: React.FC<{
       </div>
       {showDelete && (
         <button
-          className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-muted-foreground hover:text-red-500 flex-shrink-0"
+          className="p-0.5 rounded hover:bg-destructive/10 dark:hover:bg-destructive/10 text-muted-foreground hover:text-destructive flex-shrink-0"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();

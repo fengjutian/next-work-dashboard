@@ -189,7 +189,7 @@ export const CommandPalette: React.FC = () => {
         <div className="flex-1 overflow-y-auto py-1">
           {/* 非命令模式 + 空查询 + 有命令时：提示输入 > */}
           {!isCommandMode && query === '' && allCommands.length > 0 && (
-            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border border-border">
+            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border">
               输入 <code className="text-primary bg-primary-light px-1 py-0.5 rounded">{'>'}</code> 查看全部插件命令
             </div>
           )}
@@ -211,7 +211,7 @@ export const CommandPalette: React.FC = () => {
                 onClick={() => handleCommandSelect(cmd)}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
-                <span className="text-amber-500 shrink-0">⚡</span>
+                <span className="text-warning shrink-0">⚡</span>
                 <span className="flex-1 truncate">{cmd.title}</span>
                 {cmd.category && (
                   <span className="text-[10px] text-muted-foreground shrink-0">{cmd.category}</span>
@@ -238,7 +238,7 @@ export const CommandPalette: React.FC = () => {
                 <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
                   {prompt.category}
                 </span>
-                {prompt.isFavorite && <span className="text-amber-500 text-xs">★</span>}
+                {prompt.isFavorite && <span className="text-warning text-xs">★</span>}
               </div>
             ))
           )}

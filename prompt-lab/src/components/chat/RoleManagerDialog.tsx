@@ -220,7 +220,7 @@ export const RoleManagerDialog: React.FC<{
                     key={role.id}
                     className={`rounded-lg border transition-colors ${
                       isActive
-                        ? 'border-primary border-primary bg-primary-light bg-primary-light'
+                        ? 'border-primary bg-primary-light'
                         : 'border-transparent bg-background bg-muted/30 hover:bg-accent/50'
                     }`}
                   >
@@ -274,7 +274,7 @@ export const RoleManagerDialog: React.FC<{
                               deleteRole(role.id);
                             }
                           }}
-                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500"
+                          className="p-1.5 rounded-lg hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive"
                           title="删除角色"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

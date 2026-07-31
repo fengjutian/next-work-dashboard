@@ -25,13 +25,13 @@ interface EntityItemProps {
 const EntityItem: React.FC<EntityItemProps> = ({ entity, checked, alreadyExists, onToggle }) => {
   const confidencePct = Math.round(entity.relevance * 100);
   const confidenceColor =
-    confidencePct >= 80 ? 'text-emerald-500' :
-    confidencePct >= 50 ? 'text-amber-500' : 'text-red-400';
+    confidencePct >= 80 ? 'text-success' :
+    confidencePct >= 50 ? 'text-warning' : 'text-destructive';
 
   return (
     <label
       className={`flex items-center gap-2 px-2 py-1 cursor-pointer text-xs rounded transition-colors hover:bg-accent ${
-        checked ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'
+        checked ? 'text-success text-success' : 'text-muted-foreground'
       } ${alreadyExists ? 'opacity-50' : ''}`}
     >
       <input
@@ -205,7 +205,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
           </div>
           <div className="px-2 py-1 border-t border-border">
             <button
-              className="w-full h-6 text-[11px] rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-50"
+              className="w-full h-6 text-[11px] rounded bg-success hover:bg-success text-white transition-colors disabled:opacity-50"
               disabled={checkedSet.size === 0}
               onClick={handleAddToGraph}
             >

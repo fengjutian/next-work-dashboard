@@ -168,7 +168,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                插件名称 <span className="text-red-400">*</span>
+                插件名称 <span className="text-destructive">*</span>
               </label>
               <input
                 className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary"
@@ -267,7 +267,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                 <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1">
                   <Code className="h-3.5 w-3.5" />
                   JavaScript 脚本
-                  <span className="text-red-400">*</span>
+                  <span className="text-destructive">*</span>
                 </label>
                 <textarea
                   className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-primary resize-none"
@@ -323,7 +323,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                       >
                         <input
                           type="checkbox"
-                          className="mt-0.5 h-3.5 w-3.5 accent-blue-500"
+                          className="mt-0.5 h-3.5 w-3.5 accent-primary"
                           checked={checked}
                           onChange={() => togglePermission(perm as PluginPermission)}
                         />
@@ -345,14 +345,14 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
           {activeTab === 'kernel' && (
             <>
               {/* 安全警告 */}
-              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-800">
+              <div className="p-3 rounded-lg border border-warning bg-warning/10 bg-warning/10 border-warning">
                 <div className="flex items-center gap-2 mb-1">
-                  <ShieldCheck className="h-4 w-4 text-amber-600" />
-                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  <ShieldCheck className="h-4 w-4 text-warning" />
+                  <span className="text-xs font-semibold text-warning text-warning">
                     系统级权限
                   </span>
                 </div>
-                <p className="text-[11px] text-amber-600 dark:text-amber-500 leading-relaxed">
+                <p className="text-[11px] text-warning text-warning leading-relaxed">
                   内核插件直接注入 React 树，可以访问完整的 Node.js API、Electron API 和文件系统。
                   仅安装来自可信来源的内核插件。
                 </p>
@@ -363,10 +363,10 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                 <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1">
                   <Code className="h-3.5 w-3.5" />
                   React 组件源码（IIFE/UMD）
-                  <span className="text-red-400">*</span>
+                  <span className="text-destructive">*</span>
                 </label>
                 <textarea
-                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-amber-400 resize-none"
+                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-warning resize-none"
                   rows={12}
                   placeholder={"// 支持 JSX，Babel 自动编译\n// 可用: React, XLSX, useStore, electronAPI, injectToAI\n\nconst { useState } = React;\n\nfunction ExcelReader() {\n  const [data, setData] = useState(null);\n\n  const loadExcel = async () => {\n    const result = await electronAPI.pickFile({ accept: '.xlsx' });\n    if (!result) return;\n    const wb = XLSX.read(result.content, { type: 'base64' });\n    const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);\n    setData(json);\n  };\n\n  const injectData = async () => {\n    if (!data) return;\n    const text = data.map(r => Object.values(r).join('\\t')).join('\\n');\n    await injectToAI('deepseek', '请分析以下 Excel 数据:\\n' + text, false);\n  };\n\n  return (\n    <div style={{padding:16}}>\n      <button onClick={loadExcel}\n        style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'#fff',border:'none',cursor:'pointer'}}>\n        打开 Excel\n      </button>\n      {data && <>\n        <button onClick={injectData}\n          style={{marginLeft:8,padding:'6px 14px',borderRadius:8,background:'#10b981',color:'#fff',border:'none',cursor:'pointer'}}>\n          注入到 AI\n        </button>\n        <pre style={{marginTop:12,fontSize:12,maxHeight:400,overflow:'auto'}}>\n          {JSON.stringify(data.slice(0,5), null, 2)}\n        </pre>\n      </>}\n    </div>\n  );\n}\n\nmodule.exports = ExcelReader;"}
                   value={formBundle}
@@ -381,7 +381,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
               {/* 或从文件加载 */}
               <button
-                className="w-full py-2 text-xs font-medium text-muted-foreground border border-dashed border-input rounded-lg hover:border-amber-400 hover:text-amber-600 transition-colors"
+                className="w-full py-2 text-xs font-medium text-muted-foreground border border-dashed border-input rounded-lg hover:border-warning hover:text-warning transition-colors"
                 onClick={() => {
                   const input = document.createElement('input');
                   input.type = 'file';

@@ -8,9 +8,9 @@ import { useStore } from '@/store';
 // 根据站点 ID 取色，保证同一站点颜色一致
 const SITE_COLORS = [
   'bg-primary-light text-primary bg-primary-light text-primary',
-  'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+  'bg-success/10 text-success bg-success/10 text-success',
   'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-  'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
+  'bg-warning/10 text-warning bg-warning/10 text-warning',
   'bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300',
   'bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-300',
   'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300',

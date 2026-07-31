@@ -17,7 +17,7 @@ export const SiteRow: React.FC<{
       <div className="flex items-center gap-2 px-3 py-2">
         <button
           className={`w-2.5 h-2.5 rounded-full flex-shrink-0 transition-colors ${
-            site.enabled ? 'bg-green-500' : 'bg-zinc-300 dark:bg-zinc-600'
+            site.enabled ? 'bg-success' : 'bg-input'
           }`}
           onClick={() => onUpdate({ enabled: !site.enabled })}
           title={site.enabled ? '已启用，点击禁用' : '已禁用，点击启用'}
@@ -32,7 +32,7 @@ export const SiteRow: React.FC<{
           {expanded ? '收起' : '编辑'}
         </button>
         <button
-          className="text-red-400 hover:text-red-600 transition-colors"
+          className="text-destructive hover:text-destructive transition-colors"
           onClick={onDelete}
         >
           <Trash2 className="h-3.5 w-3.5" />

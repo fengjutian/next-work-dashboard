@@ -37,8 +37,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             key={t.id}
             className={`pointer-events-auto flex items-center gap-2 px-3 py-2 rounded-md shadow-lg text-sm animate-in slide-in-from-right ${
               t.type === 'success'
-                ? 'bg-green-600 text-white'
-                : 'bg-red-600 text-white'
+                ? 'bg-success text-white'
+                : 'bg-destructive text-white'
             }`}
           >
             {t.type === 'success' ? (

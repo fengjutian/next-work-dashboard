@@ -226,7 +226,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
       {/* 图例浮层 */}
       <div className="absolute bottom-3 left-3 z-10 bg-white/90 bg-muted/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-sm text-[10px] text-muted-foreground space-y-1">
         <div className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-zinc-300" /> 节点大小 = 关联强度
+          <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/40" /> 节点大小 = 关联强度
         </div>
         <div className="flex items-center gap-1.5">
           <svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke="#94a3b8" strokeWidth="3" opacity="0.4"/></svg>

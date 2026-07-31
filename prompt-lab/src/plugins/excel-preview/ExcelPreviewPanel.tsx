@@ -259,7 +259,7 @@ export const ExcelPreviewPanel: React.FC = () => {
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b">
         <div className="flex items-center gap-2">
-          <FileText className="h-5 w-5 text-green-600" />
+          <FileText className="h-5 w-5 text-success" />
           <h2 className="font-semibold text-sm text-foreground">
             Excel 编辑
           </h2>
@@ -289,7 +289,7 @@ export const ExcelPreviewPanel: React.FC = () => {
           />
           <button
             onClick={handleOpen}
-            className="inline-flex items-center gap-1.5 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-md bg-success px-3 py-1.5 text-xs font-medium text-white hover:bg-success transition-colors"
           >
             <Upload className="h-3.5 w-3.5" />
             打开文件
@@ -306,10 +306,10 @@ export const ExcelPreviewPanel: React.FC = () => {
       >
         {/* 拖拽提示 */}
         {dragOver && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-green-500/10 border-2 border-dashed border-green-400 rounded-lg m-4">
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-success/10 border-2 border-dashed border-success rounded-lg m-4">
             <div className="text-center">
-              <Upload className="h-10 w-10 text-green-500 mx-auto mb-2" />
-              <p className="text-sm text-green-600 dark:text-green-400 font-medium">释放以打开文件</p>
+              <Upload className="h-10 w-10 text-success mx-auto mb-2" />
+              <p className="text-sm text-success text-success font-medium">释放以打开文件</p>
             </div>
           </div>
         )}
@@ -323,7 +323,7 @@ export const ExcelPreviewPanel: React.FC = () => {
               <p className="text-xs text-muted-foreground mb-4">支持 .xlsx、.xls、.csv 格式</p>
               <button
                 onClick={handleOpen}
-                className="inline-flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-md bg-success px-4 py-2 text-sm font-medium text-white hover:bg-success transition-colors"
               >
                 <Upload className="h-4 w-4" />
                 选择文件
@@ -336,7 +336,7 @@ export const ExcelPreviewPanel: React.FC = () => {
         {state.status === 'loading' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <Loader2 className="h-8 w-8 text-green-500 mx-auto mb-3" />
+              <Loader2 className="h-8 w-8 text-success mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">正在解析表格...</p>
               <p className="text-xs text-muted-foreground mt-1">{state.fileName}</p>
             </div>
@@ -347,8 +347,8 @@ export const ExcelPreviewPanel: React.FC = () => {
         {state.status === 'error' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
-              <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
-              <p className="text-sm text-red-600 font-medium mb-1">解析失败</p>
+              <X className="h-12 w-12 text-destructive mx-auto mb-3" />
+              <p className="text-sm text-destructive font-medium mb-1">解析失败</p>
               <p className="text-xs text-muted-foreground mb-2">{state.error}</p>
               {state.fileName && <p className="text-xs text-muted-foreground mb-4">文件：{state.fileName}</p>}
               <button
@@ -399,7 +399,7 @@ export const ExcelPreviewPanel: React.FC = () => {
         <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-muted-foreground bg-background">
           <span>
             {activeSheet.rowCount} 行 × {activeSheet.colCount} 列
-            {state.dirty && <span className="text-amber-500 ml-2">未保存</span>}
+            {state.dirty && <span className="text-warning ml-2">未保存</span>}
           </span>
           <span>{activeSheet.name} — Sheet {state.activeSheetIndex + 1}/{state.sheets.length}</span>
         </div>

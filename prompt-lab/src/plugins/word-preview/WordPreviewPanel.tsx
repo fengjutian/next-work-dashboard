@@ -157,8 +157,8 @@ export const WordPreviewPanel: React.FC = () => {
         {state.status === 'error' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
-              <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
-              <p className="text-sm text-red-600 font-medium mb-1">预览失败</p>
+              <X className="h-12 w-12 text-destructive mx-auto mb-3" />
+              <p className="text-sm text-destructive font-medium mb-1">预览失败</p>
               <p className="text-xs text-muted-foreground mb-2">{state.error}</p>
               {state.fileName && (
                 <p className="text-xs text-muted-foreground mb-4">文件：{state.fileName}</p>

@@ -67,7 +67,7 @@ export const SaveConversationPanel: React.FC<Props> = ({
         {/* 标题 */}
         <div>
           <label className="text-xs text-muted-foreground block mb-1">
-            标题 <span className="text-red-400">*</span>
+            标题 <span className="text-destructive">*</span>
           </label>
           <input
             type="text"

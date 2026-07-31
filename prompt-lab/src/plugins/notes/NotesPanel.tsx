@@ -74,7 +74,7 @@ export const NotesPanel: React.FC = () => {
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
-          <StickyNote className="h-5 w-5 text-yellow-500" />
+          <StickyNote className="h-5 w-5 text-warning" />
           <h2 className="font-semibold text-sm text-foreground">
             便签
           </h2>
@@ -100,7 +100,7 @@ export const NotesPanel: React.FC = () => {
                   key={note.id}
                   role="button"
                   tabIndex={0}
-                  className={`w-full text-left px-3 py-2 text-sm border-b border-border border-border transition-colors group cursor-pointer ${
+                  className={`w-full text-left px-3 py-2 text-sm border-b border-border transition-colors group cursor-pointer ${
                     selectedId === note.id
                       ? 'bg-primary-light text-primary'
                       : 'hover:bg-background dark:hover:bg-background text-foreground'
@@ -113,7 +113,7 @@ export const NotesPanel: React.FC = () => {
                       {note.title || '未命名'}
                     </span>
                     <button
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-opacity"
+                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteNote(note.id);

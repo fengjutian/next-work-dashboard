@@ -28,7 +28,7 @@ const CodeBlock: React.FC<{ code: string; lang?: string }> = ({ code, lang }) =>
       <div className="flex items-center justify-between px-3 py-1.5 bg-muted">
         <span className="text-[10px] text-muted-foreground uppercase">{lang || 'text'}</span>
         <button className="text-muted-foreground hover:text-foreground" onClick={async () => { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
-          {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
+          {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
         </button>
       </div>
       <pre className="p-3 overflow-x-auto text-xs text-foreground font-mono leading-relaxed"><code>{code}</code></pre>
@@ -39,17 +39,17 @@ const CodeBlock: React.FC<{ code: string; lang?: string }> = ({ code, lang }) =>
 // ── 工具调用卡片 ──
 
 export const ToolCallCard: React.FC<{ calls: ToolCall[]; results?: ToolResult[] }> = ({ calls, results }) => (
-  <div className="my-2 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+  <div className="my-2 rounded-md border border-warning border-warning bg-warning/10 bg-warning/10">
     {calls.map((call) => {
       const result = results?.find((r) => r.callId === call.id);
       return (
-        <div key={call.id} className="px-3 py-2 border-b border-amber-200 dark:border-amber-800 last:border-b-0">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+        <div key={call.id} className="px-3 py-2 border-b border-warning border-warning last:border-b-0">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-warning text-warning">
             <Wrench className="h-3 w-3" /> {call.name}
-            {result && !result.error && <Check className="h-3 w-3 text-green-500" />}
+            {result && !result.error && <Check className="h-3 w-3 text-success" />}
           </div>
-          <div className="mt-1 text-[10px] text-amber-600 dark:text-amber-500 font-mono">{JSON.stringify(call.arguments)}</div>
-          {result && <div className={`mt-1 text-[10px] whitespace-pre-wrap break-all ${result.error ? 'text-red-500' : 'text-muted-foreground'}`}>{result.error ? `❌ ${result.error}` : result.output}</div>}
+          <div className="mt-1 text-[10px] text-warning text-warning font-mono">{JSON.stringify(call.arguments)}</div>
+          {result && <div className={`mt-1 text-[10px] whitespace-pre-wrap break-all ${result.error ? 'text-destructive' : 'text-muted-foreground'}`}>{result.error ? `❌ ${result.error}` : result.output}</div>}
         </div>
       );
     })}
@@ -102,10 +102,10 @@ export const MessageBubble: React.FC<{
 
   return (
     <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''} mb-4 group`}>
-      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isUser ? 'bg-primary text-white' : isTool ? 'bg-amber-500 text-white' : 'bg-emerald-500 text-white'}`}>
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isUser ? 'bg-primary text-white' : isTool ? 'bg-warning text-white' : 'bg-success text-white'}`}>
         {isUser ? <span className="text-xs font-bold">U</span> : isTool ? <Wrench className="h-3.5 w-3.5" /> : <Robot className="h-3.5 w-3.5" />}
       </div>
-      <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${isUser ? 'bg-primary text-white' : isTool ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800' : 'bg-muted text-foreground'}`}>
+      <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${isUser ? 'bg-primary text-white' : isTool ? 'bg-warning/10 bg-warning/10 border border-warning border-warning' : 'bg-muted text-foreground'}`}>
         {editing ? (
           <div className="flex flex-col gap-1">
             <textarea className="w-full bg-card text-foreground border rounded p-1.5 text-xs resize-none" rows={3} value={editValue} onChange={(e) => onEditChange?.(e.target.value)} autoFocus />

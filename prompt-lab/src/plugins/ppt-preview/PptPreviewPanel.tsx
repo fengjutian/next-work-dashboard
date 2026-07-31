@@ -190,7 +190,7 @@ export const PptPreviewPanel: React.FC = () => {
                     {generateState.slides.length > 1 && (
                       <button
                         onClick={() => removeSlide(slide.id)}
-                        className="text-muted-foreground hover:text-red-500 transition-colors"
+                        className="text-muted-foreground hover:text-destructive transition-colors"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -324,8 +324,8 @@ export const PptPreviewPanel: React.FC = () => {
             {previewState.status === 'error' && (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center max-w-md">
-                  <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
-                  <p className="text-sm text-red-600 font-medium mb-1">预览失败</p>
+                  <X className="h-12 w-12 text-destructive mx-auto mb-3" />
+                  <p className="text-sm text-destructive font-medium mb-1">预览失败</p>
                   <p className="text-xs text-muted-foreground mb-2">{previewState.error}</p>
                   {previewState.fileName && (
                     <p className="text-xs text-muted-foreground mb-4">文件：{previewState.fileName}</p>

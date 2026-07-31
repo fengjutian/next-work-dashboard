@@ -77,7 +77,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           另存为
         </button>
 
-        <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-600 mx-1" />
+        <div className="w-px h-5 bg-border mx-1" />
 
         {/* 撤销/重做 */}
         <button
@@ -103,7 +103,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           重做
         </button>
 
-        <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-600 mx-1" />
+        <div className="w-px h-5 bg-border mx-1" />
 
         {/* 行列操作 */}
         <button
@@ -124,7 +124,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
         <button
           onClick={onDeleteRow}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 transition-colors"
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-destructive/10 dark:hover:bg-destructive/10 text-destructive transition-colors"
           title="删除最后一行"
         >
           <Trash2 className="h-3 w-3" />
@@ -132,7 +132,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
         <button
           onClick={onDeleteCol}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-red-100 dark:hover:bg-red-900/20 text-red-500 transition-colors"
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-destructive/10 dark:hover:bg-destructive/10 text-destructive transition-colors"
           title="删除最后一列"
         >
           <Trash2 className="h-3 w-3" />
@@ -144,7 +144,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {fileName && (
           <span className="text-xs text-muted-foreground truncate max-w-[200px]">
             {fileName}
-            {dirty && <span className="text-amber-500 ml-1">●</span>}
+            {dirty && <span className="text-warning ml-1">●</span>}
           </span>
         )}
       </div>
@@ -159,7 +159,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               className={`px-3 py-0.5 text-xs rounded-t border border-b-0 transition-colors whitespace-nowrap ${
                 idx === activeSheetIndex
                   ? 'bg-card text-primary border-input font-medium'
-                  : 'bg-accent text-muted-foreground border-transparent hover:bg-zinc-300 dark:hover:bg-accent'
+                  : 'bg-accent text-muted-foreground border-transparent hover:bg-accent/80'
               }`}
             >
               {sheet.name}

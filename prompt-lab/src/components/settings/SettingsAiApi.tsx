@@ -130,12 +130,12 @@ export const SettingsAiApi: React.FC = () => {
             测试连接
           </Button>
           {testStatus === 'ok' && (
-            <span className="text-xs text-green-600 flex items-center gap-1">
+            <span className="text-xs text-success flex items-center gap-1">
               <CheckCircle className="h-3.5 w-3.5" /> {testMessage}
             </span>
           )}
           {testStatus === 'fail' && (
-            <span className="text-xs text-red-500 flex items-center gap-1">
+            <span className="text-xs text-destructive flex items-center gap-1">
               <XCircle className="h-3.5 w-3.5" /> {testMessage}
             </span>
           )}

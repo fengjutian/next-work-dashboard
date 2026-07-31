@@ -52,8 +52,8 @@ const DrawerCard: React.FC<{
           </p>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          {prompt.isPinned && <Pin className="h-3 w-3 text-amber-500 fill-amber-500" />}
-          {prompt.isFavorite && <Star className="h-3 w-3 text-amber-500 fill-amber-500" />}
+          {prompt.isPinned && <Pin className="h-3 w-3 text-warning fill-amber-500" />}
+          {prompt.isFavorite && <Star className="h-3 w-3 text-warning fill-amber-500" />}
         </div>
       </div>
       <div className="flex items-center gap-1.5 mt-2">

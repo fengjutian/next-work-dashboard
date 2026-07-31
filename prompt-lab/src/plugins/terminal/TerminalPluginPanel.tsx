@@ -187,10 +187,10 @@ export const TerminalPluginPanel: React.FC = () => {
                 <TerminalIcon className="h-3 w-3 flex-shrink-0" />
                 <span className="truncate">{tab.title}</span>
                 {!tab.alive && (
-                  <span className="text-red-400 text-[10px] flex-shrink-0">×</span>
+                  <span className="text-destructive text-[10px] flex-shrink-0">×</span>
                 )}
                 <button
-                  className="flex-shrink-0 opacity-0 hover:opacity-100 hover:bg-zinc-600 rounded-sm p-0.5 group-hover:opacity-100 transition-opacity ml-0.5"
+                  className="flex-shrink-0 opacity-0 hover:opacity-100 hover:bg-accent rounded-sm p-0.5 group-hover:opacity-100 transition-opacity ml-0.5"
                   onClick={e => { e.stopPropagation(); closeTab(tab.id); }}
                   title="Close"
                 >
@@ -250,7 +250,7 @@ export const TerminalPluginPanel: React.FC = () => {
           {/* 关闭 */}
           {tabs.length > 1 && activeTab && (
             <button
-              className="px-1.5 py-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400 transition-colors"
+              className="px-1.5 py-1 rounded hover:bg-accent text-muted-foreground hover:text-destructive transition-colors"
               onClick={() => closeTab(activeTab.id)}
               title="Kill Terminal"
             >
@@ -287,14 +287,14 @@ export const TerminalPluginPanel: React.FC = () => {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    className="px-3 py-1.5 text-xs bg-accent hover:bg-zinc-600 text-foreground rounded-md transition-colors"
+                    className="px-3 py-1.5 text-xs bg-accent hover:bg-accent/80 text-foreground rounded-md transition-colors"
                     onClick={() => restartTab(tab.id)}
                   >
                     <RefreshCw className="h-3.5 w-3.5 inline mr-1" />
                     Restart
                   </button>
                   <button
-                    className="px-3 py-1.5 text-xs bg-accent hover:bg-zinc-600 text-foreground rounded-md transition-colors"
+                    className="px-3 py-1.5 text-xs bg-accent hover:bg-accent/80 text-foreground rounded-md transition-colors"
                     onClick={() => closeTab(tab.id)}
                   >
                     <X className="h-3.5 w-3.5 inline mr-1" />
@@ -310,7 +310,7 @@ export const TerminalPluginPanel: React.FC = () => {
       {/* 状态栏 P11 */}
       <div className="flex items-center h-6 px-3 bg-muted border-t border-border text-[11px] text-muted-foreground select-none gap-3">
         <span className="flex items-center gap-1">
-          <span className={`w-1.5 h-1.5 rounded-full ${activeTab?.alive ? 'bg-green-500' : 'bg-red-500'}`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${activeTab?.alive ? 'bg-success' : 'bg-destructive'}`} />
           {activeTab?.alive ? 'Running' : `Exited (${activeTab?.exitCode})`}
         </span>
         <span className="text-muted-foreground">|</span>

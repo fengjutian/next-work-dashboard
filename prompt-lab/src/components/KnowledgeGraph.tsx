@@ -209,7 +209,7 @@ export const KnowledgeGraph: React.FC = () => {
 
         <div className="px-3 pb-3">
           <button
-            className="w-full h-8 flex items-center justify-center gap-2 rounded-md text-sm font-medium bg-muted bg-muted text-white text-foreground hover:bg-accent dark:hover:bg-accent transition-colors disabled:opacity-50"
+            className="w-full h-8 flex items-center justify-center gap-2 rounded-md text-sm font-medium bg-muted text-foreground hover:bg-accent transition-colors disabled:opacity-50"
             disabled={generating || nodes.length < 2 || selectedPaths.size === 0}
             onClick={generateGraph}
           >

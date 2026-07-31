@@ -310,11 +310,11 @@ export const ChatPanel: React.FC = () => {
 
     if (origRole === 'tool') {
       return (
-        <div className="my-1 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+        <div className="my-1 rounded-md border border-warning border-warning bg-warning/10 bg-warning/10 px-3 py-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-warning text-warning">
             <Wrench className="h-3 w-3" /> 工具结果
           </div>
-          <div className="mt-1 text-xs text-amber-600 dark:text-amber-500">
+          <div className="mt-1 text-xs text-warning text-warning">
             {text ? <XMarkdown content={text} className="text-xs" /> : null}
           </div>
         </div>
@@ -401,10 +401,10 @@ export const ChatPanel: React.FC = () => {
                   </div>
                 )}
               </div>
-              <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'}`}
+              <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-warning/10 bg-warning/10 text-warning text-warning' : 'bg-muted text-muted-foreground'}`}
                 onClick={() => setAgentMode((v) => !v)}>{agentMode ? 'Agent ✓' : 'Agent'}</button>
               <button onClick={() => setRoleManagerOpen(true)}
-                className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-muted-foreground'}`} title="角色管理">
+                className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">
                 <Bot className="h-3 w-3" /><span>{activeRole ? activeRole.name : '角色'}</span></button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setToolManagerOpen(true)} title="工具管理"><Wrench className="h-3.5 w-3.5" /></Button>
@@ -412,7 +412,7 @@ export const ChatPanel: React.FC = () => {
                 onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词">Sys</Button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setPromptManagerOpen(true)} title="提示词管理"><MessageSquare className="h-3.5 w-3.5" /></Button>
-              {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-red-500" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>}
+              {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>}
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={handleExport} title="导出 Markdown"><Download className="h-3.5 w-3.5" /></Button>}
               {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')}><span className="text-xs">⚙</span></Button>}
             </div>
@@ -454,7 +454,7 @@ export const ChatPanel: React.FC = () => {
                     ai: {
                       placement: 'start', variant: 'outlined',
                       typing: streaming ? { effect: 'typing' as const, step: 3, interval: 50 } : false,
-                      avatar: (<div className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0"><Robot className="h-3.5 w-3.5" /></div>),
+                      avatar: (<div className="w-7 h-7 rounded-full bg-success text-white flex items-center justify-center shrink-0"><Robot className="h-3.5 w-3.5" /></div>),
                       header: (_: any, info: any) => {
                         const ts = info?.extraInfo?.timestamp;
                         const model = info?.extraInfo?.model;
@@ -518,7 +518,7 @@ export const ChatPanel: React.FC = () => {
                 {/* 错误区域 + 重试按钮 */}
                 {error && (
                   <div className="flex items-center justify-center gap-2 py-2">
-                    <p className="text-xs text-red-500">{error}</p>
+                    <p className="text-xs text-destructive">{error}</p>
                     <button className="text-xs text-primary hover:text-primary underline" onClick={handleRetry}>重试</button>
                   </div>
                 )}
@@ -627,7 +627,7 @@ export const ChatPanel: React.FC = () => {
                     onClick={() => { const api = (window as any).electronAPI; api?.shell?.openExternal?.(previewUrl); }}>
                     ↗ 浏览器打开
                   </button>
-                  <button className="text-xs text-muted-foreground hover:text-red-500 px-2" onClick={() => setPreviewUrl(null)}>✕ 关闭</button>
+                  <button className="text-xs text-muted-foreground hover:text-destructive px-2" onClick={() => setPreviewUrl(null)}>✕ 关闭</button>
                 </div>
               </div>
               <webview src={previewUrl} style={{ width: '100%', height: 'calc(100% - 37px)' }} />

@@ -142,7 +142,7 @@ export const DatabaseBrowser: React.FC = () => {
               <span className="text-xs font-mono">CSV</span>
             </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopyJSON} title="复制 JSON">
-              {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
             </Button>
           </>
         )}
@@ -150,7 +150,7 @@ export const DatabaseBrowser: React.FC = () => {
 
       {/* 错误提示 */}
       {error && (
-        <div className="px-3 py-2 text-xs text-red-500 bg-red-50 dark:bg-red-950/30 border-b">
+        <div className="px-3 py-2 text-xs text-destructive bg-destructive/10 bg-destructive/10 border-b">
           {error}
         </div>
       )}
@@ -186,7 +186,7 @@ export const DatabaseBrowser: React.FC = () => {
                 <span>{data.columns.length} 列</span>
                 <span>·</span>
                 <span>{rowCount} 行</span>
-                {rowCount === 1000 && <span className="text-amber-500">（最多 1000 行）</span>}
+                {rowCount === 1000 && <span className="text-warning">（最多 1000 行）</span>}
               </div>
 
               {/* 数据表格 */}

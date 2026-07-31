@@ -11,7 +11,7 @@ const FileCheckItem: React.FC<{
 }> = ({ file, checked, onChange }) => {
   return (
     <label
-      className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border border-border transition-colors hover:bg-background dark:hover:bg-muted/50 ${
+      className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border transition-colors hover:bg-muted/50 ${
         checked ? 'text-primary' : 'text-muted-foreground'
       }`}
     >

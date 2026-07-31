@@ -286,7 +286,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
                 {/* 行号 */}
                 <div
                   className={`flex items-center justify-end pr-1.5 text-[11px] text-muted-foreground border-r border-b border-border flex-shrink-0 select-none ${
-                    isRowSelected ? 'bg-primary-light bg-primary-light' : 'bg-background bg-muted/50'
+                    isRowSelected ? 'bg-primary-light' : 'bg-muted/50'
                   }`}
                   style={{ width: HEADER_COL_WIDTH }}
                 >

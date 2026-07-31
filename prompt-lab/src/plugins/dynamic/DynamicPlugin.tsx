@@ -52,11 +52,11 @@ class KernelErrorBoundary extends React.Component<
     if (this.state.error) {
       return (
         <div className="p-4">
-          <div className="p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800">
-            <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">
+          <div className="p-4 rounded-lg border border-destructive bg-destructive/10 bg-destructive/10 border-destructive">
+            <h3 className="text-sm font-semibold text-destructive text-destructive">
               内核插件渲染异常
             </h3>
-            <pre className="text-xs text-red-500 mt-2 whitespace-pre-wrap">
+            <pre className="text-xs text-destructive mt-2 whitespace-pre-wrap">
               {this.state.error}
             </pre>
           </div>
@@ -175,9 +175,9 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
     return (
       <div className="flex flex-col h-full bg-card">
         <div className="p-4">
-          <div className="p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800">
-            <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">内核插件加载失败</h3>
-            <pre className="text-xs text-red-500 mt-2 whitespace-pre-wrap">{error}</pre>
+          <div className="p-4 rounded-lg border border-destructive bg-destructive/10 bg-destructive/10 border-destructive">
+            <h3 className="text-sm font-semibold text-destructive text-destructive">内核插件加载失败</h3>
+            <pre className="text-xs text-destructive mt-2 whitespace-pre-wrap">{error}</pre>
           </div>
         </div>
       </div>

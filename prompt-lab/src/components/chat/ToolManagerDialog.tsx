@@ -171,7 +171,7 @@ const ToolRow: React.FC<{
           </code>
           <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
             enabled
-              ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+              ? 'bg-success/10 bg-success/10 text-success text-success'
               : 'bg-muted text-muted-foreground'
           }`}>
             {enabled ? '已启用' : '已禁用'}

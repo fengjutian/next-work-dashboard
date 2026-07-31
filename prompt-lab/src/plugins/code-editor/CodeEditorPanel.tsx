@@ -166,7 +166,7 @@ export const CodeEditorPanel: React.FC = () => {
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-          <Code className="h-12 w-12 text-foreground text-foreground" />
+          <Code className="h-12 w-12 text-muted-foreground" />
           <p className="text-sm">打开本地代码或文本文件开始编辑</p>
           <Button variant="outline" onClick={openFile}>选择文件</Button>
         </div>

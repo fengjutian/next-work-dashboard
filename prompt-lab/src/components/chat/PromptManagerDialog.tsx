@@ -68,7 +68,7 @@ export const PromptManagerDialog: React.FC<{
                 {enabledCount} / {prompts.length} 已启用
               </span>
               {boundCount > 0 && (
-                <span className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] text-warning text-warning bg-warning/10 bg-warning/10 px-2 py-0.5 rounded-full">
                   📌 {boundCount} 已绑定
                 </span>
               )}
@@ -110,13 +110,13 @@ export const PromptManagerDialog: React.FC<{
                           !enabled
                             ? 'bg-background bg-muted/20 opacity-55'
                             : isBound
-                              ? 'bg-amber-50/50 dark:bg-amber-900/10 border border-amber-200/50 dark:border-amber-700/30'
+                              ? 'bg-warning/10 bg-warning/10 border border-warning/50 border-warning/30'
                               : 'bg-card/50 hover:bg-background dark:hover:bg-muted'
                         }`}
                       >
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            {isBound && <Pin className="h-3 w-3 text-amber-500 shrink-0" />}
+                            {isBound && <Pin className="h-3 w-3 text-warning shrink-0" />}
                             <span className="text-xs font-medium text-foreground truncate">
                               {prompt.title}
                             </span>
@@ -129,8 +129,8 @@ export const PromptManagerDialog: React.FC<{
                               !enabled
                                 ? 'bg-muted text-muted-foreground'
                                 : isBound
-                                  ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
-                                  : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+                                  ? 'bg-warning/10 bg-warning/10 text-warning text-warning'
+                                  : 'bg-success/10 bg-success/10 text-success text-success'
                             }`}>
                               {!enabled ? '已禁用' : isBound ? '已绑定' : '已启用'}
                             </span>
@@ -148,7 +148,7 @@ export const PromptManagerDialog: React.FC<{
                               onClick={() => onToggleBound(prompt.id)}
                               className={`p-1.5 rounded-lg transition-colors ${
                                 isBound
-                                  ? 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                                  ? 'text-warning hover:bg-warning/10 dark:hover:bg-warning/10'
                                   : 'text-foreground text-muted-foreground hover:text-muted-foreground hover:bg-accent'
                               }`}
                               title={isBound ? '取消绑定对话' : '绑定到当前对话（自动注入到 system prompt）'}

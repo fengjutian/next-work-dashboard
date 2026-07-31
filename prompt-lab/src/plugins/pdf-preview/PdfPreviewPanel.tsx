@@ -177,7 +177,7 @@ export const PdfPreviewPanel: React.FC = () => {
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
-          <FileText className="h-5 w-5 text-red-500" />
+          <FileText className="h-5 w-5 text-destructive" />
           <h2 className="font-semibold text-sm text-foreground">
             PDF 预览
           </h2>
@@ -207,7 +207,7 @@ export const PdfPreviewPanel: React.FC = () => {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-white hover:bg-destructive transition-colors"
           >
             <Upload className="h-3.5 w-3.5" />
             打开文件
@@ -283,10 +283,10 @@ export const PdfPreviewPanel: React.FC = () => {
       >
         {/* 拖拽提示 */}
         {dragOver && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-red-500/10 border-2 border-dashed border-red-400 rounded-lg m-4">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-destructive/10 border-2 border-dashed border-destructive rounded-lg m-4">
             <div className="text-center">
-              <Upload className="h-10 w-10 text-red-400 mx-auto mb-2" />
-              <p className="text-sm text-red-600">释放以打开 PDF</p>
+              <Upload className="h-10 w-10 text-destructive mx-auto mb-2" />
+              <p className="text-sm text-destructive">释放以打开 PDF</p>
             </div>
           </div>
         )}
@@ -300,7 +300,7 @@ export const PdfPreviewPanel: React.FC = () => {
               <p className="text-xs text-muted-foreground">支持 PDF 文档预览，可翻页和缩放</p>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 transition-colors"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-white hover:bg-destructive transition-colors"
               >
                 <Upload className="h-4 w-4" />
                 选择文件
@@ -313,7 +313,7 @@ export const PdfPreviewPanel: React.FC = () => {
         {state.status === 'loading' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <div className="h-8 w-8 border-2 border-red-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <div className="h-8 w-8 border-2 border-destructive border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">正在渲染 PDF...</p>
               {state.pageCount > 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
@@ -331,15 +331,15 @@ export const PdfPreviewPanel: React.FC = () => {
         {state.status === 'error' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
-              <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
-              <p className="text-sm text-red-600 font-medium mb-1">预览失败</p>
+              <X className="h-12 w-12 text-destructive mx-auto mb-3" />
+              <p className="text-sm text-destructive font-medium mb-1">预览失败</p>
               <p className="text-xs text-muted-foreground mb-2">{state.error}</p>
               {state.fileName && (
                 <p className="text-xs text-muted-foreground mb-4">文件：{state.fileName}</p>
               )}
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="text-sm text-red-500 hover:text-red-600"
+                className="text-sm text-destructive hover:text-destructive"
               >
                 尝试打开另一个文件
               </button>
@@ -369,7 +369,7 @@ export const PdfPreviewPanel: React.FC = () => {
                 <button
                   onClick={prevPage}
                   disabled={state.currentPage <= 1}
-                  className="px-3 py-1.5 rounded-md bg-accent text-xs font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 rounded-md bg-accent text-xs font-medium hover:bg-accent/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   上一页
                 </button>
@@ -379,7 +379,7 @@ export const PdfPreviewPanel: React.FC = () => {
                 <button
                   onClick={nextPage}
                   disabled={state.currentPage >= state.pageCount}
-                  className="px-3 py-1.5 rounded-md bg-accent text-xs font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 rounded-md bg-accent text-xs font-medium hover:bg-accent/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   下一页
                 </button>
