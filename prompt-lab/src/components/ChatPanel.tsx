@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Bubble, Sender, Conversations, Welcome, Prompts, ThoughtChain, Suggestion } from '@ant-design/x';
 import { XProvider } from '@ant-design/x';
 import type { BubbleProps } from '@ant-design/x';
@@ -56,7 +56,7 @@ export const ChatPanel: React.FC = () => {
     messages, systemPrompt, currentModel, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, error,
     sysPromptOpen, setSysPromptOpen,
-    handleNewSession, handleDeleteSession, handleExport,
+    handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
     handleSend, handleRegenerate, handleStop, handleClear,
     handleEditConfirm,
     updateSessionMeta,
@@ -65,8 +65,21 @@ export const ChatPanel: React.FC = () => {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
 
-  // ── 暗色模式 ──
-  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  // ── 暗色模式（响应系统主题变化） ──
+  const [isDark, setIsDark] = useState(
+    () => theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches),
+  );
+  useEffect(() => {
+    if (theme !== 'system') {
+      setIsDark(theme === 'dark');
+      return;
+    }
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    setIsDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setIsDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [theme]);
 
   // ── 角色 Agent ──
   const roles = useStore((s) => s.roles);
@@ -107,46 +120,52 @@ export const ChatPanel: React.FC = () => {
   );
 
   // ── Sender 提交 ──
-  const onSenderSubmit = (text: string) => {
+  const onSenderSubmit = useCallback((text: string) => {
     setInput('');
     handleSend(text);
-  };
+  }, [handleSend, setInput]);
 
   // ── 提示词/Suggestion 点击 ──
-  const onPromptClick = (info: { data: { key: string; label: string; value: string } }) => {
+  const onPromptClick = useCallback((info: { data: { key: string; label: string; value: string } }) => {
     handleSend(info.data.value);
-  };
+  }, [handleSend]);
 
-  // ── 是否显示 Suggestion（最后一条消息是 AI 且非流式） ──
+  // ── 是否显示 Suggestion ──
   const showSuggestion = useMemo(() => {
     if (streaming || messages.length === 0) return false;
     const last = messages[messages.length - 1];
     return last?.role === 'assistant' && last.content.trim().length > 0;
   }, [messages, streaming]);
 
-  // ── ThoughtChain 数据 ──
+  // ── ThoughtChain 数据（含 think + tool 步骤） ──
   const thoughtChainItems = useMemo(() => {
     if (!agentMode || messages.length === 0) return [];
-    return messages
-      .filter((m) => m.role === 'tool' || (m.role === 'assistant' && m.toolCalls?.length))
-      .map((m) => {
-        if (m.role === 'tool') {
-          const results = m.toolResults?.map((r) => r.error || r.output || '').join(', ') || '';
-          return {
-            title: '🔧 工具结果',
-            description: results.slice(0, 120) + (results.length > 120 ? '...' : ''),
-            status: 'success' as const,
-          };
-        }
-        return {
+    const items: { title: string; description: string; status: 'success' | 'error' }[] = [];
+    for (const m of messages) {
+      if (m.role === 'assistant' && m.toolCalls?.length) {
+        items.push({
           title: '🤔 思考',
-          description: m.content?.slice(0, 120) || '调用工具中...',
-          status: 'success' as const,
-        };
-      });
+          description: m.content?.slice(0, 120) || '分析中...',
+          status: 'success',
+        });
+        items.push({
+          title: `🔧 ${m.toolCalls.map((c) => c.name).join(', ')}`,
+          description: '执行工具调用',
+          status: 'success',
+        });
+      } else if (m.role === 'tool') {
+        const res = m.toolResults?.map((r) => r.error ? `❌ ${r.error}` : (r.output || '').slice(0, 120)).join(', ') || '';
+        items.push({
+          title: '📋 结果',
+          description: res,
+          status: m.toolResults?.some((r) => r.error) ? 'error' : 'success',
+        });
+      }
+    }
+    return items;
   }, [agentMode, messages]);
 
-  // ── 自定义消息渲染（使用 x-markdown） ──
+  // ── 自定义消息渲染 ──
   const contentRender: BubbleProps['contentRender'] = (content, info) => {
     const extra = (info as any)?.extraInfo;
     const origRole = extra?.originalRole as string | undefined;
@@ -154,7 +173,6 @@ export const ChatPanel: React.FC = () => {
     const toolResults = extra?.toolResults;
     const text = typeof content === 'string' ? content : String(content ?? '');
 
-    // 工具消息 — 琥珀色卡片
     if (origRole === 'tool') {
       return (
         <div className="my-1 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
@@ -168,7 +186,6 @@ export const ChatPanel: React.FC = () => {
       );
     }
 
-    // AI 消息 — 工具调用 + x-markdown 渲染
     if (origRole === 'assistant') {
       return (
         <div>
@@ -186,11 +203,9 @@ export const ChatPanel: React.FC = () => {
       );
     }
 
-    // 用户消息 — 纯文本
     return <span className="whitespace-pre-wrap break-words">{text}</span>;
   };
 
-  // ── 判断是否需要显示系统提示词 ──
   const showSysPrompt = sysPromptOpen || (!!systemPrompt && messages.length === 0);
 
   return (
@@ -220,18 +235,16 @@ export const ChatPanel: React.FC = () => {
                   }}
                   menu={(conv) => ({
                     items: [
+                      { label: '重命名', key: 'rename' },
                       { label: '删除', key: 'delete', danger: true },
                     ],
                     onClick: (info) => {
-                      if (info.key === 'delete') {
-                        handleDeleteSession(conv.key);
-                      }
+                      if (info.key === 'delete') handleDeleteSession(conv.key);
+                      if (info.key === 'rename') handleRenameSession(conv.key);
                     },
                   })}
                   groupable
-                  creation={{
-                    onClick: handleNewSession,
-                  }}
+                  creation={{ onClick: handleNewSession }}
                 />
               </div>
             </div>
@@ -244,13 +257,8 @@ export const ChatPanel: React.FC = () => {
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNewSession} title="新建对话">
                 <Plus className="h-4 w-4" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={`h-7 w-7 ${showHistory ? 'text-blue-500' : ''}`}
-                onClick={() => setShowHistory(!showHistory)}
-                title="对话历史"
-              >
+              <Button variant="ghost" size="icon" className={`h-7 w-7 ${showHistory ? 'text-blue-500' : ''}`}
+                onClick={() => setShowHistory(!showHistory)} title="对话历史">
                 {showHistory ? <ArrowLeft className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
               </Button>
               <span className="text-xs font-medium text-zinc-500 truncate max-w-[120px]">
@@ -258,124 +266,67 @@ export const ChatPanel: React.FC = () => {
               </span>
               <div className="flex-1" />
 
-              <select
-                className="h-6 text-[10px] rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 text-zinc-600 dark:text-zinc-400"
-                value={currentModel}
-                onChange={(e) => updateSessionMeta({ model: e.target.value })}
-              >
-                {MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
+              <select className="h-6 text-[10px] rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 text-zinc-600 dark:text-zinc-400"
+                value={currentModel} onChange={(e) => updateSessionMeta({ model: e.target.value })}>
+                {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
 
-              <button
-                className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${
-                  agentMode
-                    ? 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'
-                }`}
-                onClick={() => setAgentMode((v) => !v)}
-              >
+              <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${
+                agentMode ? 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'
+              }`} onClick={() => setAgentMode((v) => !v)}>
                 {agentMode ? 'Agent ✓' : 'Agent'}
               </button>
 
-              <button
-                onClick={() => setRoleManagerOpen(true)}
+              <button onClick={() => setRoleManagerOpen(true)}
                 className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${
-                  activeRole
-                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-zinc-600'
-                }`}
-                title="角色管理"
-              >
-                <Bot className="h-3 w-3" />
-                <span>{activeRole ? activeRole.name : '角色'}</span>
+                  activeRole ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-zinc-600'
+                }`} title="角色管理">
+                <Bot className="h-3 w-3" /><span>{activeRole ? activeRole.name : '角色'}</span>
               </button>
 
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                onClick={() => setToolManagerOpen(true)}
-                title="工具管理"
-              >
-                <Wrench className="h-3.5 w-3.5" />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                className={`h-7 w-7 text-[10px] ${sysPromptOpen || systemPrompt ? 'text-blue-500' : 'text-zinc-400'}`}
-                onClick={() => setSysPromptOpen((v) => !v)}
-                title="系统提示词"
-              >
-                Sys
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                onClick={() => setPromptManagerOpen(true)}
-                title="提示词管理"
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                onClick={() => setToolManagerOpen(true)} title="工具管理"><Wrench className="h-3.5 w-3.5" /></Button>
+              <Button variant="ghost" size="icon" className={`h-7 w-7 text-[10px] ${sysPromptOpen || systemPrompt ? 'text-blue-500' : 'text-zinc-400'}`}
+                onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词">Sys</Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                onClick={() => setPromptManagerOpen(true)} title="提示词管理"><MessageSquare className="h-3.5 w-3.5" /></Button>
               {messages.length > 0 && (
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-red-500" onClick={handleClear} title="清空对话">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-red-500" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>
               )}
               {messages.length > 0 && (
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400" onClick={handleExport} title="导出 Markdown">
-                  <Download className="h-3.5 w-3.5" />
-                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400" onClick={handleExport} title="导出 Markdown"><Download className="h-3.5 w-3.5" /></Button>
               )}
               {!hasKey && (
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400" onClick={() => setActiveActivity('settings')}>
-                  <span className="text-xs">⚙</span>
-                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400" onClick={() => setActiveActivity('settings')}><span className="text-xs">⚙</span></Button>
               )}
             </div>
 
             {/* 系统提示词 */}
             {showSysPrompt && (
               <div className="px-3 py-2 border-b bg-zinc-50 dark:bg-zinc-900 shrink-0">
-                <textarea
-                  className="w-full text-xs bg-white dark:bg-zinc-800 border rounded p-2 resize-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
-                  rows={2}
-                  placeholder="系统提示词 — 定义 AI 的角色和行为方式..."
-                  value={systemPrompt}
-                  onChange={(e) => updateSessionMeta({ systemPrompt: e.target.value })}
-                />
+                <textarea className="w-full text-xs bg-white dark:bg-zinc-800 border rounded p-2 resize-none text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
+                  rows={2} placeholder="系统提示词 — 定义 AI 的角色和行为方式..."
+                  value={systemPrompt} onChange={(e) => updateSessionMeta({ systemPrompt: e.target.value })} />
               </div>
             )}
 
             {/* Agent 思考链 */}
             {agentMode && thoughtChainItems.length > 0 && (
-              <div className="px-4 py-2 border-b bg-zinc-50 dark:bg-zinc-900 shrink-0 max-h-32 overflow-y-auto">
-                <ThoughtChain items={thoughtChainItems as any} />
+              <div className="px-4 py-2 border-b bg-zinc-50 dark:bg-zinc-900 shrink-0 max-h-40 overflow-y-auto">
+                <ThoughtChain items={thoughtChainItems} />
               </div>
             )}
 
             {/* 消息区域 */}
             {messages.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                <Welcome
-                  variant="borderless"
+                <Welcome variant="borderless"
                   icon={<Robot className="h-10 w-10 text-zinc-300" />}
                   title={hasKey ? 'AI 对话' : '未配置 API Key'}
-                  description={
-                    hasKey
-                      ? '输入消息开始对话，可开启 Agent 模式自动调用工具'
-                      : '请在设置 → AI API 中配置后使用'
-                  }
-                />
+                  description={hasKey ? '输入消息开始对话，可开启 Agent 模式自动调用工具' : '请在设置 → AI API 中配置后使用'} />
                 {hasKey && (
-                  <Prompts
-                    items={WELCOME_PROMPTS}
-                    onItemClick={onPromptClick}
-                    styles={{ list: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' } }}
-                  />
+                  <Prompts items={WELCOME_PROMPTS} onItemClick={onPromptClick}
+                    styles={{ list: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' } }} />
                 )}
               </div>
             ) : (
@@ -386,61 +337,39 @@ export const ChatPanel: React.FC = () => {
                   style={{ height: '100%' }}
                   role={{
                     ai: {
-                      placement: 'start',
-                      variant: 'outlined',
-                      typing: streaming
-                        ? { effect: 'typing' as const, step: 3, interval: 50 }
-                        : false,
-                      avatar: (
-                        <div className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0">
-                          <Robot className="h-3.5 w-3.5" />
-                        </div>
-                      ),
+                      placement: 'start', variant: 'outlined',
+                      typing: streaming ? { effect: 'typing' as const, step: 3, interval: 50 } : false,
+                      avatar: (<div className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0"><Robot className="h-3.5 w-3.5" /></div>),
                       contentRender,
-                      footer: (_: any, info: any) => {
-                        if (info?.extraInfo?.isLastAi && !streaming) {
-                          return (
-                            <button
-                              className="text-[10px] text-zinc-400 hover:text-zinc-600 px-1"
+                      footer: (content: any, info: any) => {
+                        if (!info?.extraInfo?.isLastAi || streaming) return null;
+                        const text = typeof content === 'string' ? content : '';
+                        return (
+                          <div className="flex gap-2 text-[10px]">
+                            <button className="text-zinc-400 hover:text-zinc-600"
+                              onClick={() => navigator.clipboard.writeText(text)}
+                              title="复制">📋 复制</button>
+                            <button className="text-zinc-400 hover:text-zinc-600"
                               onClick={handleRegenerate}
-                              title="重新生成"
-                            >
-                              ↻ 重新生成
-                            </button>
-                          );
-                        }
-                        return null;
+                              title="重新生成">↻ 重新生成</button>
+                          </div>
+                        );
                       },
                     },
                     user: {
-                      placement: 'end',
-                      variant: 'filled',
-                      contentRender,
+                      placement: 'end', variant: 'filled', contentRender,
                       onEditConfirm: handleEditConfirm,
-                      avatar: (
-                        <div className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0">
-                          <span className="text-xs font-bold">U</span>
-                        </div>
-                      ),
+                      avatar: (<div className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0"><span className="text-xs font-bold">U</span></div>),
                     },
-                    tool: {
-                      placement: 'start',
-                      variant: 'borderless',
-                      contentRender,
-                    },
+                    tool: { placement: 'start', variant: 'borderless', contentRender },
                   }}
                 />
                 {error && <p className="text-xs text-red-500 text-center py-2">{error}</p>}
 
-                {/* Suggestion 快捷回复 — 最后一条 AI 消息后显示 */}
                 {showSuggestion && (
                   <div className="px-4 pb-3">
-                    <Suggestion
-                      items={SUGGESTION_ITEMS}
-                      onSelect={(value) => {
-                        handleSend(value);
-                      }}
-                    />
+                    <Suggestion items={SUGGESTION_ITEMS}
+                      onSelect={(value) => { handleSend(value); }} />
                   </div>
                 )}
               </div>
@@ -448,33 +377,17 @@ export const ChatPanel: React.FC = () => {
 
             {/* 输入区域 */}
             <div className="border-t p-3 shrink-0 bg-zinc-50 dark:bg-zinc-900">
-              <Sender
-                value={input}
-                onChange={setInput}
-                onSubmit={onSenderSubmit}
-                onCancel={handleStop}
-                loading={streaming}
-                disabled={!hasKey}
-                placeholder={
-                  !hasKey
-                    ? '请先在设置中配置 API Key'
-                    : agentMode
-                      ? 'Agent 模式：输入任务...'
-                      : '输入消息... (Enter 发送)'
-                }
-                style={{ borderRadius: 8 }}
-              />
+              <Sender value={input} onChange={setInput}
+                onSubmit={onSenderSubmit} onCancel={handleStop}
+                loading={streaming} disabled={!hasKey}
+                placeholder={!hasKey ? '请先在设置中配置 API Key' : agentMode ? 'Agent 模式：输入任务...' : '输入消息... (Enter 发送)'}
+                style={{ borderRadius: 8 }} />
             </div>
           </div>
 
-          {/* 弹层 */}
           <ToolManagerDialog open={toolManagerOpen} onClose={() => setToolManagerOpen(false)} />
-          <PromptManagerDialog
-            open={promptManagerOpen}
-            onClose={() => setPromptManagerOpen(false)}
-            boundPromptIds={boundPromptIds}
-            onToggleBound={toggleBoundPrompt}
-          />
+          <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)}
+            boundPromptIds={boundPromptIds} onToggleBound={toggleBoundPrompt} />
           <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />
         </div>
       </XProvider>

@@ -109,11 +109,9 @@ export function useChatSession() {
   const [sysPromptOpen, setSysPromptOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const providerRef = useRef<LLMProvider | null>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, [activeSessionId]);
+  useEffect(() => { providerRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl]);
 
   const getProvider = useCallback((): LLMProvider | null => {
     if (!aiApi.apiKey) return null;
@@ -122,14 +120,11 @@ export function useChatSession() {
     return providerRef.current;
   }, [aiApi.apiKey, aiApi.baseUrl]);
 
-  useEffect(() => { providerRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
-
   // 提示词注入（仅启用状态的提示词）
   useEffect(() => {
     if (selectedPromptId && promptDrawerOpen === false) {
       const p = prompts.find((pp) => pp.id === selectedPromptId);
-      if (p && p.enabled !== false && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); inputRef.current?.focus(); }
+      if (p && p.enabled !== false && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); }
     }
   }, [selectedPromptId, promptDrawerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -192,6 +187,13 @@ export function useChatSession() {
       return next;
     });
   }, [activeSessionId, aiApi.model]);
+
+  const handleRenameSession = useCallback((id: string) => {
+    const name = window.prompt('请输入新名称');
+    if (name) {
+      setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title: name } : s));
+    }
+  }, []);
 
   const handleExport = useCallback(() => {
     const md = messages.map((m) => {
@@ -340,7 +342,6 @@ export function useChatSession() {
 
   const handleStop = useCallback(() => abortRef.current?.abort(), []);
   const handleClear = useCallback(() => { updateSession(() => []); setError(null); }, [updateSession]);
-  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
 
   return {
     // state
@@ -348,10 +349,9 @@ export function useChatSession() {
     messages, systemPrompt, currentModel, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, error,
     sysPromptOpen, setSysPromptOpen,
-    inputRef, scrollRef,
     // handlers
-    handleNewSession, handleDeleteSession, handleExport,
-    handleSend, handleRegenerate, handleStop, handleClear, handleKeyDown,
+    handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
+    handleSend, handleRegenerate, handleStop, handleClear,
     handleEditConfirm,
     updateSessionMeta,
     // 绑定提示词
