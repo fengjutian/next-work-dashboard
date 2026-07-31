@@ -134,17 +134,27 @@ export const builtInTools: ToolDefinition[] = [
       const url = String(args.url);
       if (!/^https?:\/\//.test(url)) return '错误：URL 必须以 http:// 或 https:// 开头';
       try {
-        const resp = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; next-work-dashboard/1.0)' },
-        });
-        if (!resp.ok) return `HTTP ${resp.status} ${resp.statusText}`;
-        const contentType = resp.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const json = await resp.json();
-          return JSON.stringify(json, null, 2).slice(0, 3000);
+        const api = (window as any).electronAPI;
+        let text: string;
+        if (api?.fetchUrl) {
+          const res = await api.fetchUrl(url);
+          if (!res.ok) return `HTTP ${res.status} ${res.error || ''}`;
+          text = res.text;
+          if (res.contentType.includes('application/json')) {
+            text = JSON.stringify(JSON.parse(text), null, 2).slice(0, 3000);
+          }
+        } else {
+          const resp = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; next-work-dashboard/1.0)' },
+          });
+          if (!resp.ok) return `HTTP ${resp.status} ${resp.statusText}`;
+          const contentType = resp.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const json = await resp.json();
+            return JSON.stringify(json, null, 2).slice(0, 3000);
+          }
+          text = await resp.text();
         }
-        const text = await resp.text();
-        // 截断过长响应
         return text.length > 5000 ? text.slice(0, 5000) + '\n...(truncated)' : text;
       } catch (e: any) {
         return `请求失败: ${e.message}`;
