@@ -21,8 +21,19 @@ describe('工作区文本编码', () => {
       .toBe('a\r\nb\r\n');
   });
 
-  it('拒绝二进制和非 UTF-8 内容', () => {
+  it('拒绝二进制内容', () => {
     expect(() => decodeWorkspaceText(Buffer.from([0x61, 0x00, 0x62]))).toThrow('BINARY_FILE');
-    expect(() => decodeWorkspaceText(Buffer.from([0xff, 0xfe, 0x61]))).toThrow('UNSUPPORTED_ENCODING');
+  });
+
+  it('识别并往返写入 UTF-16 与 GBK', () => {
+    const utf16 = encodeWorkspaceText('你好\r\n', { encoding: 'utf16le', lineEnding: 'CRLF' });
+    expect(decodeWorkspaceText(utf16)).toMatchObject({
+      content: '你好\r\n',
+      encoding: 'utf16le',
+      lineEnding: 'CRLF',
+    });
+
+    const gbk = encodeWorkspaceText('中文', { encoding: 'gbk' });
+    expect(decodeWorkspaceText(gbk)).toMatchObject({ content: '中文', encoding: 'gbk' });
   });
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Editor, { loader, type OnMount } from '@monaco-editor/react';
+import Editor, { DiffEditor, loader, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -22,7 +22,12 @@ import {
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import type { FilePickResult, WorkspaceEntry, WorkspaceSearchResult } from '@/types/electron';
+import type {
+  FilePickResult,
+  WorkspaceEncoding,
+  WorkspaceEntry,
+  WorkspaceSearchResult,
+} from '@/types/electron';
 import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
 
 export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
@@ -49,7 +54,7 @@ interface OpenDocument {
   savedContent: string;
   language: string;
   standalone?: boolean;
-  encoding: 'utf8' | 'utf8bom';
+  encoding: WorkspaceEncoding;
   lineEnding: 'LF' | 'CRLF';
   modifiedAt?: number;
   externalChanged?: boolean;
@@ -83,6 +88,17 @@ const errorMessages: Record<string, string> = {
 
 function displayError(error?: string): string {
   return errorMessages[error ?? ''] ?? error ?? '操作失败';
+}
+
+function encodingLabel(encoding: WorkspaceEncoding): string {
+  const labels: Record<WorkspaceEncoding, string> = {
+    utf8: 'UTF-8',
+    utf8bom: 'UTF-8 with BOM',
+    utf16le: 'UTF-16 LE',
+    utf16be: 'UTF-16 BE',
+    gbk: 'GBK',
+  };
+  return labels[encoding];
 }
 
 const FileTreeRow: React.FC<{
@@ -212,6 +228,14 @@ export const CodeEditorPanel: React.FC = () => {
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
   const [treeClipboard, setTreeClipboard] = useState<{ node: TreeNode; cut: boolean } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const [secondaryPath, setSecondaryPath] = useState<string | null>(null);
+  const [diffView, setDiffView] = useState<{
+    path: string;
+    name: string;
+    original: string;
+    modified: string;
+    language: string;
+  } | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
   const [status, setStatus] = useState('就绪');
@@ -234,6 +258,7 @@ export const CodeEditorPanel: React.FC = () => {
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
+  const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
   useEffect(() => {
     documentsRef.current = documents;
@@ -394,6 +419,7 @@ export const CodeEditorPanel: React.FC = () => {
     const affectedPaths = new Set(affectedDocuments.map((document) => document.path));
     const remaining = documents.filter((document) => !affectedPaths.has(document.path));
     setDocuments(remaining);
+    if (secondaryPath === path) setSecondaryPath(null);
     if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
     setSelectedNode(null);
     await refreshWorkspaceTree();
@@ -624,7 +650,7 @@ export const CodeEditorPanel: React.FC = () => {
     if (activePath === path) {
       setActivePath(remaining[Math.min(index, remaining.length - 1)]?.path ?? null);
     }
-  }, [activePath, documents]);
+  }, [activePath, documents, secondaryPath]);
 
   const closeDocumentSet = useCallback((paths: string[]) => {
     const pathSet = new Set(paths);
@@ -634,8 +660,9 @@ export const CodeEditorPanel: React.FC = () => {
     if (dirty.length > 0 && !window.confirm(`${dirty.length} 个文件尚未保存，仍要关闭吗？`)) return;
     const remaining = documents.filter((document) => !pathSet.has(document.path));
     setDocuments(remaining);
+    if (secondaryPath && pathSet.has(secondaryPath)) setSecondaryPath(null);
     if (activePath && pathSet.has(activePath)) setActivePath(remaining[0]?.path ?? null);
-  }, [activePath, documents]);
+  }, [activePath, documents, secondaryPath]);
 
   const moveTab = useCallback((sourcePath: string, targetPath: string) => {
     if (sourcePath === targetPath) return;
@@ -709,6 +736,22 @@ export const CodeEditorPanel: React.FC = () => {
       }
       : item));
     setStatus(`已重新加载 ${document.name}`);
+  }, [workspace]);
+
+  const compareExternalDocument = useCallback(async (document: OpenDocument) => {
+    if (!workspace || document.standalone) return;
+    const result = await window.electronAPI.workspace.readTextFile(workspace.path, document.path);
+    if (!result.success || !result.data) {
+      setStatus(`比较失败：${displayError(result.error)}`);
+      return;
+    }
+    setDiffView({
+      path: document.path,
+      name: document.name,
+      original: result.data.content,
+      modified: document.content,
+      language: document.language,
+    });
   }, [workspace]);
 
   useEffect(() => {
@@ -1140,6 +1183,9 @@ export const CodeEditorPanel: React.FC = () => {
               <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void reloadExternalDocument(activeDocument)}>
                 重新加载
               </Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void compareExternalDocument(activeDocument)}>
+                比较
+              </Button>
               <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void saveDocument(activeDocument, true)}>
                 覆盖保存
               </Button>
@@ -1156,33 +1202,69 @@ export const CodeEditorPanel: React.FC = () => {
           )}
 
           {activeDocument ? (
-            <div className="min-h-0 flex-1">
-              <Editor
-                path={editorPath}
-                language={activeDocument.language}
-                value={activeDocument.content}
-                theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
-                onMount={handleMount}
-                onChange={(value) => {
-                  setDocuments((previous) => previous.map((document) => (
-                    document.path === activeDocument.path
-                      ? { ...document, content: value ?? '', pinned: true }
-                      : document
-                  )));
-                }}
-                options={{
-                  automaticLayout: true,
-                  fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
-                  fontSize: 13,
-                  lineHeight: 20,
-                  minimap: { enabled: true },
-                  padding: { top: 8 },
-                  scrollBeyondLastLine: false,
-                  smoothScrolling: true,
-                  tabSize: 2,
-                  readOnly: activeDocument.readOnly,
-                }}
-              />
+            <div className="flex min-h-0 flex-1">
+              <div className="min-w-0 flex-1">
+                <Editor
+                  path={editorPath}
+                  language={activeDocument.language}
+                  value={activeDocument.content}
+                  theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+                  onMount={handleMount}
+                  onChange={(value) => {
+                    setDocuments((previous) => previous.map((document) => (
+                      document.path === activeDocument.path
+                        ? { ...document, content: value ?? '', pinned: true }
+                        : document
+                    )));
+                  }}
+                  options={{
+                    automaticLayout: true,
+                    fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
+                    fontSize: 13,
+                    lineHeight: 20,
+                    minimap: { enabled: true },
+                    padding: { top: 8 },
+                    scrollBeyondLastLine: false,
+                    smoothScrolling: true,
+                    tabSize: 2,
+                    readOnly: activeDocument.readOnly,
+                  }}
+                />
+              </div>
+              {secondaryDocument && (
+                <div className="relative min-w-0 flex-1 border-l">
+                  <div className="absolute right-2 top-1 z-10 flex items-center gap-1 rounded bg-background/90 px-1 text-[10px] shadow">
+                    <span className="max-w-36 truncate">{secondaryDocument.name}</span>
+                    <button type="button" className="rounded p-1 hover:bg-accent" title="关闭分栏" onClick={() => setSecondaryPath(null)}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <Editor
+                    path={`file:///${secondaryDocument.path.replace(/\\/g, '/')}`}
+                    language={secondaryDocument.language}
+                    value={secondaryDocument.content}
+                    theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+                    onChange={(value) => {
+                      setDocuments((previous) => previous.map((document) => (
+                        document.path === secondaryDocument.path
+                          ? { ...document, content: value ?? '', pinned: true }
+                          : document
+                      )));
+                    }}
+                    options={{
+                      automaticLayout: true,
+                      fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
+                      fontSize: 13,
+                      lineHeight: 20,
+                      minimap: { enabled: false },
+                      padding: { top: 8 },
+                      scrollBeyondLastLine: false,
+                      tabSize: 2,
+                      readOnly: secondaryDocument.readOnly,
+                    }}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground">
@@ -1207,7 +1289,7 @@ export const CodeEditorPanel: React.FC = () => {
           <>
             <span>Ln {position.line}, Col {position.column}</span>
             <span>Spaces: 2</span>
-            <span>{activeDocument.encoding === 'utf8bom' ? 'UTF-8 with BOM' : 'UTF-8'}</span>
+            <span>{encodingLabel(activeDocument.encoding)}</span>
             <span>{activeDocument.lineEnding}</span>
             {activeDocument.readOnly && <span>只读</span>}
             <span>{languageFromName(activeDocument.name)}</span>
@@ -1249,6 +1331,9 @@ export const CodeEditorPanel: React.FC = () => {
               }}>
                 {document.pinned === false ? '固定标签' : '取消固定'}
               </button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setSecondaryPath(document.path); setTabMenu(null); }}>
+                在右侧打开
+              </button>
               <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocument(document.path); setTabMenu(null); }}>关闭</button>
               <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.path !== document.path).map((item) => item.path)); setTabMenu(null); }}>关闭其他</button>
               <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={index === documents.length - 1} onClick={() => { closeDocumentSet(documents.slice(index + 1).map((item) => item.path)); setTabMenu(null); }}>关闭右侧</button>
@@ -1257,6 +1342,35 @@ export const CodeEditorPanel: React.FC = () => {
           </div>
         );
       })()}
+
+      {diffView && (
+        <div className="absolute inset-0 z-40 flex flex-col bg-background">
+          <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
+            <span className="font-semibold">{diffView.name}</span>
+            <span className="text-muted-foreground">磁盘版本 ↔ 本地版本</span>
+            <div className="flex-1" />
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setDiffView(null)}>
+              关闭比较
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <DiffEditor
+              original={diffView.original}
+              modified={diffView.modified}
+              language={diffView.language}
+              originalModelPath={`file:///${diffView.path.replace(/\\/g, '/')}?disk`}
+              modifiedModelPath={`file:///${diffView.path.replace(/\\/g, '/')}?local`}
+              theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+              options={{
+                automaticLayout: true,
+                readOnly: true,
+                renderSideBySide: true,
+                minimap: { enabled: false },
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {searchPanel.open && (
         <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setSearchPanel((previous) => ({ ...previous, open: false }))}>

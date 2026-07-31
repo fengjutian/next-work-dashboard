@@ -144,18 +144,20 @@ export interface WorkspaceResult<T> {
 export interface WorkspaceTextFile {
   content: string;
   size: number;
-  encoding: 'utf8' | 'utf8bom';
+  encoding: WorkspaceEncoding;
   lineEnding: 'LF' | 'CRLF';
   modifiedAt: number;
   readOnly: boolean;
 }
 
 export interface WorkspaceWriteOptions {
-  encoding?: 'utf8' | 'utf8bom';
+  encoding?: WorkspaceEncoding;
   lineEnding?: 'LF' | 'CRLF';
   expectedModifiedAt?: number;
   force?: boolean;
 }
+
+export type WorkspaceEncoding = 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk';
 
 export interface WorkspaceSearchResult {
   path: string;

@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       relativePath: string,
       content: string,
       options?: {
-        encoding?: 'utf8' | 'utf8bom';
+        encoding?: 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk';
         lineEnding?: 'LF' | 'CRLF';
         expectedModifiedAt?: number;
         force?: boolean;
