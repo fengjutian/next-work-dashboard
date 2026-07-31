@@ -58,6 +58,7 @@ export interface ElectronAPI {
     deleteEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     trashEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     copyEntry: (rootPath: string, sourcePath: string, targetPath: string) => Promise<WorkspaceResult<void>>;
+    revealEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
@@ -148,7 +149,7 @@ export interface WorkspaceGitStatus {
   status: string;
 }
 
-export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'stashList' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
+export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'stashList' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
 
 export interface WorkspaceGitProgress {
   operationId: string;

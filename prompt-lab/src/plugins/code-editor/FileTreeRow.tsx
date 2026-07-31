@@ -2,6 +2,18 @@ import React from 'react';
 import { ChevronDown, FileText, FolderOpen, RefreshCw } from '@/components/icons';
 import type { TreeNode, TreeEditState } from './editor-types';
 
+function fileIconColor(name: string): string {
+  const extension = name.split('.').pop()?.toLowerCase();
+  if (['ts', 'tsx'].includes(extension ?? '')) return 'text-blue-500';
+  if (['js', 'jsx'].includes(extension ?? '')) return 'text-yellow-500';
+  if (extension === 'json') return 'text-amber-500';
+  if (['css', 'scss', 'less'].includes(extension ?? '')) return 'text-purple-500';
+  if (['html', 'vue', 'svelte'].includes(extension ?? '')) return 'text-orange-500';
+  if (['md', 'mdx'].includes(extension ?? '')) return 'text-cyan-500';
+  if (extension === 'py') return 'text-emerald-500';
+  return 'text-muted-foreground';
+}
+
 export const FileTreeRow: React.FC<{
   node: TreeNode;
   depth: number;
@@ -16,9 +28,10 @@ export const FileTreeRow: React.FC<{
   onEditCancel: () => void;
   onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
   onMove: (source: TreeNode, target: TreeNode) => void;
+  decorations?: Map<string, { git?: string; errors?: number; warnings?: number }>;
 }> = ({
   node, depth, activePath, selectedPaths, onOpen, onToggle, onSelect,
-  editing, onEditChange, onEditCommit, onEditCancel, onContextMenu, onMove,
+  editing, onEditChange, onEditCommit, onEditCancel, onContextMenu, onMove, decorations,
 }) => {
   const isDirectory = node.type === 'directory';
   const expanded = node.children !== undefined;
@@ -67,7 +80,7 @@ export const FileTreeRow: React.FC<{
         ) : (
           <>
             <span className="w-3 shrink-0" />
-            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <FileText className={`h-3.5 w-3.5 shrink-0 ${fileIconColor(node.name)}`} />
           </>
         )}
         {editing?.mode === 'rename' && editing.target?.path === node.path ? (
@@ -88,6 +101,7 @@ export const FileTreeRow: React.FC<{
           <span className="truncate">{node.name}</span>
         )}
         {node.loading && <RefreshCw className="ml-auto h-3 w-3 animate-spin" />}
+        {decorations?.get(node.path)?.errors ? <span className="ml-auto text-[10px] font-semibold text-destructive">{decorations.get(node.path)?.errors}</span> : decorations?.get(node.path)?.warnings ? <span className="ml-auto text-[10px] font-semibold text-warning">{decorations.get(node.path)?.warnings}</span> : decorations?.get(node.path)?.git ? <span className="ml-auto text-[10px] font-semibold text-primary">{decorations.get(node.path)?.git?.trim()}</span> : null}
       </button>
       {expanded && node.children?.map((child) => (
         <FileTreeRow
@@ -105,6 +119,7 @@ export const FileTreeRow: React.FC<{
           onEditCancel={onEditCancel}
           onContextMenu={onContextMenu}
           onMove={onMove}
+          decorations={decorations}
         />
       ))}
     </>

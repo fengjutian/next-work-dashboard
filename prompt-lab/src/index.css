@@ -137,3 +137,10 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--foreground) / 0.25);
 }
+/* Code editor Git diff decorations */
+.monaco-editor .git-line-added { background: color-mix(in srgb, #22c55e 10%, transparent); }
+.monaco-editor .git-line-modified { background: color-mix(in srgb, #3b82f6 10%, transparent); }
+.monaco-editor .git-line-deleted { background: color-mix(in srgb, #ef4444 10%, transparent); }
+.monaco-editor .git-gutter-added { border-left: 3px solid #22c55e; margin-left: 3px; }
+.monaco-editor .git-gutter-modified { border-left: 3px solid #3b82f6; margin-left: 3px; }
+.monaco-editor .git-gutter-deleted { border-left: 3px solid #ef4444; margin-left: 3px; }

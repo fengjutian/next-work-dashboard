@@ -1,7 +1,7 @@
 import { BrowserWindow, app, ipcMain, Menu, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import AutoLaunch from 'electron-auto-launch';
 import { getMainWindow } from './globals';
@@ -33,6 +33,22 @@ async function runGit(root: string, args: string[], maxBuffer = 10 * 1024 * 1024
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
   });
   return result.stdout.trim();
+}
+
+async function applyGitPatch(root: string, patchText: string): Promise<string> {
+  if (!patchText || patchText.length > 5 * 1024 * 1024) throw new Error('INVALID_GIT_PATCH');
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['apply', '--cached', '--unidiff-zero', '-'], {
+      cwd: root, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr.trim() || `git apply exited with ${code}`)));
+    child.stdin.end(patchText);
+  });
 }
 
 export function setupIPC(webviewPreloadPath: string) {
@@ -677,6 +693,16 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:revealEntry', async (_event, rootPath: string, relativePath: string) => {
+    try {
+      const target = resolveWorkspacePath(rootPath, relativePath);
+      shell.showItemInFolder(target);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:listFiles', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
@@ -716,23 +742,35 @@ export function setupIPC(webviewPreloadPath: string) {
       const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const source = options?.useRegex ? query : escapeRegExp(query);
       const matcher = new RegExp(options?.wholeWord ? `\\b(?:${source})\\b` : source, options?.caseSensitive ? 'g' : 'gi');
+      const globMatches = (relativePath: string, pattern: string) => {
+        const normalizedPath = relativePath.replace(/\\/g, '/');
+        const normalizedPattern = pattern.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '/**');
+        if (!normalizedPattern) return false;
+        const marker = '__DOUBLE_STAR__';
+        const escaped = normalizedPattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, marker).replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replaceAll(marker, '.*');
+        return new RegExp(normalizedPattern.includes('/') ? `^${escaped}$` : `(?:^|/)${escaped}(?:$|/)`, 'i').test(normalizedPath);
+      };
       const pathMatches = (relativePath: string, filter?: string) => {
         if (!filter?.trim()) return true;
-        return filter.split(',').some((part) => {
-          const normalized = part.trim().replace(/^\*\*\//, '').replace(/^\*\./, '.');
-          return relativePath.toLocaleLowerCase().includes(normalized.toLocaleLowerCase());
-        });
+        return filter.split(',').some((part) => globMatches(relativePath, part));
       };
+      const ignorePatterns = ['.gitignore', '.ignore'].flatMap((name) => {
+        const file = path.join(root, name);
+        if (!fs.existsSync(file)) return [];
+        return fs.readFileSync(file, 'utf8').split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#') && !line.startsWith('!'));
+      });
+      const isIgnored = (relativePath: string) => ignorePatterns.some((pattern) => globMatches(relativePath, pattern));
       const results: Array<{ path: string; line: number; column: number; preview: string }> = [];
       const visit = (directory: string) => {
         if (results.length >= 500) return;
         for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
           if (WORKSPACE_IGNORED_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
           const fullPath = path.join(directory, entry.name);
+          const relativePath = path.relative(root, fullPath);
+          if (isIgnored(relativePath)) continue;
           if (entry.isDirectory()) {
             visit(fullPath);
           } else if (entry.isFile()) {
-            const relativePath = path.relative(root, fullPath);
             if (!pathMatches(relativePath, options?.include) || (options?.exclude && pathMatches(relativePath, options.exclude))) continue;
             const stat = fs.statSync(fullPath);
             if (stat.size > 1024 * 1024) continue;
@@ -885,6 +923,21 @@ export function setupIPC(webviewPreloadPath: string) {
       } else if (operation === 'showCommit') {
         const hash = validateGitRef(String(payload.hash ?? ''));
         data = await runGit(root, ['show', '--format=fuller', '--stat', '--patch', hash], 30 * 1024 * 1024);
+      } else if (operation === 'fileDiff') {
+        const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
+        data = await runGit(root, ['diff', '--no-ext-diff', '--unified=3', '--', relativePath], 20 * 1024 * 1024);
+      } else if (operation === 'stagePatch') {
+        data = await applyGitPatch(root, String(payload.patch ?? ''));
+      } else if (operation === 'conflictVersions') {
+        const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? ''))).replace(/\\/g, '/');
+        const readStage = (stage: number) => runGit(root, ['show', `:${stage}:${relativePath}`], 20 * 1024 * 1024).catch(() => '');
+        const [base, ours, theirs] = await Promise.all([readStage(1), readStage(2), readStage(3)]);
+        data = { base, ours, theirs };
+      } else if (operation === 'resolveConflict') {
+        const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
+        const strategy = payload.strategy === 'theirs' ? '--theirs' : '--ours';
+        await runGit(root, ['checkout', strategy, '--', relativePath]);
+        data = await runGit(root, ['add', '--', relativePath]);
       } else if (operation === 'stashList') {
         const output = await runGit(root, ['stash', 'list', '--format=%gd%x1f%H%x1f%cr%x1f%s']);
         data = output.split(/\r?\n/).filter(Boolean).map((line) => {
