@@ -25,6 +25,7 @@ export interface AgentStep {
 
 export interface AgentOptions {
   maxSteps?: number; // 最大循环次数，默认 5
+  signal?: AbortSignal;
 }
 
 // ── System prompt that enables tool use ──
@@ -78,14 +79,13 @@ export async function* runAgent(
     yield { type: 'think', content: '' };
 
     let fullResponse = '';
-    const abort = new AbortController();
-
     try {
-      const stream = provider.chat(messages, { model, signal: abort.signal });
+      const stream = provider.chat(messages, { model, signal: options.signal });
       for await (const chunk of stream) {
         fullResponse += chunk.delta;
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') throw err;
       yield { type: 'answer', content: `Agent error: ${err.message}` };
       return;
     }
@@ -146,7 +146,7 @@ export async function* runAgent(
 
   let finalResponse = '';
   try {
-    const stream = provider.chat(messages, { model });
+    const stream = provider.chat(messages, { model, signal: options.signal });
     for await (const chunk of stream) {
       finalResponse += chunk.delta;
     }

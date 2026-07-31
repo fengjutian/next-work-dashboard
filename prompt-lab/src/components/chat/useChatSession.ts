@@ -7,6 +7,51 @@ import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 import type { Prompt } from '@/store/types';
 
+// ── Bubble.List 兼容的消息状态 ──
+export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'error' | 'abort';
+
+/** 将 Message 转为 Bubble.List items 所接受的格式 */
+export function toBubbleItems(messages: Message[], streaming: boolean, error: string | null) {
+  // 找到最后一条 user 消息的索引
+  let lastUserIdx = -1;
+  let lastAiIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user' && lastUserIdx === -1) lastUserIdx = i;
+    if (messages[i].role === 'assistant' && lastAiIdx === -1) lastAiIdx = i;
+    if (lastUserIdx !== -1 && lastAiIdx !== -1) break;
+  }
+
+  return messages.map((msg, idx, arr) => {
+    const isLast = idx === arr.length - 1;
+    const isLastUser = idx === lastUserIdx;
+    const isLastAi = idx === lastAiIdx;
+    let status: MessageStatus | undefined;
+    if (msg.role === 'assistant') {
+      if (isLast && streaming) status = 'loading';
+      else if (isLast && error) status = 'error';
+      else if (!msg.content.trim() && !msg.toolCalls?.length) status = 'loading';
+    }
+    const role = msg.role === 'assistant' ? 'ai' : msg.role;
+    return {
+      key: msg.id,
+      role,
+      content: msg.content,
+      status,
+      // streaming 是 per-item 的，不在 role 配置中
+      streaming: isLast && streaming,
+      // 最后一条 user 消息（非 streaming 时）可编辑
+      editable: role === 'user' && isLastUser && !streaming,
+      extraInfo: {
+        toolCalls: msg.toolCalls,
+        toolResults: msg.toolResults,
+        timestamp: msg.timestamp,
+        originalRole: msg.role,
+        isLastAi: msg.role === 'assistant' && isLastAi,
+      },
+    };
+  });
+}
+
 // ── 一次性工具注册 ──
 let toolsRegistered = false;
 if (!toolsRegistered) { registerTools(builtInTools); registerTools(pluginTools); toolsRegistered = true; }
@@ -63,8 +108,6 @@ export function useChatSession() {
   const [error, setError] = useState<string | null>(null);
   const [sysPromptOpen, setSysPromptOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -167,7 +210,7 @@ export function useChatSession() {
   }, [messages, currentModel, activeSession]);
 
   // ── Chat / Agent 核心 ──
-  const runChat = useCallback(async (history: Message[], assistantId: string) => {
+  const runChat = useCallback(async (history: Message[], assistantId: string, signal?: AbortSignal) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const boundContent = getBoundPromptsContent();
@@ -175,7 +218,7 @@ export function useChatSession() {
     const sysMsg = fullSystemPrompt ? [{ role: 'system' as const, content: fullSystemPrompt }] : [];
     const chatMessages: ChatMessage[] = [...sysMsg, ...history.filter((m) => m.content.trim() && m.role !== 'tool').map((m) => ({ role: m.role as 'user'|'assistant', content: m.content }))];
     let full = '';
-    const stream = provider.chat(chatMessages, { model: currentModel });
+    const stream = provider.chat(chatMessages, { model: currentModel, signal });
     for await (const chunk of stream) {
       full += chunk.delta;
       updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: full }; return u; });
@@ -187,7 +230,7 @@ export function useChatSession() {
     }
   }, [currentModel, systemPrompt, getBoundPromptsContent, getProvider, updateSession, updateSessionMeta]);
 
-  const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string) => {
+  const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const chatHistory: ChatMessage[] = history.filter((m) => m.content.trim() && m.role !== 'tool').map((m) => ({ role: m.role as 'user'|'assistant', content: m.content }));
@@ -201,7 +244,7 @@ export function useChatSession() {
 
     let thinkingText = '';
     let currentToolCalls: ToolCall[] = [];
-    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel)) {
+    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal })) {
       switch (step.type) {
         case 'think':
           updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: '🤔 思考中...' }; return u; });
@@ -224,18 +267,21 @@ export function useChatSession() {
   }, [currentModel, getProvider, updateSession]);
 
   // ── 发送 ──
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  const handleSend = useCallback(async (directText?: string) => {
+    const text = (directText ?? input).trim();
     if (!text || streaming) return;
-    setInput(''); setError(null);
+    if (!directText) setInput('');
+    setError(null);
     const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text, timestamp: Date.now() };
     const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
     const newHistory = [...messages, userMsg];
     updateSession(() => [...newHistory, assistantMsg]);
     setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, text);
-      else await runChat(newHistory, assistantMsg.id);
+      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, text, ctrl.signal);
+      else await runChat(newHistory, assistantMsg.id, ctrl.signal);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setError(err?.message ?? '请求失败');
@@ -254,40 +300,43 @@ export function useChatSession() {
     const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
     updateSession(() => [...trimmed, assistantMsg]);
     setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      if (agentMode) await runAgentChat(trimmed, assistantMsg.id, lastUser.content);
-      else await runChat(trimmed, assistantMsg.id);
+      if (agentMode) await runAgentChat(trimmed, assistantMsg.id, lastUser.content, ctrl.signal);
+      else await runChat(trimmed, assistantMsg.id, ctrl.signal);
     } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
     finally { setStreaming(false); }
   }, [streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
 
-  const handleStartEdit = useCallback((msgId: string) => {
-    const msg = messages.find((m) => m.id === msgId);
-    if (msg) { setEditValue(msg.content); setEditingMsgId(msgId); }
-  }, [messages]);
-
-  const handleSaveEdit = useCallback(async () => {
-    if (!editingMsgId || streaming) return;
-    const idx = messages.findIndex((m) => m.id === editingMsgId);
-    if (idx === -1) return;
-    const trimmed = messages.slice(0, idx);
-    const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: editValue, timestamp: Date.now() };
+  /** Bubble editable 的确认回调 — 编辑最后一条用户消息并重发 */
+  const handleEditConfirm = useCallback(async (newContent: string) => {
+    if (streaming) return;
+    // 找到最后一条 user 消息
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { lastUserIdx = i; break; }
+    }
+    if (lastUserIdx === -1) return;
+    const trimmed = messages.slice(0, lastUserIdx);
+    const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: newContent, timestamp: Date.now() };
     const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
     const newHistory = [...trimmed, userMsg];
     updateSession(() => [...newHistory, assistantMsg]);
-    setEditingMsgId(null);
     setStreaming(true);
     setError(null);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, editValue);
-      else await runChat(newHistory, assistantMsg.id);
+      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, newContent, ctrl.signal);
+      else await runChat(newHistory, assistantMsg.id, ctrl.signal);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setError(err?.message ?? '请求失败');
         updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantMsg.id && !last.content) u[u.length - 1] = { ...last, content: `❌ ${err?.message ?? '请求失败'}` }; return u; });
       }
     } finally { setStreaming(false); }
-  }, [editingMsgId, streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
+  }, [streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
 
   const handleStop = useCallback(() => abortRef.current?.abort(), []);
   const handleClear = useCallback(() => { updateSession(() => []); setError(null); }, [updateSession]);
@@ -299,13 +348,11 @@ export function useChatSession() {
     messages, systemPrompt, currentModel, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, error,
     sysPromptOpen, setSysPromptOpen,
-    editingMsgId, editValue, setEditValue, setEditingMsgId,
-    // refs
     inputRef, scrollRef,
     // handlers
     handleNewSession, handleDeleteSession, handleExport,
     handleSend, handleRegenerate, handleStop, handleClear, handleKeyDown,
-    handleStartEdit, handleSaveEdit,
+    handleEditConfirm,
     updateSessionMeta,
     // 绑定提示词
     boundPromptIds, toggleBoundPrompt, getBoundPromptsContent,

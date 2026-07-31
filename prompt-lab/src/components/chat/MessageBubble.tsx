@@ -50,9 +50,9 @@ export const ToolCallCard: React.FC<{ calls: ToolCall[]; results?: ToolResult[] 
   </div>
 );
 
-// ── Markdown 渲染 ──
+// ── Markdown 渲染（导出供外部使用）──
 
-function renderContent(text: string): React.ReactNode[] {
+export function renderMarkdown(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   const r = /```(\w*)\n([\s\S]*?)```/g;
   let last = 0, m: RegExpExecArray | null;
@@ -63,6 +63,10 @@ function renderContent(text: string): React.ReactNode[] {
   }
   if (last < text.length) parts.push(inline(text.slice(last), `a${last}`));
   return parts.length > 0 ? parts : [<span key="e">{text}</span>];
+}
+
+function renderContent(text: string): React.ReactNode[] {
+  return renderMarkdown(text);
 }
 
 function inline(text: string, key: string): React.ReactNode {
