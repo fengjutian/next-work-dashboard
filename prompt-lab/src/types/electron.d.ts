@@ -59,7 +59,8 @@ export interface ElectronAPI {
     trashEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     copyEntry: (rootPath: string, sourcePath: string, targetPath: string) => Promise<WorkspaceResult<void>>;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
-    search: (rootPath: string, query: string, options?: { caseSensitive?: boolean }) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
+    search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
+    gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
     watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
     unwatch: () => Promise<void>;
     onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;
@@ -126,6 +127,19 @@ export interface FolderPickResult {
 export interface WorkspaceFolder {
   path: string;
   name: string;
+}
+
+export interface WorkspaceSearchOptions {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  useRegex?: boolean;
+  include?: string;
+  exclude?: string;
+}
+
+export interface WorkspaceGitStatus {
+  path: string;
+  status: string;
 }
 
 export interface WorkspaceEntry {

@@ -1,6 +1,7 @@
 import { BrowserWindow, app, ipcMain, Menu, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import AutoLaunch from 'electron-auto-launch';
 import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
@@ -688,12 +689,21 @@ export function setupIPC(webviewPreloadPath: string) {
     _event,
     rootPath: string,
     query: string,
-    options?: { caseSensitive?: boolean },
+    options?: { caseSensitive?: boolean; wholeWord?: boolean; useRegex?: boolean; include?: string; exclude?: string },
   ) => {
     try {
       if (!query || query.length > 500) return { success: true, data: [] };
       const root = resolveWorkspacePath(rootPath);
-      const needle = options?.caseSensitive ? query : query.toLocaleLowerCase();
+      const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const source = options?.useRegex ? query : escapeRegExp(query);
+      const matcher = new RegExp(options?.wholeWord ? `\\b(?:${source})\\b` : source, options?.caseSensitive ? 'g' : 'gi');
+      const pathMatches = (relativePath: string, filter?: string) => {
+        if (!filter?.trim()) return true;
+        return filter.split(',').some((part) => {
+          const normalized = part.trim().replace(/^\*\*\//, '').replace(/^\*\./, '.');
+          return relativePath.toLocaleLowerCase().includes(normalized.toLocaleLowerCase());
+        });
+      };
       const results: Array<{ path: string; line: number; column: number; preview: string }> = [];
       const visit = (directory: string) => {
         if (results.length >= 500) return;
@@ -703,6 +713,8 @@ export function setupIPC(webviewPreloadPath: string) {
           if (entry.isDirectory()) {
             visit(fullPath);
           } else if (entry.isFile()) {
+            const relativePath = path.relative(root, fullPath);
+            if (!pathMatches(relativePath, options?.include) || (options?.exclude && pathMatches(relativePath, options.exclude))) continue;
             const stat = fs.statSync(fullPath);
             if (stat.size > 1024 * 1024) continue;
             let decoded;
@@ -713,15 +725,12 @@ export function setupIPC(webviewPreloadPath: string) {
             }
             const lines = decoded.content.split(/\r?\n/);
             for (let index = 0; index < lines.length && results.length < 500; index += 1) {
-              const haystack = options?.caseSensitive ? lines[index] : lines[index].toLocaleLowerCase();
-              const column = haystack.indexOf(needle);
-              if (column < 0) continue;
-              results.push({
-                path: path.relative(root, fullPath),
-                line: index + 1,
-                column: column + 1,
-                preview: lines[index].trim().slice(0, 240),
-              });
+              matcher.lastIndex = 0;
+              let match: RegExpExecArray | null;
+              while ((match = matcher.exec(lines[index])) && results.length < 500) {
+                results.push({ path: relativePath, line: index + 1, column: match.index + 1, preview: lines[index].trim().slice(0, 240) });
+                if (match[0].length === 0) matcher.lastIndex += 1;
+              }
             }
           }
           if (results.length >= 500) break;
@@ -729,6 +738,22 @@ export function setupIPC(webviewPreloadPath: string) {
       };
       visit(root);
       return { success: true, data: results };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:gitStatus', async (_event, rootPath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const output = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], {
+        cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 2 * 1024 * 1024,
+      });
+      const entries = output.split('\0').filter(Boolean).map((record) => ({
+        status: record.slice(0, 2),
+        path: record.slice(3).replace(/^.* -> /, ''),
+      }));
+      return { success: true, data: entries };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

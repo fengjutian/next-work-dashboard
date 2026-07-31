@@ -21,11 +21,13 @@ import {
   X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
+import { TerminalSingle } from '@/components/Terminal';
 import { useStore } from '@/store';
 import type {
   FilePickResult,
   WorkspaceEncoding,
   WorkspaceEntry,
+  WorkspaceGitStatus,
   WorkspaceSearchResult,
 } from '@/types/electron';
 import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
@@ -74,6 +76,40 @@ interface TreeEditState {
   value: string;
   target?: TreeNode;
 }
+
+interface EditorPreferences {
+  fontSize: number;
+  tabSize: number;
+  wordWrap: 'off' | 'on';
+  minimap: boolean;
+  formatOnSave: boolean;
+}
+
+interface EditorProblem {
+  path: string;
+  message: string;
+  line: number;
+  column: number;
+  severity: monaco.MarkerSeverity;
+}
+
+interface EditorSymbol {
+  name: string;
+  detail?: string;
+  line: number;
+  column: number;
+  depth: number;
+}
+
+type BottomPanelTab = 'problems' | 'output' | 'terminal' | 'outline' | 'sourceControl' | 'settings';
+
+const DEFAULT_PREFERENCES: EditorPreferences = {
+  fontSize: 13,
+  tabSize: 2,
+  wordWrap: 'off',
+  minimap: true,
+  formatOnSave: false,
+};
 
 const errorMessages: Record<string, string> = {
   ACCESS_DENIED: '路径不在当前工作区内',
@@ -239,6 +275,21 @@ export const CodeEditorPanel: React.FC = () => {
   } | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
+  const [preferences, setPreferences] = useState<EditorPreferences>(() => {
+    try {
+      return { ...DEFAULT_PREFERENCES, ...JSON.parse(localStorage.getItem('code-editor.preferences.v1') ?? '{}') };
+    } catch {
+      return DEFAULT_PREFERENCES;
+    }
+  });
+  const [bottomPanel, setBottomPanel] = useState<{ open: boolean; tab: BottomPanelTab; height: number }>({
+    open: false, tab: 'problems', height: 220,
+  });
+  const [problems, setProblems] = useState<EditorProblem[]>([]);
+  const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
+  const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
+  const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
+  const terminalIdRef = useRef(`code-editor-terminal-${Date.now()}`);
   const [status, setStatus] = useState('就绪');
   const [position, setPosition] = useState({ line: 1, column: 1 });
   const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
@@ -247,16 +298,26 @@ export const CodeEditorPanel: React.FC = () => {
   const [searchPanel, setSearchPanel] = useState<{
     open: boolean;
     query: string;
+    replacement: string;
     caseSensitive: boolean;
+    wholeWord: boolean;
+    useRegex: boolean;
+    include: string;
+    exclude: string;
     loading: boolean;
     results: WorkspaceSearchResult[];
-  }>({ open: false, query: '', caseSensitive: false, loading: false, results: [] });
+  }>({ open: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, useRegex: false, include: '', exclude: '', loading: false, results: [] });
   const restoringRef = useRef(true);
   const documentsRef = useRef<OpenDocument[]>([]);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const pendingRevealRef = useRef<{ path: string; line: number; column: number } | null>(null);
   const recentlySavedRef = useRef(new Map<string, number>());
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
+
+  const appendOutput = useCallback((message: string) => {
+    const line = `${new Date().toLocaleTimeString()}  ${message}`;
+    setOutputLines((previous) => [...previous.slice(-199), line]);
+  }, []);
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
@@ -623,7 +684,8 @@ export const CodeEditorPanel: React.FC = () => {
       item.path === document.path
         ? {
           ...item,
-          savedContent: item.content,
+          content: document.content,
+          savedContent: document.content,
           modifiedAt: 'data' in result ? result.data?.modifiedAt : item.modifiedAt,
           externalChanged: false,
         }
@@ -633,9 +695,23 @@ export const CodeEditorPanel: React.FC = () => {
     return true;
   }, [workspace]);
 
+  const formatActiveDocument = useCallback(async () => {
+    const action = editorRef.current?.getAction('editor.action.formatDocument');
+    if (!action?.isSupported()) {
+      setStatus('当前语言没有可用的格式化程序');
+      return false;
+    }
+    await action.run();
+    appendOutput(`已格式化 ${activeDocument?.name ?? '当前文档'}`);
+    return true;
+  }, [activeDocument?.name, appendOutput]);
+
   const saveActive = useCallback(async () => {
-    if (activeDocument) await saveDocument(activeDocument);
-  }, [activeDocument, saveDocument]);
+    if (!activeDocument) return;
+    if (preferences.formatOnSave && activeDocument.path === activePath) await formatActiveDocument();
+    const latest = documentsRef.current.find((item) => item.path === activeDocument.path) ?? activeDocument;
+    await saveDocument({ ...latest, content: editorRef.current?.getValue() ?? latest.content });
+  }, [activeDocument, activePath, formatActiveDocument, preferences.formatOnSave, saveDocument]);
 
   const saveAll = useCallback(async () => {
     for (const document of documents.filter((item) => item.content !== item.savedContent)) {
@@ -681,13 +757,46 @@ export const CodeEditorPanel: React.FC = () => {
     });
   }, []);
 
+  const refreshProblems = useCallback(() => {
+    setProblems(monaco.editor.getModels().flatMap((model) => (
+      monaco.editor.getModelMarkers({ resource: model.uri }).map((marker) => ({
+        path: model.uri.path.replace(/^\//, ''),
+        message: marker.message,
+        line: marker.startLineNumber,
+        column: marker.startColumn,
+        severity: marker.severity,
+      }))
+    )));
+  }, []);
+
+  const refreshSymbols = useCallback(async (editor: monaco.editor.IStandaloneCodeEditor | null = editorRef.current) => {
+    const model = editor?.getModel();
+    if (!model) {
+      setSymbols([]);
+      return;
+    }
+    // Monaco's standalone API does not expose VS Code's outline service, so keep
+    // a lightweight language-neutral outline for common declarations.
+    const declaration = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var|def|fn|struct)\s+([\w$]+)/;
+    const entries: EditorSymbol[] = [];
+    for (let line = 1; line <= model.getLineCount(); line += 1) {
+      const text = model.getLineContent(line);
+      const match = declaration.exec(text);
+      if (!match) continue;
+      entries.push({ name: match[2], detail: match[1], line, column: Math.max(1, text.indexOf(match[2]) + 1), depth: 0 });
+    }
+    setSymbols(entries);
+  }, []);
+
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
     editor.onDidChangeCursorPosition((event) => {
       setPosition({ line: event.position.lineNumber, column: event.position.column });
     });
+    refreshProblems();
+    void refreshSymbols(editor);
     editor.focus();
-  }, []);
+  }, [refreshProblems, refreshSymbols]);
 
   const runSearch = useCallback(async () => {
     if (!workspace || !searchPanel.query.trim()) return;
@@ -695,7 +804,13 @@ export const CodeEditorPanel: React.FC = () => {
     const result = await window.electronAPI.workspace.search(
       workspace.path,
       searchPanel.query.trim(),
-      { caseSensitive: searchPanel.caseSensitive },
+      {
+        caseSensitive: searchPanel.caseSensitive,
+        wholeWord: searchPanel.wholeWord,
+        useRegex: searchPanel.useRegex,
+        include: searchPanel.include,
+        exclude: searchPanel.exclude,
+      },
     );
     if (!result.success) {
       setStatus(`搜索失败：${displayError(result.error)}`);
@@ -708,7 +823,47 @@ export const CodeEditorPanel: React.FC = () => {
       results: result.data ?? [],
     }));
     setStatus(`找到 ${result.data?.length ?? 0} 个结果`);
-  }, [searchPanel.caseSensitive, searchPanel.query, workspace]);
+  }, [searchPanel.caseSensitive, searchPanel.exclude, searchPanel.include, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
+
+  const replaceAllSearchResults = useCallback(async () => {
+    if (!workspace || searchPanel.results.length === 0) return;
+    const paths = [...new Set(searchPanel.results.map((result) => result.path))];
+    if (!window.confirm(`将在 ${paths.length} 个文件中替换 ${searchPanel.results.length} 处匹配，是否继续？`)) return;
+    let matcher: RegExp;
+    try {
+      const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const source = searchPanel.useRegex ? searchPanel.query : escaped;
+      matcher = new RegExp(searchPanel.wholeWord ? `\\b(?:${source})\\b` : source, searchPanel.caseSensitive ? 'g' : 'gi');
+    } catch (error) {
+      setStatus(`替换失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    setSearchPanel((previous) => ({ ...previous, loading: true }));
+    let replacedFiles = 0;
+    for (const filePath of paths) {
+      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
+      if (!read.success || !read.data) continue;
+      const content = read.data.content.replace(matcher, searchPanel.replacement);
+      if (content === read.data.content) continue;
+      const write = await window.electronAPI.workspace.writeTextFile(workspace.path, filePath, content, {
+        encoding: read.data.encoding,
+        lineEnding: read.data.lineEnding,
+        expectedModifiedAt: read.data.modifiedAt,
+      });
+      if (!write.success) {
+        setStatus(`替换中止：${filePath} — ${displayError(write.error)}`);
+        break;
+      }
+      replacedFiles += 1;
+      recentlySavedRef.current.set(filePath, Date.now());
+      setDocuments((previous) => previous.map((document) => document.path === filePath ? {
+        ...document, content, savedContent: content, modifiedAt: write.data?.modifiedAt,
+      } : document));
+    }
+    appendOutput(`工作区替换完成：${replacedFiles}/${paths.length} 个文件`);
+    setSearchPanel((previous) => ({ ...previous, loading: false, results: [] }));
+    setStatus(`已在 ${replacedFiles} 个文件中完成替换`);
+  }, [appendOutput, searchPanel.caseSensitive, searchPanel.query, searchPanel.replacement, searchPanel.results, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
 
   const openSearchResult = useCallback(async (result: WorkspaceSearchResult) => {
     pendingRevealRef.current = { path: result.path, line: result.line, column: result.column };
@@ -873,6 +1028,32 @@ export const CodeEditorPanel: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [autoSave, documents, saveDocument]);
 
+  useEffect(() => {
+    localStorage.setItem('code-editor.preferences.v1', JSON.stringify(preferences));
+  }, [preferences]);
+
+  useEffect(() => {
+    const disposable = monaco.editor.onDidChangeMarkers(() => refreshProblems());
+    refreshProblems();
+    return () => disposable.dispose();
+  }, [refreshProblems]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshSymbols(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activePath, activeDocument?.content, refreshSymbols]);
+
+  useEffect(() => {
+    if (!workspace || !bottomPanel.open || bottomPanel.tab !== 'sourceControl') return;
+    void window.electronAPI.workspace.gitStatus(workspace.path).then((result) => {
+      if (result.success) setGitStatus(result.data ?? []);
+      else {
+        setGitStatus([]);
+        appendOutput(`Git 状态读取失败：${displayError(result.error)}`);
+      }
+    });
+  }, [appendOutput, bottomPanel.open, bottomPanel.tab, workspace]);
+
   useLayoutEffect(() => {
     if (!activePath || !editorRef.current) return;
     const pathForEffect = activePath;
@@ -985,6 +1166,14 @@ export const CodeEditorPanel: React.FC = () => {
         event.preventDefault();
         setSearchPanel((previous) => ({ ...previous, open: true }));
       }
+      if (command && event.shiftKey && event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        setBottomPanel({ open: true, tab: 'problems', height: 220 });
+      }
+      if (event.ctrlKey && event.key === '`') {
+        event.preventDefault();
+        setBottomPanel((previous) => ({ ...previous, open: previous.tab !== 'terminal' || !previous.open, tab: 'terminal' }));
+      }
       if (event.key === 'Escape') {
         setQuickOpen((previous) => ({ ...previous, open: false }));
         setSearchPanel((previous) => ({ ...previous, open: false }));
@@ -1043,6 +1232,12 @@ export const CodeEditorPanel: React.FC = () => {
           <Search className="h-4 w-4" /> 全文搜索
         </Button>
         <div className="flex-1" />
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void formatActiveDocument()} title="格式化文档 (Shift+Alt+F)">
+          格式化
+        </Button>
+        <Button size="sm" variant={bottomPanel.open ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setBottomPanel((previous) => ({ ...previous, open: !previous.open }))}>
+          面板
+        </Button>
         <Button size="sm" variant={autoSave ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setAutoSave((value) => !value)}>
           自动保存
         </Button>
@@ -1217,6 +1412,17 @@ export const CodeEditorPanel: React.FC = () => {
             </div>
           )}
 
+          {activeDocument && (
+            <nav className="flex h-7 shrink-0 items-center gap-1 overflow-hidden border-b px-3 text-[11px] text-muted-foreground" aria-label="Breadcrumb">
+              {(workspace ? activeDocument.path.split(/[\\/]/) : [activeDocument.name]).map((part, index, parts) => (
+                <React.Fragment key={`${part}:${index}`}>
+                  {index > 0 && <span className="opacity-50">›</span>}
+                  <span className={index === parts.length - 1 ? 'text-foreground' : ''}>{part}</span>
+                </React.Fragment>
+              ))}
+            </nav>
+          )}
+
           {activeDocument ? (
             <div className="flex min-h-0 flex-1">
               <div className="min-w-0 flex-1">
@@ -1236,13 +1442,14 @@ export const CodeEditorPanel: React.FC = () => {
                   options={{
                     automaticLayout: true,
                     fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
-                    fontSize: 13,
-                    lineHeight: 20,
-                    minimap: { enabled: true },
+                    fontSize: preferences.fontSize,
+                    lineHeight: Math.round(preferences.fontSize * 1.55),
+                    minimap: { enabled: preferences.minimap },
                     padding: { top: 8 },
                     scrollBeyondLastLine: false,
                     smoothScrolling: true,
-                    tabSize: 2,
+                    tabSize: preferences.tabSize,
+                    wordWrap: preferences.wordWrap,
                     readOnly: activeDocument.readOnly,
                   }}
                 />
@@ -1270,12 +1477,13 @@ export const CodeEditorPanel: React.FC = () => {
                     options={{
                       automaticLayout: true,
                       fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
-                      fontSize: 13,
-                      lineHeight: 20,
-                      minimap: { enabled: false },
+                      fontSize: preferences.fontSize,
+                      lineHeight: Math.round(preferences.fontSize * 1.55),
+                      minimap: { enabled: preferences.minimap },
                       padding: { top: 8 },
                       scrollBeyondLastLine: false,
-                      tabSize: 2,
+                      tabSize: preferences.tabSize,
+                      wordWrap: preferences.wordWrap,
                       readOnly: secondaryDocument.readOnly,
                     }}
                   />
@@ -1295,6 +1503,107 @@ export const CodeEditorPanel: React.FC = () => {
               </div>
             </div>
           )}
+
+          {bottomPanel.open && (
+            <section className="relative flex shrink-0 flex-col border-t bg-background" style={{ height: bottomPanel.height }}>
+              <div
+                className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize"
+                onMouseDown={(event) => {
+                  const startY = event.clientY;
+                  const startHeight = bottomPanel.height;
+                  const move = (moveEvent: MouseEvent) => setBottomPanel((previous) => ({
+                    ...previous, height: Math.max(120, Math.min(520, startHeight + startY - moveEvent.clientY)),
+                  }));
+                  const up = () => {
+                    window.removeEventListener('mousemove', move);
+                    window.removeEventListener('mouseup', up);
+                  };
+                  window.addEventListener('mousemove', move);
+                  window.addEventListener('mouseup', up);
+                }}
+              />
+              <div className="flex h-8 shrink-0 items-center gap-1 border-b px-2 text-[11px]">
+                {([
+                  ['problems', `问题 (${problems.length})`],
+                  ['output', '输出'],
+                  ['terminal', '终端'],
+                  ['outline', `大纲 (${symbols.length})`],
+                  ['sourceControl', `源代码管理 (${gitStatus.length})`],
+                  ['settings', '设置'],
+                ] as Array<[BottomPanelTab, string]>).map(([tab, label]) => (
+                  <button key={tab} type="button" className={`h-full border-b-2 px-2 ${bottomPanel.tab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`} onClick={() => setBottomPanel((previous) => ({ ...previous, tab }))}>
+                    {label}
+                  </button>
+                ))}
+                <div className="flex-1" />
+                <button type="button" className="rounded p-1 hover:bg-accent" onClick={() => setBottomPanel((previous) => ({ ...previous, open: false }))} aria-label="关闭底部面板"><X className="h-3.5 w-3.5" /></button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto">
+                {bottomPanel.tab === 'terminal' && (
+                  <TerminalSingle id={terminalIdRef.current} title="工作区终端" cwd={workspace?.path} alive theme={resolvedTheme === 'dark' ? 'dark' : 'light'} onExit={(_id, code) => appendOutput(`终端进程退出，代码 ${code}`)} />
+                )}
+                {bottomPanel.tab === 'problems' && (
+                  <div className="py-1">
+                    {problems.map((problem, index) => (
+                      <button key={`${problem.path}:${problem.line}:${problem.column}:${index}`} type="button" className="flex min-h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={() => {
+                        const relativePath = problem.path.replace(/^.*?file:\/\//, '').replace(/^\//, '');
+                        const document = documents.find((item) => problem.path.endsWith(item.path.replace(/\\/g, '/')));
+                        if (document) {
+                          pendingRevealRef.current = { path: document.path, line: problem.line, column: problem.column };
+                          setActivePath(document.path);
+                        } else setStatus(`问题位置：${relativePath}:${problem.line}:${problem.column}`);
+                      }}>
+                        <span className={problem.severity === monaco.MarkerSeverity.Error ? 'text-destructive' : 'text-warning'}>{problem.severity === monaco.MarkerSeverity.Error ? '●' : '▲'}</span>
+                        <span className="min-w-0 flex-1 truncate">{problem.message}</span>
+                        <span className="shrink-0 text-muted-foreground">{problem.path.split('/').pop()} [{problem.line}, {problem.column}]</span>
+                      </button>
+                    ))}
+                    {problems.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">未发现问题</div>}
+                  </div>
+                )}
+                {bottomPanel.tab === 'outline' && (
+                  <div className="py-1">
+                    {symbols.map((symbol) => (
+                      <button key={`${symbol.name}:${symbol.line}`} type="button" className="flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" style={{ paddingLeft: 12 + symbol.depth * 14 }} onClick={() => {
+                        editorRef.current?.setPosition({ lineNumber: symbol.line, column: symbol.column });
+                        editorRef.current?.revealLineInCenter(symbol.line);
+                        editorRef.current?.focus();
+                      }}>
+                        <Code className="h-3.5 w-3.5 text-primary" />
+                        <span className="truncate">{symbol.name}</span>
+                        <span className="text-muted-foreground">{symbol.detail}</span>
+                        <span className="ml-auto text-muted-foreground">:{symbol.line}</span>
+                      </button>
+                    ))}
+                    {symbols.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">当前文档没有可显示的符号</div>}
+                  </div>
+                )}
+                {bottomPanel.tab === 'output' && <pre className="min-h-full whitespace-pre-wrap p-3 font-mono text-xs text-muted-foreground">{outputLines.join('\n')}</pre>}
+                {bottomPanel.tab === 'sourceControl' && (
+                  <div className="py-1">
+                    {gitStatus.map((entry) => (
+                      <button key={`${entry.status}:${entry.path}`} type="button" className="flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={() => void openTreeFile({ name: entry.path.split(/[\\/]/).pop() ?? entry.path, path: entry.path, type: 'file' })}>
+                        <span className="w-5 shrink-0 font-mono text-primary">{entry.status.trim() || '?'}</span>
+                        <span className="truncate">{entry.path}</span>
+                      </button>
+                    ))}
+                    {gitStatus.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">工作区干净，或当前目录不是 Git 仓库</div>}
+                  </div>
+                )}
+                {bottomPanel.tab === 'settings' && (
+                  <div className="grid max-w-2xl grid-cols-[180px_1fr] items-center gap-x-4 gap-y-3 p-4 text-xs">
+                    <label htmlFor="editor-font-size">字体大小</label>
+                    <input id="editor-font-size" type="number" min={10} max={32} value={preferences.fontSize} onChange={(event) => setPreferences((previous) => ({ ...previous, fontSize: Number(event.target.value) || 13 }))} className="h-8 rounded border bg-background px-2" />
+                    <label htmlFor="editor-tab-size">Tab Size</label>
+                    <select id="editor-tab-size" value={preferences.tabSize} onChange={(event) => setPreferences((previous) => ({ ...previous, tabSize: Number(event.target.value) }))} className="h-8 rounded border bg-background px-2"><option value={2}>2</option><option value={4}>4</option><option value={8}>8</option></select>
+                    <span>自动换行</span><input type="checkbox" checked={preferences.wordWrap === 'on'} onChange={(event) => setPreferences((previous) => ({ ...previous, wordWrap: event.target.checked ? 'on' : 'off' }))} />
+                    <span>Minimap</span><input type="checkbox" checked={preferences.minimap} onChange={(event) => setPreferences((previous) => ({ ...previous, minimap: event.target.checked }))} />
+                    <span>保存时格式化</span><input type="checkbox" checked={preferences.formatOnSave} onChange={(event) => setPreferences((previous) => ({ ...previous, formatOnSave: event.target.checked }))} />
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
         </main>
       </div>
 
@@ -1304,7 +1613,7 @@ export const CodeEditorPanel: React.FC = () => {
         {activeDocument && (
           <>
             <span>Ln {position.line}, Col {position.column}</span>
-            <span>Spaces: 2</span>
+            <button type="button" onClick={() => setBottomPanel({ open: true, tab: 'settings', height: 220 })}>Spaces: {preferences.tabSize}</button>
             <span>{encodingLabel(activeDocument.encoding)}</span>
             <span>{activeDocument.lineEnding}{activeDocument.mixedLineEndings ? ' (混合)' : ''}</span>
             {activeDocument.readOnly && <span>只读</span>}
@@ -1411,10 +1720,20 @@ export const CodeEditorPanel: React.FC = () => {
               >
                 Aa
               </button>
+              <button type="button" className={`rounded px-1.5 py-1 font-mono text-xs ${searchPanel.wholeWord ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'}`} onClick={() => setSearchPanel((previous) => ({ ...previous, wholeWord: !previous.wholeWord }))} title="全字匹配">ab</button>
+              <button type="button" className={`rounded px-1.5 py-1 font-mono text-xs ${searchPanel.useRegex ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'}`} onClick={() => setSearchPanel((previous) => ({ ...previous, useRegex: !previous.useRegex }))} title="使用正则表达式">.*</button>
               <Button size="sm" className="h-7 px-3 text-xs" disabled={!searchPanel.query.trim() || searchPanel.loading} onClick={() => void runSearch()}>
                 {searchPanel.loading ? '搜索中…' : '搜索'}
               </Button>
               <kbd className="text-[10px] text-muted-foreground">Esc</kbd>
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-b px-3 py-2">
+              <input value={searchPanel.include} onChange={(event) => setSearchPanel((previous) => ({ ...previous, include: event.target.value }))} placeholder="包含文件，例如 src,.ts" className="h-8 rounded border bg-background px-2 text-xs outline-none" />
+              <input value={searchPanel.exclude} onChange={(event) => setSearchPanel((previous) => ({ ...previous, exclude: event.target.value }))} placeholder="排除文件，例如 dist,.min.js" className="h-8 rounded border bg-background px-2 text-xs outline-none" />
+            </div>
+            <div className="flex items-center gap-2 border-b px-3 py-2">
+              <input value={searchPanel.replacement} onChange={(event) => setSearchPanel((previous) => ({ ...previous, replacement: event.target.value }))} placeholder="替换为" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none" />
+              <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={searchPanel.loading || searchPanel.results.length === 0} onClick={() => void replaceAllSearchResults()}>全部替换</Button>
             </div>
             <div className="max-h-[420px] overflow-auto py-1">
               {searchPanel.results.map((result, index) => (

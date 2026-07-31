@@ -111,8 +111,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:copyEntry', rootPath, sourcePath, targetPath),
     listFiles: (rootPath: string) =>
       ipcRenderer.invoke('workspace:listFiles', rootPath),
-    search: (rootPath: string, query: string, options?: { caseSensitive?: boolean }) =>
+    search: (rootPath: string, query: string, options?: import('./types/electron').WorkspaceSearchOptions) =>
       ipcRenderer.invoke('workspace:search', rootPath, query, options),
+    gitStatus: (rootPath: string) => ipcRenderer.invoke('workspace:gitStatus', rootPath),
     watch: (rootPath: string) => ipcRenderer.invoke('workspace:watch', rootPath),
     unwatch: () => ipcRenderer.invoke('workspace:unwatch'),
     onFileChanged: (callback: (event: { path: string; type: 'change' | 'rename' }) => void) => {
