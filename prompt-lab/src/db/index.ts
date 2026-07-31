@@ -107,14 +107,14 @@ function ensureSchema(): void {
 interface PromptRow {
   id: string; title: string; content: string; category: string;
   tags: string; variables: string;
-  is_favorite: number; is_pinned: number; usage_count: number;
-  created_at: number; updated_at: number;
+  isFavorite: number; isPinned: number; usageCount: number;
+  createdAt: number; updatedAt: number;
 }
 
 interface SiteRow {
   id: string; name: string; url: string;
-  input_selector: string; submit_selector: string;
-  enabled: number; use_proxy: number; sort_order: number;
+  inputSelector: string; submitSelector: string;
+  enabled: number; useProxy: number; sortOrder: number;
 }
 
 import type { Prompt, SiteConfig } from '@/store/types';
@@ -123,8 +123,8 @@ function promptToRow(p: Prompt): PromptRow {
   return {
     id: p.id, title: p.title, content: p.content, category: p.category,
     tags: JSON.stringify(p.tags), variables: JSON.stringify(p.variables),
-    is_favorite: p.isFavorite ? 1 : 0, is_pinned: p.isPinned ? 1 : 0,
-    usage_count: p.usageCount, created_at: p.createdAt, updated_at: p.updatedAt,
+    isFavorite: p.isFavorite ? 1 : 0, isPinned: p.isPinned ? 1 : 0,
+    usageCount: p.usageCount, createdAt: p.createdAt, updatedAt: p.updatedAt,
   };
 }
 
@@ -133,24 +133,24 @@ function rowToPrompt(row: PromptRow): Prompt {
     id: row.id, title: row.title, content: row.content, category: row.category,
     tags: safeJsonParse(row.tags, []),
     variables: safeJsonParse(row.variables, []),
-    isFavorite: row.is_favorite === 1, isPinned: row.is_pinned === 1,
-    usageCount: row.usage_count, createdAt: row.created_at, updatedAt: row.updated_at,
+    isFavorite: row.isFavorite === 1, isPinned: row.isPinned === 1,
+    usageCount: row.usageCount, createdAt: row.createdAt, updatedAt: row.updatedAt,
   };
 }
 
 function siteToRow(s: SiteConfig): SiteRow {
   return {
     id: s.id, name: s.name, url: s.url,
-    input_selector: s.inputSelector, submit_selector: s.submitSelector,
-    enabled: s.enabled ? 1 : 0, use_proxy: 0, sort_order: s.sortOrder,
+    inputSelector: s.inputSelector, submitSelector: s.submitSelector,
+    enabled: s.enabled ? 1 : 0, useProxy: 0, sortOrder: s.sortOrder,
   };
 }
 
 function rowToSite(row: SiteRow): SiteConfig {
   return {
     id: row.id, name: row.name, url: row.url,
-    inputSelector: row.input_selector, submitSelector: row.submit_selector,
-    enabled: row.enabled === 1, sortOrder: row.sort_order,
+    inputSelector: row.inputSelector, submitSelector: row.submitSelector,
+    enabled: row.enabled === 1, sortOrder: row.sortOrder,
   };
 }
 
@@ -178,10 +178,10 @@ export function dbUpdatePrompt(id: string, patch: Partial<Prompt>): void {
   if (patch.category !== undefined) setObj.category = patch.category;
   if (patch.tags !== undefined) setObj.tags = JSON.stringify(patch.tags);
   if (patch.variables !== undefined) setObj.variables = JSON.stringify(patch.variables);
-  if (patch.isFavorite !== undefined) setObj.is_favorite = patch.isFavorite ? 1 : 0;
-  if (patch.isPinned !== undefined) setObj.is_pinned = patch.isPinned ? 1 : 0;
-  if (patch.usageCount !== undefined) setObj.usage_count = patch.usageCount;
-  if (patch.updatedAt !== undefined) setObj.updated_at = patch.updatedAt;
+  if (patch.isFavorite !== undefined) setObj.isFavorite = patch.isFavorite ? 1 : 0;
+  if (patch.isPinned !== undefined) setObj.isPinned = patch.isPinned ? 1 : 0;
+  if (patch.usageCount !== undefined) setObj.usageCount = patch.usageCount;
+  if (patch.updatedAt !== undefined) setObj.updatedAt = patch.updatedAt;
   if (Object.keys(setObj).length === 0) return;
   getDb().update(schema.prompts).set(setObj as never).where(eq(schema.prompts.id, id)).run();
 }
@@ -212,10 +212,10 @@ export function dbUpdateSite(id: string, patch: Partial<SiteConfig>): void {
   const setObj: Record<string, unknown> = {};
   if (patch.name !== undefined) setObj.name = patch.name;
   if (patch.url !== undefined) setObj.url = patch.url;
-  if (patch.inputSelector !== undefined) setObj.input_selector = patch.inputSelector;
-  if (patch.submitSelector !== undefined) setObj.submit_selector = patch.submitSelector;
+  if (patch.inputSelector !== undefined) setObj.inputSelector = patch.inputSelector;
+  if (patch.submitSelector !== undefined) setObj.submitSelector = patch.submitSelector;
   if (patch.enabled !== undefined) setObj.enabled = patch.enabled ? 1 : 0;
-  if (patch.sortOrder !== undefined) setObj.sort_order = patch.sortOrder;
+  if (patch.sortOrder !== undefined) setObj.sortOrder = patch.sortOrder;
   if (Object.keys(setObj).length === 0) return;
   getDb().update(schema.sites).set(setObj as never).where(eq(schema.sites.id, id)).run();
 }
@@ -228,8 +228,8 @@ export function dbInsertInjectHistory(entry: { promptId: string; siteId: string;
   const id = `${entry.promptId}-${entry.siteId}-${entry.timestamp}`;
   getDb().insert(schema.injectHistory).values({
     id,
-    prompt_id: entry.promptId,
-    site_id: entry.siteId,
+    promptId: entry.promptId,
+    siteId: entry.siteId,
     success: entry.success ? 1 : 0,
     timestamp: entry.timestamp,
   } as never).run();

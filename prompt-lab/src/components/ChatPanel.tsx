@@ -56,6 +56,7 @@ export const ChatPanel: React.FC = () => {
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [attachments, setAttachments] = useState<any[]>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const senderRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notifApi, contextHolder] = notification.useNotification();
@@ -71,7 +72,7 @@ export const ChatPanel: React.FC = () => {
 
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
-    messages, systemPrompt, currentModel, hasKey,
+    messages, systemPrompt, currentModel, compareModels, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, error,
     sysPromptOpen, setSysPromptOpen,
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
@@ -82,6 +83,18 @@ export const ChatPanel: React.FC = () => {
   } = useChatSession();
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+
+  const toggleCompareModel = useCallback((model: string) => {
+    const selected = compareModels.includes(model)
+      ? compareModels.filter((item) => item !== model)
+      : [...compareModels, model];
+    if (selected.length === 0) return;
+    updateSessionMeta({
+      model: selected[0],
+      compareModels: selected,
+    });
+  }, [compareModels, updateSessionMeta]);
 
   // ── 暗色模式 ──
   const [isDark, setIsDark] = useState(
@@ -120,7 +133,25 @@ export const ChatPanel: React.FC = () => {
   }, [activeRoleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── bubbleItems / conversationItems ──
-  const bubbleItems = useMemo(() => toBubbleItems(messages, streaming, error), [messages, streaming, error]);
+  const latestComparisonId = useMemo(() => {
+    return messages[messages.length - 1]?.comparisonId;
+  }, [messages]);
+  const latestComparison = useMemo(
+    () => latestComparisonId
+      ? messages.filter((message) => message.comparisonId === latestComparisonId)
+      : [],
+    [messages, latestComparisonId],
+  );
+  const bubbleMessages = useMemo(
+    () => latestComparisonId
+      ? messages.filter((message) => message.comparisonId !== latestComparisonId)
+      : messages,
+    [messages, latestComparisonId],
+  );
+  const bubbleItems = useMemo(
+    () => toBubbleItems(bubbleMessages, streaming && latestComparison.length === 0, error),
+    [bubbleMessages, streaming, latestComparison.length, error],
+  );
   const conversationItems = useMemo(() =>
     [...sessions].sort((a, b) => b.createdAt - a.createdAt).map((s) => ({
       key: s.id, label: s.title, group: stableDate(s.createdAt),
@@ -150,6 +181,16 @@ export const ChatPanel: React.FC = () => {
   const onSuggestionSelect = useCallback((value: string) => {
     handleSend(value);
   }, [handleSend]);
+
+  // ── URL 点击 → 弹层预览 ──
+  const handleMessageClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const anchor = target.closest('a');
+    if (anchor && anchor.href && /^https?:\/\//.test(anchor.href)) {
+      e.preventDefault();
+      setPreviewUrl(anchor.href);
+    }
+  }, []);
 
   const showSuggestion = useMemo(() => {
     if (streaming || messages.length === 0) return false;
@@ -202,7 +243,9 @@ export const ChatPanel: React.FC = () => {
           <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
             <Wrench className="h-3 w-3" /> 工具结果
           </div>
-          <div className="mt-1 text-xs whitespace-pre-wrap break-all text-amber-600 dark:text-amber-500">{text}</div>
+          <div className="mt-1 text-xs text-amber-600 dark:text-amber-500">
+            {text ? <XMarkdown content={text} className="text-xs" /> : null}
+          </div>
         </div>
       );
     }
@@ -259,10 +302,34 @@ export const ChatPanel: React.FC = () => {
               </Button>
               <span className="text-xs font-medium text-zinc-500 truncate max-w-[120px]">{activeSession?.title || '新对话'}</span>
               <div className="flex-1" />
-              <select className="h-6 text-[10px] rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 text-zinc-600 dark:text-zinc-400"
-                value={currentModel} onChange={(e) => updateSessionMeta({ model: e.target.value })}>
-                {MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              <div className="relative">
+                <button
+                  className={`h-6 text-[10px] rounded border px-2 ${
+                    compareModels.length > 1
+                      ? 'border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
+                      : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                  }`}
+                  onClick={() => setModelPickerOpen((open) => !open)}
+                  title="选择一个或多个模型"
+                >
+                  {compareModels.length > 1 ? `${compareModels.length} 个模型对比` : MODELS.find((m) => m.value === currentModel)?.label ?? currentModel}
+                </button>
+                {modelPickerOpen && (
+                  <div className="absolute right-0 top-7 z-40 min-w-48 rounded-md border bg-white dark:bg-zinc-900 p-2 shadow-lg">
+                    <div className="mb-1.5 text-[10px] text-zinc-400">可多选；Agent 模式仅使用主模型</div>
+                    {MODELS.map((model) => (
+                      <label key={model.value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                        <input
+                          type="checkbox"
+                          checked={compareModels.includes(model.value)}
+                          onChange={() => toggleCompareModel(model.value)}
+                        />
+                        <span>{model.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}
                 onClick={() => setAgentMode((v) => !v)}>{agentMode ? 'Agent ✓' : 'Agent'}</button>
               <button onClick={() => setRoleManagerOpen(true)}
@@ -297,7 +364,7 @@ export const ChatPanel: React.FC = () => {
 
             {/* 消息区域 */}
             {messages.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-4">
+              <div className="flex-1 flex flex-col items-center justify-center gap-4" onClick={handleMessageClick}>
                 <Welcome variant="borderless" icon={<Robot className="h-10 w-10 text-zinc-300" />}
                   title={hasKey ? 'AI 对话' : '未配置 API Key'}
                   description={hasKey ? '输入消息开始对话，可开启 Agent 模式自动调用工具' : '请在设置 → AI API 中配置后使用'} />
@@ -307,8 +374,11 @@ export const ChatPanel: React.FC = () => {
                 )}
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto" style={{ height: 0 }}>
-                <Bubble.List items={bubbleItems as any} autoScroll style={{ height: '100%' }}
+              <div className="flex-1 overflow-y-auto" style={{ height: 0 }} onClick={handleMessageClick}>
+                <Bubble.List
+                  items={bubbleItems as any}
+                  autoScroll
+                  style={{ height: latestComparison.length > 0 ? 'auto' : '100%' }}
                   role={{
                     ai: {
                       placement: 'start', variant: 'outlined',
@@ -316,8 +386,9 @@ export const ChatPanel: React.FC = () => {
                       avatar: (<div className="w-7 h-7 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0"><Robot className="h-3.5 w-3.5" /></div>),
                       header: (_: any, info: any) => {
                         const ts = info?.extraInfo?.timestamp;
+                        const model = info?.extraInfo?.model;
                         if (!ts) return null;
-                        return <span className="text-[10px] text-zinc-400">{formatTime(ts)}</span>;
+                        return <span className="text-[10px] text-zinc-400">{model ? `${model} · ` : ''}{formatTime(ts)}</span>;
                       },
                       contentRender,
                       footer: (content: any, info: any) => {
@@ -343,6 +414,36 @@ export const ChatPanel: React.FC = () => {
                     },
                     tool: { placement: 'start', variant: 'borderless', contentRender },
                   }} />
+                {latestComparison.length > 0 && (
+                  <div className="grid grid-cols-1 items-start gap-3 px-4 pb-4 lg:grid-cols-2">
+                    {latestComparison.map((message) => (
+                      <section
+                        key={message.id}
+                        className="min-w-0 rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900 dark:bg-violet-950/20"
+                      >
+                        <div className="mb-2 flex items-center justify-between border-b border-violet-100 pb-2 text-xs dark:border-violet-900">
+                          <span className="font-semibold text-violet-700 dark:text-violet-300">
+                            {MODELS.find((model) => model.value === message.model)?.label ?? message.model}
+                          </span>
+                          <button
+                            className="text-[10px] text-zinc-400 hover:text-zinc-600"
+                            onClick={() => navigator.clipboard.writeText(message.content)}
+                            disabled={!message.content}
+                          >
+                            复制
+                          </button>
+                        </div>
+                        {message.content ? (
+                          <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="text-sm" />
+                        ) : (
+                          <div className="py-6 text-center text-xs text-zinc-400">
+                            {streaming ? '生成中…' : '暂无回答'}
+                          </div>
+                        )}
+                      </section>
+                    ))}
+                  </div>
+                )}
                 {/* 错误区域 + 重试按钮 */}
                 {error && (
                   <div className="flex items-center justify-center gap-2 py-2">
@@ -407,6 +508,26 @@ export const ChatPanel: React.FC = () => {
             boundPromptIds={boundPromptIds} onToggleBound={toggleBoundPrompt} />
           <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />
         </div>
+
+        {/* URL 预览弹层 */}
+        {previewUrl && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPreviewUrl(null)}>
+            <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden" style={{ width: '90vw', height: '85vh' }}
+              onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-3 py-2 border-b bg-zinc-50 dark:bg-zinc-800">
+                <span className="text-xs text-zinc-500 truncate max-w-[80%]">{previewUrl}</span>
+                <div className="flex gap-1">
+                  <button className="text-xs text-zinc-400 hover:text-zinc-600 px-2"
+                    onClick={() => { const api = (window as any).electronAPI; api?.shell?.openExternal?.(previewUrl); }}>
+                    ↗ 浏览器打开
+                  </button>
+                  <button className="text-xs text-zinc-400 hover:text-red-500 px-2" onClick={() => setPreviewUrl(null)}>✕ 关闭</button>
+                </div>
+              </div>
+              <webview src={previewUrl} style={{ width: '100%', height: 'calc(100% - 37px)' }} />
+            </div>
+          </div>
+        )}
       </XProvider>
     </ConfigProvider>
   );

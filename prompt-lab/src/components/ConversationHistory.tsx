@@ -72,7 +72,6 @@ export const ConversationHistory: React.FC = () => {
         return;
       }
       const list = await api.listConversations();
-      console.log('[ConvHistory] loaded', list.length, 'files:', list.map((f: ConversationFile) => f.fileName));
       setFiles(list);
     } catch (err) {
       console.error('[ConvHistory] loadList failed:', err);

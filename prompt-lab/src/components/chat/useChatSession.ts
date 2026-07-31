@@ -46,6 +46,8 @@ export function toBubbleItems(messages: Message[], streaming: boolean, error: st
         toolCalls: msg.toolCalls,
         toolResults: msg.toolResults,
         timestamp: msg.timestamp,
+        model: msg.model,
+        comparisonId: msg.comparisonId,
         originalRole: msg.role,
         isLastAi: msg.role === 'assistant' && isLastAi,
       },
@@ -69,6 +71,8 @@ export interface Session {
   title: string;
   messages: Message[];
   model: string;
+  /** 勾选两个及以上模型时启用并行对比。 */
+  compareModels?: string[];
   systemPrompt: string;
   /** 绑定到该会话的提示词 ID 列表 — 自动合并到 systemPrompt */
   boundPromptIds: string[];
@@ -128,6 +132,9 @@ export function useChatSession() {
   }, [sessions.length, aiApi.model]);
 
   const currentModel = activeSession?.model ?? aiApi.model;
+  const compareModels = activeSession?.compareModels?.length
+    ? activeSession.compareModels
+    : [currentModel];
   const hasKey = !!aiApi.apiKey;
 
   // ── 状态 ──
@@ -137,7 +144,7 @@ export function useChatSession() {
   const [error, setError] = useState<string | null>(null);
   const [sysPromptOpen, setSysPromptOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortRef = useRef<AbortController[]>([]);
   const providerRef = useRef<LLMProvider | null>(null);
 
   useEffect(() => { providerRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl]);
@@ -241,20 +248,34 @@ export function useChatSession() {
   }, [messages, currentModel, activeSession]);
 
   // ── Chat / Agent 核心 ──
-  const runChat = useCallback(async (history: Message[], assistantId: string, signal?: AbortSignal) => {
+  const runChat = useCallback(async (
+    history: Message[],
+    assistantId: string,
+    model = currentModel,
+    signal?: AbortSignal,
+  ) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const boundContent = getBoundPromptsContent();
     const fullSystemPrompt = [systemPrompt.trim(), boundContent].filter(Boolean).join('\n\n');
     const sysMsg = fullSystemPrompt ? [{ role: 'system' as const, content: fullSystemPrompt }] : [];
-    const chatMessages: ChatMessage[] = [...sysMsg, ...history.filter((m) => m.content.trim() && m.role !== 'tool').map((m) => ({ role: m.role as 'user'|'assistant', content: m.content }))];
+    const chatMessages: ChatMessage[] = [
+      ...sysMsg,
+      ...history
+        .filter((m) =>
+          m.content.trim() &&
+          m.role !== 'tool' &&
+          (m.role !== 'assistant' || !m.model || m.model === model)
+        )
+        .map((m) => ({ role: m.role as 'user'|'assistant', content: m.content })),
+    ];
     let full = '';
-    const stream = provider.chat(chatMessages, { model: currentModel, signal });
+    const stream = provider.chat(chatMessages, { model, signal });
     for await (const chunk of stream) {
       full += chunk.delta;
-      updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: full }; return u; });
+      updateSession((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: full } : m));
     }
-    updateSession((prev) => { const last = prev[prev.length - 1]; if (last?.id === assistantId && !last.content.trim()) return prev.slice(0, -1); return prev; });
+    updateSession((prev) => prev.filter((m) => m.id !== assistantId || m.content.trim()));
     if (history.length <= 1 && full) {
       const title = history[0]?.content?.slice(0, 30) + (history[0]?.content?.length > 30 ? '...' : '') || '新对话';
       updateSessionMeta({ title });
@@ -304,22 +325,62 @@ export function useChatSession() {
     if (!directText) setInput('');
     setError(null);
     const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text, timestamp: Date.now() };
-    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
+    const comparisonId = `cmp-${Date.now()}`;
+    const models = agentMode ? [currentModel] : [...new Set(compareModels)];
+    const assistantMsgs: Message[] = models.map((model, index) => ({
+      id: `a-${Date.now()}-${index}`,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      model,
+      comparisonId: models.length > 1 ? comparisonId : undefined,
+    }));
     const newHistory = [...messages, userMsg];
-    updateSession(() => [...newHistory, assistantMsg]);
+    updateSession(() => [...newHistory, ...assistantMsgs]);
     setStreaming(true);
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    const controllers = models.map(() => new AbortController());
+    abortRef.current = controllers;
     try {
-      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, text, ctrl.signal);
-      else await runChat(newHistory, assistantMsg.id, ctrl.signal);
+      if (agentMode) {
+        await runAgentChat(newHistory, assistantMsgs[0].id, text, controllers[0].signal);
+      } else {
+        const results = await Promise.allSettled(
+          assistantMsgs.map((message, index) =>
+            runChat(newHistory, message.id, message.model, controllers[index].signal)
+          )
+        );
+        const failures = results
+          .map((result, index) => ({ result, model: models[index], message: assistantMsgs[index] }))
+          .filter(({ result }) => result.status === 'rejected') as Array<{
+            result: PromiseRejectedResult;
+            model: string;
+            message: Message;
+          }>;
+        for (const failure of failures) {
+          const reason = failure.result.reason;
+          if (reason?.name === 'AbortError') continue;
+          updateSession((prev) => prev.map((m) =>
+            m.id === failure.message.id
+              ? { ...m, content: `❌ ${reason?.message ?? '请求失败'}` }
+              : m
+          ));
+        }
+        if (failures.length === models.length) {
+          throw failures[0].result.reason;
+        }
+      }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setError(err?.message ?? '请求失败');
-        updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantMsg.id && !last.content) u[u.length - 1] = { ...last, content: `❌ ${err?.message ?? '请求失败'}` }; return u; });
+        const answerIds = new Set(assistantMsgs.map((message) => message.id));
+        updateSession((prev) => prev.map((message) =>
+          answerIds.has(message.id) && !message.content
+            ? { ...message, content: `❌ ${err?.message ?? '请求失败'}` }
+            : message
+        ));
       }
     } finally { setStreaming(false); }
-  }, [input, streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
+  }, [input, streaming, messages, agentMode, currentModel, compareModels, runChat, runAgentChat, updateSession]);
 
   // ── 重新生成 / 编辑 ──
   const handleRegenerate = useCallback(async () => {
@@ -328,17 +389,17 @@ export function useChatSession() {
     const trimmed = messages.slice(0, -1);
     const lastUser = trimmed[trimmed.length - 1];
     if (lastUser?.role !== 'user') return;
-    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
+    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now(), model: currentModel };
     updateSession(() => [...trimmed, assistantMsg]);
     setStreaming(true);
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    abortRef.current = [ctrl];
     try {
       if (agentMode) await runAgentChat(trimmed, assistantMsg.id, lastUser.content, ctrl.signal);
-      else await runChat(trimmed, assistantMsg.id, ctrl.signal);
+      else await runChat(trimmed, assistantMsg.id, currentModel, ctrl.signal);
     } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
     finally { setStreaming(false); }
-  }, [streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
+  }, [streaming, messages, agentMode, currentModel, runChat, runAgentChat, updateSession]);
 
   /** Bubble editable 的确认回调 — 编辑最后一条用户消息并重发 */
   const handleEditConfirm = useCallback(async (newContent: string) => {
@@ -351,25 +412,25 @@ export function useChatSession() {
     if (lastUserIdx === -1) return;
     const trimmed = messages.slice(0, lastUserIdx);
     const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: newContent, timestamp: Date.now() };
-    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
+    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now(), model: currentModel };
     const newHistory = [...trimmed, userMsg];
     updateSession(() => [...newHistory, assistantMsg]);
     setStreaming(true);
     setError(null);
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    abortRef.current = [ctrl];
     try {
       if (agentMode) await runAgentChat(newHistory, assistantMsg.id, newContent, ctrl.signal);
-      else await runChat(newHistory, assistantMsg.id, ctrl.signal);
+      else await runChat(newHistory, assistantMsg.id, currentModel, ctrl.signal);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setError(err?.message ?? '请求失败');
         updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantMsg.id && !last.content) u[u.length - 1] = { ...last, content: `❌ ${err?.message ?? '请求失败'}` }; return u; });
       }
     } finally { setStreaming(false); }
-  }, [streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
+  }, [streaming, messages, agentMode, currentModel, runChat, runAgentChat, updateSession]);
 
-  const handleStop = useCallback(() => abortRef.current?.abort(), []);
+  const handleStop = useCallback(() => abortRef.current.forEach((controller) => controller.abort()), []);
   const handleClear = useCallback(() => { updateSession(() => []); setError(null); }, [updateSession]);
 
   /** 出错后重试：重新发送最后一条用户消息 */
@@ -385,23 +446,23 @@ export function useChatSession() {
     // 移除该 user 消息之后的所有消息，重新发送
     const idx = messages.findIndex((m) => m.id === lastUser!.id);
     const trimmed = messages.slice(0, idx);
-    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
+    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now(), model: currentModel };
     const newHistory = [...trimmed, lastUser];
     updateSession(() => [...newHistory, assistantMsg]);
     setStreaming(true);
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    abortRef.current = [ctrl];
     try {
       if (agentMode) await runAgentChat(newHistory, assistantMsg.id, lastUser.content, ctrl.signal);
-      else await runChat(newHistory, assistantMsg.id, ctrl.signal);
+      else await runChat(newHistory, assistantMsg.id, currentModel, ctrl.signal);
     } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
     finally { setStreaming(false); }
-  }, [streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
+  }, [streaming, messages, agentMode, currentModel, runChat, runAgentChat, updateSession]);
 
   return {
     // state
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
-    messages, systemPrompt, currentModel, hasKey,
+    messages, systemPrompt, currentModel, compareModels, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, error,
     sysPromptOpen, setSysPromptOpen,
     // handlers

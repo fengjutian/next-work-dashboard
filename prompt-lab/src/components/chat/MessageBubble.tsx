@@ -9,6 +9,10 @@ export interface Message {
   role: 'user' | 'assistant' | 'tool';
   content: string;
   timestamp: number;
+  /** 生成该回答的模型；旧会话没有此字段时沿用会话默认模型。 */
+  model?: string;
+  /** 同一次多模型请求共享的标识，用于区分并行回答。 */
+  comparisonId?: string;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
 }

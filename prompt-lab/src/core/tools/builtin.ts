@@ -39,7 +39,7 @@ export const builtInTools: ToolDefinition[] = [
   },
   {
     name: 'web_search',
-    description: '搜索网页（通过 DuckDuckGo）',
+    description: '搜索网页（通过 Bing）',
     parameters: {
       type: 'object',
       properties: {
@@ -51,27 +51,45 @@ export const builtInTools: ToolDefinition[] = [
       const query = String(args.query);
       try {
         const api = (window as any).electronAPI;
-        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+        const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=zh-cn`;
         let html: string;
         if (api?.fetchUrl) {
           const res = await api.fetchUrl(url);
-          html = res.ok ? res.text : '';
+          if (!res.ok) return `搜索失败: HTTP ${res.status}`;
+          html = res.text;
         } else {
-          const resp = await fetch(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          });
+          const resp = await fetch(url);
+          if (!resp.ok) return `搜索失败: HTTP ${resp.status}`;
           html = await resp.text();
         }
-        const snippets: string[] = [];
-        const re = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-        let m; let count = 0;
-        while ((m = re.exec(html)) !== null && count < 5) {
-          snippets.push(m[1].replace(/<[^>]+>/g, '').trim());
-          count++;
+
+        // 从 Bing HTML 提取搜索结果
+        const results: { title: string; url: string; snippet: string }[] = [];
+        // Bing 结果在 <li class="b_algo"> 中
+        const blockRe = /<li class="b_algo"[^>]*>([\s\S]*?)<\/li>/gi;
+        let block;
+        while ((block = blockRe.exec(html)) !== null) {
+          const blockHtml = block[1];
+          // 提取标题
+          const titleM = blockHtml.match(/<h2[^>]*><a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
+          // 提取摘要
+          const snippetM = blockHtml.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+          if (titleM) {
+            results.push({
+              title: titleM[2].replace(/<[^>]+>/g, '').trim(),
+              url: titleM[1],
+              snippet: snippetM ? snippetM[1].replace(/<[^>]+>/g, '').trim() : '',
+            });
+          }
+          if (results.length >= 5) break;
         }
-        return snippets.length > 0
-          ? snippets.map((s, i) => `${i + 1}. ${s}`).join('\n')
-          : '未找到搜索结果';
+
+        if (results.length > 0) {
+          return results.map((r, i) =>
+            `${i + 1}. **${r.title}**\n   ${r.snippet}\n   ${r.url}`
+          ).join('\n\n');
+        }
+        return '未找到搜索结果';
       } catch (e: any) {
         return `搜索失败: ${e.message}`;
       }
@@ -136,10 +154,12 @@ export const builtInTools: ToolDefinition[] = [
       try {
         const api = (window as any).electronAPI;
         let text: string;
+        let isHtml = false;
         if (api?.fetchUrl) {
           const res = await api.fetchUrl(url);
           if (!res.ok) return `HTTP ${res.status} ${res.error || ''}`;
           text = res.text;
+          isHtml = res.contentType.includes('text/html');
           if (res.contentType.includes('application/json')) {
             text = JSON.stringify(JSON.parse(text), null, 2).slice(0, 3000);
           }
@@ -149,12 +169,30 @@ export const builtInTools: ToolDefinition[] = [
           });
           if (!resp.ok) return `HTTP ${resp.status} ${resp.statusText}`;
           const contentType = resp.headers.get('content-type') || '';
+          isHtml = contentType.includes('text/html');
           if (contentType.includes('application/json')) {
             const json = await resp.json();
             return JSON.stringify(json, null, 2).slice(0, 3000);
           }
           text = await resp.text();
         }
+
+        // 如果是 HTML，提取纯文本
+        if (isHtml) {
+          text = text
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#\d+;/g, '')
+            .replace(/\s{2,}/g, '\n')
+            .trim();
+        }
+
         return text.length > 5000 ? text.slice(0, 5000) + '\n...(truncated)' : text;
       } catch (e: any) {
         return `请求失败: ${e.message}`;
