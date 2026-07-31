@@ -117,6 +117,22 @@ export function setupIPC(webviewPreloadPath: string) {
     return await fetchSiteFavicon(siteUrl);
   });
 
+  // ── 通用 HTTP fetch（绕过 CORS，供 AI 工具使用） ──
+  ipcMain.handle('fetch-url', async (_event, url: string, options?: { headers?: Record<string, string> }) => {
+    try {
+      const resp = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          ...options?.headers,
+        },
+      });
+      const text = await resp.text();
+      return { ok: resp.ok, status: resp.status, text, contentType: resp.headers.get('content-type') || '' };
+    } catch (err: any) {
+      return { ok: false, status: 0, text: '', error: err.message };
+    }
+  });
+
   // ── JSON 存储 ──
   ipcMain.handle('store-save', async (_event, data: string) => {
     try {

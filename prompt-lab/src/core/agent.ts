@@ -1,20 +1,11 @@
 // ── ReAct Agent Loop ──
-// 实现 think → act → observe 循环，直到 LLM 给出最终答案
+// 使用 OpenAI 原生 function calling 协议
 
-import type { LLMProvider, ChatMessage } from './llm';
+import type { LLMProvider, ChatMessage, ChatOptions, ToolDef } from './llm';
 import { getEnabledToolSchemas, executeToolCall } from './tools';
 import type { ToolCall, ToolResult } from './tools';
 
 // ── 类型 ──
-
-export interface AgentMessage {
-  role: 'user' | 'assistant' | 'tool' | 'system';
-  content: string;
-  /** 工具调用信息（仅 assistant 消息可能有） */
-  toolCalls?: ToolCall[];
-  /** 工具执行结果（仅 tool 消息有） */
-  toolResult?: ToolResult;
-}
 
 export interface AgentStep {
   type: 'think' | 'act' | 'observe' | 'answer';
@@ -24,25 +15,26 @@ export interface AgentStep {
 }
 
 export interface AgentOptions {
-  maxSteps?: number; // 最大循环次数，默认 5
+  maxSteps?: number;
   signal?: AbortSignal;
 }
 
-// ── System prompt that enables tool use ──
+// ── System prompt ──
 
-const TOOL_SYSTEM_PROMPT = `You are an AI assistant with access to tools.
-When you need to use a tool, output a JSON block exactly like this:
-
-\`\`\`tool
-{"calls":[{"id":"call_1","name":"tool_name","arguments":{"arg":"value"}}]}
-\`\`\`
-
-After receiving tool results, continue thinking and either use more tools or give a final answer.
-Always output your final answer in natural language without tool blocks.
-
-Available tools will be provided in the system message.`;
+const SYSTEM_PROMPT = `You are a helpful AI assistant. You have access to tools. Use them when needed to gather information or perform actions. Always respond in the user's language.`;
 
 // ── Agent ──
+
+function openAiSchemaToToolDef(schema: ReturnType<typeof getEnabledToolSchemas>[number]): ToolDef {
+  return {
+    type: 'function',
+    function: {
+      name: schema.function.name,
+      description: schema.function.description,
+      parameters: schema.function.parameters as unknown as Record<string, unknown>,
+    },
+  };
+}
 
 export async function* runAgent(
   provider: LLMProvider,
@@ -52,37 +44,43 @@ export async function* runAgent(
   options: AgentOptions = {},
 ): AsyncIterable<AgentStep> {
   const maxSteps = options.maxSteps ?? 5;
-
-  // 构建包含工具定义的 system message
   const toolSchemas = getEnabledToolSchemas();
-  const toolListText = toolSchemas
-    .map((t) => {
-      const props = Object.entries(t.function.parameters.properties)
-        .map(([k, v]) => `  - ${k}: ${v.type} — ${v.description}`)
-        .join('\n');
-      const required = t.function.parameters.required?.length
-        ? `\n  Required: ${t.function.parameters.required.join(', ')}`
-        : '';
-      return `- **${t.function.name}**: ${t.function.description}\n${props}${required}`;
-    })
-    .join('\n\n');
+  const tools = toolSchemas.map(openAiSchemaToToolDef);
 
-  const systemMsg: ChatMessage = {
-    role: 'system',
-    content: `${TOOL_SYSTEM_PROMPT}\n\n## Available Tools\n\n${toolListText}`,
-  };
-
+  const systemMsg: ChatMessage = { role: 'system', content: SYSTEM_PROMPT };
   const messages: ChatMessage[] = [systemMsg, ...history, { role: 'user', content: userMessage }];
 
   for (let step = 0; step < maxSteps; step++) {
-    // ── Think 阶段：调用 LLM ──
     yield { type: 'think', content: '' };
 
-    let fullResponse = '';
+    let fullContent = '';
+    let finishReason: string | null = null;
+    const accumulatedToolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
+
     try {
-      const stream = provider.chat(messages, { model, signal: options.signal });
+      const chatOpts: ChatOptions = { model, signal: options.signal, tools };
+      const stream = provider.chat(messages, chatOpts);
       for await (const chunk of stream) {
-        fullResponse += chunk.delta;
+        fullContent += chunk.delta;
+
+        // 收集 tool_call delta
+        if (chunk.toolCallDelta) {
+          const d = chunk.toolCallDelta;
+          const existing = accumulatedToolCalls.get(d.index);
+          if (existing) {
+            if (d.id) existing.id = d.id;
+            if (d.name) existing.name = d.name;
+            existing.arguments += d.arguments || '';
+          } else {
+            accumulatedToolCalls.set(d.index, {
+              id: d.id || '',
+              name: d.name || '',
+              arguments: d.arguments || '',
+            });
+          }
+        }
+
+        if (chunk.finishReason) finishReason = chunk.finishReason;
       }
     } catch (err: any) {
       if (err.name === 'AbortError') throw err;
@@ -90,33 +88,35 @@ export async function* runAgent(
       return;
     }
 
-    // ── 解析响应：是否有 tool block ──
-    const toolBlockMatch = fullResponse.match(/```tool\n([\s\S]*?)\n```/);
-    if (!toolBlockMatch) {
-      // 无工具调用 → 最终答案
-      yield { type: 'answer', content: fullResponse };
+    // ── 判断是否有 tool_calls ──
+    if (accumulatedToolCalls.size === 0) {
+      yield { type: 'answer', content: fullContent };
       return;
     }
 
-    // 提取 tool calls JSON
-    let toolCalls: ToolCall[];
-    try {
-      const parsed = JSON.parse(toolBlockMatch[1]);
-      toolCalls = parsed.calls || [];
-    } catch {
-      yield { type: 'answer', content: fullResponse };
-      return;
-    }
+    // ── 构建 ToolCall 列表 ──
+    const rawCalls = [...accumulatedToolCalls.values()]
+      .sort((a, b) => a.id.localeCompare(b.id) || 0);
+
+    const toolCalls: ToolCall[] = rawCalls
+      .map((c, i) => {
+        let args: Record<string, unknown> = {};
+        try { args = JSON.parse(c.arguments); } catch { /* empty args */ }
+        return {
+          id: c.id || `call_${i}`,
+          name: c.name,
+          arguments: args,
+        };
+      })
+      .filter((c) => c.name);
 
     if (toolCalls.length === 0) {
-      yield { type: 'answer', content: fullResponse };
+      yield { type: 'answer', content: fullContent };
       return;
     }
 
-    // 思考文本（去掉 tool block 后的内容）
-    const thinkingText = fullResponse.replace(/```tool\n[\s\S]*?\n```/, '').trim();
-
-    // ── Act 阶段：执行工具 ──
+    // ── Act：执行工具 ──
+    const thinkingText = fullContent.trim();
     yield { type: 'act', content: thinkingText, toolCalls };
 
     const toolResults: ToolResult[] = [];
@@ -125,23 +125,32 @@ export async function* runAgent(
       toolResults.push(result);
     }
 
-    // ── Observe 阶段：将结果反馈给 LLM ──
+    // ── Observe ──
     yield { type: 'observe', toolResults };
 
-    // 将 assistant 响应 + tool 结果添加到消息历史
-    messages.push({ role: 'assistant', content: fullResponse });
+    // 按 OpenAI 格式追加消息
+    messages.push({
+      role: 'assistant',
+      content: thinkingText || null as any,
+      tool_calls: toolCalls.map((c) => ({
+        id: c.id,
+        type: 'function' as const,
+        function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+      })),
+    });
     for (const result of toolResults) {
-      const resultText = result.error
-        ? `Tool ${result.name} error: ${result.error}`
-        : `Tool ${result.name} result:\n${result.output}`;
-      messages.push({ role: 'user', content: `[Tool Result]\n${resultText}` });
+      messages.push({
+        role: 'tool',
+        content: result.error ? `Error: ${result.error}` : (result.output || ''),
+        tool_call_id: result.callId,
+      });
     }
   }
 
-  // 超过最大步骤 → 强制要求 LLM 总结
+  // 超过最大步骤
   messages.push({
     role: 'user',
-    content: 'Please provide a final answer based on all the information gathered so far. Do NOT use any more tools.',
+    content: 'Please provide a final answer based on all the information gathered so far.',
   });
 
   let finalResponse = '';
@@ -153,6 +162,5 @@ export async function* runAgent(
   } catch (err: any) {
     finalResponse = `Agent error at final step: ${err.message}`;
   }
-
   yield { type: 'answer', content: finalResponse };
 }

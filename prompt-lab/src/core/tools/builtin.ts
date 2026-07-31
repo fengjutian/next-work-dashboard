@@ -50,17 +50,21 @@ export const builtInTools: ToolDefinition[] = [
     execute: async (args) => {
       const query = String(args.query);
       try {
-        // DuckDuckGo HTML search（无需 API key）
+        const api = (window as any).electronAPI;
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-        const resp = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-        });
-        const html = await resp.text();
-        // 提取搜索结果片段
+        let html: string;
+        if (api?.fetchUrl) {
+          const res = await api.fetchUrl(url);
+          html = res.ok ? res.text : '';
+        } else {
+          const resp = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+          });
+          html = await resp.text();
+        }
         const snippets: string[] = [];
         const re = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-        let m;
-        let count = 0;
+        let m; let count = 0;
         while ((m = re.exec(html)) !== null && count < 5) {
           snippets.push(m[1].replace(/<[^>]+>/g, '').trim());
           count++;

@@ -3,8 +3,23 @@
 // ── 类型定义 ──
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  tool_calls?: {
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }[];
+  tool_call_id?: string;
+}
+
+export interface ToolDef {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 export interface ChatOptions {
@@ -12,11 +27,19 @@ export interface ChatOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  tools?: ToolDef[];
 }
 
 export interface ChatChunk {
   delta: string;
   finishReason?: 'stop' | 'length' | 'tool_calls' | null;
+  /** 流式 tool_call 增量 */
+  toolCallDelta?: {
+    index: number;
+    id?: string;
+    name?: string;
+    arguments?: string;
+  };
 }
 
 export interface ModelInfo {
@@ -29,13 +52,9 @@ export interface ModelInfo {
 // ── Provider 接口 ──
 
 export interface LLMProvider {
-  /** 服务商标识 */
   readonly id: string;
-  /** 流式对话 */
   chat(messages: ChatMessage[], options: ChatOptions): AsyncIterable<ChatChunk>;
-  /** 列出可用模型 */
   listModels(): Promise<ModelInfo[]>;
-  /** 检查 API Key 是否有效 */
   validate(): Promise<boolean>;
 }
 
@@ -54,19 +73,30 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
     id: 'openai-compatible',
 
     async *chat(messages, options) {
+      const body: Record<string, unknown> = {
+        model: options.model,
+        messages: messages.map((m) => {
+          const msg: Record<string, unknown> = { role: m.role, content: m.content };
+          if (m.tool_calls) msg.tool_calls = m.tool_calls;
+          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+          return msg;
+        }),
+        temperature: options.temperature ?? 0.7,
+        max_tokens: options.maxTokens,
+        stream: true,
+      };
+      if (options.tools?.length) {
+        body.tools = options.tools;
+        body.tool_choice = 'auto';
+      }
+
       const response = await fetch(`${normalizedBase}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: options.model,
-          messages,
-          temperature: options.temperature ?? 0.7,
-          max_tokens: options.maxTokens,
-          stream: true,
-        }),
+        body: JSON.stringify(body),
         signal: options.signal,
       });
 
@@ -100,10 +130,28 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
             const choice = parsed.choices?.[0];
             if (!choice) continue;
 
-            yield {
-              delta: choice.delta?.content || '',
+            const delta = choice.delta;
+            const content = delta?.content || '';
+
+            const chunk: ChatChunk = {
+              delta: content,
               finishReason: choice.finish_reason || null,
             };
+
+            // 解析 tool_calls delta
+            if (delta?.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                chunk.toolCallDelta = {
+                  index: tc.index ?? 0,
+                  id: tc.id,
+                  name: tc.function?.name,
+                  arguments: tc.function?.arguments,
+                };
+                yield chunk;
+              }
+            } else {
+              yield chunk;
+            }
           } catch {
             // skip unparseable chunks
           }
@@ -121,7 +169,7 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
         id: m.id,
         name: m.id,
         provider: 'openai-compatible',
-        contextWindow: 32768, // default
+        contextWindow: 32768,
       }));
     },
 
