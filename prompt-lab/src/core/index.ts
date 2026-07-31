@@ -54,3 +54,7 @@ export {
 // ReAct Agent
 export { runAgent } from './agent';
 export type { AgentMessage, AgentStep, AgentOptions } from './agent';
+
+// 知识图谱实体抽取
+export { extractFromDocuments, quickExtract } from './graph-extractor';
+export type { ExtractConfig } from './graph-extractor';
