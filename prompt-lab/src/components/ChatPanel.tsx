@@ -17,10 +17,11 @@ import { buildAttachmentContext, parseAttachment } from './chat/attachment-parse
 
 interface ChatAttachment {
   key: string;
+  uid: string;
   name: string;
   size: number;
   file: File;
-  status: 'pending' | 'parsing' | 'ready' | 'error';
+  parseStatus: 'pending' | 'parsing' | 'ready' | 'error';
   error?: string;
 }
 
@@ -73,18 +74,26 @@ export const ChatPanel: React.FC = () => {
 
   // 附件上传处理
   const handleFiles = useCallback((files: FileList | null) => {
-    if (!files) return;
+    if (!files || files.length === 0) {
+      notifApi.warning({
+        message: '文件夹中没有可选择的文件',
+        description: '空文件夹不会产生附件条目。',
+      });
+      return;
+    }
+    const batchId = Date.now();
     setAttachments((prev) => [
       ...prev,
       ...Array.from(files).map((f, i): ChatAttachment => ({
-        key: `f-${Date.now()}-${i}`,
-        name: f.name,
+        key: `f-${batchId}-${i}`,
+        uid: `f-${batchId}-${i}`,
+        name: f.webkitRelativePath || f.name,
         size: f.size,
         file: f,
-        status: 'pending',
+        parseStatus: 'pending',
       })),
     ]);
-  }, []);
+  }, [notifApi]);
 
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
@@ -181,9 +190,16 @@ export const ChatPanel: React.FC = () => {
       setTimeout(() => senderRef.current?.focus(), 50);
       return;
     }
+    if (attachments.some((attachment) => attachment.parseStatus === 'error')) {
+      notifApi.error({
+        message: '存在无法读取的文件',
+        description: '请移除标记为失败的文件后再发送。',
+      });
+      return;
+    }
 
     setAttachments((current) =>
-      current.map((attachment) => ({ ...attachment, status: 'parsing' }))
+      current.map((attachment) => ({ ...attachment, parseStatus: 'parsing' }))
     );
     const results = await Promise.allSettled(
       attachments.map((attachment) => parseAttachment(attachment.file))
@@ -204,7 +220,7 @@ export const ChatPanel: React.FC = () => {
     if (failedIndexes.size > 0) {
       setAttachments((current) => current.map((attachment, index) => ({
         ...attachment,
-        status: failedIndexes.has(index) ? 'error' : 'ready',
+        parseStatus: failedIndexes.has(index) ? 'error' : 'ready',
         error: failedIndexes.get(index),
       })));
       return;
@@ -224,7 +240,7 @@ export const ChatPanel: React.FC = () => {
     setAttachments([]);
     await handleSend(displayText, contextText);
     setTimeout(() => senderRef.current?.focus(), 50);
-  }, [handleSend, setInput, attachments]);
+  }, [handleSend, setInput, attachments, notifApi]);
 
   // ── 提示词点击 → 填充到输入框（不自动发送） ──
   const onPromptClick = useCallback((info: { data: { key: string; label: string; value: string } }) => {
@@ -532,20 +548,42 @@ export const ChatPanel: React.FC = () => {
             <div className="border-t shrink-0 bg-zinc-50 dark:bg-zinc-900">
               {attachments.length > 0 && (
                 <div className="px-3 pt-2">
+                  <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-400">
+                    <span>已添加 {attachments.length} 个文件</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="text-blue-500 hover:text-blue-600"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        + 添加文件
+                      </button>
+                    </div>
+                  </div>
                   <Attachments
+                    overflow="wrap"
+                    maxCount={attachments.length}
                     items={attachments.map((attachment) => ({
                       ...attachment,
-                      description: attachment.status === 'parsing'
+                      status: attachment.parseStatus === 'error'
+                        ? 'error' as const
+                        : attachment.parseStatus === 'parsing'
+                          ? 'uploading' as const
+                          : 'done' as const,
+                      description: attachment.parseStatus === 'parsing'
                         ? '正在读取内容…'
-                        : attachment.status === 'ready'
+                        : attachment.parseStatus === 'ready'
                           ? '已读取'
-                          : attachment.status === 'error'
+                          : attachment.parseStatus === 'error'
                             ? attachment.error
                             : `${(attachment.size / 1024).toFixed(1)} KB · 待读取`,
                     }))}
-                    onRemove={(key) => setAttachments((prev) =>
-                      prev.filter((attachment) => attachment.key !== key)
-                    )}
+                    onRemove={(file) => {
+                      const id = file.uid || String((file as { key?: string }).key ?? '');
+                      setAttachments((prev) =>
+                        prev.filter((attachment) => attachment.uid !== id && attachment.key !== id)
+                      );
+                      return true;
+                    }}
                   />
                 </div>
               )}
@@ -557,11 +595,13 @@ export const ChatPanel: React.FC = () => {
                   onSubmit={onSenderSubmit} onCancel={handleStop}
                   loading={streaming} disabled={!hasKey}
                   prefix={
-                    <button className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1"
-                      onClick={() => fileInputRef.current?.click()} title="上传文件"
-                      disabled={!hasKey}>
-                      📎
-                    </button>
+                    <div className="flex items-center">
+                      <button className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                        onClick={() => fileInputRef.current?.click()} title="选择文件"
+                        disabled={!hasKey}>
+                        📎
+                      </button>
+                    </div>
                   }
                   placeholder={!hasKey ? '请先在设置中配置 API Key' : agentMode ? 'Agent 模式：输入任务...' : '输入消息... (Enter 发送)'}
                   style={{ borderRadius: 8 }} />

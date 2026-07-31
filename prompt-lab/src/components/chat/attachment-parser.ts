@@ -59,6 +59,16 @@ async function parsePptx(file: File): Promise<string> {
   ).join('\n\n');
 }
 
+async function readBinaryAsBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunkSize = 32_768;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return `[二进制文件，Base64 原始内容]\n${btoa(binary)}`;
+}
+
 export async function parseAttachment(file: File): Promise<ParsedAttachment> {
   const extension = extensionOf(file.name);
   let raw: string;
@@ -80,7 +90,8 @@ export async function parseAttachment(file: File): Promise<ParsedAttachment> {
     raw = await parsePptx(file);
     type = 'PowerPoint';
   } else {
-    throw new Error(`暂不支持 .${extension || '未知'} 文件`);
+    raw = await readBinaryAsBase64(file);
+    type = `${extension || 'binary'}/base64`;
   }
 
   const content = raw.trim();
