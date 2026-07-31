@@ -51,7 +51,7 @@ export interface Plugin {
   /** ActivityBar 悬停提示 & 设置页显示名 */
   name: string;
 
-  /** 图标组件（用于 ActivityBar 按钮），兼容 react-icons/hi2 + fa6 */
+  /** 图标组件（用于 ActivityBar 按钮），通过统一图标出口提供 */
   icon: ComponentType<{ className?: string }>;
 
   /** 主面板 React 组件 */
