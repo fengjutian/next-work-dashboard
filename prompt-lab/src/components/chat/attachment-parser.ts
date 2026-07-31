@@ -8,9 +8,6 @@ export interface ParsedAttachment {
   truncated: boolean;
 }
 
-export const MAX_ATTACHMENT_CHARS = 60_000;
-export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-
 const TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'json', 'jsonc', 'csv', 'tsv', 'yaml', 'yml', 'toml', 'xml',
   'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'vue', 'svelte', 'html', 'css', 'scss', 'less',
@@ -23,31 +20,16 @@ function extensionOf(name: string): string {
   return index >= 0 ? name.slice(index + 1).toLowerCase() : name.toLowerCase();
 }
 
-function limitContent(content: string) {
-  const originalLength = content.length;
-  if (originalLength <= MAX_ATTACHMENT_CHARS) {
-    return { content, originalLength, truncated: false };
-  }
-  return {
-    content: `${content.slice(0, MAX_ATTACHMENT_CHARS)}\n\n[内容过长，已截断]`,
-    originalLength,
-    truncated: true,
-  };
-}
-
 async function parsePdf(file: File): Promise<string> {
   const pdfjs: any = await import('pdfjs-dist');
   const data = new Uint8Array(await file.arrayBuffer());
   const document = await pdfjs.getDocument({ data, disableWorker: true }).promise;
   const pages: string[] = [];
-  let length = 0;
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);
     const text = await page.getTextContent();
     const pageText = `## 第 ${pageNumber} 页\n${text.items.map((item: any) => item.str ?? '').join(' ')}`;
     pages.push(pageText);
-    length += pageText.length;
-    if (length >= MAX_ATTACHMENT_CHARS) break;
   }
   return pages.join('\n\n');
 }
@@ -78,9 +60,6 @@ async function parsePptx(file: File): Promise<string> {
 }
 
 export async function parseAttachment(file: File): Promise<ParsedAttachment> {
-  if (file.size > MAX_ATTACHMENT_BYTES) {
-    throw new Error(`文件超过 ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB 限制`);
-  }
   const extension = extensionOf(file.name);
   let raw: string;
   let type: string;
@@ -104,7 +83,14 @@ export async function parseAttachment(file: File): Promise<ParsedAttachment> {
     throw new Error(`暂不支持 .${extension || '未知'} 文件`);
   }
 
-  return { name: file.name, type, ...limitContent(raw.trim()) };
+  const content = raw.trim();
+  return {
+    name: file.name,
+    type,
+    content,
+    originalLength: content.length,
+    truncated: false,
+  };
 }
 
 export function buildAttachmentContext(files: ParsedAttachment[]): string {

@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 文件对话框
   pickFile: (options?: { accept?: string; multiple?: boolean }) =>
     ipcRenderer.invoke('dialog:pickFile', options),
+  pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),
   writeTextFile: (filePath: string, content: string) =>

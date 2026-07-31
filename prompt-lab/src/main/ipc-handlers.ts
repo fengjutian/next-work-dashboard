@@ -414,6 +414,38 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('dialog:pickFolder', async () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow();
+      const result = await dialog.showOpenDialog(win!, {
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || result.filePaths.length === 0) return null;
+
+      const rootPath = result.filePaths[0];
+      const files: Array<{ path: string; name: string; size: number }> = [];
+      const visit = (directory: string) => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          const fullPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) {
+            visit(fullPath);
+          } else if (entry.isFile()) {
+            const stat = fs.statSync(fullPath);
+            files.push({
+              path: fullPath,
+              name: path.relative(rootPath, fullPath),
+              size: stat.size,
+            });
+          }
+        }
+      };
+      visit(rootPath);
+      return { path: rootPath, name: path.basename(rootPath), files };
+    } catch (err) {
+      return { error: String(err), files: [] };
+    }
+  });
+
   ipcMain.handle('dialog:saveFile', async (_event, content: string, defaultName?: string) => {
     try {
       const win = BrowserWindow.getFocusedWindow();
