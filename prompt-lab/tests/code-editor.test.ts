@@ -3,7 +3,7 @@ import {
   decodeBase64Utf8,
   languageFromName,
   languageIdFromName,
-} from '../src/plugins/code-editor/CodeEditorPanel';
+} from '../src/plugins/code-editor/editor-utils';
 
 describe('代码编辑器', () => {
   it('正确解码 UTF-8 文件', () => {
