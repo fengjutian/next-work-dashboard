@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
-import { Wrench, MessageSquare, Send, Robot, Settings, Trash2, Plus, Download, ChevronDown } from '@/components/icons';
+import React, { useState, useEffect } from 'react';
+import { Wrench, MessageSquare, Send, Robot, Settings, Trash2, Plus, Download, ChevronDown, Bot } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { useChatSession, MODELS } from './chat/useChatSession';
 import { MessageBubble } from './chat/MessageBubble';
+import { setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './chat/ToolManagerDialog';
 import { PromptManagerDialog } from './chat/PromptManagerDialog';
+import { RoleManagerDialog } from './chat/RoleManagerDialog';
 
 // ── 空状态 ──
 
@@ -29,6 +31,7 @@ export const ChatPanel: React.FC = () => {
   const setActiveActivity = useStore((s) => s.setActiveActivity);
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
+  const [roleManagerOpen, setRoleManagerOpen] = useState(false);
 
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
@@ -41,12 +44,66 @@ export const ChatPanel: React.FC = () => {
     handleSend, handleRegenerate, handleStop, handleClear, handleKeyDown,
     handleStartEdit, handleSaveEdit,
     updateSessionMeta,
+    boundPromptIds, toggleBoundPrompt,
   } = useChatSession();
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
 
+  // ── 角色 Agent ──
+  const roles = useStore((s) => s.roles);
+  const activeRoleId = useStore((s) => s.activeRoleId);
+  const activeRole = roles.find((r) => r.id === activeRoleId);
+
+  // 角色激活/停用时自动应用设置
+  useEffect(() => {
+    if (activeRole) {
+      updateSessionMeta({ systemPrompt: activeRole.systemPrompt });
+      const tools = activeRole.enabledToolIds;
+      const allTools = [
+        'get_current_time', 'calculator', 'web_search', 'read_file',
+        'clipboard_read', 'fetch_url', 'write_file', 'list_files',
+        'read_file_content', 'read_pdf_document', 'read_word_document',
+        'read_excel_spreadsheet', 'read_ppt_presentation', 'open_image',
+      ];
+      if (tools.length > 0) {
+        allTools.forEach((t) => setToolEnabled(t, tools.includes(t)));
+      } else {
+        allTools.forEach((t) => setToolEnabled(t, true));
+      }
+    } else {
+      // 停用角色时恢复全部工具
+      const allTools = [
+        'get_current_time', 'calculator', 'web_search', 'read_file',
+        'clipboard_read', 'fetch_url', 'write_file', 'list_files',
+        'read_file_content', 'read_pdf_document', 'read_word_document',
+        'read_excel_spreadsheet', 'read_ppt_presentation', 'open_image',
+      ];
+      allTools.forEach((t) => setToolEnabled(t, true));
+    }
+  }, [activeRoleId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="flex-1 flex h-full bg-white dark:bg-zinc-950">
+      {/* 历史记录侧边栏 */}
+      {showHistory && (
+        <div className="w-64 border-r shrink-0 flex flex-col bg-zinc-50 dark:bg-zinc-900 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b">
+            <span className="text-xs font-semibold text-zinc-500">对话历史</span>
+            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowHistory(false)}><span className="text-xs">✕</span></Button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {[...sessions].sort((a, b) => b.createdAt - a.createdAt).map((s) => (
+              <div key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer text-xs border-b border-zinc-100 dark:border-zinc-800 transition-colors ${s.id === activeSessionId ? 'bg-blue-50 dark:bg-blue-950 text-blue-600' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}
+                onClick={() => { setActiveSessionId(s.id); setShowHistory(false); }}>
+                <span className="flex-1 truncate">{s.title}</span>
+                <span className="text-[10px] text-zinc-400">{new Date(s.createdAt).toLocaleDateString()}</span>
+                <button className="text-zinc-400 hover:text-red-500 ml-1" onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 主聊天区 */}
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* 头部 */}
@@ -66,6 +123,19 @@ export const ChatPanel: React.FC = () => {
 
           <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`} onClick={() => setAgentMode((v) => !v)}>
             {agentMode ? 'Agent ✓' : 'Agent'}
+          </button>
+
+          <button
+            onClick={() => setRoleManagerOpen(true)}
+            className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${
+              activeRole
+                ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
+                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-zinc-600'
+            }`}
+            title="角色管理"
+          >
+            <Bot className="h-3 w-3" />
+            <span>{activeRole ? activeRole.name : '角色'}</span>
           </button>
 
           <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" onClick={() => setToolManagerOpen(true)} title="工具管理">
@@ -142,29 +212,17 @@ export const ChatPanel: React.FC = () => {
       </div>
 
       {/* 历史记录侧边栏 */}
-      {showHistory && (
-        <div className="w-64 border-l shrink-0 flex flex-col bg-zinc-50 dark:bg-zinc-900 overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b">
-            <span className="text-xs font-semibold text-zinc-500">对话历史</span>
-            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowHistory(false)}><span className="text-xs">✕</span></Button>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {[...sessions].sort((a, b) => b.createdAt - a.createdAt).map((s) => (
-              <div key={s.id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer text-xs border-b border-zinc-100 dark:border-zinc-800 transition-colors ${s.id === activeSessionId ? 'bg-blue-50 dark:bg-blue-950 text-blue-600' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}
-                onClick={() => { setActiveSessionId(s.id); setShowHistory(false); }}>
-                <span className="flex-1 truncate">{s.title}</span>
-                <span className="text-[10px] text-zinc-400">{new Date(s.createdAt).toLocaleDateString()}</span>
-                <button className="text-zinc-400 hover:text-red-500 ml-1" onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}>✕</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* 工具管理弹层 */}
       <ToolManagerDialog open={toolManagerOpen} onClose={() => setToolManagerOpen(false)} />
       {/* 提示词管理弹层 */}
-      <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)} />
+      <PromptManagerDialog
+        open={promptManagerOpen}
+        onClose={() => setPromptManagerOpen(false)}
+        boundPromptIds={boundPromptIds}
+        onToggleBound={toggleBoundPrompt}
+      />
+      {/* 角色 Agent 管理弹层 */}
+      <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />
     </div>
   );
 };

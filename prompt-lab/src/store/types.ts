@@ -145,4 +145,19 @@ export interface AiApiConfig {
   baseUrl: string;
 }
 
+/**
+ * 角色 Agent 定义 — 预定义人物设定和工具权限
+ */
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  /** 角色系统提示词 — 定义行为、风格、知识边界 */
+  systemPrompt: string;
+  /** 允许使用的工具 ID 列表，空数组表示允许所有工具 */
+  enabledToolIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export const CATEGORIES = ['通用', '编程', '写作', '翻译', '分析', '设计', '营销'];

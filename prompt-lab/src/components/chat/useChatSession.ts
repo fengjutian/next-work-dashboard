@@ -5,6 +5,7 @@ import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
+import type { Prompt } from '@/store/types';
 
 // ── 一次性工具注册 ──
 let toolsRegistered = false;
@@ -23,6 +24,8 @@ export interface Session {
   messages: Message[];
   model: string;
   systemPrompt: string;
+  /** 绑定到该会话的提示词 ID 列表 — 自动合并到 systemPrompt */
+  boundPromptIds: string[];
   createdAt: number;
 }
 
@@ -44,7 +47,7 @@ export function useChatSession() {
   // 确保至少有一个默认会话
   useEffect(() => {
     if (sessions.length === 0) {
-      const def: Session = { id: 'default', title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', createdAt: Date.now() };
+      const def: Session = { id: 'default', title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
       setSessions([def]);
       setActiveSessionId('default');
     }
@@ -96,10 +99,36 @@ export function useChatSession() {
     setSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, ...patch } : s));
   }, [activeSessionId]);
 
+  // ── 绑定提示词 ──
+  const boundPromptIds = activeSession?.boundPromptIds ?? [];
+
+  /** 切换提示词是否绑定到当前对话 */
+  const toggleBoundPrompt = useCallback((promptId: string) => {
+    setSessions((prev) => prev.map((s) => {
+      if (s.id !== activeSessionId) return s;
+      const ids = s.boundPromptIds ?? [];
+      const next = ids.includes(promptId)
+        ? ids.filter((id) => id !== promptId)
+        : [...ids, promptId];
+      return { ...s, boundPromptIds: next };
+    }));
+  }, [activeSessionId]);
+
+  /** 获取所有绑定提示词的合并内容 */
+  const getBoundPromptsContent = useCallback((): string => {
+    const ids = activeSession?.boundPromptIds ?? [];
+    if (ids.length === 0) return '';
+    return ids
+      .map((id) => prompts.find((p) => p.id === id))
+      .filter((p): p is Prompt => p !== undefined && p.enabled !== false)
+      .map((p) => `[${p.title}]\n${p.content}`)
+      .join('\n\n');
+  }, [activeSession, prompts]);
+
   // ── 新建/删除/导出会话 ──
   const handleNewSession = useCallback(() => {
     const id = `s-${Date.now()}`;
-    const s: Session = { id, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', createdAt: Date.now() };
+    const s: Session = { id, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
     setSessions((prev) => [...prev, s]);
     setActiveSessionId(id);
     setShowHistory(false);
@@ -112,7 +141,7 @@ export function useChatSession() {
       if (activeSessionId === id) {
         if (next.length > 0) setActiveSessionId(next[0].id);
         else {
-          const def: Session = { id: 'default', title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', createdAt: Date.now() };
+          const def: Session = { id: 'default', title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
           setActiveSessionId('default');
           return [def];
         }
@@ -141,7 +170,9 @@ export function useChatSession() {
   const runChat = useCallback(async (history: Message[], assistantId: string) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
-    const sysMsg = systemPrompt.trim() ? [{ role: 'system' as const, content: systemPrompt }] : [];
+    const boundContent = getBoundPromptsContent();
+    const fullSystemPrompt = [systemPrompt.trim(), boundContent].filter(Boolean).join('\n\n');
+    const sysMsg = fullSystemPrompt ? [{ role: 'system' as const, content: fullSystemPrompt }] : [];
     const chatMessages: ChatMessage[] = [...sysMsg, ...history.filter((m) => m.content.trim() && m.role !== 'tool').map((m) => ({ role: m.role as 'user'|'assistant', content: m.content }))];
     let full = '';
     const stream = provider.chat(chatMessages, { model: currentModel });
@@ -154,7 +185,7 @@ export function useChatSession() {
       const title = history[0]?.content?.slice(0, 30) + (history[0]?.content?.length > 30 ? '...' : '') || '新对话';
       updateSessionMeta({ title });
     }
-  }, [currentModel, systemPrompt, getProvider, updateSession, updateSessionMeta]);
+  }, [currentModel, systemPrompt, getBoundPromptsContent, getProvider, updateSession, updateSessionMeta]);
 
   const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string) => {
     const provider = getProvider();
@@ -162,9 +193,15 @@ export function useChatSession() {
     const chatHistory: ChatMessage[] = history.filter((m) => m.content.trim() && m.role !== 'tool').map((m) => ({ role: m.role as 'user'|'assistant', content: m.content }));
     if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') chatHistory.pop();
 
+    // 注入绑定提示词到 system prompt 层面
+    const boundContent = getBoundPromptsContent();
+    const agentUserContent = boundContent
+      ? `[系统绑定提示词]\n${boundContent}\n\n---\n\n${userContent}`
+      : userContent;
+
     let thinkingText = '';
     let currentToolCalls: ToolCall[] = [];
-    for await (const step of runAgent(provider, userContent, chatHistory, currentModel)) {
+    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel)) {
       switch (step.type) {
         case 'think':
           updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: '🤔 思考中...' }; return u; });
@@ -270,5 +307,7 @@ export function useChatSession() {
     handleSend, handleRegenerate, handleStop, handleClear, handleKeyDown,
     handleStartEdit, handleSaveEdit,
     updateSessionMeta,
+    // 绑定提示词
+    boundPromptIds, toggleBoundPrompt, getBoundPromptsContent,
   };
 }

@@ -2,4 +2,4 @@
 export { useStore } from './store';
 export { useFilteredPrompts, useAllTags, useRecentPrompts, useAllCategories } from './selectors';
 export { CATEGORIES } from './types';
-export type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig } from './types';
+export type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, Role } from './types';

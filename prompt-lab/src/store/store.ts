@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig } from './types';
+import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, Role } from './types';
 import { DEFAULT_SITES } from './types';
 import { DEFAULT_PROMPTS } from './defaultPrompts';
+import { DEFAULT_ROLES } from './defaultRoles';
 import {
   isDbReady,
   dbLoadPrompts, dbLoadSites,
@@ -80,6 +81,14 @@ interface AppState {
   // 对话保存信号
   conversationSavedAt: number;
   notifyConversationSaved: () => void;
+
+  // ── 角色 Agent ──
+  roles: Role[];
+  activeRoleId: string | null;
+  addRole: (role: Role) => void;
+  updateRole: (id: string, patch: Partial<Role>) => void;
+  deleteRole: (id: string) => void;
+  setActiveRole: (id: string | null) => void;
 
   // 从 DB 加载数据（启动时调用）
   loadFromDb: () => void;
@@ -285,6 +294,38 @@ export const useStore = create<AppState>((set, get) => ({
   conversationSavedAt: 0,
   notifyConversationSaved: () => set({ conversationSavedAt: Date.now() }),
 
+  // ── 角色 Agent ──
+  roles: DEFAULT_ROLES,
+  activeRoleId: null,
+  addRole: (role) => {
+    set((s) => ({ roles: [...s.roles, role] }));
+    if (isDbReady()) {
+      try {
+        dbSetSetting('roles', JSON.stringify([...DEFAULT_ROLES.map((r) => r.id), role.id].map((id) => get().roles.find((r) => r.id === id)).filter(Boolean)));
+      } catch { /* ignore */ }
+    }
+  },
+  updateRole: (id, patch) => {
+    set((s) => ({
+      roles: s.roles.map((r) =>
+        r.id === id ? { ...r, ...patch, updatedAt: Date.now() } : r
+      ),
+    }));
+    if (isDbReady()) {
+      try { dbSetSetting('roles', JSON.stringify(get().roles)); } catch { /* ignore */ }
+    }
+  },
+  deleteRole: (id) => {
+    set((s) => ({
+      roles: s.roles.filter((r) => r.id !== id),
+      activeRoleId: s.activeRoleId === id ? null : s.activeRoleId,
+    }));
+    if (isDbReady()) {
+      try { dbSetSetting('roles', JSON.stringify(get().roles)); } catch { /* ignore */ }
+    }
+  },
+  setActiveRole: (id) => set({ activeRoleId: id }),
+
   // ── DB 加载 ──
   loadFromDb: () => {
     if (!isDbReady()) return;
@@ -326,6 +367,15 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       console.warn('[store] Failed to load aiApi from DB:', err);
     }
+
+    // 加载角色
+    try {
+      const raw = dbGetSetting('roles');
+      if (raw) {
+        const saved = JSON.parse(raw) as Role[];
+        if (saved.length > 0) set({ roles: saved });
+      }
+    } catch { /* ignore */ }
 
     // 加载主题
     try {
