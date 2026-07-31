@@ -59,6 +59,7 @@ export interface ElectronAPI {
     trashEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     copyEntry: (rootPath: string, sourcePath: string, targetPath: string) => Promise<WorkspaceResult<void>>;
     revealEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
+    listTasks: (rootPath: string) => Promise<WorkspaceResult<Array<{ name: string; command: string; detail: string }>>>;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;

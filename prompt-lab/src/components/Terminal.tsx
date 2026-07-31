@@ -86,6 +86,7 @@ export interface TerminalSingleProps extends TerminalTab {
   onTitleChange?: (id: string, title: string) => void;
   onExit?: (id: string, exitCode: number) => void;
   setHandle?: (handle: TerminalHandle) => void;
+  onOutput?: (id: string, data: string) => void;
 }
 
 // ═══════════════════════════════════════
@@ -97,7 +98,7 @@ export const TerminalSingle = forwardRef<TerminalHandle, TerminalSingleProps>(
     const {
       id, cwd, theme = 'dark', profile, fontSize = 13,
       fontFamily = "Cascadia Code, Consolas, 'Courier New', monospace",
-      onTitleChange, onExit, setHandle,
+      onTitleChange, onExit, setHandle, onOutput,
     } = props;
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -201,6 +202,7 @@ export const TerminalSingle = forwardRef<TerminalHandle, TerminalSingleProps>(
       }
 
       const unsubData = window.electronAPI.terminal.onData(id, (data: string) => {
+        onOutput?.(id, data);
         // 尝试从 OSC 标题序列提取标题
         const titleMatch = data.match(/\x1b\]0;(.+?)\x07/);
         if (titleMatch) onTitleChange?.(id, titleMatch[1]);

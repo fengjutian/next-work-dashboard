@@ -110,6 +110,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     copyEntry: (rootPath: string, sourcePath: string, targetPath: string) =>
       ipcRenderer.invoke('workspace:copyEntry', rootPath, sourcePath, targetPath),
     revealEntry: (rootPath: string, relativePath: string) => ipcRenderer.invoke('workspace:revealEntry', rootPath, relativePath),
+    listTasks: (rootPath: string) => ipcRenderer.invoke('workspace:listTasks', rootPath),
     listFiles: (rootPath: string) =>
       ipcRenderer.invoke('workspace:listFiles', rootPath),
     search: (rootPath: string, query: string, options?: import('./types/electron').WorkspaceSearchOptions) =>

@@ -139,6 +139,8 @@ export const CodeEditorPanel: React.FC = () => {
     open: false, tab: 'problems', height: 220,
   });
   const [problems, setProblems] = useState<EditorProblem[]>([]);
+  const [taskProblems, setTaskProblems] = useState<EditorProblem[]>([]);
+  const [workspaceTasks, setWorkspaceTasks] = useState<Array<{ name: string; command: string; detail: string }>>([]);
   const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
@@ -264,9 +266,28 @@ export const CodeEditorPanel: React.FC = () => {
     setActiveTerminalId(nextId);
   }, []);
 
+  const handleTerminalOutput = useCallback((_id: string, data: string) => {
+    const clean = data.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+    const found: EditorProblem[] = [];
+    for (const line of clean.split(/\r?\n/)) {
+      const match = /(.+?)(?:\((\d+),(\d+)\)|:(\d+):(\d+))(?:\s*-?\s*)(error|warning)?\s*(.*)/i.exec(line);
+      if (!match) continue;
+      found.push({ path: match[1].trim(), line: Number(match[2] ?? match[4]), column: Number(match[3] ?? match[5]), severity: match[6]?.toLowerCase() === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error, message: (match[7] || line).trim() });
+    }
+    if (found.length > 0) setTaskProblems((previous) => [...previous.slice(-499), ...found]);
+  }, []);
+
+  const runWorkspaceTask = useCallback((command: string) => {
+    setTaskProblems([]);
+    setBottomPanel((previous) => ({ ...previous, open: true, tab: 'terminal' }));
+    void window.electronAPI.terminal.write(activeTerminalId, `${command}\r`);
+    setStatus(`正在运行任务：${command}`);
+  }, [activeTerminalId]);
+
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
+  const allProblems = useMemo(() => [...problems, ...taskProblems], [problems, taskProblems]);
   const visibleTreeNodes = useMemo(() => {
     const result: TreeNode[] = [];
     const visit = (nodes: TreeNode[]) => nodes.forEach((node) => {
@@ -282,7 +303,7 @@ export const CodeEditorPanel: React.FC = () => {
       const path = visibleTreeNodes.find((node) => node.path.replace(/\\/g, '/') === entry.path.replace(/\\/g, '/'))?.path ?? entry.path;
       result.set(path, { ...result.get(path), git: entry.status });
     }
-    for (const problem of problems) {
+    for (const problem of allProblems) {
       const path = [...visibleTreeNodes].find((node) => problem.path.replace(/\\/g, '/').endsWith(node.path.replace(/\\/g, '/')))?.path;
       if (!path) continue;
       const current = result.get(path) ?? {};
@@ -291,7 +312,7 @@ export const CodeEditorPanel: React.FC = () => {
       result.set(path, current);
     }
     return result;
-  }, [gitStatus, problems, visibleTreeNodes]);
+  }, [allProblems, gitStatus, visibleTreeNodes]);
   useEffect(() => {
     documentsRef.current = documents;
   }, [documents]);
@@ -1207,6 +1228,11 @@ export const CodeEditorPanel: React.FC = () => {
     void Promise.all([refreshGitStatus(), refreshGitOverview()]);
   }, [bottomPanel.open, bottomPanel.tab, refreshGitOverview, refreshGitStatus, workspace]);
 
+  useEffect(() => {
+    if (!workspace) { setWorkspaceTasks([]); return; }
+    void window.electronAPI.workspace.listTasks(workspace.path).then((result) => setWorkspaceTasks(result.data ?? []));
+  }, [workspace]);
+
   useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
     if (event.state === 'started') setGitBusy(event.operation);
     else setGitBusy(null);
@@ -1981,7 +2007,7 @@ export const CodeEditorPanel: React.FC = () => {
                 {bottomPanel.tab === 'problems' && (
                   <div className="py-1">
                     {problems.map((problem, index) => (
-                      <button key={`${problem.path}:${problem.line}:${problem.column}:${index}`} type="button" className="flex min-h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={() => {
+                      <div key={`${problem.path}:${problem.line}:${problem.column}:${index}`} className="group flex min-h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => {
                         const relativePath = problem.path.replace(/^.*?file:\/\//, '').replace(/^\//, '');
                         const document = documents.find((item) => problem.path.endsWith(item.path.replace(/\\/g, '/')));
                         if (document) {
@@ -1992,7 +2018,7 @@ export const CodeEditorPanel: React.FC = () => {
                         <span className={problem.severity === monaco.MarkerSeverity.Error ? 'text-destructive' : 'text-warning'}>{problem.severity === monaco.MarkerSeverity.Error ? '●' : '▲'}</span>
                         <span className="min-w-0 flex-1 truncate">{problem.message}</span>
                         <span className="shrink-0 text-muted-foreground">{problem.path.split('/').pop()} [{problem.line}, {problem.column}]</span>
-                      </button>
+                      </button><button type="button" className="rounded px-1.5 py-0.5 text-[10px] opacity-0 hover:bg-background group-hover:opacity-100" onClick={() => { setAiInstruction(`修复以下问题：${problem.message}（${problem.path}:${problem.line}:${problem.column}）`); setBottomPanel((previous) => ({ ...previous, tab: 'ai' })); }}>AI 修复</button></div>
                     ))}
                     {problems.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">未发现问题</div>}
                   </div>
@@ -2066,6 +2092,7 @@ export const CodeEditorPanel: React.FC = () => {
                     <div className="flex items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={aiMultiFile} onChange={(event) => setAiMultiFile(event.target.checked)} />多文件 Agent（自动筛选相关文件）</label><span className="text-muted-foreground">待审阅 {aiProposals.length}</span><span className="text-muted-foreground">已接受 {aiHistory.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={aiHistory.length === 0} onClick={undoLastAiEdit}>撤销上次 AI 修改</Button></div>
                     <textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
                     <div className="flex justify-end">
+                      <Button size="sm" variant="ghost" className="mr-2" disabled={!activeDocument} onClick={() => { setAiMultiFile(true); setAiInstruction(`为 ${activeDocument?.path ?? '当前模块'} 生成或完善单元测试，复用项目现有测试框架和约定`); }}>生成测试</Button>
                       <Button size="sm" disabled={!activeDocument || !aiInstruction.trim() || aiEditing} onClick={() => void generateAiEdit()}>{aiEditing ? '生成中…' : '生成修改并预览'}</Button>
                     </div>
                   </div>

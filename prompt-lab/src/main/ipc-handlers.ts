@@ -703,6 +703,18 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:listTasks', async (_event, rootPath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const packagePath = path.join(root, 'package.json');
+      if (!fs.existsSync(packagePath)) return { success: true, data: [] };
+      const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
+      return { success: true, data: Object.entries(parsed.scripts ?? {}).map(([name, command]) => ({ name, command: `npm run ${name}`, detail: command })) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:listFiles', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
