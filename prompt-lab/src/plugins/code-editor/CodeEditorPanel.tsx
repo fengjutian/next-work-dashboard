@@ -120,14 +120,14 @@ export const CodeEditorPanel: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full flex-col bg-white text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+    <div className="flex h-full flex-col bg-white text-foreground bg-background text-foreground">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
-        <Code className="h-4 w-4 text-blue-500" />
+        <Code className="h-4 w-4 text-primary" />
         <span className="max-w-64 truncate text-xs font-semibold">
           {fileName || '代码编辑器'}{dirty ? ' ●' : ''}
         </span>
         {fileName && (
-          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground bg-muted">
             {languageFromName(fileName)}
           </span>
         )}
@@ -144,10 +144,10 @@ export const CodeEditorPanel: React.FC = () => {
       </header>
 
       {fileName ? (
-        <div className="flex min-h-0 flex-1 overflow-hidden bg-zinc-50 font-mono text-[13px] leading-5 dark:bg-zinc-950">
+        <div className="flex min-h-0 flex-1 overflow-hidden bg-background font-mono text-[13px] leading-5 bg-background">
           <div
             ref={gutterRef}
-            className="w-14 shrink-0 overflow-hidden border-r bg-zinc-100 py-3 pr-3 text-right text-zinc-400 select-none dark:bg-zinc-900"
+            className="w-14 shrink-0 overflow-hidden border-r bg-muted py-3 pr-3 text-right text-muted-foreground select-none bg-background"
             aria-hidden="true"
           >
             <pre className="m-0 font-inherit leading-5">{lineNumbers}</pre>
@@ -161,18 +161,18 @@ export const CodeEditorPanel: React.FC = () => {
               if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop;
             }}
             spellCheck={false}
-            className="min-h-0 flex-1 resize-none overflow-auto border-0 bg-transparent p-3 font-mono leading-5 text-zinc-800 outline-none whitespace-pre dark:text-zinc-200"
+            className="min-h-0 flex-1 resize-none overflow-auto border-0 bg-transparent p-3 font-mono leading-5 text-foreground outline-none whitespace-pre text-foreground"
           />
         </div>
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-400">
-          <Code className="h-12 w-12 text-zinc-300 dark:text-zinc-700" />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+          <Code className="h-12 w-12 text-foreground text-foreground" />
           <p className="text-sm">打开本地代码或文本文件开始编辑</p>
           <Button variant="outline" onClick={openFile}>选择文件</Button>
         </div>
       )}
 
-      <footer className="flex h-7 shrink-0 items-center justify-between border-t px-3 text-[10px] text-zinc-400">
+      <footer className="flex h-7 shrink-0 items-center justify-between border-t px-3 text-[10px] text-muted-foreground">
         <span className="truncate">{filePath ?? '未打开文件'}</span>
         <span>{lineCount} 行 · {content.length} 字符 · {status}</span>
       </footer>

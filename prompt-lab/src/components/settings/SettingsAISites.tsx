@@ -41,7 +41,7 @@ export const SettingsAISites: React.FC = () => {
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
           AI 站点
         </h4>
         <Button

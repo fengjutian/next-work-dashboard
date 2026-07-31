@@ -173,16 +173,16 @@ export const PdfPreviewPanel: React.FC = () => {
   );
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-red-500" />
-          <h2 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+          <h2 className="font-semibold text-sm text-foreground">
             PDF 预览
           </h2>
           {state.fileName && (
-            <span className="text-xs text-zinc-400 truncate max-w-[160px]">
+            <span className="text-xs text-muted-foreground truncate max-w-[160px]">
               {state.fileName}
             </span>
           )}
@@ -191,7 +191,7 @@ export const PdfPreviewPanel: React.FC = () => {
           {state.status === 'loaded' && (
             <button
               onClick={clear}
-              className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-1"
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
               title="关闭当前文档"
             >
               <X className="h-3.5 w-3.5" />
@@ -217,13 +217,13 @@ export const PdfPreviewPanel: React.FC = () => {
 
       {/* 工具栏（已加载时显示） */}
       {state.status === 'loaded' && (
-        <div className="flex items-center justify-between px-4 py-1.5 border-b bg-zinc-50 dark:bg-zinc-900 text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-4 py-1.5 border-b bg-background text-xs text-muted-foreground">
           {/* 翻页 */}
           <div className="flex items-center gap-2">
             <button
               onClick={prevPage}
               disabled={state.currentPage <= 1}
-              className="px-2 py-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="px-2 py-0.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
               title="上一页"
             >
               ‹
@@ -235,14 +235,14 @@ export const PdfPreviewPanel: React.FC = () => {
                 onChange={e => setPageInput(e.target.value)}
                 onKeyDown={handlePageInputKeyDown}
                 placeholder={String(state.currentPage)}
-                className="w-8 text-center border rounded px-1 py-0.5 bg-white dark:bg-zinc-800 text-xs"
+                className="w-8 text-center border rounded px-1 py-0.5 bg-card text-xs"
               />
               <span>/ {state.pageCount}</span>
             </span>
             <button
               onClick={nextPage}
               disabled={state.currentPage >= state.pageCount}
-              className="px-2 py-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="px-2 py-0.5 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
               title="下一页"
             >
               ›
@@ -254,7 +254,7 @@ export const PdfPreviewPanel: React.FC = () => {
             <button
               onClick={zoomOut}
               disabled={state.scale <= 0.25}
-              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30"
+              className="p-1 rounded hover:bg-accent disabled:opacity-30"
               title="缩小"
             >
               <ZoomOut className="h-3.5 w-3.5" />
@@ -265,7 +265,7 @@ export const PdfPreviewPanel: React.FC = () => {
             <button
               onClick={zoomIn}
               disabled={state.scale >= 3}
-              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30"
+              className="p-1 rounded hover:bg-accent disabled:opacity-30"
               title="放大"
             >
               <ZoomIn className="h-3.5 w-3.5" />
@@ -276,7 +276,7 @@ export const PdfPreviewPanel: React.FC = () => {
 
       {/* 内容区 */}
       <div
-        className="flex-1 overflow-hidden bg-zinc-100 dark:bg-zinc-900 relative"
+        className="flex-1 overflow-hidden bg-muted relative"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -295,9 +295,9 @@ export const PdfPreviewPanel: React.FC = () => {
         {state.status === 'idle' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <FileText className="h-16 w-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-4" />
-              <p className="text-sm text-zinc-500 mb-1">打开或拖入 .pdf 文件</p>
-              <p className="text-xs text-zinc-400">支持 PDF 文档预览，可翻页和缩放</p>
+              <FileText className="h-16 w-16 text-foreground text-muted-foreground mx-auto mb-4" />
+              <p className="text-sm text-muted-foreground mb-1">打开或拖入 .pdf 文件</p>
+              <p className="text-xs text-muted-foreground">支持 PDF 文档预览，可翻页和缩放</p>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 transition-colors"
@@ -314,14 +314,14 @@ export const PdfPreviewPanel: React.FC = () => {
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="h-8 w-8 border-2 border-red-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm text-zinc-500">正在渲染 PDF...</p>
+              <p className="text-sm text-muted-foreground">正在渲染 PDF...</p>
               {state.pageCount > 0 && (
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   第 {state.currentPage} / {state.pageCount} 页
                 </p>
               )}
               {state.fileName && (
-                <p className="text-xs text-zinc-400 mt-1">{state.fileName}</p>
+                <p className="text-xs text-muted-foreground mt-1">{state.fileName}</p>
               )}
             </div>
           </div>
@@ -333,9 +333,9 @@ export const PdfPreviewPanel: React.FC = () => {
             <div className="text-center max-w-md">
               <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
               <p className="text-sm text-red-600 font-medium mb-1">预览失败</p>
-              <p className="text-xs text-zinc-500 mb-2">{state.error}</p>
+              <p className="text-xs text-muted-foreground mb-2">{state.error}</p>
               {state.fileName && (
-                <p className="text-xs text-zinc-400 mb-4">文件：{state.fileName}</p>
+                <p className="text-xs text-muted-foreground mb-4">文件：{state.fileName}</p>
               )}
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -369,17 +369,17 @@ export const PdfPreviewPanel: React.FC = () => {
                 <button
                   onClick={prevPage}
                   disabled={state.currentPage <= 1}
-                  className="px-3 py-1.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-xs font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 rounded-md bg-accent text-xs font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   上一页
                 </button>
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-muted-foreground">
                   第 {state.currentPage} / {state.pageCount} 页
                 </span>
                 <button
                   onClick={nextPage}
                   disabled={state.currentPage >= state.pageCount}
-                  className="px-3 py-1.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-xs font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 rounded-md bg-accent text-xs font-medium hover:bg-zinc-300 dark:hover:bg-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   下一页
                 </button>
@@ -391,7 +391,7 @@ export const PdfPreviewPanel: React.FC = () => {
 
       {/* 底部状态 */}
       {state.status === 'loaded' && (
-        <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-zinc-400 bg-zinc-50 dark:bg-zinc-900">
+        <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-muted-foreground bg-background">
           <span>共 {state.pageCount} 页 · {Math.round(state.scale * 100)}%</span>
           <span>{state.fileName}</span>
         </div>

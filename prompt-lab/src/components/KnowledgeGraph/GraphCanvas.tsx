@@ -189,10 +189,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
   // ── 空状态 ──
   if (!graphData) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
-        <GitBranch className="h-12 w-12 text-zinc-300" />
+      <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
+        <GitBranch className="h-12 w-12 text-foreground" />
         <div className="text-center">
-          <p className="text-sm font-medium text-zinc-500">知识图谱</p>
+          <p className="text-sm font-medium text-muted-foreground">知识图谱</p>
           <p className="text-xs mt-1">选择对话文件，添加节点，然后生成图谱</p>
         </div>
       </div>
@@ -214,7 +214,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
         ].map(({ icon: Icon, label, onClick }) => (
           <button
             key={label}
-            className="h-7 w-7 flex items-center justify-center rounded-md bg-white/90 dark:bg-zinc-800/90 backdrop-blur border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 shadow-sm transition-colors"
+            className="h-7 w-7 flex items-center justify-center rounded-md bg-white/90 bg-muted/90 backdrop-blur border border-border text-muted-foreground hover:text-foreground dark:hover:text-foreground shadow-sm transition-colors"
             onClick={onClick}
             title={label}
           >
@@ -224,7 +224,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
       </div>
 
       {/* 图例浮层 */}
-      <div className="absolute bottom-3 left-3 z-10 bg-white/90 dark:bg-zinc-800/90 backdrop-blur border border-zinc-200 dark:border-zinc-700 rounded-md px-3 py-2 shadow-sm text-[10px] text-zinc-500 space-y-1">
+      <div className="absolute bottom-3 left-3 z-10 bg-white/90 bg-muted/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-sm text-[10px] text-muted-foreground space-y-1">
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full bg-zinc-300" /> 节点大小 = 关联强度
         </div>

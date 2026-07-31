@@ -7,7 +7,7 @@ import { useStore } from '@/store';
 
 // 根据站点 ID 取色，保证同一站点颜色一致
 const SITE_COLORS = [
-  'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+  'bg-primary-light text-primary bg-primary-light text-primary',
   'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
   'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
   'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
@@ -82,10 +82,10 @@ export const AIPanel: React.FC = () => {
   // ── 折叠态：窄条 ──
   if (collapsed) {
     return (
-      <div className="h-full w-9 flex-shrink-0 border-r flex flex-col items-center py-2 gap-1 bg-white dark:bg-zinc-950">
+      <div className="h-full w-9 flex-shrink-0 border-r flex flex-col items-center py-2 gap-1 bg-card">
         {/* 展开按钮 */}
         <button
-          className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 mb-1"
+          className="p-1 rounded hover:bg-accent text-muted-foreground mb-1"
           onClick={() => setCollapsed(false)}
           title="展开面板"
         >
@@ -102,8 +102,8 @@ export const AIPanel: React.FC = () => {
               key={tab.id}
               className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
                 activeTabId === tab.id
-                  ? 'bg-blue-100 dark:bg-blue-900 ring-1 ring-blue-300 dark:ring-blue-700'
-                  : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  ? 'bg-primary-light ring-1 ring-primary/40'
+                  : 'hover:bg-accent'
               }`}
               onClick={() => setActiveTab(tab.id)}
               title={tab.title}
@@ -119,7 +119,7 @@ export const AIPanel: React.FC = () => {
         {enabledSites.map((site) => (
           <button
             key={site.id}
-            className="w-7 h-7 flex items-center justify-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-accent transition-colors"
             onClick={() => openTab(site.id)}
             title={site.name}
           >
@@ -133,10 +133,10 @@ export const AIPanel: React.FC = () => {
   // ── 展开态：完整面板 ──
 
   return (
-    <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-white dark:bg-zinc-950">
+    <div className="h-full w-[260px] flex-shrink-0 border-r flex flex-col bg-card">
       {/* 头部 */}
       <div className="flex items-center justify-between px-3 py-3">
-        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           AI 站点
         </h3>
         <Button
@@ -157,7 +157,7 @@ export const AIPanel: React.FC = () => {
           {/* 已打开的标签页 */}
           {tabs.length > 0 && (
             <div>
-              <h4 className="text-[10px] font-semibold text-zinc-400 uppercase mb-2">
+              <h4 className="text-[10px] font-semibold text-muted-foreground uppercase mb-2">
                 已打开 ({tabs.length})
               </h4>
               <div className="space-y-0.5">
@@ -168,15 +168,15 @@ export const AIPanel: React.FC = () => {
                       key={tab.id}
                       className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-2 ${
                         activeTabId === tab.id
-                          ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
-                          : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                          ? 'bg-primary-light text-primary'
+                          : 'text-muted-foreground hover:bg-accent'
                       }`}
                       onClick={() => setActiveTab(tab.id)}
                     >
                       {site ? (
                         <SiteIcon url={site.url} name={site.name} className="h-4 w-4 shrink-0" />
                       ) : (
-                        <Globe className="h-3 w-3 shrink-0 text-zinc-400" />
+                        <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
                       )}
                       <span className="truncate">{tab.title}</span>
                     </button>
@@ -188,14 +188,14 @@ export const AIPanel: React.FC = () => {
 
           {/* 可用站点 */}
           <div>
-            <h4 className="text-[10px] font-semibold text-zinc-400 uppercase mb-2">
+            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase mb-2">
               可用站点
             </h4>
             <div className="space-y-1">
               {enabledSites.map((site) => (
                 <button
                   key={site.id}
-                  className="w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                  className="w-full text-left px-2 py-2 rounded-md text-sm transition-colors flex items-center gap-2.5 hover:bg-accent text-foreground"
                   onClick={() => openTab(site.id)}
                 >
                   <SiteIcon url={site.url} name={site.name} className="h-5 w-5 shrink-0" />
@@ -203,7 +203,7 @@ export const AIPanel: React.FC = () => {
                 </button>
               ))}
               {enabledSites.length === 0 && (
-                <p className="text-xs text-zinc-400 py-4 text-center">
+                <p className="text-xs text-muted-foreground py-4 text-center">
                   请在设置中启用 AI 站点
                 </p>
               )}

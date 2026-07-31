@@ -162,15 +162,15 @@ export const CommandPalette: React.FC = () => {
       onClick={() => setVisible(false)}
     >
       <div
-        className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl w-[520px] max-h-[60vh] flex flex-col overflow-hidden"
+        className="bg-card rounded-lg shadow-2xl w-[520px] max-h-[60vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 搜索框 */}
         <div className="flex items-center gap-2 px-4 py-3 border-b">
-          <Search className="h-4 w-4 text-zinc-400 shrink-0" />
+          <Search className="h-4 w-4 text-muted-foreground shrink-0" />
           <input
             ref={inputRef}
-            className="flex-1 bg-transparent text-sm outline-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400"
+            className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground"
             placeholder={isCommandMode ? '输入命令关键词...' : '搜索提示词或输入 > 执行命令...'}
             value={query}
             onChange={(e) => {
@@ -180,7 +180,7 @@ export const CommandPalette: React.FC = () => {
             onKeyDown={handleKeyDown}
             autoFocus
           />
-          <kbd className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
+          <kbd className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             ESC
           </kbd>
         </div>
@@ -189,13 +189,13 @@ export const CommandPalette: React.FC = () => {
         <div className="flex-1 overflow-y-auto py-1">
           {/* 非命令模式 + 空查询 + 有命令时：提示输入 > */}
           {!isCommandMode && query === '' && allCommands.length > 0 && (
-            <div className="px-4 py-2 text-[11px] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
-              输入 <code className="text-blue-500 bg-blue-50 dark:bg-blue-950 px-1 py-0.5 rounded">{'>'}</code> 查看全部插件命令
+            <div className="px-4 py-2 text-[11px] text-muted-foreground border-b border-border border-border">
+              输入 <code className="text-primary bg-primary-light px-1 py-0.5 rounded">{'>'}</code> 查看全部插件命令
             </div>
           )}
 
           {results.length === 0 ? (
-            <p className="text-xs text-zinc-400 text-center py-8">
+            <p className="text-xs text-muted-foreground text-center py-8">
               {isCommandMode ? '没有匹配的命令' : '没有匹配的提示词'}
             </p>
           ) : isCommandMode ? (
@@ -205,8 +205,8 @@ export const CommandPalette: React.FC = () => {
                 key={cmd.id}
                 className={`flex items-center gap-3 px-4 py-2 cursor-pointer text-sm ${
                   i === selectedIndex
-                    ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
-                    : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                    ? 'bg-primary-light text-primary'
+                    : 'text-foreground hover:bg-background dark:hover:bg-muted'
                 }`}
                 onClick={() => handleCommandSelect(cmd)}
                 onMouseEnter={() => setSelectedIndex(i)}
@@ -214,9 +214,9 @@ export const CommandPalette: React.FC = () => {
                 <span className="text-amber-500 shrink-0">⚡</span>
                 <span className="flex-1 truncate">{cmd.title}</span>
                 {cmd.category && (
-                  <span className="text-[10px] text-zinc-400 shrink-0">{cmd.category}</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0">{cmd.category}</span>
                 )}
-                <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded shrink-0">
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
                   {cmd.pluginId}
                 </span>
               </div>
@@ -228,14 +228,14 @@ export const CommandPalette: React.FC = () => {
                 key={prompt.id}
                 className={`flex items-center gap-3 px-4 py-2 cursor-pointer text-sm ${
                   i === selectedIndex
-                    ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
-                    : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                    ? 'bg-primary-light text-primary'
+                    : 'text-foreground hover:bg-background dark:hover:bg-muted'
                 }`}
                 onClick={() => handlePromptSelect(prompt)}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
                 <span className="flex-1 truncate">{prompt.title}</span>
-                <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded shrink-0">
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
                   {prompt.category}
                 </span>
                 {prompt.isFavorite && <span className="text-amber-500 text-xs">★</span>}
@@ -245,7 +245,7 @@ export const CommandPalette: React.FC = () => {
         </div>
 
         {/* 底部提示 */}
-        <div className="px-4 py-2 border-t flex gap-3 text-[10px] text-zinc-400">
+        <div className="px-4 py-2 border-t flex gap-3 text-[10px] text-muted-foreground">
           <span>↑↓ 导航</span>
           <span>↵ 选择</span>
           <span>Esc 关闭</span>

@@ -173,7 +173,7 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
 
   if (error) {
     return (
-      <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+      <div className="flex flex-col h-full bg-card">
         <div className="p-4">
           <div className="p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800">
             <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">内核插件加载失败</h3>
@@ -186,8 +186,8 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
 
   if (!Component) {
     return (
-      <div className="flex items-center justify-center h-full bg-white dark:bg-zinc-950">
-        <p className="text-sm text-zinc-400">加载中...</p>
+      <div className="flex items-center justify-center h-full bg-card">
+        <p className="text-sm text-muted-foreground">加载中...</p>
       </div>
     );
   }
@@ -229,10 +229,10 @@ export const DynamicPlugin: React.FC<DynamicPluginProps> = ({
 
   // ── 旧版：静态 Markdown 渲染 ──
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 头部 */}
       <div className="px-4 py-3 border-b">
-        <h2 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+        <h2 className="font-semibold text-sm text-foreground">
           {pluginName}
         </h2>
       </div>
@@ -241,21 +241,21 @@ export const DynamicPlugin: React.FC<DynamicPluginProps> = ({
       <div className="flex-1 overflow-y-auto p-4">
         {content ? (
           <div
-            className="prose prose-sm dark:prose-invert max-w-none text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap leading-relaxed"
+            className="prose prose-sm dark:prose-invert max-w-none text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed"
             dangerouslySetInnerHTML={{
               __html: content
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/\n/g, '<br/>')
-                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-500 underline">$1</a>')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-primary underline">$1</a>')
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/`([^`]+)`/g, '<code class="bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded text-xs">$1</code>'),
+                .replace(/`([^`]+)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-xs">$1</code>'),
             }}
           />
         ) : (
-          <p className="text-sm text-zinc-400 text-center py-16">
+          <p className="text-sm text-muted-foreground text-center py-16">
             空白插件 — 可在插件管理中编辑内容
           </p>
         )}

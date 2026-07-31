@@ -127,8 +127,8 @@ export const DatabaseBrowser: React.FC = () => {
   return (
     <div className="flex flex-col h-full">
       {/* 工具栏 */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b bg-white dark:bg-zinc-950">
-        <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">数据库浏览器</h2>
+      <div className="flex items-center gap-1 px-3 py-2 border-b bg-card">
+        <h2 className="text-sm font-semibold text-foreground">数据库浏览器</h2>
         <div className="flex-1" />
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} title="刷新">
           <RefreshCw className="h-3.5 w-3.5" />
@@ -156,17 +156,17 @@ export const DatabaseBrowser: React.FC = () => {
       )}
 
       {/* 表列表 */}
-      <div className="flex gap-0.5 px-3 py-2 border-b bg-zinc-50 dark:bg-zinc-900 overflow-x-auto">
+      <div className="flex gap-0.5 px-3 py-2 border-b bg-background overflow-x-auto">
         {tables.length === 0 ? (
-          <span className="text-xs text-zinc-400 py-1">暂无表 — 数据库为空</span>
+          <span className="text-xs text-muted-foreground py-1">暂无表 — 数据库为空</span>
         ) : (
           tables.map((t) => (
             <button
               key={t.table}
               className={`px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap ${
                 selectedTable === t.table
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                  ? 'bg-primary text-white'
+                  : 'bg-card text-muted-foreground hover:bg-accent'
               }`}
               onClick={() => handleTableClick(t.table)}
             >
@@ -182,7 +182,7 @@ export const DatabaseBrowser: React.FC = () => {
           {selectedTable && data ? (
             <>
               {/* 统计 */}
-              <div className="flex items-center gap-3 mb-2 text-xs text-zinc-500">
+              <div className="flex items-center gap-3 mb-2 text-xs text-muted-foreground">
                 <span>{data.columns.length} 列</span>
                 <span>·</span>
                 <span>{rowCount} 行</span>
@@ -193,10 +193,10 @@ export const DatabaseBrowser: React.FC = () => {
               <div className="overflow-auto rounded-lg border">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="bg-zinc-100 dark:bg-zinc-800">
-                      <th className="sticky left-0 bg-zinc-100 dark:bg-zinc-800 px-2 py-1.5 text-left font-mono text-zinc-400 w-8">#</th>
+                    <tr className="bg-muted">
+                      <th className="sticky left-0 bg-muted px-2 py-1.5 text-left font-mono text-muted-foreground w-8">#</th>
                       {data.columns.map((col) => (
-                        <th key={col} className="px-3 py-1.5 text-left font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                        <th key={col} className="px-3 py-1.5 text-left font-semibold text-muted-foreground text-foreground whitespace-nowrap">
                           {col}
                         </th>
                       ))}
@@ -205,7 +205,7 @@ export const DatabaseBrowser: React.FC = () => {
                   <tbody>
                     {data.values.length === 0 ? (
                       <tr>
-                        <td colSpan={data.columns.length + 1} className="px-3 py-4 text-center text-zinc-400">
+                        <td colSpan={data.columns.length + 1} className="px-3 py-4 text-center text-muted-foreground">
                           无数据
                         </td>
                       </tr>
@@ -214,20 +214,20 @@ export const DatabaseBrowser: React.FC = () => {
                         <tr
                           key={i}
                           className={`border-t ${
-                            i % 2 === 0 ? 'bg-white dark:bg-zinc-950' : 'bg-zinc-50 dark:bg-zinc-900/50'
+                            i % 2 === 0 ? 'bg-card' : 'bg-background/50'
                           }`}
                         >
-                          <td className="sticky left-0 px-2 py-1 font-mono text-zinc-400 bg-inherit">
+                          <td className="sticky left-0 px-2 py-1 font-mono text-muted-foreground bg-inherit">
                             {i + 1}
                           </td>
                           {row.map((val, j) => (
                             <td
                               key={j}
-                              className="px-3 py-1 font-mono text-zinc-700 dark:text-zinc-300 max-w-80 truncate"
+                              className="px-3 py-1 font-mono text-foreground max-w-80 truncate"
                               title={val === null ? 'NULL' : String(val)}
                             >
                               {val === null ? (
-                                <span className="text-zinc-300 italic">NULL</span>
+                                <span className="text-foreground italic">NULL</span>
                               ) : (
                                 String(val)
                               )}
@@ -241,16 +241,16 @@ export const DatabaseBrowser: React.FC = () => {
               </div>
             </>
           ) : selectedTable && loading ? (
-            <div className="flex items-center justify-center py-12 text-sm text-zinc-400">
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
               <RefreshCw className="h-4 w-4 animate-spin mr-2" />
               加载中...
             </div>
           ) : selectedTable ? (
-            <div className="flex items-center justify-center py-12 text-sm text-zinc-400">
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
               查询失败
             </div>
           ) : (
-            <div className="flex items-center justify-center py-12 text-sm text-zinc-400">
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
               {tables.length > 0 ? '选择一张表查看数据' : '数据库为空，保存数据后将显示表结构'}
             </div>
           )}
@@ -259,7 +259,7 @@ export const DatabaseBrowser: React.FC = () => {
 
       {/* 底部统计栏 */}
       {tables.length > 0 && (
-        <div className="h-7 flex items-center px-3 border-t bg-zinc-50 dark:bg-zinc-900 text-xs text-zinc-400 gap-3">
+        <div className="h-7 flex items-center px-3 border-t bg-background text-xs text-muted-foreground gap-3">
           <span>{tables.length} 张表</span>
         </div>
       )}

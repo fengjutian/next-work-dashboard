@@ -40,14 +40,14 @@ export const SettingsSidebar: React.FC = () => {
   const setActiveActivity = useStore((s) => s.setActiveActivity);
 
   return (
-    <div className="h-full flex-1 flex flex-col bg-white dark:bg-zinc-950">
+    <div className="h-full flex-1 flex flex-col bg-card">
       {/* 标题行 + 关闭按钮 */}
       <div className="px-3 py-2.5 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+        <h3 className="text-sm font-semibold text-foreground">
           设置
         </h3>
         <button
-          className="h-6 w-6 flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           onClick={() => setActiveActivity(null)}
           title="关闭设置"
         >
@@ -59,14 +59,14 @@ export const SettingsSidebar: React.FC = () => {
 
       {/* Tab 导航栏 */}
       <div className="px-3 py-2">
-        <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-md p-1">
+        <div className="flex items-center gap-1 bg-muted rounded-md p-1">
           {SETTINGS_TABS.map((tab) => (
             <button
               key={tab.id}
               className={`flex-1 px-2 py-1 rounded-md text-xs transition-colors whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'bg-blue-500 text-white font-medium'
-                  : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                  ? 'bg-primary text-white font-medium'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => setActiveTab(tab.id)}
             >

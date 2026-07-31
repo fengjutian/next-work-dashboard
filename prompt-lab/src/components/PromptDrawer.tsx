@@ -39,15 +39,15 @@ const DrawerCard: React.FC<{
 
   return (
     <div
-      className="group p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-blue-400 hover:shadow-sm transition-all bg-white dark:bg-zinc-900"
+      className="group p-3 rounded-lg border border-border cursor-pointer hover:border-primary hover:shadow-sm transition-all bg-card"
       onClick={handleClick}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <h5 className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">
+          <h5 className="text-sm font-medium text-foreground truncate">
             {prompt.title}
           </h5>
-          <p className="text-[11px] text-zinc-400 leading-relaxed mt-1 line-clamp-2">
+          <p className="text-[11px] text-muted-foreground leading-relaxed mt-1 line-clamp-2">
             {preview}
           </p>
         </div>
@@ -57,21 +57,21 @@ const DrawerCard: React.FC<{
         </div>
       </div>
       <div className="flex items-center gap-1.5 mt-2">
-        <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
+        <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
           {prompt.category}
         </span>
         {prompt.tags.slice(0, 2).map((t) => (
-          <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-400">
+          <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
             {t}
           </span>
         ))}
-        <span className="text-[9px] text-zinc-400 ml-auto">×{prompt.usageCount}</span>
+        <span className="text-[9px] text-muted-foreground ml-auto">×{prompt.usageCount}</span>
         <button
-          className="p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="p-0.5 rounded hover:bg-accent opacity-0 group-hover:opacity-100 transition-opacity"
           onClick={handleCopy}
           title="复制"
         >
-          <Copy className="h-3 w-3 text-zinc-400" />
+          <Copy className="h-3 w-3 text-muted-foreground" />
         </button>
       </div>
     </div>
@@ -97,26 +97,26 @@ export const PromptDrawer: React.FC = () => {
       />
 
       {/* 抽屉面板 */}
-      <div className="fixed right-0 top-0 bottom-0 w-[380px] z-50 bg-white dark:bg-zinc-950 border-l shadow-2xl flex flex-col animate-slide-in-right">
+      <div className="fixed right-0 top-0 bottom-0 w-[380px] z-50 bg-card border-l shadow-2xl flex flex-col animate-slide-in-right">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+          <h3 className="text-sm font-semibold text-foreground">
             提示词
           </h3>
           <button
-            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded hover:bg-accent transition-colors"
             onClick={() => setPromptDrawerOpen(false)}
           >
-            <X className="h-4 w-4 text-zinc-500" />
+            <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
 
         {/* 搜索 */}
         <div className="p-3 pb-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <input
-              className="w-full h-8 pl-8 pr-2 text-sm rounded-md border bg-zinc-50 dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full h-8 pl-8 pr-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 ring-ring"
               placeholder="搜索提示词..."
               value={searchQuery}
               onChange={(e) => setSearch(e.target.value)}
@@ -130,8 +130,8 @@ export const PromptDrawer: React.FC = () => {
             <button
               className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
                 !filterCategory
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200'
+                  ? 'bg-primary text-white'
+                  : 'bg-muted text-muted-foreground hover:bg-accent'
               }`}
               onClick={() => setFilterCategory(null)}
             >
@@ -142,8 +142,8 @@ export const PromptDrawer: React.FC = () => {
                 key={cat}
                 className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
                   filterCategory === cat
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200'
+                    ? 'bg-primary text-white'
+                    : 'bg-muted text-muted-foreground hover:bg-accent'
                 }`}
                 onClick={() => setFilterCategory(filterCategory === cat ? null : cat)}
               >
@@ -159,8 +159,8 @@ export const PromptDrawer: React.FC = () => {
                   key={tag}
                   className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
                     filterTag === tag
-                      ? 'border-blue-400 bg-blue-50 dark:bg-blue-950 text-blue-600'
-                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-zinc-400'
+                      ? 'border-primary bg-primary-light text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/50'
                   }`}
                   onClick={() => setFilterTag(filterTag === tag ? null : tag)}
                 >
@@ -175,7 +175,7 @@ export const PromptDrawer: React.FC = () => {
         <ScrollArea className="flex-1">
           <div className="p-3 space-y-2">
             {prompts.length === 0 ? (
-              <p className="text-xs text-zinc-400 text-center py-12">
+              <p className="text-xs text-muted-foreground text-center py-12">
                 没有匹配的提示词
               </p>
             ) : (

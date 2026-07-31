@@ -70,15 +70,15 @@ export const NotesPanel: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
           <StickyNote className="h-5 w-5 text-yellow-500" />
-          <h2 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+          <h2 className="font-semibold text-sm text-foreground">
             便签
           </h2>
-          <span className="text-xs text-zinc-400">{notes.length} 条</span>
+          <span className="text-xs text-muted-foreground">{notes.length} 条</span>
         </div>
         <Button size="sm" variant="outline" onClick={addNote}>
           + 新建
@@ -91,7 +91,7 @@ export const NotesPanel: React.FC = () => {
         <div className="w-52 border-r flex flex-col">
           <ScrollArea className="flex-1">
             {notes.length === 0 ? (
-              <p className="text-xs text-zinc-400 text-center py-8">
+              <p className="text-xs text-muted-foreground text-center py-8">
                 暂无便签，点击"新建"创建
               </p>
             ) : (
@@ -100,10 +100,10 @@ export const NotesPanel: React.FC = () => {
                   key={note.id}
                   role="button"
                   tabIndex={0}
-                  className={`w-full text-left px-3 py-2 text-sm border-b border-zinc-100 dark:border-zinc-800 transition-colors group cursor-pointer ${
+                  className={`w-full text-left px-3 py-2 text-sm border-b border-border border-border transition-colors group cursor-pointer ${
                     selectedId === note.id
-                      ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
-                      : 'hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300'
+                      ? 'bg-primary-light text-primary'
+                      : 'hover:bg-background dark:hover:bg-background text-foreground'
                   }`}
                   onClick={() => setSelectedId(note.id)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(note.id); } }}
@@ -113,7 +113,7 @@ export const NotesPanel: React.FC = () => {
                       {note.title || '未命名'}
                     </span>
                     <button
-                      className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity"
+                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-opacity"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteNote(note.id);
@@ -123,7 +123,7 @@ export const NotesPanel: React.FC = () => {
                       <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
-                  <p className="text-[10px] text-zinc-400 truncate mt-0.5">
+                  <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                     {note.content.slice(0, 40) || '空内容'}
                   </p>
                 </div>
@@ -137,20 +137,20 @@ export const NotesPanel: React.FC = () => {
           {selected ? (
             <>
               <input
-                className="text-lg font-semibold bg-transparent border-none outline-none text-zinc-800 dark:text-zinc-200 mb-3"
+                className="text-lg font-semibold bg-transparent border-none outline-none text-foreground mb-3"
                 value={selected.title}
                 onChange={(e) => updateNote(selected.id, { title: e.target.value })}
                 placeholder="标题"
               />
               <textarea
-                className="flex-1 bg-transparent border-none outline-none resize-none text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed"
+                className="flex-1 bg-transparent border-none outline-none resize-none text-sm text-muted-foreground leading-relaxed"
                 value={selected.content}
                 onChange={(e) => updateNote(selected.id, { content: e.target.value })}
                 placeholder="写点什么..."
               />
             </>
           ) : (
-            <p className="text-sm text-zinc-400 text-center py-16">
+            <p className="text-sm text-muted-foreground text-center py-16">
               选择一个便签或新建一个
             </p>
           )}

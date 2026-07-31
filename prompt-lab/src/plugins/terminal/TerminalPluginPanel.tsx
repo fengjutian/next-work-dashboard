@@ -157,13 +157,13 @@ export const TerminalPluginPanel: React.FC = () => {
   // ── 渲染 ──
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden bg-zinc-900" onContextMenu={e => {
+    <div className="flex flex-col flex-1 overflow-hidden bg-background" onContextMenu={e => {
       // 空白区域右键 — 新建终端
       if ((e.target as HTMLElement).closest('.terminal-tab-bar,.terminal-toolbar')) return;
       e.preventDefault();
     }}>
       {/* Tab 栏 + 工具栏 P1/P2/P8 */}
-      <div className="terminal-tab-bar flex items-center h-9 bg-zinc-800 border-b border-zinc-700 select-none overflow-x-auto">
+      <div className="terminal-tab-bar flex items-center h-9 bg-muted border-b border-border select-none overflow-x-auto">
         {/* 标签页 */}
         <div className="flex items-center flex-1 min-w-0 gap-0.5 px-1">
           {tabs.map(tab => {
@@ -173,8 +173,8 @@ export const TerminalPluginPanel: React.FC = () => {
                 key={tab.id}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-t-md cursor-pointer text-xs min-w-0 max-w-[180px] transition-colors ${
                   isActive
-                    ? 'bg-zinc-900 text-zinc-100 border-t border-l border-r border-zinc-700'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
+                    ? 'bg-background text-foreground border-t border-l border-r border-border'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                 }`}
                 onClick={() => setActiveId(tab.id)}
                 onDoubleClick={() => {
@@ -206,7 +206,7 @@ export const TerminalPluginPanel: React.FC = () => {
           {/* + 新建（带 profile 下拉） */}
           <div className="relative">
             <button
-              className="flex items-center gap-0.5 px-1.5 py-1 rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="flex items-center gap-0.5 px-1.5 py-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => newTab()}
               title="New Terminal"
             >
@@ -221,11 +221,11 @@ export const TerminalPluginPanel: React.FC = () => {
             {profileMenu.open && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setProfileMenu({ open: false })} />
-                <div className="absolute right-0 top-full mt-0.5 z-20 bg-zinc-800 border border-zinc-600 rounded-md shadow-xl py-1 min-w-[140px]">
+                <div className="absolute right-0 top-full mt-0.5 z-20 bg-muted border border-border rounded-md shadow-xl py-1 min-w-[140px]">
                   {profiles.map(p => (
                     <button
                       key={p.name}
-                      className="block w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+                      className="block w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent hover:text-foreground"
                       onClick={() => { newTab(p); setProfileMenu({ open: false }); }}
                     >
                       {p.shell.split('/').pop()?.split('\\').pop()} — {p.name}
@@ -239,7 +239,7 @@ export const TerminalPluginPanel: React.FC = () => {
           {/* 重启 */}
           {activeTab && !activeTab.alive && (
             <button
-              className="px-1.5 py-1 rounded hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="px-1.5 py-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => restartTab(activeTab.id)}
               title="Restart Terminal"
             >
@@ -250,7 +250,7 @@ export const TerminalPluginPanel: React.FC = () => {
           {/* 关闭 */}
           {tabs.length > 1 && activeTab && (
             <button
-              className="px-1.5 py-1 rounded hover:bg-zinc-700 text-zinc-400 hover:text-red-400 transition-colors"
+              className="px-1.5 py-1 rounded hover:bg-accent text-muted-foreground hover:text-red-400 transition-colors"
               onClick={() => closeTab(activeTab.id)}
               title="Kill Terminal"
             >
@@ -280,21 +280,21 @@ export const TerminalPluginPanel: React.FC = () => {
                 setHandle={(h) => setHandle(tab.id, h)}
               />
             ) : (
-              <div className="flex flex-col items-center justify-center h-full bg-zinc-900 text-zinc-500 gap-3">
-                <TerminalIcon className="h-10 w-10 text-zinc-600" />
+              <div className="flex flex-col items-center justify-center h-full bg-background text-muted-foreground gap-3">
+                <TerminalIcon className="h-10 w-10 text-muted-foreground" />
                 <p className="text-sm">
                   Process exited with code {tab.exitCode ?? 'unknown'}
                 </p>
                 <div className="flex gap-2">
                   <button
-                    className="px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-md transition-colors"
+                    className="px-3 py-1.5 text-xs bg-accent hover:bg-zinc-600 text-foreground rounded-md transition-colors"
                     onClick={() => restartTab(tab.id)}
                   >
                     <RefreshCw className="h-3.5 w-3.5 inline mr-1" />
                     Restart
                   </button>
                   <button
-                    className="px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded-md transition-colors"
+                    className="px-3 py-1.5 text-xs bg-accent hover:bg-zinc-600 text-foreground rounded-md transition-colors"
                     onClick={() => closeTab(tab.id)}
                   >
                     <X className="h-3.5 w-3.5 inline mr-1" />
@@ -308,16 +308,16 @@ export const TerminalPluginPanel: React.FC = () => {
       </div>
 
       {/* 状态栏 P11 */}
-      <div className="flex items-center h-6 px-3 bg-zinc-800 border-t border-zinc-700 text-[11px] text-zinc-500 select-none gap-3">
+      <div className="flex items-center h-6 px-3 bg-muted border-t border-border text-[11px] text-muted-foreground select-none gap-3">
         <span className="flex items-center gap-1">
           <span className={`w-1.5 h-1.5 rounded-full ${activeTab?.alive ? 'bg-green-500' : 'bg-red-500'}`} />
           {activeTab?.alive ? 'Running' : `Exited (${activeTab?.exitCode})`}
         </span>
-        <span className="text-zinc-600">|</span>
+        <span className="text-muted-foreground">|</span>
         <span>{activeTab?.id ?? '—'}</span>
         {tabs.length > 1 && (
           <>
-            <span className="text-zinc-600">|</span>
+            <span className="text-muted-foreground">|</span>
             <span>{tabs.length} terminals</span>
           </>
         )}
@@ -330,24 +330,24 @@ export const TerminalPluginPanel: React.FC = () => {
         <>
           <div className="fixed inset-0 z-30" onClick={closeContextMenu} />
           <div
-            className="fixed z-40 bg-zinc-800 border border-zinc-600 rounded-md shadow-xl py-1 min-w-[160px]"
+            className="fixed z-40 bg-muted border border-border rounded-md shadow-xl py-1 min-w-[160px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             <button
-              className="block w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+              className="block w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               onClick={() => { newTab(); closeContextMenu(); }}
             >
               <Plus className="h-3 w-3 inline mr-2" />New Terminal
             </button>
             <button
-              className="block w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+              className="block w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               onClick={() => { restartTab(contextMenu.tabId); closeContextMenu(); }}
             >
               <RefreshCw className="h-3 w-3 inline mr-2" />Restart
             </button>
-            <div className="border-t border-zinc-600 my-1" />
+            <div className="border-t border-border my-1" />
             <button
-              className="block w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+              className="block w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               onClick={() => { closeTab(contextMenu.tabId); closeContextMenu(); }}
             >
               <X className="h-3 w-3 inline mr-2" />Kill Terminal

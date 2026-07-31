@@ -16,7 +16,7 @@ export const SettingsAppearance: React.FC = () => {
 
   return (
     <section>
-      <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
         主题
       </h4>
       <div className="grid grid-cols-1 gap-2">
@@ -25,15 +25,15 @@ export const SettingsAppearance: React.FC = () => {
             key={value}
             className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border text-left transition-colors ${
               theme === value
-                ? 'border-blue-500 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300'
-                : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600'
+                ? 'border-primary bg-primary-light text-primary'
+                : 'border-border text-muted-foreground hover:border-border dark:hover:border-border'
             }`}
             onClick={() => setTheme(value)}
           >
             <Icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
             <div>
               <div className="text-xs font-medium">{label}</div>
-              <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+              <div className="text-[10px] text-muted-foreground mt-0.5">
                 {desc}
               </div>
             </div>

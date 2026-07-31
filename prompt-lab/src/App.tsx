@@ -24,19 +24,19 @@ const EmptyState: React.FC = () => {
   const enabledSites = sites.filter((s) => s.enabled);
 
   return (
-    <div className="flex-1 flex items-center justify-center bg-zinc-50 dark:bg-zinc-900">
+    <div className="flex-1 flex items-center justify-center bg-background">
       <div className="text-center space-y-6 max-w-md">
-        <Globe className="h-12 w-12 text-zinc-300 mx-auto" />
+        <Globe className="h-12 w-12 text-foreground mx-auto" />
         <div>
-          <h1 className="text-xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">
+          <h1 className="text-xl font-bold text-foreground mb-2">
             next-work-dashboard
           </h1>
           {enabledSites.length > 0 ? (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               选择一个 AI 站点开始对话
             </p>
           ) : (
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-foreground">
               请在设置中启用 AI 站点
             </p>
           )}
@@ -46,7 +46,7 @@ const EmptyState: React.FC = () => {
             {enabledSites.map((site) => (
               <button
                 key={site.id}
-                className="px-4 py-3 rounded-lg border bg-white dark:bg-zinc-800 hover:border-blue-400 hover:shadow-sm transition-all text-sm text-zinc-700 dark:text-zinc-300"
+                className="px-4 py-3 rounded-lg border bg-card hover:border-primary hover:shadow-sm transition-all text-sm text-foreground"
                 onClick={() => openTab(site.id)}
               >
                 + {site.name}
@@ -100,8 +100,8 @@ export default function App() {
     <ToastProvider>
     <div className="h-screen flex flex-col">
       {/* 顶部工具栏 */}
-      <div className="h-10 flex items-center px-3 border-b bg-white dark:bg-zinc-950 gap-2 select-none">
-        <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+      <div className="h-10 flex items-center px-3 border-b bg-card gap-2 select-none">
+        <span className="text-sm font-semibold text-foreground">
           next-work-dashboard
         </span>
 
@@ -110,12 +110,12 @@ export default function App() {
         {/* 注入模式切换 — 仅 AI 模式显示 */}
         {isAI && (
           <>
-            <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5">
+            <div className="flex items-center gap-1 text-xs bg-muted rounded-md p-0.5">
               <button
                 className={`px-2 py-0.5 rounded-sm transition-colors ${
                   injectMode === 'fill-only'
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                    ? 'bg-white bg-accent text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => setInjectMode('fill-only')}
               >
@@ -124,8 +124,8 @@ export default function App() {
               <button
                 className={`px-2 py-0.5 rounded-sm transition-colors ${
                   injectMode === 'fill-and-submit'
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                    ? 'bg-white bg-accent text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => setInjectMode('fill-and-submit')}
               >
@@ -133,12 +133,12 @@ export default function App() {
               </button>
             </div>
 
-            <div className="flex items-center gap-1 text-xs bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5 ml-1">
+            <div className="flex items-center gap-1 text-xs bg-muted rounded-md p-0.5 ml-1">
               <button
                 className={`px-2 py-0.5 rounded-sm transition-colors ${
                   injectStrategy === 'replace'
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                    ? 'bg-white bg-accent text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => setInjectStrategy('replace')}
               >
@@ -147,8 +147,8 @@ export default function App() {
               <button
                 className={`px-2 py-0.5 rounded-sm transition-colors ${
                   injectStrategy === 'append'
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                    ? 'bg-white bg-accent text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => setInjectStrategy('append')}
               >
@@ -162,7 +162,7 @@ export default function App() {
           <Button
             variant="ghost"
             size="icon"
-            className={`h-7 w-7 ml-1 ${promptDrawerOpen ? 'text-blue-500' : ''}`}
+            className={`h-7 w-7 ml-1 ${promptDrawerOpen ? 'text-primary' : ''}`}
             onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}
             title="提示词"
           >
@@ -224,13 +224,13 @@ export default function App() {
       <PromptDrawer />
 
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
-      <div className="h-8 flex items-center px-2 border-t bg-zinc-100 dark:bg-zinc-900 select-none flex-shrink-0 gap-2">
+      <div className="h-8 flex items-center px-2 border-t bg-muted select-none flex-shrink-0 gap-2">
         <PluginStatusBar />
         <button
           className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
             isSettings
-              ? 'text-zinc-900 dark:text-zinc-100 bg-zinc-200 dark:bg-zinc-700'
-              : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'
+              ? 'text-foreground bg-accent'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50 dark:hover:bg-muted'
           }`}
           onClick={() => setActiveActivity(isSettings ? null : 'settings')}
           title="设置"

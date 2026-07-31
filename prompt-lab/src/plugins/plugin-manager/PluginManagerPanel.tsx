@@ -37,22 +37,22 @@ export const PluginManagerPanel: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
-          <Puzzle className="h-5 w-5 text-blue-500" />
-          <h2 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+          <Puzzle className="h-5 w-5 text-primary" />
+          <h2 className="font-semibold text-sm text-foreground">
             插件管理
           </h2>
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs text-muted-foreground">
             {enabledCount}/{allPlugins.length} 已启用
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           {/* 导入 .nwd */}
           <button
-            className="flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors"
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground text-muted-foreground dark:hover:text-foreground transition-colors"
             onClick={() => {
               const input = document.createElement('input');
               input.type = 'file';
@@ -73,7 +73,7 @@ export const PluginManagerPanel: React.FC = () => {
             导入
           </button>
           <button
-            className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+            className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary text-primary dark:hover:text-primary transition-colors"
             onClick={() => setDialogOpen(true)}
           >
             <Plus className="h-4 w-4" />
@@ -92,7 +92,7 @@ export const PluginManagerPanel: React.FC = () => {
       {/* 插件卡片网格 */}
       <div className="flex-1 overflow-y-auto p-4">
         {allPlugins.length === 0 ? (
-          <p className="text-sm text-zinc-400 text-center py-16">
+          <p className="text-sm text-muted-foreground text-center py-16">
             暂无已注册的插件，点击"新建插件"开始
           </p>
         ) : (
@@ -135,7 +135,7 @@ export const PluginManagerPanel: React.FC = () => {
       </div>
 
       {/* 底部提示 */}
-      <div className="px-4 py-2 border-t text-[11px] text-zinc-400 flex items-center justify-between">
+      <div className="px-4 py-2 border-t text-[11px] text-muted-foreground flex items-center justify-between">
         <span>禁用插件会从左侧栏和主内容区隐藏，数据不丢失 · 悬停卡片显示导出/删除</span>
         <span className="flex items-center gap-1">
           <Blocks className="h-3 w-3 text-green-500" />
@@ -172,22 +172,22 @@ const PluginCard: React.FC<PluginCardProps> = ({
   <div
     className={`relative flex flex-col items-center gap-3 p-4 rounded-xl border transition-all group ${
       plugin.enabled
-        ? 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:shadow-md'
-        : 'border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 opacity-60'
+        ? 'border-border bg-card hover:shadow-md'
+        : 'border-border border-border bg-background/50 opacity-60'
     }`}
   >
     {/* 删除/导出按钮 — 仅用户插件 */}
     {isUserPlugin && (
       <>
         <button
-          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all"
+          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-all"
           onClick={() => onDelete(plugin.id)}
           title="删除插件"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
         <button
-          className="absolute top-2 left-8 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-blue-500 transition-all"
+          className="absolute top-2 left-8 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all"
           onClick={() => onExport(plugin.id)}
           title="导出 .nwd 插件"
         >
@@ -200,7 +200,7 @@ const PluginCard: React.FC<PluginCardProps> = ({
     <div className="absolute top-2 right-2">
       <button
         className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
-          plugin.enabled ? 'bg-blue-500' : 'bg-zinc-300 dark:bg-zinc-600'
+          plugin.enabled ? 'bg-primary' : 'bg-zinc-300 dark:bg-zinc-600'
         }`}
         onClick={() => onToggle(plugin.id)}
         title={plugin.enabled ? '点击禁用' : '点击启用'}
@@ -218,25 +218,25 @@ const PluginCard: React.FC<PluginCardProps> = ({
       plugin.enabled
         ? isUserPlugin
           ? 'bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400'
-          : 'bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400'
-        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'
+          : 'bg-primary-light bg-primary-light text-primary'
+        : 'bg-muted text-muted-foreground'
     }`}>
       <Icon className="h-7 w-7" />
     </div>
 
     {/* 名称 */}
     <span className={`text-sm font-semibold ${
-      plugin.enabled ? 'text-zinc-800 dark:text-zinc-200' : 'text-zinc-400'
+      plugin.enabled ? 'text-foreground' : 'text-muted-foreground'
     }`}>
       {plugin.name}
     </span>
 
     {/* 元信息 */}
     <div className="flex flex-col items-center gap-1 w-full">
-      <code className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+      <code className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
         {plugin.id}
       </code>
-      <span className="text-[10px] text-zinc-400">
+      <span className="text-[10px] text-muted-foreground">
         排序 #{plugin.order}
       </span>
     </div>
@@ -261,11 +261,11 @@ const PluginCard: React.FC<PluginCardProps> = ({
         </span>
       )}
       {plugin.enabled ? (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-medium">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-light bg-primary-light text-primary font-medium">
           已启用
         </span>
       ) : (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-500 font-medium">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent text-muted-foreground font-medium">
           已禁用
         </span>
       )}

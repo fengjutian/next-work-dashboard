@@ -30,8 +30,8 @@ const EntityItem: React.FC<EntityItemProps> = ({ entity, checked, alreadyExists,
 
   return (
     <label
-      className={`flex items-center gap-2 px-2 py-1 cursor-pointer text-xs rounded transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-        checked ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-500'
+      className={`flex items-center gap-2 px-2 py-1 cursor-pointer text-xs rounded transition-colors hover:bg-accent ${
+        checked ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'
       } ${alreadyExists ? 'opacity-50' : ''}`}
     >
       <input
@@ -39,10 +39,10 @@ const EntityItem: React.FC<EntityItemProps> = ({ entity, checked, alreadyExists,
         checked={checked}
         disabled={alreadyExists}
         onChange={() => onToggle(entity.name)}
-        className="h-3 w-3 rounded border-zinc-300 dark:border-zinc-600"
+        className="h-3 w-3 rounded border-input"
       />
       <span className="flex-1 truncate">{entity.name}</span>
-      <span className="text-[10px] text-zinc-400">{entity.category}</span>
+      <span className="text-[10px] text-muted-foreground">{entity.category}</span>
       <span className={`text-[10px] ${confidenceColor} w-8 text-right`}>
         {confidencePct}%
       </span>
@@ -152,7 +152,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
         <select
           value={strategy}
           onChange={(e) => setStrategy(e.target.value as ExtractStrategy)}
-          className="flex-1 h-6 text-[11px] rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 outline-none px-1"
+          className="flex-1 h-6 text-[11px] rounded border border-input bg-card text-foreground outline-none px-1"
           title={STRATEGY_LABELS.find((s) => s.value === strategy)?.hint}
         >
           {STRATEGY_LABELS.map((s) => (
@@ -175,13 +175,13 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
 
       {/* 抽取结果 */}
       {extractedEntities.length > 0 && (
-        <div className="border border-zinc-200 dark:border-zinc-700 rounded overflow-hidden">
-          <div className="flex items-center justify-between px-2 py-1 bg-zinc-100 dark:bg-zinc-800">
-            <span className="text-[10px] text-zinc-500">
+        <div className="border border-border rounded overflow-hidden">
+          <div className="flex items-center justify-between px-2 py-1 bg-muted">
+            <span className="text-[10px] text-muted-foreground">
               抽取结果 ({checkedSet.size}/{extractedEntities.length})
             </span>
             <button
-              className="text-[10px] px-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+              className="text-[10px] px-1 rounded text-muted-foreground hover:text-foreground"
               onClick={() => {
                 const newCheckable = extractedEntities.filter(
                   (e) => !existingLabelSet.has(e.name),
@@ -203,7 +203,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
               />
             ))}
           </div>
-          <div className="px-2 py-1 border-t border-zinc-200 dark:border-zinc-700">
+          <div className="px-2 py-1 border-t border-border">
             <button
               className="w-full h-6 text-[11px] rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-50"
               disabled={checkedSet.size === 0}

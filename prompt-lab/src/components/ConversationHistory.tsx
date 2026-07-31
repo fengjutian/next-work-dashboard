@@ -20,10 +20,10 @@ const FileItem: React.FC<{
 
   return (
     <div
-      className={`group flex items-center gap-2 px-3 py-2 cursor-pointer text-xs border-b border-zinc-100 dark:border-zinc-800 transition-colors ${
+      className={`group flex items-center gap-2 px-3 py-2 cursor-pointer text-xs border-b border-border border-border transition-colors ${
         isActive
-          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
-          : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400'
+          ? 'bg-primary-light bg-primary-light text-primary'
+          : 'hover:bg-background dark:hover:bg-muted/50 text-muted-foreground'
       }`}
       onClick={onClick}
       onMouseEnter={() => setShowDelete(true)}
@@ -32,7 +32,7 @@ const FileItem: React.FC<{
       <FileText className="h-3.5 w-3.5 flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="truncate font-medium">{file.title || file.site}</div>
-        <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
           <Calendar className="h-3 w-3" />
           {file.date}
           <span>{sizeKB} KB</span>
@@ -40,7 +40,7 @@ const FileItem: React.FC<{
       </div>
       {showDelete && (
         <button
-          className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-zinc-400 hover:text-red-500 flex-shrink-0"
+          className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-muted-foreground hover:text-red-500 flex-shrink-0"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
@@ -136,21 +136,21 @@ export const ConversationHistory: React.FC = () => {
   return (
     <div className="flex h-full">
       {/* 左侧文件列表 */}
-      <div className="w-64 flex-shrink-0 border-r flex flex-col bg-zinc-50 dark:bg-zinc-900">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+      <div className="w-64 flex-shrink-0 border-r flex flex-col bg-background">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+          <span className="text-xs font-semibold text-muted-foreground">
             对话记录 ({files.length})
           </span>
           <div className="flex items-center gap-1">
             <button
-              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400"
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
               onClick={loadList}
               title="刷新"
             >
               <RefreshCw className="h-3 w-3" />
             </button>
             <button
-              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400"
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
               onClick={handleOpenFolder}
               title="打开文件夹"
             >
@@ -161,7 +161,7 @@ export const ConversationHistory: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto">
           {files.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-400 gap-2">
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <FileText className="h-8 w-8" />
               <p className="text-xs">暂无对话记录</p>
               <p className="text-[10px]">点击 AI 页面中的保存按钮来保存对话</p>
@@ -181,10 +181,10 @@ export const ConversationHistory: React.FC = () => {
       </div>
 
       {/* 右侧预览区 */}
-      <div className="flex-1 flex flex-col bg-white dark:bg-zinc-950">
+      <div className="flex-1 flex flex-col bg-card">
         {activePath ? (
           loading ? (
-            <div className="flex-1 flex items-center justify-center text-zinc-400 text-xs">
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">
               加载中...
             </div>
           ) : (
@@ -197,7 +197,7 @@ export const ConversationHistory: React.FC = () => {
             </div>
           )
         ) : (
-          <div className="flex-1 flex items-center justify-center text-zinc-400 text-xs">
+          <div className="flex-1 flex items-center justify-center text-muted-foreground text-xs">
             选择左侧文件查看内容
           </div>
         )}

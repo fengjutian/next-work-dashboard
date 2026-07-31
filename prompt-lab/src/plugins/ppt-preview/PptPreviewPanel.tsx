@@ -119,22 +119,22 @@ export const PptPreviewPanel: React.FC = () => {
   // ══════════════════════════════════════════
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 头部 + 模式切换 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-orange-500" />
-          <h2 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+          <h2 className="font-semibold text-sm text-foreground">
             PPT
           </h2>
         </div>
-        <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-md p-0.5">
+        <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
           <button
             onClick={() => setMode('generate')}
             className={`inline-flex items-center gap-1 px-3 py-1 text-xs rounded-sm transition-colors ${
               mode === 'generate'
-                ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                ? 'bg-white bg-accent text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <Edit3 className="h-3 w-3" />
@@ -144,8 +144,8 @@ export const PptPreviewPanel: React.FC = () => {
             onClick={() => setMode('preview')}
             className={`inline-flex items-center gap-1 px-3 py-1 text-xs rounded-sm transition-colors ${
               mode === 'preview'
-                ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 shadow-sm'
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                ? 'bg-white bg-accent text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <Eye className="h-3 w-3" />
@@ -158,21 +158,21 @@ export const PptPreviewPanel: React.FC = () => {
       {mode === 'generate' && (
         <div className="flex-1 flex flex-col min-h-0">
           {/* 文档信息 */}
-          <div className="px-4 py-3 border-b space-y-2 bg-zinc-50/50 dark:bg-zinc-900/50">
+          <div className="px-4 py-3 border-b space-y-2 bg-background/50 bg-background/50">
             <div className="flex gap-2">
               <input
                 type="text"
                 placeholder="演示文稿标题"
                 value={generateState.title}
                 onChange={(e) => setGenerateState((p) => ({ ...p, title: e.target.value }))}
-                className="flex-1 px-2 py-1 text-sm border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200"
+                className="flex-1 px-2 py-1 text-sm border rounded bg-card border-border text-foreground"
               />
               <input
                 type="text"
                 placeholder="作者"
                 value={generateState.author}
                 onChange={(e) => setGenerateState((p) => ({ ...p, author: e.target.value }))}
-                className="w-32 px-2 py-1 text-sm border rounded bg-white dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200"
+                className="w-32 px-2 py-1 text-sm border rounded bg-card border-border text-foreground"
               />
             </div>
           </div>
@@ -183,14 +183,14 @@ export const PptPreviewPanel: React.FC = () => {
               {generateState.slides.map((slide, i) => (
                 <div
                   key={slide.id}
-                  className="border rounded-md bg-white dark:bg-zinc-900 dark:border-zinc-700 p-3 space-y-2"
+                  className="border rounded-md bg-card border-border p-3 space-y-2"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-zinc-500">幻灯片 {i + 1}</span>
+                    <span className="text-xs font-medium text-muted-foreground">幻灯片 {i + 1}</span>
                     {generateState.slides.length > 1 && (
                       <button
                         onClick={() => removeSlide(slide.id)}
-                        className="text-zinc-400 hover:text-red-500 transition-colors"
+                        className="text-muted-foreground hover:text-red-500 transition-colors"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -201,14 +201,14 @@ export const PptPreviewPanel: React.FC = () => {
                     placeholder="幻灯片标题"
                     value={slide.title}
                     onChange={(e) => updateSlide(slide.id, 'title', e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm border rounded bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 font-medium"
+                    className="w-full px-2 py-1.5 text-sm border rounded bg-background bg-muted border-border text-foreground font-medium"
                   />
                   <textarea
                     placeholder="幻灯片内容（支持换行）"
                     rows={4}
                     value={slide.content}
                     onChange={(e) => updateSlide(slide.id, 'content', e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm border rounded bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 resize-none"
+                    className="w-full px-2 py-1.5 text-sm border rounded bg-background bg-muted border-border text-foreground resize-none"
                   />
                 </div>
               ))}
@@ -216,10 +216,10 @@ export const PptPreviewPanel: React.FC = () => {
           </ScrollArea>
 
           {/* 底部操作栏 */}
-          <div className="px-4 py-3 border-t flex items-center gap-2 bg-zinc-50/50 dark:bg-zinc-900/50">
+          <div className="px-4 py-3 border-t flex items-center gap-2 bg-background/50 bg-background/50">
             <button
               onClick={addSlide}
-              className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium text-muted-foreground text-foreground hover:bg-accent transition-colors"
             >
               <Plus className="h-3.5 w-3.5" />
               添加幻灯片
@@ -227,7 +227,7 @@ export const PptPreviewPanel: React.FC = () => {
             <div className="flex-1" />
             <button
               onClick={handleResetGenerate}
-              className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+              className="text-xs text-muted-foreground hover:text-foreground"
             >
               重置
             </button>
@@ -246,7 +246,7 @@ export const PptPreviewPanel: React.FC = () => {
       {/* ── 预览模式 ── */}
       {mode === 'preview' && (
         <div
-          className="flex-1 overflow-hidden bg-zinc-100 dark:bg-zinc-900 relative"
+          className="flex-1 overflow-hidden bg-muted relative"
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -262,11 +262,11 @@ export const PptPreviewPanel: React.FC = () => {
           )}
 
           {/* 工具栏 */}
-          <div className="flex items-center justify-end px-4 py-2 border-b bg-white dark:bg-zinc-950">
+          <div className="flex items-center justify-end px-4 py-2 border-b bg-card">
             {previewState.status === 'loaded' && (
               <button
                 onClick={clearPreview}
-                className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-1"
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
                 title="关闭当前文档"
               >
                 <X className="h-3.5 w-3.5" />
@@ -295,9 +295,9 @@ export const PptPreviewPanel: React.FC = () => {
             {previewState.status === 'idle' && (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
-                  <FileText className="h-16 w-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-4" />
-                  <p className="text-sm text-zinc-500 mb-1">打开或拖入 .pptx 文件</p>
-                  <p className="text-xs text-zinc-400">支持 Microsoft PowerPoint、Google Slides 导出的演示文稿</p>
+                  <FileText className="h-16 w-16 text-foreground text-muted-foreground mx-auto mb-4" />
+                  <p className="text-sm text-muted-foreground mb-1">打开或拖入 .pptx 文件</p>
+                  <p className="text-xs text-muted-foreground">支持 Microsoft PowerPoint、Google Slides 导出的演示文稿</p>
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 transition-colors"
@@ -314,8 +314,8 @@ export const PptPreviewPanel: React.FC = () => {
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <div className="h-8 w-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                  <p className="text-sm text-zinc-500">正在解析文档...</p>
-                  <p className="text-xs text-zinc-400 mt-1">{previewState.fileName}</p>
+                  <p className="text-sm text-muted-foreground">正在解析文档...</p>
+                  <p className="text-xs text-muted-foreground mt-1">{previewState.fileName}</p>
                 </div>
               </div>
             )}
@@ -326,9 +326,9 @@ export const PptPreviewPanel: React.FC = () => {
                 <div className="text-center max-w-md">
                   <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
                   <p className="text-sm text-red-600 font-medium mb-1">预览失败</p>
-                  <p className="text-xs text-zinc-500 mb-2">{previewState.error}</p>
+                  <p className="text-xs text-muted-foreground mb-2">{previewState.error}</p>
                   {previewState.fileName && (
-                    <p className="text-xs text-zinc-400 mb-4">文件：{previewState.fileName}</p>
+                    <p className="text-xs text-muted-foreground mb-4">文件：{previewState.fileName}</p>
                   )}
                   <button
                     onClick={() => fileInputRef.current?.click()}
@@ -346,24 +346,24 @@ export const PptPreviewPanel: React.FC = () => {
                 <div className="p-4 space-y-3">
                   {previewState.slides.length === 0 ? (
                     <div className="flex items-center justify-center h-40">
-                      <p className="text-sm text-zinc-500">未检测到幻灯片内容</p>
+                      <p className="text-sm text-muted-foreground">未检测到幻灯片内容</p>
                     </div>
                   ) : (
                     previewState.slides.map((slide) => (
                       <div
                         key={slide.index}
-                        className="bg-white dark:bg-zinc-950 rounded-md border dark:border-zinc-700 shadow-sm p-4"
+                        className="bg-card rounded-md border border-border shadow-sm p-4"
                       >
                         <div className="flex items-center gap-2 mb-2">
                           <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs font-bold">
                             {slide.index}
                           </span>
-                          <h3 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200 truncate">
+                          <h3 className="font-semibold text-sm text-foreground truncate">
                             {slide.title || '无标题'}
                           </h3>
                         </div>
                         {slide.body && (
-                          <p className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-pre-wrap ml-8">
+                          <p className="text-xs text-muted-foreground whitespace-pre-wrap ml-8">
                             {slide.body}
                           </p>
                         )}
@@ -377,7 +377,7 @@ export const PptPreviewPanel: React.FC = () => {
 
           {/* 底部状态 */}
           {previewState.status === 'loaded' && (
-            <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-zinc-400 bg-zinc-50 dark:bg-zinc-900">
+            <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-muted-foreground bg-background">
               <span>共 {previewState.slideCount} 张幻灯片</span>
               <span>{previewState.fileName}</span>
             </div>

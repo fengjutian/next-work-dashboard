@@ -127,14 +127,14 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40">
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[560px] max-h-[85vh] flex flex-col">
+      <div className="bg-card rounded-lg shadow-xl w-[560px] max-h-[85vh] flex flex-col">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+          <h3 className="text-sm font-semibold text-foreground">
             新建插件
           </h3>
           <button
-            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+            className="text-muted-foreground hover:text-foreground transition-colors"
             onClick={onClose}
           >
             <X className="h-4 w-4" />
@@ -144,7 +144,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
         {/* 表单 */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {/* 选项卡切换 */}
-          <div className="flex gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5">
+          <div className="flex gap-1 bg-muted rounded-lg p-0.5">
             {([
               ['basic', '基础模式'],
               ['advanced', '高级模式（脚本）'],
@@ -154,8 +154,8 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                 key={key}
                 className={`flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                   activeTab === key
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200 shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    ? 'bg-white bg-accent text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => setActiveTab(key)}
               >
@@ -167,11 +167,11 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
           {/* 名称 + ID 始终显示 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                 插件名称 <span className="text-red-400">*</span>
               </label>
               <input
-                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary"
                 placeholder="例如：今日待办"
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
@@ -180,11 +180,11 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
               />
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                 插件 ID
               </label>
               <input
-                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400 font-mono"
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary font-mono"
                 placeholder="自动生成"
                 value={formId}
                 onChange={(e) => setFormId(e.target.value)}
@@ -195,33 +195,33 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
           {/* 清单字段（版本 + 图标 + 描述） */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                 版本
               </label>
               <input
-                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400 font-mono"
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary font-mono"
                 placeholder="0.1.0"
                 value={formVersion}
                 onChange={(e) => setFormVersion(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                 图标 Emoji
               </label>
               <input
-                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary"
                 placeholder="📊"
                 value={formIconEmoji}
                 onChange={(e) => setFormIconEmoji(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                 作者
               </label>
               <input
-                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary"
                 placeholder="选填"
                 value={formAuthor}
                 onChange={(e) => setFormAuthor(e.target.value)}
@@ -229,11 +229,11 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             </div>
           </div>
           <div>
-            <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1">
               描述
             </label>
             <input
-              className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400"
+              className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary"
               placeholder="简短描述插件功能"
               value={formDescription}
               onChange={(e) => setFormDescription(e.target.value)}
@@ -243,17 +243,17 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
           {/* ── 基础模式：Markdown 内容 ── */}
           {activeTab === 'basic' && (
             <div>
-              <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                 内容（支持 Markdown）
               </label>
               <textarea
-                className="w-full px-2 py-1.5 text-sm border rounded-md bg-white dark:bg-zinc-950 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400 resize-none"
+                className="w-full px-2 py-1.5 text-sm border rounded-md bg-card border-border text-foreground outline-none focus:border-primary resize-none"
                 rows={5}
                 placeholder={"**标题**\n- 列表项 1\n- 列表项 2\n\n[链接](https://example.com)"}
                 value={formContent}
                 onChange={(e) => setFormContent(e.target.value)}
               />
-              <p className="text-[10px] text-zinc-400 mt-1">
+              <p className="text-[10px] text-muted-foreground mt-1">
                 无需编程，支持 Markdown 格式。适合便签、说明文档、备忘等。
               </p>
             </div>
@@ -264,13 +264,13 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             <>
               {/* 脚本编辑 */}
               <div>
-                <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 mb-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1">
                   <Code className="h-3.5 w-3.5" />
                   JavaScript 脚本
                   <span className="text-red-400">*</span>
                 </label>
                 <textarea
-                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400 resize-none"
+                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-primary resize-none"
                   rows={10}
                   placeholder={"// 使用 PluginSDK 构建交互式插件\nconst { ui, store, actions, data } = PluginSDK;\n\n// 1. 设置初始 UI\nui.setContent('\\n  <div class=\"pk-card\">\\n    <h3>我的数据面板</h3>\\n    <button id=\"btn\" class=\"pk-btn pk-primary\">加载数据</button>\\n    <div id=\"result\"></div>\\n  </div>\\n');\n\n// 2. 绑定事件\ndocument.getElementById('btn').addEventListener('click', async () => {\n  const prompts = await store.getPrompts();\n  document.getElementById('result').innerHTML =\n    '共 ' + prompts.length + ' 条提示词';\n});"}
                   value={formScript}
@@ -281,11 +281,11 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
               {/* 自定义样式 */}
               <div>
-                <label className="block text-[11px] font-medium text-zinc-500 mb-1">
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                   自定义 CSS（可选）
                 </label>
                 <textarea
-                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-400 resize-none"
+                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-primary resize-none"
                   rows={3}
                   placeholder={"/* 自定义样式 */\n#result { color: var(--foreground); }"}
                   value={formStyle}
@@ -296,7 +296,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
               {/* 权限选择 */}
               <div>
-                <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 mb-1.5">
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1.5">
                   <ShieldCheck className="h-3.5 w-3.5" />
                   权限声明（按需勾选）
                 </label>
@@ -317,8 +317,8 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                         key={perm}
                         className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
                           checked
-                            ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950'
-                            : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                            ? 'border-primary bg-primary-light border-primary bg-primary-light'
+                            : 'border-border hover:border-border'
                         }`}
                       >
                         <input
@@ -328,10 +328,10 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
                           onChange={() => togglePermission(perm as PluginPermission)}
                         />
                         <div>
-                          <div className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                          <div className="text-[11px] font-semibold text-foreground">
                             {title}
                           </div>
-                          <div className="text-[10px] text-zinc-400">{desc}</div>
+                          <div className="text-[10px] text-muted-foreground">{desc}</div>
                         </div>
                       </label>
                     );
@@ -360,20 +360,20 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
               {/* Bundle 代码编辑 */}
               <div>
-                <label className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 mb-1">
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1">
                   <Code className="h-3.5 w-3.5" />
                   React 组件源码（IIFE/UMD）
                   <span className="text-red-400">*</span>
                 </label>
                 <textarea
-                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-400 resize-none"
+                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-amber-400 resize-none"
                   rows={12}
                   placeholder={"// 支持 JSX，Babel 自动编译\n// 可用: React, XLSX, useStore, electronAPI, injectToAI\n\nconst { useState } = React;\n\nfunction ExcelReader() {\n  const [data, setData] = useState(null);\n\n  const loadExcel = async () => {\n    const result = await electronAPI.pickFile({ accept: '.xlsx' });\n    if (!result) return;\n    const wb = XLSX.read(result.content, { type: 'base64' });\n    const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);\n    setData(json);\n  };\n\n  const injectData = async () => {\n    if (!data) return;\n    const text = data.map(r => Object.values(r).join('\\t')).join('\\n');\n    await injectToAI('deepseek', '请分析以下 Excel 数据:\\n' + text, false);\n  };\n\n  return (\n    <div style={{padding:16}}>\n      <button onClick={loadExcel}\n        style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'#fff',border:'none',cursor:'pointer'}}>\n        打开 Excel\n      </button>\n      {data && <>\n        <button onClick={injectData}\n          style={{marginLeft:8,padding:'6px 14px',borderRadius:8,background:'#10b981',color:'#fff',border:'none',cursor:'pointer'}}>\n          注入到 AI\n        </button>\n        <pre style={{marginTop:12,fontSize:12,maxHeight:400,overflow:'auto'}}>\n          {JSON.stringify(data.slice(0,5), null, 2)}\n        </pre>\n      </>}\n    </div>\n  );\n}\n\nmodule.exports = ExcelReader;"}
                   value={formBundle}
                   onChange={(e) => setFormBundle(e.target.value)}
                   spellCheck={false}
                 />
-                <p className="text-[10px] text-zinc-400 mt-1">
+                <p className="text-[10px] text-muted-foreground mt-1">
                   支持 <strong>JSX/TSX</strong> 语法（Babel 自动编译）。可用 <code>require('xlsx')</code> 返回 SheetJS。
                   确保末尾 <code>module.exports = 组件名;</code> 导出 React 组件。
                 </p>
@@ -381,7 +381,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
               {/* 或从文件加载 */}
               <button
-                className="w-full py-2 text-xs font-medium text-zinc-500 border border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg hover:border-amber-400 hover:text-amber-600 transition-colors"
+                className="w-full py-2 text-xs font-medium text-muted-foreground border border-dashed border-input rounded-lg hover:border-amber-400 hover:text-amber-600 transition-colors"
                 onClick={() => {
                   const input = document.createElement('input');
                   input.type = 'file';
@@ -407,18 +407,18 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
         {/* 底部按钮 */}
         <div className="px-4 py-3 border-t flex items-center justify-between">
-          <span className="text-[10px] text-zinc-400">
+          <span className="text-[10px] text-muted-foreground">
             Esc 取消
           </span>
           <div className="flex gap-2">
             <button
-              className="px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors"
+              className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent rounded-md transition-colors"
               onClick={onClose}
             >
               取消
             </button>
             <button
-              className="px-4 py-1.5 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors disabled:opacity-40"
+              className="px-4 py-1.5 text-xs font-medium bg-primary hover:bg-primary-hover text-white rounded-md transition-colors disabled:opacity-40"
               disabled={!formName.trim() || (activeTab === 'kernel' && !formBundle.trim())}
               onClick={handleCreate}
             >

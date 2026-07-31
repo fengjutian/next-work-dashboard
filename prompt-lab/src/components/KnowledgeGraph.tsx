@@ -183,7 +183,7 @@ export const KnowledgeGraph: React.FC = () => {
   return (
     <div className="flex h-full">
       {/* 左侧配置面板 */}
-      <div className="w-64 flex-shrink-0 border-r flex flex-col bg-zinc-50 dark:bg-zinc-900">
+      <div className="w-64 flex-shrink-0 border-r flex flex-col bg-background">
         <FileSelector
           files={files}
           selectedPaths={selectedPaths}
@@ -209,7 +209,7 @@ export const KnowledgeGraph: React.FC = () => {
 
         <div className="px-3 pb-3">
           <button
-            className="w-full h-8 flex items-center justify-center gap-2 rounded-md text-sm font-medium bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors disabled:opacity-50"
+            className="w-full h-8 flex items-center justify-center gap-2 rounded-md text-sm font-medium bg-muted bg-muted text-white text-foreground hover:bg-accent dark:hover:bg-accent transition-colors disabled:opacity-50"
             disabled={generating || nodes.length < 2 || selectedPaths.size === 0}
             onClick={generateGraph}
           >
@@ -220,7 +220,7 @@ export const KnowledgeGraph: React.FC = () => {
       </div>
 
       {/* 右侧图谱区 */}
-      <div className="flex-1 flex flex-col bg-white dark:bg-zinc-950 overflow-hidden relative">
+      <div className="flex-1 flex flex-col bg-card overflow-hidden relative">
         <GraphCanvas graphData={graphData} />
       </div>
     </div>

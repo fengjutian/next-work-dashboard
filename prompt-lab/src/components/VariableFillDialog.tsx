@@ -66,7 +66,7 @@ export const VariableFillDialog: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40">
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-[640px] max-h-[85vh] flex flex-col">
+      <div className="bg-card rounded-lg shadow-xl w-[640px] max-h-[85vh] flex flex-col">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="text-sm font-semibold">
@@ -78,9 +78,9 @@ export const VariableFillDialog: React.FC<Props> = ({
         </div>
 
         {/* 预览 */}
-        <div className="px-4 py-2 border-b bg-zinc-50 dark:bg-zinc-950">
-          <p className="text-[10px] text-zinc-400 uppercase mb-1">预览</p>
-          <pre className="text-xs text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap max-h-20 overflow-y-auto">
+        <div className="px-4 py-2 border-b bg-background">
+          <p className="text-[10px] text-muted-foreground uppercase mb-1">预览</p>
+          <pre className="text-xs text-muted-foreground whitespace-pre-wrap max-h-20 overflow-y-auto">
             {fillVariables(content, values)}
           </pre>
         </div>
@@ -91,10 +91,10 @@ export const VariableFillDialog: React.FC<Props> = ({
             const def = variables.find((v) => v.name === name);
             return (
             <div key={name}>
-              <label className="text-xs text-zinc-500 block mb-1">
+              <label className="text-xs text-muted-foreground block mb-1">
                 {`{{${name}}}`}
                 {def?.description && (
-                  <span className="text-zinc-300 ml-1">— {def.description}</span>
+                  <span className="text-foreground ml-1">— {def.description}</span>
                 )}
               </label>
               <textarea
@@ -103,14 +103,14 @@ export const VariableFillDialog: React.FC<Props> = ({
                   setValues((prev) => ({ ...prev, [name]: e.target.value }))
                 }
                 placeholder={def?.defaultValue || `输入 ${name} 的值...`}
-                className="w-full h-20 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-zinc-950"
+                className="w-full h-20 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 ring-ring bg-card"
                 autoFocus={varNames.indexOf(name) === 0}
               />
             </div>
             );
           })}
           {varNames.length === 0 && (
-            <p className="text-xs text-zinc-400 text-center py-4">
+            <p className="text-xs text-muted-foreground text-center py-4">
               此提示词没有变量，直接注入
             </p>
           )}
@@ -118,14 +118,14 @@ export const VariableFillDialog: React.FC<Props> = ({
 
         {/* 底部按钮 */}
         <div className="px-4 py-3 border-t flex justify-between">
-          <span className="text-[10px] text-zinc-400 self-center">
+          <span className="text-[10px] text-muted-foreground self-center">
             Ctrl+Enter 快速确认
           </span>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={onCancel}>
               取消
             </Button>
-            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleSubmit}>
+            <Button size="sm" className="bg-primary hover:bg-primary-hover text-white" onClick={handleSubmit}>
               注入
             </Button>
           </div>

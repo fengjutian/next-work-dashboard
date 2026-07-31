@@ -22,7 +22,7 @@ const SHORTCUT_GROUPS = [
 export const SettingsShortcuts: React.FC = () => {
   return (
     <section>
-      <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
         快捷键
       </h4>
       <div className="space-y-3">
@@ -31,19 +31,19 @@ export const SettingsShortcuts: React.FC = () => {
             key={group.title}
             className="border rounded-lg overflow-hidden"
           >
-            <div className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 text-[10px] font-medium text-zinc-500 uppercase tracking-wide">
+            <div className="px-3 py-1.5 bg-background text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
               {group.title}
             </div>
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            <div className="divide-y divide-border">
               {group.items.map(({ keys, desc }) => (
                 <div
                   key={keys}
                   className="flex items-center justify-between px-3 py-2"
                 >
-                  <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                  <span className="text-xs text-muted-foreground">
                     {desc}
                   </span>
-                  <kbd className="text-[10px] px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-zinc-500 font-mono">
+                  <kbd className="text-[10px] px-1.5 py-0.5 bg-muted rounded text-muted-foreground font-mono">
                     {keys}
                   </kbd>
                 </div>

@@ -49,14 +49,14 @@ export const SettingsAiApi: React.FC = () => {
 
   return (
     <section>
-      <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-3">
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
         AI API
       </h4>
 
       <div className="space-y-4">
         {/* API Key */}
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+          <label className="text-xs font-medium text-muted-foreground">
             API Key
           </label>
           <div className="relative">
@@ -69,7 +69,7 @@ export const SettingsAiApi: React.FC = () => {
             />
             <button
               type="button"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
               onClick={() => setShowKey((v) => !v)}
             >
               {showKey ? (
@@ -83,7 +83,7 @@ export const SettingsAiApi: React.FC = () => {
 
         {/* Model */}
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+          <label className="text-xs font-medium text-muted-foreground">
             模型
           </label>
           <select
@@ -91,7 +91,7 @@ export const SettingsAiApi: React.FC = () => {
             onChange={(e) =>
               setAiApi({ model: e.target.value as typeof aiApi.model })
             }
-            className="flex h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+            className="flex h-8 w-full rounded-md border border-border bg-card px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 ring-ring"
           >
             {MODELS.map((m) => (
               <option key={m.value} value={m.value}>
@@ -103,7 +103,7 @@ export const SettingsAiApi: React.FC = () => {
 
         {/* Base URL */}
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+          <label className="text-xs font-medium text-muted-foreground">
             API Base URL
           </label>
           <Input

@@ -194,7 +194,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
       return (
         <input
           ref={editInputRef}
-          className="absolute inset-0 w-full h-full px-1.5 text-sm bg-white dark:bg-zinc-800 border-2 border-blue-500 outline-none z-10"
+          className="absolute inset-0 w-full h-full px-1.5 text-sm bg-card border-2 border-primary outline-none z-10"
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onBlur={commitEdit}
@@ -214,8 +214,8 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
       <div
         className={`w-full h-full px-1.5 py-0.5 text-sm truncate select-none ${
           isSelected
-            ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-400 dark:border-blue-500'
-            : 'border border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
+            ? 'bg-primary-light border border-primary border-primary'
+            : 'border border-transparent hover:bg-background dark:hover:bg-muted/50'
         }`}
         title={displayValue}
       >
@@ -227,7 +227,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-hidden bg-white dark:bg-zinc-950 outline-none"
+      className="flex-1 overflow-hidden bg-card outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}
       style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}
@@ -247,22 +247,22 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
         >
           {/* 列标栏 */}
           <div
-            className="sticky top-0 z-20 flex bg-zinc-100 dark:bg-zinc-800 border-b border-zinc-300 dark:border-zinc-700"
+            className="sticky top-0 z-20 flex bg-muted border-b border-input"
             style={{ height: HEADER_ROW_HEIGHT, paddingLeft: HEADER_COL_WIDTH }}
           >
             {/* 左上角空白 */}
             <div
-              className="absolute left-0 top-0 bg-zinc-200 dark:bg-zinc-700 border-r border-zinc-300 dark:border-zinc-600 flex items-center justify-center"
+              className="absolute left-0 top-0 bg-accent border-r border-input flex items-center justify-center"
               style={{ width: HEADER_COL_WIDTH, height: HEADER_ROW_HEIGHT }}
             >
-              <span className="text-[10px] text-zinc-400 font-mono">#</span>
+              <span className="text-[10px] text-muted-foreground font-mono">#</span>
             </div>
             {Array.from({ length: visibleColRange.endCol - visibleColRange.startCol }, (_, i) => {
               const colIdx = visibleColRange.startCol + i;
               return (
                 <div
                   key={colIdx}
-                  className="flex items-center justify-center text-[11px] font-medium text-zinc-500 dark:text-zinc-400 border-r border-zinc-200 dark:border-zinc-700 flex-shrink-0 select-none"
+                  className="flex items-center justify-center text-[11px] font-medium text-muted-foreground border-r border-border flex-shrink-0 select-none"
                   style={{
                     width: COL_WIDTH,
                     height: HEADER_ROW_HEIGHT,
@@ -285,8 +285,8 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
               <div key={r} className="absolute flex" style={{ top, height: ROW_HEIGHT, left: 0 }}>
                 {/* 行号 */}
                 <div
-                  className={`flex items-center justify-end pr-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 border-r border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0 select-none ${
-                    isRowSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-zinc-50 dark:bg-zinc-800/50'
+                  className={`flex items-center justify-end pr-1.5 text-[11px] text-muted-foreground border-r border-b border-border flex-shrink-0 select-none ${
+                    isRowSelected ? 'bg-primary-light bg-primary-light' : 'bg-background bg-muted/50'
                   }`}
                   style={{ width: HEADER_COL_WIDTH }}
                 >
@@ -302,7 +302,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
                   return (
                     <div
                       key={colIdx}
-                      className="border-r border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0 relative"
+                      className="border-r border-b border-border flex-shrink-0 relative"
                       style={{ width: COL_WIDTH }}
                       onClick={() => {
                         setSelection({ row: r, col: colIdx });

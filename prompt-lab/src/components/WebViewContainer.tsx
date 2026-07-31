@@ -37,20 +37,20 @@ const TabBar: React.FC = () => {
   };
 
   return (
-    <div className="h-9 flex items-center bg-zinc-100 dark:bg-zinc-900 border-b gap-0.5 px-1 overflow-x-auto">
+    <div className="h-9 flex items-center bg-muted border-b gap-0.5 px-1 overflow-x-auto">
       {tabs.map((tab) => (
         <div
           key={tab.id}
           className={`flex items-center gap-1 px-3 py-1 text-xs rounded-t-md cursor-pointer select-none whitespace-nowrap border-b-2 transition-colors ${
             activeTabId === tab.id
-              ? 'bg-white dark:bg-zinc-950 border-blue-500 text-zinc-900 dark:text-zinc-100'
-              : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              ? 'bg-card border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
           onClick={() => setActiveTab(tab.id)}
         >
           <span>{tab.title}</span>
           <button
-            className="ml-0.5 p-0.2 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            className="ml-0.5 p-0.2 rounded hover:bg-accent"
             onClick={(e) => {
               e.stopPropagation();
               closeTab(tab.id);
@@ -65,7 +65,7 @@ const TabBar: React.FC = () => {
         ref={btnRef}
         variant="ghost"
         size="icon"
-        className="h-6 w-6 text-zinc-400 hover:text-zinc-600"
+        className="h-6 w-6 text-muted-foreground hover:text-muted-foreground"
         onClick={handleToggle}
       >
         +
@@ -79,7 +79,7 @@ const TabBar: React.FC = () => {
               onClick={() => setDropdownOpen(false)}
             />
             <div
-              className="fixed z-50 bg-white dark:bg-zinc-800 border rounded-md shadow-lg py-1 min-w-[120px]"
+              className="fixed z-50 bg-card border rounded-md shadow-lg py-1 min-w-[120px]"
               style={{ top: dropdownPos.top, left: dropdownPos.left }}
             >
               {sites
@@ -87,7 +87,7 @@ const TabBar: React.FC = () => {
                 .map((site) => (
                   <div
                     key={site.id}
-                    className="px-3 py-1.5 text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
+                    className="px-3 py-1.5 text-xs cursor-pointer hover:bg-muted dark:hover:bg-accent text-foreground"
                     onClick={() => handleOpenTab(site.id)}
                   >
                     {site.name}
@@ -271,7 +271,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   return (
     <div className="flex-1 flex flex-col relative">
       {/* 导航栏 */}
-      <div className="h-8 flex items-center px-2 gap-1 bg-zinc-50 dark:bg-zinc-900 border-b">
+      <div className="h-8 flex items-center px-2 gap-1 bg-background border-b">
         <Button
           variant="ghost"
           size="icon"
@@ -297,7 +297,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           <RefreshCw className="h-3 w-3" />
         </Button>
 
-        <div className="flex-1 text-xs text-zinc-400 truncate px-2">
+        <div className="flex-1 text-xs text-muted-foreground truncate px-2">
           {tab.url}
         </div>
 
@@ -327,7 +327,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         {selectedPrompt && site && (
           <Button
             size="sm"
-            className="h-6 text-xs gap-1 bg-blue-600 hover:bg-blue-700 ml-1"
+            className="h-6 text-xs gap-1 bg-primary hover:bg-primary-hover ml-1"
             onClick={handleInject}
           >
             <Send className="h-3 w-3" />

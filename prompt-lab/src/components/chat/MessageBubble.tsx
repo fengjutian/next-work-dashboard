@@ -24,14 +24,14 @@ export interface Message {
 const CodeBlock: React.FC<{ code: string; lang?: string }> = ({ code, lang }) => {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="relative my-2 rounded-md border bg-zinc-950 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-800">
-        <span className="text-[10px] text-zinc-400 uppercase">{lang || 'text'}</span>
-        <button className="text-zinc-400 hover:text-zinc-200" onClick={async () => { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
+    <div className="relative my-2 rounded-md border bg-background overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted">
+        <span className="text-[10px] text-muted-foreground uppercase">{lang || 'text'}</span>
+        <button className="text-muted-foreground hover:text-foreground" onClick={async () => { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
           {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
         </button>
       </div>
-      <pre className="p-3 overflow-x-auto text-xs text-zinc-200 font-mono leading-relaxed"><code>{code}</code></pre>
+      <pre className="p-3 overflow-x-auto text-xs text-foreground font-mono leading-relaxed"><code>{code}</code></pre>
     </div>
   );
 };
@@ -49,7 +49,7 @@ export const ToolCallCard: React.FC<{ calls: ToolCall[]; results?: ToolResult[] 
             {result && !result.error && <Check className="h-3 w-3 text-green-500" />}
           </div>
           <div className="mt-1 text-[10px] text-amber-600 dark:text-amber-500 font-mono">{JSON.stringify(call.arguments)}</div>
-          {result && <div className={`mt-1 text-[10px] whitespace-pre-wrap break-all ${result.error ? 'text-red-500' : 'text-zinc-600 dark:text-zinc-400'}`}>{result.error ? `❌ ${result.error}` : result.output}</div>}
+          {result && <div className={`mt-1 text-[10px] whitespace-pre-wrap break-all ${result.error ? 'text-red-500' : 'text-muted-foreground'}`}>{result.error ? `❌ ${result.error}` : result.output}</div>}
         </div>
       );
     })}
@@ -78,7 +78,7 @@ function renderContent(text: string): React.ReactNode[] {
 function inline(text: string, key: string): React.ReactNode {
   const segs = text.split(/(`[^`]+`)/g);
   return <span key={key} className="whitespace-pre-wrap break-words">{segs.map((s, i) => {
-    if (s.startsWith('`') && s.endsWith('`')) return <code key={i} className="px-1 py-0.5 bg-zinc-200 dark:bg-zinc-700 rounded text-xs font-mono">{s.slice(1, -1)}</code>;
+    if (s.startsWith('`') && s.endsWith('`')) return <code key={i} className="px-1 py-0.5 bg-accent rounded text-xs font-mono">{s.slice(1, -1)}</code>;
     const bsegs = s.split(/(\*\*[^*]+\*\*)/g);
     return bsegs.map((bs, j) => {
       if (bs.startsWith('**') && bs.endsWith('**')) return <strong key={`${i}${j}`} className="font-semibold">{bs.slice(2, -2)}</strong>;
@@ -102,16 +102,16 @@ export const MessageBubble: React.FC<{
 
   return (
     <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''} mb-4 group`}>
-      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isUser ? 'bg-blue-500 text-white' : isTool ? 'bg-amber-500 text-white' : 'bg-emerald-500 text-white'}`}>
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isUser ? 'bg-primary text-white' : isTool ? 'bg-amber-500 text-white' : 'bg-emerald-500 text-white'}`}>
         {isUser ? <span className="text-xs font-bold">U</span> : isTool ? <Wrench className="h-3.5 w-3.5" /> : <Robot className="h-3.5 w-3.5" />}
       </div>
-      <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${isUser ? 'bg-blue-500 text-white' : isTool ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200'}`}>
+      <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${isUser ? 'bg-primary text-white' : isTool ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800' : 'bg-muted text-foreground'}`}>
         {editing ? (
           <div className="flex flex-col gap-1">
-            <textarea className="w-full bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 border rounded p-1.5 text-xs resize-none" rows={3} value={editValue} onChange={(e) => onEditChange?.(e.target.value)} autoFocus />
+            <textarea className="w-full bg-card text-foreground border rounded p-1.5 text-xs resize-none" rows={3} value={editValue} onChange={(e) => onEditChange?.(e.target.value)} autoFocus />
             <div className="flex gap-1 justify-end">
-              <button className="text-[10px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700" onClick={onEditCancel}>取消</button>
-              <button className="text-[10px] px-2 py-0.5 rounded bg-blue-500 text-white" onClick={onEditSave}>保存并重发</button>
+              <button className="text-[10px] px-2 py-0.5 rounded bg-accent" onClick={onEditCancel}>取消</button>
+              <button className="text-[10px] px-2 py-0.5 rounded bg-primary text-white" onClick={onEditSave}>保存并重发</button>
             </div>
           </div>
         ) : (
@@ -122,10 +122,10 @@ export const MessageBubble: React.FC<{
         )}
       </div>
       {!isUser && canRegenerate && onRegenerate && !editing && (
-        <button className="self-center opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400" title="重新生成" onClick={onRegenerate}><RotateCcw className="h-3.5 w-3.5" /></button>
+        <button className="self-center opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-accent text-muted-foreground" title="重新生成" onClick={onRegenerate}><RotateCcw className="h-3.5 w-3.5" /></button>
       )}
       {isUser && canEdit && onEdit && !editing && (
-        <button className="self-center opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400" title="编辑" onClick={onEdit}><Edit3 className="h-3.5 w-3.5" /></button>
+        <button className="self-center opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-accent text-muted-foreground" title="编辑" onClick={onEdit}><Edit3 className="h-3.5 w-3.5" /></button>
       )}
     </div>
   );

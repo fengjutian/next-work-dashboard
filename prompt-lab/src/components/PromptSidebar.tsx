@@ -65,8 +65,8 @@ const PromptCard: React.FC<{
     <div
       className={`group p-4 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md ${
         (isSelected || selected)
-          ? 'bg-blue-50 dark:bg-blue-950 border-blue-400 dark:border-blue-600 shadow-sm'
-          : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-blue-300 dark:hover:border-blue-700'
+          ? 'bg-primary-light border-primary border-primary shadow-sm'
+          : 'bg-card border-border hover:border-primary dark:hover:border-primary'
       }`}
       onClick={handleClick}
     >
@@ -82,46 +82,46 @@ const PromptCard: React.FC<{
           />
         )}
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+          <h4 className="text-sm font-semibold text-foreground truncate">
             {prompt.title}
           </h4>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 font-medium">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
               {prompt.category}
             </span>
             {prompt.tags.slice(0, 3).map((t) => (
               <span
                 key={t}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-400"
+                className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
               >
                 {t}
               </span>
             ))}
             {prompt.tags.length > 3 && (
-              <span className="text-[10px] text-zinc-400">+{prompt.tags.length - 3}</span>
+              <span className="text-[10px] text-muted-foreground">+{prompt.tags.length - 3}</span>
             )}
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <button
-            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded hover:bg-accent transition-colors"
             onClick={togglePin}
             title={prompt.isPinned ? '取消置顶' : '置顶'}
           >
             <Pin
               className={`h-3.5 w-3.5 ${
-                prompt.isPinned ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'
+                prompt.isPinned ? 'text-amber-500 fill-amber-500' : 'text-foreground'
               }`}
             />
           </button>
           <button
-            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded hover:bg-accent transition-colors"
             onClick={toggleFavorite}
             title={prompt.isFavorite ? '取消收藏' : '收藏'}
           >
             <Star
               className={`h-3.5 w-3.5 ${
-                prompt.isFavorite ? 'text-amber-500 fill-amber-500' : 'text-zinc-300'
+                prompt.isFavorite ? 'text-amber-500 fill-amber-500' : 'text-foreground'
               }`}
             />
           </button>
@@ -129,32 +129,32 @@ const PromptCard: React.FC<{
       </div>
 
       {/* 内容预览 */}
-      <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed line-clamp-3 mb-3">
+      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mb-3">
         {preview}
       </p>
 
       {/* 底部：使用次数 + 操作按钮 */}
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-zinc-400">
+        <span className="text-[10px] text-muted-foreground">
           使用 {prompt.usageCount} 次
         </span>
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
-            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded hover:bg-accent transition-colors"
             onClick={handleCopy}
             title="复制内容"
           >
-            <Copy className="h-3.5 w-3.5 text-zinc-400" />
+            <Copy className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           <button
-            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded hover:bg-accent transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               onEdit?.(prompt);
             }}
             title="编辑"
           >
-            <Edit3 className="h-3.5 w-3.5 text-zinc-400" />
+            <Edit3 className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           <button
             className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
@@ -164,7 +164,7 @@ const PromptCard: React.FC<{
             }}
             title="删除"
           >
-            <Trash2 className="h-3.5 w-3.5 text-zinc-400 hover:text-red-500" />
+            <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-red-500" />
           </button>
         </div>
       </div>
@@ -215,7 +215,7 @@ const PromptEditor: React.FC<{
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="bg-white dark:bg-zinc-950 rounded-lg shadow-xl max-h-[85vh] flex flex-col mx-4" style={{ width: 800 }}
+        className="bg-card rounded-lg shadow-xl max-h-[85vh] flex flex-col mx-4" style={{ width: 800 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b">
@@ -228,7 +228,7 @@ const PromptEditor: React.FC<{
         </div>
         <div className="flex-1 p-4 space-y-3 overflow-y-auto">
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">标题</label>
+            <label className="text-xs text-muted-foreground block mb-1">标题</label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -237,18 +237,18 @@ const PromptEditor: React.FC<{
             />
           </div>
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">
+            <label className="text-xs text-muted-foreground block mb-1">
               正文（用 {'{{变量名}}'} 表示占位符）
             </label>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="输入提示词内容..."
-              className="w-full h-32 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full h-32 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 ring-ring"
             />
           </div>
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">分类</label>
+            <label className="text-xs text-muted-foreground block mb-1">分类</label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
@@ -260,7 +260,7 @@ const PromptEditor: React.FC<{
             </select>
           </div>
           <div>
-            <label className="text-xs text-zinc-500 block mb-1">
+            <label className="text-xs text-muted-foreground block mb-1">
               标签（逗号分隔）
             </label>
             <Input
@@ -310,13 +310,13 @@ export const PromptSidebar: React.FC = () => {
 
 
   return (
-    <div className="h-full flex-1 flex flex-col bg-white dark:bg-zinc-950 relative">
+    <div className="h-full flex-1 flex flex-col bg-card relative">
       {/* 搜索框 */}
       <div className="p-3 pb-2">
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
-            className="w-full h-8 pl-7 pr-2 text-sm rounded-md border bg-zinc-50 dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full h-8 pl-7 pr-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 ring-ring"
             placeholder="搜索提示词..."
             value={searchQuery}
             onChange={(e) => setSearch(e.target.value)}
@@ -332,8 +332,8 @@ export const PromptSidebar: React.FC = () => {
           <button
             className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
               !filterCategory
-                ? 'bg-blue-600 text-white'
-                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200'
+                ? 'bg-primary text-white'
+                : 'bg-muted text-muted-foreground hover:bg-accent'
             }`}
             onClick={() => setFilterCategory(null)}
           >
@@ -344,8 +344,8 @@ export const PromptSidebar: React.FC = () => {
               key={cat}
               className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
                 filterCategory === cat
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200'
+                  ? 'bg-primary text-white'
+                  : 'bg-muted text-muted-foreground hover:bg-accent'
               }`}
               onClick={() =>
                 setFilterCategory(filterCategory === cat ? null : cat)
@@ -364,8 +364,8 @@ export const PromptSidebar: React.FC = () => {
                 key={tag}
                 className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
                   filterTag === tag
-                    ? 'border-blue-400 bg-blue-50 dark:bg-blue-950 text-blue-600'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-zinc-400'
+                    ? 'border-primary bg-primary-light text-primary'
+                    : 'border-border text-muted-foreground hover:border-primary/50'
                 }`}
                 onClick={() => setFilterTag(filterTag === tag ? null : tag)}
               >
@@ -382,7 +382,7 @@ export const PromptSidebar: React.FC = () => {
       {recentPrompts.length > 0 && (
         <>
           <div className="px-3 py-2">
-            <span className="text-[10px] font-semibold text-zinc-400 uppercase">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase">
               最近使用
             </span>
           </div>
@@ -390,7 +390,7 @@ export const PromptSidebar: React.FC = () => {
             {recentPrompts.map((p) => (
               <div
                 key={`recent-${p.id}`}
-                className="text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer truncate py-0.5"
+                className="text-xs text-muted-foreground hover:text-foreground cursor-pointer truncate py-0.5"
                 onClick={() => selectPrompt(p.id)}
               >
                 {p.title}
@@ -403,7 +403,7 @@ export const PromptSidebar: React.FC = () => {
 
       {/* 列表头 + 操作按钮 */}
       <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-semibold text-zinc-400 uppercase">
+        <span className="text-xs font-semibold text-muted-foreground uppercase">
           提示词 ({prompts.length})
         </span>
         <div className="flex gap-1">
@@ -427,7 +427,7 @@ export const PromptSidebar: React.FC = () => {
           <Button
             variant="ghost"
             size="icon"
-            className={`h-6 w-6 ${batchMode ? 'text-blue-500' : ''}`}
+            className={`h-6 w-6 ${batchMode ? 'text-primary' : ''}`}
             onClick={() => { setBatchMode(!batchMode); setSelectedIds(new Set()); }}
             title="批量模式"
           >
@@ -448,7 +448,7 @@ export const PromptSidebar: React.FC = () => {
       <ScrollArea className="flex-1">
         <div className="p-4">
           {prompts.length === 0 ? (
-            <p className="text-sm text-zinc-400 text-center py-16">
+            <p className="text-sm text-muted-foreground text-center py-16">
               没有匹配的提示词
             </p>
           ) : (
@@ -479,8 +479,8 @@ export const PromptSidebar: React.FC = () => {
 
       {/* 底部：选中提示词的快捷信息 */}
       {selectedPromptId && (
-        <div className="border-t p-2 text-[10px] text-zinc-400 bg-zinc-50 dark:bg-zinc-900">
-          <span className="text-zinc-600 dark:text-zinc-300 font-medium">
+        <div className="border-t p-2 text-[10px] text-muted-foreground bg-background">
+          <span className="text-muted-foreground text-foreground font-medium">
             {prompts.find((p) => p.id === selectedPromptId)?.title}
           </span>
           <span className="ml-2">

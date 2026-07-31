@@ -15,8 +15,8 @@ const NodeTag: React.FC<NodeTagProps> = ({ node, onRemove }) => {
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full ${
         isExtracted
-          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
-          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+          ? 'bg-success/10 text-success'
+          : 'bg-primary-light text-primary'
       }`}
       title={
         isExtracted
@@ -63,12 +63,12 @@ export const NodePanel: React.FC<NodePanelProps> = ({
   };
 
   return (
-    <div className="border-t border-zinc-200 dark:border-zinc-700 p-3 space-y-3">
+    <div className="border-t border-border p-3 space-y-3">
       {/* 标题栏 */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">图谱节点</span>
+        <span className="text-xs font-semibold text-muted-foreground">图谱节点</span>
         <button
-          className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           onClick={onResetDefault}
           title="重置为默认节点"
         >
@@ -87,10 +87,10 @@ export const NodePanel: React.FC<NodePanelProps> = ({
           onChange={(e) => onNodeInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="输入节点名称…"
-          className="flex-1 h-7 px-2 text-xs rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 outline-none focus:border-blue-400"
+          className="flex-1 h-7 px-2 text-xs rounded border border-input bg-card text-foreground outline-none focus:border-primary"
         />
         <button
-          className="h-7 w-7 flex items-center justify-center rounded bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+          className="h-7 w-7 flex items-center justify-center rounded bg-primary hover:bg-primary-hover text-white transition-colors"
           onClick={onAddNode}
           title="添加节点"
         >

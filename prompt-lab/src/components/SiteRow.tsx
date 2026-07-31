@@ -13,7 +13,7 @@ export const SiteRow: React.FC<{
   const [expanded, setExpanded] = React.useState(false);
 
   return (
-    <div className="border rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
+    <div className="border rounded-lg overflow-hidden bg-card">
       <div className="flex items-center gap-2 px-3 py-2">
         <button
           className={`w-2.5 h-2.5 rounded-full flex-shrink-0 transition-colors ${
@@ -22,11 +22,11 @@ export const SiteRow: React.FC<{
           onClick={() => onUpdate({ enabled: !site.enabled })}
           title={site.enabled ? '已启用，点击禁用' : '已禁用，点击启用'}
         />
-        <span className="text-xs flex-1 truncate font-medium text-zinc-700 dark:text-zinc-300">
+        <span className="text-xs flex-1 truncate font-medium text-foreground">
           {site.name}
         </span>
         <button
-          className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           onClick={() => setExpanded(!expanded)}
         >
           {expanded ? '收起' : '编辑'}
@@ -39,9 +39,9 @@ export const SiteRow: React.FC<{
         </button>
       </div>
       {expanded && (
-        <div className="px-3 py-2.5 space-y-2 border-t bg-zinc-50/50 dark:bg-zinc-950/50">
+        <div className="px-3 py-2.5 space-y-2 border-t bg-background/50 bg-background/50">
           <div>
-            <label className="text-[10px] text-zinc-500 font-medium">名称</label>
+            <label className="text-[10px] text-muted-foreground font-medium">名称</label>
             <Input
               value={site.name}
               onChange={(e) => onUpdate({ name: e.target.value })}
@@ -49,7 +49,7 @@ export const SiteRow: React.FC<{
             />
           </div>
           <div>
-            <label className="text-[10px] text-zinc-500 font-medium">URL</label>
+            <label className="text-[10px] text-muted-foreground font-medium">URL</label>
             <Input
               value={site.url}
               onChange={(e) => onUpdate({ url: e.target.value })}
@@ -57,7 +57,7 @@ export const SiteRow: React.FC<{
             />
           </div>
           <div>
-            <label className="text-[10px] text-zinc-500 font-medium">输入框 CSS 选择器</label>
+            <label className="text-[10px] text-muted-foreground font-medium">输入框 CSS 选择器</label>
             <Input
               value={site.inputSelector}
               onChange={(e) => onUpdate({ inputSelector: e.target.value })}
@@ -65,7 +65,7 @@ export const SiteRow: React.FC<{
             />
           </div>
           <div>
-            <label className="text-[10px] text-zinc-500 font-medium">发送按钮 CSS 选择器</label>
+            <label className="text-[10px] text-muted-foreground font-medium">发送按钮 CSS 选择器</label>
             <Input
               value={site.submitSelector}
               onChange={(e) => onUpdate({ submitSelector: e.target.value })}

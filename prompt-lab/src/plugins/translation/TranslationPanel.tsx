@@ -14,9 +14,9 @@ export const TranslationPanel: React.FC = () => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 导航栏 */}
-      <div className="h-8 flex items-center px-2 gap-1 bg-zinc-50 dark:bg-zinc-900 border-b">
+      <div className="h-8 flex items-center px-2 gap-1 bg-background border-b">
         <Button
           variant="ghost"
           size="icon"
@@ -42,7 +42,7 @@ export const TranslationPanel: React.FC = () => {
           <RefreshCw className="h-3 w-3" />
         </Button>
 
-        <span className="flex-1 text-xs text-zinc-400 truncate px-2">
+        <span className="flex-1 text-xs text-muted-foreground truncate px-2">
           百度翻译
         </span>
       </div>

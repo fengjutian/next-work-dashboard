@@ -65,16 +65,16 @@ export const WordPreviewPanel: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
+    <div className="flex flex-col h-full bg-card">
       {/* 头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2">
-          <FileText className="h-5 w-5 text-blue-500" />
-          <h2 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+          <FileText className="h-5 w-5 text-primary" />
+          <h2 className="font-semibold text-sm text-foreground">
             Word 预览
           </h2>
           {state.fileName && (
-            <span className="text-xs text-zinc-400 truncate max-w-[160px]">
+            <span className="text-xs text-muted-foreground truncate max-w-[160px]">
               {state.fileName}
             </span>
           )}
@@ -83,7 +83,7 @@ export const WordPreviewPanel: React.FC = () => {
           {state.status === 'loaded' && (
             <button
               onClick={clear}
-              className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-1"
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
               title="关闭当前文档"
             >
               <X className="h-3.5 w-3.5" />
@@ -99,7 +99,7 @@ export const WordPreviewPanel: React.FC = () => {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary transition-colors"
           >
             <Upload className="h-3.5 w-3.5" />
             打开文件
@@ -109,17 +109,17 @@ export const WordPreviewPanel: React.FC = () => {
 
       {/* 内容区 */}
       <div
-        className="flex-1 overflow-hidden bg-zinc-100 dark:bg-zinc-900"
+        className="flex-1 overflow-hidden bg-muted"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
         {/* 拖拽提示 */}
         {dragOver && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-blue-500/10 border-2 border-dashed border-blue-400 rounded-lg m-4">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-lg m-4">
             <div className="text-center">
-              <Upload className="h-10 w-10 text-blue-400 mx-auto mb-2" />
-              <p className="text-sm text-blue-600">释放以打开文件</p>
+              <Upload className="h-10 w-10 text-primary mx-auto mb-2" />
+              <p className="text-sm text-primary">释放以打开文件</p>
             </div>
           </div>
         )}
@@ -128,12 +128,12 @@ export const WordPreviewPanel: React.FC = () => {
         {state.status === 'idle' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <FileText className="h-16 w-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-4" />
-              <p className="text-sm text-zinc-500 mb-1">打开或拖入 .docx 文件</p>
-              <p className="text-xs text-zinc-400">支持 Microsoft Word、Google Docs、LibreOffice 导出的文档</p>
+              <FileText className="h-16 w-16 text-foreground text-muted-foreground mx-auto mb-4" />
+              <p className="text-sm text-muted-foreground mb-1">打开或拖入 .docx 文件</p>
+              <p className="text-xs text-muted-foreground">支持 Microsoft Word、Google Docs、LibreOffice 导出的文档</p>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 transition-colors"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary transition-colors"
               >
                 <Upload className="h-4 w-4" />
                 选择文件
@@ -146,9 +146,9 @@ export const WordPreviewPanel: React.FC = () => {
         {state.status === 'loading' && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <div className="h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm text-zinc-500">正在解析文档...</p>
-              <p className="text-xs text-zinc-400 mt-1">{state.fileName}</p>
+              <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">正在解析文档...</p>
+              <p className="text-xs text-muted-foreground mt-1">{state.fileName}</p>
             </div>
           </div>
         )}
@@ -159,13 +159,13 @@ export const WordPreviewPanel: React.FC = () => {
             <div className="text-center max-w-md">
               <X className="h-12 w-12 text-red-400 mx-auto mb-3" />
               <p className="text-sm text-red-600 font-medium mb-1">预览失败</p>
-              <p className="text-xs text-zinc-500 mb-2">{state.error}</p>
+              <p className="text-xs text-muted-foreground mb-2">{state.error}</p>
               {state.fileName && (
-                <p className="text-xs text-zinc-400 mb-4">文件：{state.fileName}</p>
+                <p className="text-xs text-muted-foreground mb-4">文件：{state.fileName}</p>
               )}
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="text-sm text-blue-500 hover:text-blue-600"
+                className="text-sm text-primary hover:text-primary"
               >
                 尝试打开另一个文件
               </button>
@@ -178,7 +178,7 @@ export const WordPreviewPanel: React.FC = () => {
           <ScrollArea className="h-full">
             <div className="flex justify-center py-8 px-4">
               <div
-                className="word-preview-document prose prose-sm dark:prose-invert max-w-[800px] w-full bg-white dark:bg-zinc-950 shadow-lg rounded-sm p-12 min-h-[1000px]"
+                className="word-preview-document prose prose-sm dark:prose-invert max-w-[800px] w-full bg-card shadow-lg rounded-sm p-12 min-h-[1000px]"
                 dangerouslySetInnerHTML={{ __html: state.html }}
               />
             </div>
@@ -188,7 +188,7 @@ export const WordPreviewPanel: React.FC = () => {
 
       {/* 底部状态 */}
       {state.status === 'loaded' && (
-        <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-zinc-400 bg-zinc-50 dark:bg-zinc-900">
+        <div className="flex items-center justify-between px-4 py-1.5 border-t text-xs text-muted-foreground bg-background">
           <span>预览模式</span>
           <span>{state.fileName}</span>
         </div>
