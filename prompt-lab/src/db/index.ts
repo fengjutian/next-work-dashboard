@@ -302,3 +302,19 @@ export async function flushDbToDisk(): Promise<void> {
     }
   } catch { /* 静默失败 — 下次定时器仍会保存 */ }
 }
+
+// ═══════════════════════════════════════════
+// Chat Sessions — 作为 JSON 存在 settings 中
+// ═══════════════════════════════════════════
+
+const CHAT_SESSIONS_KEY = 'chat_sessions';
+
+export function dbLoadChatSessions<T = unknown>(): T | null {
+  const raw = dbGetSetting(CHAT_SESSIONS_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
+}
+
+export function dbSaveChatSessions(sessions: unknown): void {
+  dbSetSetting(CHAT_SESSIONS_KEY, JSON.stringify(sessions));
+}

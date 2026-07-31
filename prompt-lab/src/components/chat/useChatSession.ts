@@ -3,6 +3,7 @@ import { useStore } from '@/store';
 import { createOpenAIProvider, registerTools, runAgent } from '@/core';
 import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
+import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 import type { Prompt } from '@/store/types';
@@ -84,6 +85,34 @@ export function useChatSession() {
   // ── 会话管理 ──
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('default');
+  const sessionsLoaded = useRef(false);
+
+  // 初始化：从 DB 加载已持久化的会话
+  useEffect(() => {
+    if (sessionsLoaded.current) return;
+    try {
+      const saved = dbLoadChatSessions<Session[]>();
+      if (saved && saved.length > 0) {
+        setSessions(saved);
+        setActiveSessionId(saved[0].id);
+        sessionsLoaded.current = true;
+        return;
+      }
+    } catch { /* ignore */ }
+    sessionsLoaded.current = true;
+  }, []);
+
+  // 自动持久化：sessions 变化时保存到 DB（debounce 2s）
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    if (!isDbReady() || sessions.length === 0) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      dbSaveChatSessions(sessions);
+      flushDbToDisk();
+    }, 2000);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [sessions]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const messages = activeSession?.messages ?? [];
@@ -343,6 +372,32 @@ export function useChatSession() {
   const handleStop = useCallback(() => abortRef.current?.abort(), []);
   const handleClear = useCallback(() => { updateSession(() => []); setError(null); }, [updateSession]);
 
+  /** 出错后重试：重新发送最后一条用户消息 */
+  const handleRetry = useCallback(async () => {
+    if (streaming) return;
+    setError(null);
+    // 找到最后一条 user 消息
+    let lastUser: Message | undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { lastUser = messages[i]; break; }
+    }
+    if (!lastUser) return;
+    // 移除该 user 消息之后的所有消息，重新发送
+    const idx = messages.findIndex((m) => m.id === lastUser!.id);
+    const trimmed = messages.slice(0, idx);
+    const assistantMsg: Message = { id: `a-${Date.now()}`, role: 'assistant', content: '', timestamp: Date.now() };
+    const newHistory = [...trimmed, lastUser];
+    updateSession(() => [...newHistory, assistantMsg]);
+    setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, lastUser.content, ctrl.signal);
+      else await runChat(newHistory, assistantMsg.id, ctrl.signal);
+    } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
+    finally { setStreaming(false); }
+  }, [streaming, messages, agentMode, runChat, runAgentChat, updateSession]);
+
   return {
     // state
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
@@ -351,7 +406,7 @@ export function useChatSession() {
     sysPromptOpen, setSysPromptOpen,
     // handlers
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
-    handleSend, handleRegenerate, handleStop, handleClear,
+    handleSend, handleRegenerate, handleStop, handleClear, handleRetry,
     handleEditConfirm,
     updateSessionMeta,
     // 绑定提示词
