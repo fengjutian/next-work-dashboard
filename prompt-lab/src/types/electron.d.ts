@@ -61,6 +61,10 @@ export interface ElectronAPI {
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
+    gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
+    gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
+    gitUnstage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
+    gitCommit: (rootPath: string, message: string) => Promise<WorkspaceResult<string>>;
     watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
     unwatch: () => Promise<void>;
     onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;

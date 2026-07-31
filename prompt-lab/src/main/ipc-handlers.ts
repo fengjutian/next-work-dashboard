@@ -759,6 +759,58 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:gitShowHead', async (_event, rootPath: string, relativePath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const absolutePath = resolveWorkspacePath(rootPath, relativePath);
+      const safeRelativePath = path.relative(root, absolutePath).replace(/\\/g, '/');
+      const content = execFileSync('git', ['show', `HEAD:${safeRelativePath}`], {
+        cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 20 * 1024 * 1024,
+      });
+      return { success: true, data: content };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:gitStage', async (_event, rootPath: string, relativePaths: string[]) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const paths = relativePaths.map((relativePath) => path.relative(root, resolveWorkspacePath(rootPath, relativePath)));
+      if (paths.length === 0) return { success: true };
+      execFileSync('git', ['add', '--', ...paths], { cwd: root, windowsHide: true });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:gitUnstage', async (_event, rootPath: string, relativePaths: string[]) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const paths = relativePaths.map((relativePath) => path.relative(root, resolveWorkspacePath(rootPath, relativePath)));
+      if (paths.length === 0) return { success: true };
+      execFileSync('git', ['restore', '--staged', '--', ...paths], { cwd: root, windowsHide: true });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:gitCommit', async (_event, rootPath: string, message: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const normalizedMessage = message.trim();
+      if (!normalizedMessage || normalizedMessage.length > 5000) return { success: false, error: 'INVALID_COMMIT_MESSAGE' };
+      const output = execFileSync('git', ['commit', '-m', normalizedMessage], {
+        cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 2 * 1024 * 1024,
+      });
+      return { success: true, data: output.trim() };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:watch', async (_event, rootPath: string) => {
     try {
       workspaceWatcher?.close();

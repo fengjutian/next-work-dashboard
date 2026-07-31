@@ -56,7 +56,15 @@
 - P1：已接入工作区终端、可拖动底部面板、持久化编辑器设置，以及大小写/全字/正则/包含/排除全文搜索。
 - P2：已接入 Problems、Output、Outline、Breadcrumb、Monaco TypeScript/JavaScript/JSON 基础诊断、文档格式化、保存时格式化和 Git 状态列表。
 - 已有 Diff Editor 用于外部文件冲突比较。
-- 后续增强：工作区批量替换、多终端标签、基于 HEAD 的 Git Diff/暂存提交、完整 LSP、Code Action 和 AI 代码操作。
+- 后续增强：完整 LSP、Code Action、Git 分支/远端操作和多文件 AI Agent 修改。
+
+### 3.5 第二阶段实现状态（2026-07-31）
+
+- Git：支持相对 HEAD 的文件 Diff、逐文件暂存/取消暂存、提交消息和本地提交。
+- 语义导航：TypeScript/JavaScript 使用 Monaco Language Worker 生成语义 Outline，并提供定义与引用入口；其他语言保留声明级大纲。
+- 终端：代码编辑器底部面板支持多个终端标签、新建、切换、关闭、退出状态和重启。
+- Explorer：支持 Ctrl/Cmd 多选、Shift 连选、方向键导航、左右键展开折叠、Enter 打开、F2 重命名和 Delete 批量移入回收站。
+- AI 编辑：使用应用现有 AI 配置生成完整文件候选，通过 Diff Editor 预览后接受或拒绝；接受后保持未保存状态，不会自动写盘。
 
 ## 4. 界面结构
 

@@ -21,18 +21,34 @@ import {
   X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { TerminalSingle } from '@/components/Terminal';
+import { TerminalSingle, type TerminalTab } from '@/components/Terminal';
 import { useStore } from '@/store';
+import { createOpenAIProvider } from '@/core/llm';
 import type {
   FilePickResult,
   WorkspaceEncoding,
-  WorkspaceEntry,
   WorkspaceGitStatus,
   WorkspaceSearchResult,
 } from '@/types/electron';
 import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
+import { FileTreeRow } from './FileTreeRow';
+import { SearchPanel } from './SearchPanel';
+import { QuickOpenPanel } from './QuickOpenPanel';
+import {
+  type BottomPanelTab,
+  type EditorPreferences,
+  type EditorProblem,
+  type EditorSymbol,
+  type OpenDocument,
+  type TreeNode,
+  type TreeEditState,
+  DEFAULT_PREFERENCES,
+  displayError,
+  encodingLabel,
+} from './editor-types';
 
 export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
+export { type BottomPanelTab, type EditorPreferences, type EditorProblem, type EditorSymbol, type OpenDocument, type TreeNode, type TreeEditState, DEFAULT_PREFERENCES, displayError, encodingLabel } from './editor-types';
 
 loader.config({ monaco });
 if (typeof self !== 'undefined') {
@@ -49,199 +65,6 @@ if (typeof self !== 'undefined') {
   };
 }
 
-interface OpenDocument {
-  path: string;
-  name: string;
-  content: string;
-  savedContent: string;
-  language: string;
-  standalone?: boolean;
-  encoding: WorkspaceEncoding;
-  lineEnding: 'LF' | 'CRLF';
-  mixedLineEndings?: boolean;
-  modifiedAt?: number;
-  externalChanged?: boolean;
-  readOnly?: boolean;
-  pinned?: boolean;
-  missing?: boolean;
-}
-
-interface TreeNode extends WorkspaceEntry {
-  children?: TreeNode[];
-  loading?: boolean;
-}
-
-interface TreeEditState {
-  mode: 'create-file' | 'create-directory' | 'rename';
-  value: string;
-  target?: TreeNode;
-}
-
-interface EditorPreferences {
-  fontSize: number;
-  tabSize: number;
-  wordWrap: 'off' | 'on';
-  minimap: boolean;
-  formatOnSave: boolean;
-}
-
-interface EditorProblem {
-  path: string;
-  message: string;
-  line: number;
-  column: number;
-  severity: monaco.MarkerSeverity;
-}
-
-interface EditorSymbol {
-  name: string;
-  detail?: string;
-  line: number;
-  column: number;
-  depth: number;
-}
-
-type BottomPanelTab = 'problems' | 'output' | 'terminal' | 'outline' | 'sourceControl' | 'settings';
-
-const DEFAULT_PREFERENCES: EditorPreferences = {
-  fontSize: 13,
-  tabSize: 2,
-  wordWrap: 'off',
-  minimap: true,
-  formatOnSave: false,
-};
-
-const errorMessages: Record<string, string> = {
-  ACCESS_DENIED: '路径不在当前工作区内',
-  BINARY_FILE: '二进制文件无法在代码编辑器中打开',
-  FILE_TOO_LARGE: '文件超过 20MB，请使用其他工具打开',
-  FILE_READ_ONLY: '文件为只读，无法保存',
-  FILE_MODIFIED_EXTERNALLY: '文件已在外部修改，请重新加载或确认覆盖',
-  NOT_A_FILE: '目标不是文件',
-  NOT_A_DIRECTORY: '目标不是目录',
-  ALREADY_EXISTS: '同名文件或文件夹已经存在',
-  ENOENT: '文件或文件夹不存在',
-};
-
-function displayError(error?: string): string {
-  return errorMessages[error ?? ''] ?? error ?? '操作失败';
-}
-
-function encodingLabel(encoding: WorkspaceEncoding): string {
-  const labels: Record<WorkspaceEncoding, string> = {
-    utf8: 'UTF-8',
-    utf8bom: 'UTF-8 with BOM',
-    utf16le: 'UTF-16 LE',
-    utf16be: 'UTF-16 BE',
-    gbk: 'GBK',
-  };
-  return labels[encoding];
-}
-
-const FileTreeRow: React.FC<{
-  node: TreeNode;
-  depth: number;
-  activePath: string | null;
-  selectedPath: string | null;
-  onOpen: (node: TreeNode) => void;
-  onToggle: (node: TreeNode) => void;
-  onSelect: (node: TreeNode) => void;
-  editing?: TreeEditState | null;
-  onEditChange: (value: string) => void;
-  onEditCommit: () => void;
-  onEditCancel: () => void;
-  onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
-  onMove: (source: TreeNode, target: TreeNode) => void;
-}> = ({
-  node, depth, activePath, selectedPath, onOpen, onToggle, onSelect,
-  editing, onEditChange, onEditCommit, onEditCancel, onContextMenu, onMove,
-}) => {
-  const isDirectory = node.type === 'directory';
-  const expanded = node.children !== undefined;
-  return (
-    <>
-      <button
-        type="button"
-        className={`flex h-7 w-full items-center gap-1.5 truncate pr-2 text-left text-xs hover:bg-accent/60 ${
-          activePath === node.path || selectedPath === node.path
-            ? 'bg-accent text-accent-foreground'
-            : 'text-foreground'
-        }`}
-        style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => {
-          onSelect(node);
-          if (isDirectory) onToggle(node);
-          else onOpen(node);
-        }}
-        title={node.path}
-        draggable={!editing}
-        onDragStart={(event) => {
-          event.dataTransfer.setData('application/x-nwd-tree-path', node.path);
-          event.dataTransfer.effectAllowed = 'move';
-        }}
-        onDragOver={(event) => {
-          if (isDirectory) event.preventDefault();
-        }}
-        onDrop={(event) => {
-          if (!isDirectory) return;
-          event.preventDefault();
-          const sourcePath = event.dataTransfer.getData('application/x-nwd-tree-path');
-          if (sourcePath) onMove({ name: sourcePath.split(/[\\/]/).pop() ?? sourcePath, path: sourcePath, type: 'file' }, node);
-        }}
-        onContextMenu={(event) => onContextMenu(event, node)}
-      >
-        {isDirectory ? (
-          <>
-            <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${expanded ? '' : '-rotate-90'}`} />
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
-          </>
-        ) : (
-          <>
-            <span className="w-3 shrink-0" />
-            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </>
-        )}
-        {editing?.mode === 'rename' && editing.target?.path === node.path ? (
-          <input
-            autoFocus
-            value={editing.value}
-            onChange={(event) => onEditChange(event.target.value)}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              event.stopPropagation();
-              if (event.key === 'Enter') onEditCommit();
-              if (event.key === 'Escape') onEditCancel();
-            }}
-            onBlur={onEditCommit}
-            className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-          />
-        ) : (
-          <span className="truncate">{node.name}</span>
-        )}
-        {node.loading && <RefreshCw className="ml-auto h-3 w-3 animate-spin" />}
-      </button>
-      {expanded && node.children?.map((child) => (
-        <FileTreeRow
-          key={child.path}
-          node={child}
-          depth={depth + 1}
-          activePath={activePath}
-          selectedPath={selectedPath}
-          onOpen={onOpen}
-          onToggle={onToggle}
-          onSelect={onSelect}
-          editing={editing}
-          onEditChange={onEditChange}
-          onEditCommit={onEditCommit}
-          onEditCancel={onEditCancel}
-          onContextMenu={onContextMenu}
-          onMove={onMove}
-        />
-      ))}
-    </>
-  );
-};
-
 function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode) => TreeNode): TreeNode[] {
   return nodes.map((node) => {
     if (node.path === path) return update(node);
@@ -251,7 +74,7 @@ function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode
 }
 
 export const CodeEditorPanel: React.FC = () => {
-  const { theme } = useStore();
+  const { theme, aiApi } = useStore();
   const resolvedTheme = theme === 'system'
     ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : theme;
@@ -261,6 +84,7 @@ export const CodeEditorPanel: React.FC = () => {
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [treeEdit, setTreeEdit] = useState<TreeEditState | null>(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
   const [treeClipboard, setTreeClipboard] = useState<{ node: TreeNode; cut: boolean } | null>(null);
@@ -272,6 +96,7 @@ export const CodeEditorPanel: React.FC = () => {
     original: string;
     modified: string;
     language: string;
+    source?: 'external' | 'git' | 'ai';
   } | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
@@ -289,7 +114,14 @@ export const CodeEditorPanel: React.FC = () => {
   const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
-  const terminalIdRef = useRef(`code-editor-terminal-${Date.now()}`);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiEditing, setAiEditing] = useState(false);
+  const terminalCounterRef = useRef(1);
+  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>(() => [{
+    id: `code-editor-terminal-${Date.now()}`, title: 'Terminal 1', alive: true,
+  }]);
+  const [activeTerminalId, setActiveTerminalId] = useState(() => terminalTabs[0].id);
   const [status, setStatus] = useState('就绪');
   const [position, setPosition] = useState({ line: 1, column: 1 });
   const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
@@ -312,6 +144,7 @@ export const CodeEditorPanel: React.FC = () => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const pendingRevealRef = useRef<{ path: string; line: number; column: number } | null>(null);
   const recentlySavedRef = useRef(new Map<string, number>());
+  const openRequestRef = useRef(0);
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
 
   const appendOutput = useCallback((message: string) => {
@@ -319,9 +152,56 @@ export const CodeEditorPanel: React.FC = () => {
     setOutputLines((previous) => [...previous.slice(-199), line]);
   }, []);
 
+  const refreshGitStatus = useCallback(async () => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitStatus(workspace.path);
+    if (result.success) setGitStatus(result.data ?? []);
+    else {
+      setGitStatus([]);
+      appendOutput(`Git 状态读取失败：${displayError(result.error)}`);
+    }
+  }, [appendOutput, workspace]);
+
+  const createTerminalTab = useCallback(() => {
+    terminalCounterRef.current += 1;
+    const id = `code-editor-terminal-${Date.now()}-${terminalCounterRef.current}`;
+    setTerminalTabs((previous) => [...previous, { id, title: `Terminal ${terminalCounterRef.current}`, cwd: workspace?.path, alive: true }]);
+    setActiveTerminalId(id);
+  }, [workspace?.path]);
+
+  const closeTerminalTab = useCallback((id: string) => {
+    setTerminalTabs((previous) => {
+      const remaining = previous.filter((tab) => tab.id !== id);
+      if (remaining.length === 0) {
+        const nextId = `code-editor-terminal-${Date.now()}-${++terminalCounterRef.current}`;
+        setActiveTerminalId(nextId);
+        return [{ id: nextId, title: `Terminal ${terminalCounterRef.current}`, cwd: workspace?.path, alive: true }];
+      }
+      if (activeTerminalId === id) setActiveTerminalId(remaining[0].id);
+      return remaining;
+    });
+  }, [activeTerminalId, workspace?.path]);
+
+  const restartTerminalTab = useCallback((id: string) => {
+    const nextId = `code-editor-terminal-${Date.now()}-${++terminalCounterRef.current}`;
+    setTerminalTabs((previous) => previous.map((tab) => tab.id === id ? {
+      ...tab, id: nextId, title: tab.title, alive: true, exitCode: undefined,
+    } : tab));
+    setActiveTerminalId(nextId);
+  }, []);
+
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
+  const visibleTreeNodes = useMemo(() => {
+    const result: TreeNode[] = [];
+    const visit = (nodes: TreeNode[]) => nodes.forEach((node) => {
+      result.push(node);
+      if (node.children) visit(node.children);
+    });
+    visit(tree);
+    return result;
+  }, [tree]);
   useEffect(() => {
     documentsRef.current = documents;
   }, [documents]);
@@ -331,6 +211,26 @@ export const CodeEditorPanel: React.FC = () => {
     if (!result.success) throw new Error(displayError(result.error));
     return (result.data ?? []) as TreeNode[];
   }, []);
+
+  const selectTreeNode = useCallback((node: TreeNode, event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
+    if (event?.shiftKey && selectedNode) {
+      const anchor = visibleTreeNodes.findIndex((item) => item.path === selectedNode.path);
+      const target = visibleTreeNodes.findIndex((item) => item.path === node.path);
+      if (anchor >= 0 && target >= 0) {
+        const [start, end] = anchor < target ? [anchor, target] : [target, anchor];
+        setSelectedPaths(new Set(visibleTreeNodes.slice(start, end + 1).map((item) => item.path)));
+      }
+    } else if (event?.ctrlKey || event?.metaKey) {
+      setSelectedPaths((previous) => {
+        const next = new Set(previous);
+        if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
+        return next;
+      });
+    } else {
+      setSelectedPaths(new Set([node.path]));
+    }
+    setSelectedNode(node);
+  }, [selectedNode, visibleTreeNodes]);
 
   const hydrateExpandedTree = useCallback(async (
     rootPath: string,
@@ -488,6 +388,37 @@ export const CodeEditorPanel: React.FC = () => {
     setStatus(`已将 ${node.name} 移到回收站`);
   }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedNode, workspace]);
 
+  const deleteTreeSelection = useCallback(async () => {
+    if (!workspace || selectedPaths.size === 0) return;
+    const paths = [...selectedPaths].filter((candidate) => ![...selectedPaths].some((parent) => (
+      parent !== candidate && (candidate.startsWith(`${parent}/`) || candidate.startsWith(`${parent}\\`))
+    )));
+    const affected = documents.filter((document) => paths.some((target) => (
+      document.path === target || document.path.startsWith(`${target}/`) || document.path.startsWith(`${target}\\`)
+    )));
+    if (affected.some((document) => document.content !== document.savedContent)) {
+      setStatus('所选项目中包含未保存文件，请先保存或关闭');
+      return;
+    }
+    if (!window.confirm(`确定将所选 ${paths.length} 个项目移到系统回收站吗？`)) return;
+    for (const target of paths) {
+      const result = await window.electronAPI.workspace.trashEntry(workspace.path, target);
+      if (!result.success) {
+        setStatus(`删除失败：${target} — ${displayError(result.error)}`);
+        return;
+      }
+    }
+    const affectedPaths = new Set(affected.map((document) => document.path));
+    const remaining = documents.filter((document) => !affectedPaths.has(document.path));
+    setDocuments(remaining);
+    if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
+    if (secondaryPath && affectedPaths.has(secondaryPath)) setSecondaryPath(null);
+    setSelectedNode(null);
+    setSelectedPaths(new Set());
+    await refreshWorkspaceTree();
+    setStatus(`已将 ${paths.length} 个项目移到回收站`);
+  }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedPaths, workspace]);
+
   const pasteTreeEntry = useCallback(async (target = selectedNode) => {
     if (!workspace || !treeClipboard) return;
     const parent = target?.type === 'directory'
@@ -583,15 +514,22 @@ export const CodeEditorPanel: React.FC = () => {
     }
   }, [documents]);
 
-  const openTreeFile = useCallback(async (node: TreeNode) => {
+  const openTreeFile = useCallback(async (node: TreeNode, pinned = false) => {
     if (!workspace) return;
     if (documents.some((document) => document.path === node.path)) {
+      if (pinned) {
+        setDocuments((previous) => previous.map((document) => (
+          document.path === node.path ? { ...document, pinned: true } : document
+        )));
+      }
       setActivePath(node.path);
       void revealWorkspacePath(node.path);
       return;
     }
+    const requestId = ++openRequestRef.current;
     setStatus(`正在打开 ${node.name}…`);
     const result = await window.electronAPI.workspace.readTextFile(workspace.path, node.path);
+    if (requestId !== openRequestRef.current) return;
     if (!result.success || !result.data) {
       setStatus(displayError(result.error));
       return;
@@ -611,7 +549,7 @@ export const CodeEditorPanel: React.FC = () => {
       mixedLineEndings: result.data.mixedLineEndings,
         modifiedAt: result.data.modifiedAt,
         readOnly: result.data.readOnly,
-        pinned: false,
+        pinned,
       },
     ]);
     setActivePath(node.path);
@@ -648,6 +586,34 @@ export const CodeEditorPanel: React.FC = () => {
       setStatus(error instanceof Error ? error.message : '目录读取失败');
     }
   }, [loadDirectory, workspace]);
+
+  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if ((event.target as HTMLElement).tagName === 'INPUT') return;
+    const index = selectedNode ? visibleTreeNodes.findIndex((node) => node.path === selectedNode.path) : -1;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = event.key === 'ArrowDown' ? Math.min(visibleTreeNodes.length - 1, index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
+      const next = visibleTreeNodes[nextIndex];
+      if (next) selectTreeNode(next);
+    } else if (event.key === 'ArrowRight' && selectedNode?.type === 'directory' && selectedNode.children === undefined) {
+      event.preventDefault(); void toggleDirectory(selectedNode);
+    } else if (event.key === 'ArrowLeft' && selectedNode) {
+      event.preventDefault();
+      if (selectedNode.type === 'directory' && selectedNode.children !== undefined) void toggleDirectory(selectedNode);
+      else {
+        const parentPath = selectedNode.path.replace(/[\\/][^\\/]+$/, '');
+        const parent = visibleTreeNodes.find((node) => node.path === parentPath);
+        if (parent) selectTreeNode(parent);
+      }
+    } else if (event.key === 'Enter' && selectedNode) {
+      event.preventDefault();
+      if (selectedNode.type === 'directory') void toggleDirectory(selectedNode); else void openTreeFile(selectedNode);
+    } else if (event.key === 'F2' && selectedNode) {
+      event.preventDefault(); beginRename(selectedNode);
+    } else if (event.key === 'Delete') {
+      event.preventDefault(); void deleteTreeSelection();
+    }
+  }, [beginRename, deleteTreeSelection, openTreeFile, selectTreeNode, selectedNode, toggleDirectory, visibleTreeNodes]);
 
   const saveDocument = useCallback(async (document: OpenDocument, force = false) => {
     if (document.readOnly) {
@@ -705,6 +671,15 @@ export const CodeEditorPanel: React.FC = () => {
     appendOutput(`已格式化 ${activeDocument?.name ?? '当前文档'}`);
     return true;
   }, [activeDocument?.name, appendOutput]);
+
+  const runEditorAction = useCallback(async (actionId: string, unavailableMessage: string) => {
+    const action = editorRef.current?.getAction(actionId);
+    if (!action?.isSupported()) {
+      setStatus(unavailableMessage);
+      return;
+    }
+    await action.run();
+  }, []);
 
   const saveActive = useCallback(async () => {
     if (!activeDocument) return;
@@ -775,8 +750,32 @@ export const CodeEditorPanel: React.FC = () => {
       setSymbols([]);
       return;
     }
-    // Monaco's standalone API does not expose VS Code's outline service, so keep
-    // a lightweight language-neutral outline for common declarations.
+    if (model.getLanguageId() === 'typescript' || model.getLanguageId() === 'javascript') {
+      try {
+        const getWorker = model.getLanguageId() === 'typescript'
+          ? await monaco.languages.typescript.getTypeScriptWorker()
+          : await monaco.languages.typescript.getJavaScriptWorker();
+        const worker = await getWorker(model.uri);
+        const tree = await worker.getNavigationTree(model.uri.toString());
+        if (tree) {
+          const semanticEntries: EditorSymbol[] = [];
+          const visit = (item: { text?: string; kind?: string; spans?: Array<{ start: number }>; childItems?: unknown[] }, depth: number) => {
+            const span = item.spans?.[0];
+            if (depth > 0 && item.text && span) {
+              const position = model.getPositionAt(span.start);
+              semanticEntries.push({ name: item.text, detail: item.kind, line: position.lineNumber, column: position.column, depth: depth - 1 });
+            }
+            for (const child of item.childItems ?? []) visit(child as typeof item, depth + 1);
+          };
+          visit(tree, 0);
+          setSymbols(semanticEntries);
+          return;
+        }
+      } catch {
+        // Fall through to a language-neutral outline.
+      }
+    }
+    // Language-neutral fallback for common declarations.
     const declaration = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var|def|fn|struct)\s+([\w$]+)/;
     const entries: EditorSymbol[] = [];
     for (let line = 1; line <= model.getLineCount(); line += 1) {
@@ -911,6 +910,7 @@ export const CodeEditorPanel: React.FC = () => {
       original: result.data.content,
       modified: document.content,
       language: document.language,
+      source: 'external',
     });
   }, [workspace]);
 
@@ -1045,14 +1045,92 @@ export const CodeEditorPanel: React.FC = () => {
 
   useEffect(() => {
     if (!workspace || !bottomPanel.open || bottomPanel.tab !== 'sourceControl') return;
-    void window.electronAPI.workspace.gitStatus(workspace.path).then((result) => {
-      if (result.success) setGitStatus(result.data ?? []);
-      else {
-        setGitStatus([]);
-        appendOutput(`Git 状态读取失败：${displayError(result.error)}`);
-      }
+    void refreshGitStatus();
+  }, [bottomPanel.open, bottomPanel.tab, refreshGitStatus, workspace]);
+
+  const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
+    if (!workspace) return;
+    const current = await window.electronAPI.workspace.readTextFile(workspace.path, entry.path);
+    if (!current.success || !current.data) {
+      setStatus(`Diff 读取失败：${displayError(current.error)}`);
+      return;
+    }
+    const head = await window.electronAPI.workspace.gitShowHead(workspace.path, entry.path);
+    setDiffView({
+      path: entry.path,
+      name: entry.path,
+      original: head.success ? head.data ?? '' : '',
+      modified: current.data.content,
+      language: languageIdFromName(entry.path),
+      source: 'git',
     });
-  }, [appendOutput, bottomPanel.open, bottomPanel.tab, workspace]);
+  }, [workspace]);
+
+  const generateAiEdit = useCallback(async () => {
+    if (!activeDocument || !aiInstruction.trim()) return;
+    if (!aiApi.apiKey) {
+      setStatus('请先在设置中配置 AI API');
+      return;
+    }
+    setAiEditing(true);
+    setStatus(`AI 正在修改 ${activeDocument.name}…`);
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const selection = editorRef.current?.getSelection();
+      const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
+      const messages = [
+        { role: 'system' as const, content: '你是代码编辑器中的修改助手。根据要求修改文件。只返回修改后的完整文件内容，不要解释，不要输出 diff。' },
+        { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selectedText ? `\n重点关注的选中代码：\n${selectedText}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
+      ];
+      let response = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: 16000 })) response += chunk.delta;
+      const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
+      const modified = (fenced?.[1] ?? response).trimEnd();
+      if (!modified || modified === activeDocument.content.trimEnd()) {
+        setStatus('AI 未生成有效修改');
+        return;
+      }
+      setDiffView({ path: activeDocument.path, name: activeDocument.name, original: activeDocument.content, modified, language: activeDocument.language, source: 'ai' });
+      appendOutput(`AI 已生成 ${activeDocument.name} 的修改候选，等待确认`);
+    } catch (error) {
+      setStatus(`AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAiEditing(false);
+    }
+  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, appendOutput]);
+
+  const acceptAiEdit = useCallback(() => {
+    if (!diffView || diffView.source !== 'ai') return;
+    setDocuments((previous) => previous.map((document) => document.path === diffView.path ? {
+      ...document, content: diffView.modified, pinned: true,
+    } : document));
+    setActivePath(diffView.path);
+    appendOutput(`已接受 AI 对 ${diffView.name} 的修改（尚未保存）`);
+    setStatus('已接受 AI 修改，请检查后保存');
+    setDiffView(null);
+  }, [appendOutput, diffView]);
+
+  const updateGitStage = useCallback(async (entry: WorkspaceGitStatus, stage: boolean) => {
+    if (!workspace) return;
+    const result = stage
+      ? await window.electronAPI.workspace.gitStage(workspace.path, [entry.path])
+      : await window.electronAPI.workspace.gitUnstage(workspace.path, [entry.path]);
+    if (!result.success) setStatus(`Git 操作失败：${displayError(result.error)}`);
+    else await refreshGitStatus();
+  }, [refreshGitStatus, workspace]);
+
+  const commitGitChanges = useCallback(async () => {
+    if (!workspace || !commitMessage.trim()) return;
+    const result = await window.electronAPI.workspace.gitCommit(workspace.path, commitMessage);
+    if (!result.success) {
+      setStatus(`提交失败：${displayError(result.error)}`);
+      return;
+    }
+    appendOutput(result.data ?? 'Git 提交成功');
+    setCommitMessage('');
+    setStatus('Git 提交成功');
+    await refreshGitStatus();
+  }, [appendOutput, commitMessage, refreshGitStatus, workspace]);
 
   useLayoutEffect(() => {
     if (!activePath || !editorRef.current) return;
@@ -1232,6 +1310,8 @@ export const CodeEditorPanel: React.FC = () => {
           <Search className="h-4 w-4" /> 全文搜索
         </Button>
         <div className="flex-1" />
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.revealDefinition', '当前位置没有可跳转的定义')} title="转到定义 (F12)">定义</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.referenceSearch.trigger', '当前位置没有可查找的引用')} title="查找所有引用 (Shift+F12)">引用</Button>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void formatActiveDocument()} title="格式化文档 (Shift+Alt+F)">
           格式化
         </Button>
@@ -1251,7 +1331,7 @@ export const CodeEditorPanel: React.FC = () => {
 
       <div className="flex min-h-0 flex-1">
         {sidebarVisible && (
-          <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar-bg">
+          <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar-bg outline-none" tabIndex={0} onKeyDown={handleTreeKeyDown} aria-label="文件资源管理器">
             <div className="flex h-9 items-center gap-0.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               <span className="flex-1 px-1">Explorer</span>
               <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => beginCreate('file')} disabled={!workspace}>
@@ -1263,7 +1343,7 @@ export const CodeEditorPanel: React.FC = () => {
               <button type="button" className="rounded p-1 hover:bg-accent" title="重命名选中项" onClick={() => beginRename()} disabled={!selectedNode}>
                 <Edit3 className="h-3.5 w-3.5" />
               </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="删除选中项" onClick={() => void deleteSelected()} disabled={!selectedNode}>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="删除选中项" onClick={() => void (selectedPaths.size > 1 ? deleteTreeSelection() : deleteSelected())} disabled={!selectedNode}>
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
               <button type="button" className="rounded p-1 hover:bg-accent" title="快速打开 (Ctrl+P)" onClick={() => void showQuickOpen()} disabled={!workspace}>
@@ -1310,17 +1390,20 @@ export const CodeEditorPanel: React.FC = () => {
                     node={node}
                     depth={0}
                     activePath={activePath}
-                    selectedPath={selectedNode?.path ?? null}
+                    selectedPaths={selectedPaths}
                     onOpen={openTreeFile}
                     onToggle={toggleDirectory}
-                    onSelect={setSelectedNode}
+                    onSelect={selectTreeNode}
                     editing={treeEdit}
                     onEditChange={(value) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
                     onEditCommit={() => void commitTreeEdit()}
                     onEditCancel={() => setTreeEdit(null)}
                     onContextMenu={(event, current) => {
                       event.preventDefault();
-                      setSelectedNode(current);
+                      if (!selectedPaths.has(current.path)) {
+                        setSelectedPaths(new Set([current.path]));
+                        setSelectedNode(current);
+                      }
                       setTreeMenu({ x: event.clientX, y: event.clientY, node: current });
                     }}
                     onMove={(source, target) => void moveTreeEntry(source, target)}
@@ -1529,6 +1612,7 @@ export const CodeEditorPanel: React.FC = () => {
                   ['terminal', '终端'],
                   ['outline', `大纲 (${symbols.length})`],
                   ['sourceControl', `源代码管理 (${gitStatus.length})`],
+                  ['ai', 'AI 修改'],
                   ['settings', '设置'],
                 ] as Array<[BottomPanelTab, string]>).map(([tab, label]) => (
                   <button key={tab} type="button" className={`h-full border-b-2 px-2 ${bottomPanel.tab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`} onClick={() => setBottomPanel((previous) => ({ ...previous, tab }))}>
@@ -1540,7 +1624,31 @@ export const CodeEditorPanel: React.FC = () => {
               </div>
               <div className="min-h-0 flex-1 overflow-auto">
                 {bottomPanel.tab === 'terminal' && (
-                  <TerminalSingle id={terminalIdRef.current} title="工作区终端" cwd={workspace?.path} alive theme={resolvedTheme === 'dark' ? 'dark' : 'light'} onExit={(_id, code) => appendOutput(`终端进程退出，代码 ${code}`)} />
+                  <div className="flex h-full min-h-0 flex-col">
+                    <div className="flex h-8 shrink-0 items-center border-b bg-muted/30 px-1">
+                      <div className="flex min-w-0 flex-1 overflow-x-auto">
+                        {terminalTabs.map((tab) => (
+                          <button key={tab.id} type="button" className={`group flex h-7 max-w-44 items-center gap-1.5 rounded px-2 text-xs ${tab.id === activeTerminalId ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => setActiveTerminalId(tab.id)}>
+                            <span className={tab.alive ? 'text-success' : 'text-destructive'}>●</span>
+                            <span className="truncate">{tab.title}</span>
+                            <span role="button" tabIndex={0} className="rounded px-1 opacity-0 hover:bg-accent group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); closeTerminalTab(tab.id); }}>×</span>
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button" className="rounded px-2 py-1 text-sm hover:bg-accent" onClick={createTerminalTab} title="新建终端">＋</button>
+                      {!terminalTabs.find((tab) => tab.id === activeTerminalId)?.alive && <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => restartTerminalTab(activeTerminalId)}>重启</button>}
+                    </div>
+                    <div className="relative min-h-0 flex-1">
+                      {terminalTabs.map((tab) => (
+                        <div key={tab.id} className="absolute inset-0" style={{ display: tab.id === activeTerminalId ? 'flex' : 'none' }}>
+                          <TerminalSingle {...tab} cwd={tab.cwd ?? workspace?.path} theme={resolvedTheme === 'dark' ? 'dark' : 'light'} onTitleChange={(id, title) => setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, title } : item))} onExit={(id, code) => {
+                            setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, alive: false, exitCode: code } : item));
+                            appendOutput(`终端进程退出，代码 ${code}`);
+                          }} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
                 {bottomPanel.tab === 'problems' && (
                   <div className="py-1">
@@ -1581,13 +1689,30 @@ export const CodeEditorPanel: React.FC = () => {
                 {bottomPanel.tab === 'output' && <pre className="min-h-full whitespace-pre-wrap p-3 font-mono text-xs text-muted-foreground">{outputLines.join('\n')}</pre>}
                 {bottomPanel.tab === 'sourceControl' && (
                   <div className="py-1">
+                    <div className="flex gap-2 border-b p-2">
+                      <input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void commitGitChanges(); }} placeholder="提交消息（Ctrl+Enter 提交）" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none" />
+                      <Button size="sm" className="h-8 px-3 text-xs" disabled={!commitMessage.trim() || !gitStatus.some((entry) => entry.status[0] !== ' ' && entry.status[0] !== '?')} onClick={() => void commitGitChanges()}>提交</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void refreshGitStatus()}>刷新</Button>
+                    </div>
                     {gitStatus.map((entry) => (
-                      <button key={`${entry.status}:${entry.path}`} type="button" className="flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={() => void openTreeFile({ name: entry.path.split(/[\\/]/).pop() ?? entry.path, path: entry.path, type: 'file' })}>
+                      <div key={`${entry.status}:${entry.path}`} className="group flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent">
                         <span className="w-5 shrink-0 font-mono text-primary">{entry.status.trim() || '?'}</span>
-                        <span className="truncate">{entry.path}</span>
-                      </button>
+                        <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => void showGitDiff(entry)} title="查看相对 HEAD 的 Diff">{entry.path}</button>
+                        <button type="button" className="rounded px-1.5 py-0.5 opacity-0 hover:bg-background group-hover:opacity-100" onClick={() => void updateGitStage(entry, entry.status[0] === ' ' || entry.status === '??')}>
+                          {entry.status[0] !== ' ' && entry.status[0] !== '?' ? '取消暂存' : '暂存'}
+                        </button>
+                      </div>
                     ))}
                     {gitStatus.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">工作区干净，或当前目录不是 Git 仓库</div>}
+                  </div>
+                )}
+                {bottomPanel.tab === 'ai' && (
+                  <div className="flex h-full min-h-0 flex-col gap-2 p-3">
+                    <div className="text-xs text-muted-foreground">描述希望对当前文件执行的修改。AI 结果会先进入 Diff，不会自动保存。</div>
+                    <textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
+                    <div className="flex justify-end">
+                      <Button size="sm" disabled={!activeDocument || !aiInstruction.trim() || aiEditing} onClick={() => void generateAiEdit()}>{aiEditing ? '生成中…' : '生成修改并预览'}</Button>
+                    </div>
                   </div>
                 )}
                 {bottomPanel.tab === 'settings' && (
@@ -1672,10 +1797,13 @@ export const CodeEditorPanel: React.FC = () => {
         <div className="absolute inset-0 z-40 flex flex-col bg-background">
           <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
             <span className="font-semibold">{diffView.name}</span>
-            <span className="text-muted-foreground">磁盘版本 ↔ 本地版本</span>
+            <span className="text-muted-foreground">{diffView.source === 'ai' ? '修改前 ↔ AI 候选' : diffView.source === 'git' ? 'HEAD ↔ 工作区' : '磁盘版本 ↔ 本地版本'}</span>
             <div className="flex-1" />
+            {diffView.source === 'ai' && (
+              <Button size="sm" className="h-7 px-3 text-xs" onClick={acceptAiEdit}>接受修改</Button>
+            )}
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setDiffView(null)}>
-              关闭比较
+              {diffView.source === 'ai' ? '拒绝修改' : '关闭比较'}
             </Button>
           </div>
           <div className="min-h-0 flex-1">
@@ -1697,110 +1825,20 @@ export const CodeEditorPanel: React.FC = () => {
         </div>
       )}
 
-      {searchPanel.open && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setSearchPanel((previous) => ({ ...previous, open: false }))}>
-          <div className="w-[min(720px,85vw)] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="flex items-center gap-2 border-b px-3">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <input
-                autoFocus
-                value={searchPanel.query}
-                onChange={(event) => setSearchPanel((previous) => ({ ...previous, query: event.target.value }))}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void runSearch();
-                }}
-                placeholder="在工作区文件内容中搜索"
-                className="h-10 flex-1 bg-transparent text-sm outline-none"
-              />
-              <button
-                type="button"
-                className={`rounded px-1.5 py-1 font-mono text-xs ${searchPanel.caseSensitive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'}`}
-                onClick={() => setSearchPanel((previous) => ({ ...previous, caseSensitive: !previous.caseSensitive }))}
-                title="区分大小写"
-              >
-                Aa
-              </button>
-              <button type="button" className={`rounded px-1.5 py-1 font-mono text-xs ${searchPanel.wholeWord ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'}`} onClick={() => setSearchPanel((previous) => ({ ...previous, wholeWord: !previous.wholeWord }))} title="全字匹配">ab</button>
-              <button type="button" className={`rounded px-1.5 py-1 font-mono text-xs ${searchPanel.useRegex ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'}`} onClick={() => setSearchPanel((previous) => ({ ...previous, useRegex: !previous.useRegex }))} title="使用正则表达式">.*</button>
-              <Button size="sm" className="h-7 px-3 text-xs" disabled={!searchPanel.query.trim() || searchPanel.loading} onClick={() => void runSearch()}>
-                {searchPanel.loading ? '搜索中…' : '搜索'}
-              </Button>
-              <kbd className="text-[10px] text-muted-foreground">Esc</kbd>
-            </div>
-            <div className="grid grid-cols-2 gap-2 border-b px-3 py-2">
-              <input value={searchPanel.include} onChange={(event) => setSearchPanel((previous) => ({ ...previous, include: event.target.value }))} placeholder="包含文件，例如 src,.ts" className="h-8 rounded border bg-background px-2 text-xs outline-none" />
-              <input value={searchPanel.exclude} onChange={(event) => setSearchPanel((previous) => ({ ...previous, exclude: event.target.value }))} placeholder="排除文件，例如 dist,.min.js" className="h-8 rounded border bg-background px-2 text-xs outline-none" />
-            </div>
-            <div className="flex items-center gap-2 border-b px-3 py-2">
-              <input value={searchPanel.replacement} onChange={(event) => setSearchPanel((previous) => ({ ...previous, replacement: event.target.value }))} placeholder="替换为" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none" />
-              <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={searchPanel.loading || searchPanel.results.length === 0} onClick={() => void replaceAllSearchResults()}>全部替换</Button>
-            </div>
-            <div className="max-h-[420px] overflow-auto py-1">
-              {searchPanel.results.map((result, index) => (
-                <button
-                  type="button"
-                  key={`${result.path}:${result.line}:${result.column}:${index}`}
-                  className="flex min-h-10 w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-accent"
-                  onClick={() => void openSearchResult(result)}
-                >
-                  <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="w-52 shrink-0 truncate font-medium" title={result.path}>
-                    {result.path}:{result.line}:{result.column}
-                  </span>
-                  <span className="truncate font-mono text-muted-foreground">{result.preview}</span>
-                </button>
-              ))}
-              {!searchPanel.loading && searchPanel.query && searchPanel.results.length === 0 && (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">没有搜索结果</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <SearchPanel
+        searchPanel={searchPanel}
+        setSearchPanel={setSearchPanel}
+        runSearch={runSearch}
+        replaceAllSearchResults={replaceAllSearchResults}
+        openSearchResult={openSearchResult}
+      />
 
-      {quickOpen.open && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setQuickOpen((previous) => ({ ...previous, open: false }))}>
-          <div className="w-[min(640px,80vw)] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="flex items-center gap-2 border-b px-3">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <input
-                autoFocus
-                value={quickOpen.query}
-                onChange={(event) => setQuickOpen((previous) => ({ ...previous, query: event.target.value }))}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && quickOpenResults[0]) {
-                    void openTreeFile(quickOpenResults[0]);
-                    setQuickOpen((previous) => ({ ...previous, open: false }));
-                  }
-                }}
-                placeholder="输入文件名快速打开"
-                className="h-10 flex-1 bg-transparent text-sm outline-none"
-              />
-              <kbd className="text-[10px] text-muted-foreground">Esc</kbd>
-            </div>
-            <div className="max-h-80 overflow-auto py-1">
-              {quickOpenResults.map((file) => (
-                <button
-                  type="button"
-                  key={file.path}
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent"
-                  onClick={() => {
-                    void openTreeFile(file);
-                    setQuickOpen((previous) => ({ ...previous, open: false }));
-                  }}
-                >
-                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="font-medium">{file.name}</span>
-                  <span className="truncate text-muted-foreground">{file.path}</span>
-                </button>
-              ))}
-              {quickOpenResults.length === 0 && (
-                <div className="px-3 py-6 text-center text-xs text-muted-foreground">没有匹配的文件</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <QuickOpenPanel
+        quickOpen={quickOpen}
+        setQuickOpen={setQuickOpen}
+        quickOpenResults={quickOpenResults}
+        openTreeFile={openTreeFile}
+      />
     </div>
   );
 };
