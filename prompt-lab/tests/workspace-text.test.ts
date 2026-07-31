@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decodeWorkspaceText, encodeWorkspaceText } from '../src/main/workspace-text';
+import {
+  decodeWorkspaceText,
+  encodeWorkspaceText,
+  fileWasModified,
+} from '../src/main/workspace-text';
 
 describe('工作区文本编码', () => {
   it('识别并保留 UTF-8 BOM 和 CRLF', () => {
@@ -12,6 +16,7 @@ describe('工作区文本编码', () => {
       content: '第一行\r\n第二行\r\n',
       encoding: 'utf8bom',
       lineEnding: 'CRLF',
+      mixedLineEndings: false,
     });
     expect(encodeWorkspaceText(decoded.content, decoded)).toEqual(source);
   });
@@ -35,5 +40,14 @@ describe('工作区文本编码', () => {
 
     const gbk = encodeWorkspaceText('中文', { encoding: 'gbk' });
     expect(decodeWorkspaceText(gbk)).toMatchObject({ content: '中文', encoding: 'gbk' });
+  });
+
+  it('检测混合换行符和外部修改时间冲突', () => {
+    expect(decodeWorkspaceText(Buffer.from('a\r\nb\n', 'utf-8'))).toMatchObject({
+      lineEnding: 'LF',
+      mixedLineEndings: true,
+    });
+    expect(fileWasModified(200, 100)).toBe(true);
+    expect(fileWasModified(100.5, 100)).toBe(false);
   });
 });

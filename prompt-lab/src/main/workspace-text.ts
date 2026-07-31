@@ -6,6 +6,18 @@ export interface DecodedWorkspaceText {
   content: string;
   encoding: WorkspaceEncoding;
   lineEnding: 'LF' | 'CRLF';
+  mixedLineEndings: boolean;
+}
+
+function detectLineEndings(content: string): Pick<DecodedWorkspaceText, 'lineEnding' | 'mixedLineEndings'> {
+  const crlfCount = (content.match(/\r\n/g) ?? []).length;
+  const withoutCrlf = content.replace(/\r\n/g, '');
+  const lfCount = (withoutCrlf.match(/\n/g) ?? []).length;
+  const crCount = (withoutCrlf.match(/\r/g) ?? []).length;
+  return {
+    lineEnding: crlfCount > lfCount + crCount ? 'CRLF' : 'LF',
+    mixedLineEndings: [crlfCount > 0, lfCount > 0 || crCount > 0].filter(Boolean).length > 1,
+  };
 }
 
 export function decodeWorkspaceText(buffer: Buffer): DecodedWorkspaceText {
@@ -21,7 +33,7 @@ export function decodeWorkspaceText(buffer: Buffer): DecodedWorkspaceText {
     return {
       content,
       encoding,
-      lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
+      ...detectLineEndings(content),
     };
   }
   if (buffer.includes(0)) throw new Error('BINARY_FILE');
@@ -37,8 +49,12 @@ export function decodeWorkspaceText(buffer: Buffer): DecodedWorkspaceText {
   return {
     content,
     encoding,
-    lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
+    ...detectLineEndings(content),
   };
+}
+
+export function fileWasModified(currentModifiedAt: number, expectedModifiedAt?: number): boolean {
+  return expectedModifiedAt !== undefined && Math.abs(currentModifiedAt - expectedModifiedAt) > 1;
 }
 
 export function encodeWorkspaceText(

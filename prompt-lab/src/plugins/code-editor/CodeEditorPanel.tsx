@@ -56,6 +56,7 @@ interface OpenDocument {
   standalone?: boolean;
   encoding: WorkspaceEncoding;
   lineEnding: 'LF' | 'CRLF';
+  mixedLineEndings?: boolean;
   modifiedAt?: number;
   externalChanged?: boolean;
   readOnly?: boolean;
@@ -419,12 +420,12 @@ export const CodeEditorPanel: React.FC = () => {
     const affectedPaths = new Set(affectedDocuments.map((document) => document.path));
     const remaining = documents.filter((document) => !affectedPaths.has(document.path));
     setDocuments(remaining);
-    if (secondaryPath === path) setSecondaryPath(null);
+    if (secondaryPath && affectedPaths.has(secondaryPath)) setSecondaryPath(null);
     if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
     setSelectedNode(null);
     await refreshWorkspaceTree();
     setStatus(`已将 ${node.name} 移到回收站`);
-  }, [activePath, documents, refreshWorkspaceTree, selectedNode, workspace]);
+  }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedNode, workspace]);
 
   const pasteTreeEntry = useCallback(async (target = selectedNode) => {
     if (!workspace || !treeClipboard) return;
@@ -509,6 +510,7 @@ export const CodeEditorPanel: React.FC = () => {
           standalone: true,
           encoding: 'utf8',
           lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
+          mixedLineEndings: false,
           readOnly: false,
           pinned: true,
         }]);
@@ -544,7 +546,8 @@ export const CodeEditorPanel: React.FC = () => {
         savedContent: result.data!.content,
         language: languageIdFromName(node.name),
         encoding: result.data.encoding,
-        lineEnding: result.data.lineEnding,
+      lineEnding: result.data.lineEnding,
+      mixedLineEndings: result.data.mixedLineEndings,
         modifiedAt: result.data.modifiedAt,
         readOnly: result.data.readOnly,
         pinned: false,
@@ -647,6 +650,7 @@ export const CodeEditorPanel: React.FC = () => {
     const index = documents.findIndex((item) => item.path === path);
     const remaining = documents.filter((item) => item.path !== path);
     setDocuments(remaining);
+    if (secondaryPath === path) setSecondaryPath(null);
     if (activePath === path) {
       setActivePath(remaining[Math.min(index, remaining.length - 1)]?.path ?? null);
     }
@@ -730,6 +734,7 @@ export const CodeEditorPanel: React.FC = () => {
         savedContent: result.data!.content,
         encoding: result.data!.encoding,
         lineEnding: result.data!.lineEnding,
+        mixedLineEndings: result.data!.mixedLineEndings,
         modifiedAt: result.data!.modifiedAt,
         externalChanged: false,
         readOnly: result.data!.readOnly,
@@ -794,6 +799,7 @@ export const CodeEditorPanel: React.FC = () => {
             language: languageIdFromName(filePath),
             encoding: result.data.encoding,
             lineEnding: result.data.lineEnding,
+            mixedLineEndings: result.data.mixedLineEndings,
             modifiedAt: result.data.modifiedAt,
             readOnly: result.data.readOnly,
             pinned: session.drafts?.[filePath]?.pinned ?? session.pinned?.[filePath] ?? true,
@@ -924,6 +930,7 @@ export const CodeEditorPanel: React.FC = () => {
             savedContent: result.data!.content,
             encoding: result.data!.encoding,
             lineEnding: result.data!.lineEnding,
+            mixedLineEndings: result.data!.mixedLineEndings,
             modifiedAt: result.data!.modifiedAt,
             externalChanged: false,
             readOnly: result.data!.readOnly,
@@ -1066,6 +1073,15 @@ export const CodeEditorPanel: React.FC = () => {
               </button>
               <button type="button" className="rounded p-1 hover:bg-accent" title="快速打开 (Ctrl+P)" onClick={() => void showQuickOpen()} disabled={!workspace}>
                 <Search className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="刷新资源管理器" onClick={() => void refreshWorkspaceTree()} disabled={!workspace}>
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="折叠全部" onClick={() => {
+                setExpandedPaths(new Set());
+                setTree((previous) => previous.map((node) => ({ ...node, children: undefined })));
+              }} disabled={!workspace}>
+                <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
               </button>
             </div>
             {workspace ? (
@@ -1290,7 +1306,7 @@ export const CodeEditorPanel: React.FC = () => {
             <span>Ln {position.line}, Col {position.column}</span>
             <span>Spaces: 2</span>
             <span>{encodingLabel(activeDocument.encoding)}</span>
-            <span>{activeDocument.lineEnding}</span>
+            <span>{activeDocument.lineEnding}{activeDocument.mixedLineEndings ? ' (混合)' : ''}</span>
             {activeDocument.readOnly && <span>只读</span>}
             <span>{languageFromName(activeDocument.name)}</span>
           </>

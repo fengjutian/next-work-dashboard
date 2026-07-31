@@ -7,7 +7,7 @@ import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
 import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
-import { decodeWorkspaceText, encodeWorkspaceText } from './workspace-text';
+import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -544,8 +544,7 @@ export function setupIPC(webviewPreloadPath: string) {
       if ((stat.mode & 0o200) === 0) return { success: false, error: 'FILE_READ_ONLY' };
       if (
         !options?.force
-        && options?.expectedModifiedAt !== undefined
-        && Math.abs(stat.mtimeMs - options.expectedModifiedAt) > 1
+        && fileWasModified(stat.mtimeMs, options?.expectedModifiedAt)
       ) {
         return { success: false, error: 'FILE_MODIFIED_EXTERNALLY' };
       }

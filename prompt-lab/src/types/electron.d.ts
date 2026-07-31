@@ -146,6 +146,7 @@ export interface WorkspaceTextFile {
   size: number;
   encoding: WorkspaceEncoding;
   lineEnding: 'LF' | 'CRLF';
+  mixedLineEndings: boolean;
   modifiedAt: number;
   readOnly: boolean;
 }
