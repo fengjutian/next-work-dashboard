@@ -1,7 +1,8 @@
 import { BrowserWindow, app, ipcMain, Menu, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import AutoLaunch from 'electron-auto-launch';
 import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
@@ -15,6 +16,24 @@ const WORKSPACE_IGNORED_NAMES = new Set([
 ]);
 const MAX_EDITOR_FILE_SIZE = 5 * 1024 * 1024;
 const MAX_READ_ONLY_FILE_SIZE = 20 * 1024 * 1024;
+const execFileAsync = promisify(execFile);
+
+function validateGitRef(value: string): string {
+  const ref = value.trim();
+  if (!ref || ref.startsWith('-') || !/^[\w./-]+$/.test(ref) || ref.includes('..')) throw new Error('INVALID_GIT_REF');
+  return ref;
+}
+
+async function runGit(root: string, args: string[], maxBuffer = 10 * 1024 * 1024): Promise<string> {
+  const result = await execFileAsync('git', args, {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+    maxBuffer,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
+  });
+  return result.stdout.trim();
+}
 
 export function setupIPC(webviewPreloadPath: string) {
   const mw = getMainWindow();
@@ -808,6 +827,101 @@ export function setupIPC(webviewPreloadPath: string) {
       return { success: true, data: output.trim() };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:gitOperation', async (
+    _event,
+    rootPath: string,
+    operation: string,
+    payload: Record<string, unknown> = {},
+  ) => {
+    const root = resolveWorkspacePath(rootPath);
+    const operationId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const progress = (state: 'started' | 'completed' | 'failed', message: string) => {
+      mw.webContents.send('workspace:gitProgress', { operationId, operation, state, message });
+    };
+    progress('started', `正在执行 ${operation}`);
+    try {
+      let data: unknown;
+      if (operation === 'overview') {
+        const [branch, branches, remotes, tags] = await Promise.all([
+          runGit(root, ['branch', '--show-current']),
+          runGit(root, ['branch', '--format=%(refname:short)%09%(HEAD)']).catch(() => ''),
+          runGit(root, ['remote', '-v']).catch(() => ''),
+          runGit(root, ['tag', '--sort=-creatordate']).catch(() => ''),
+        ]);
+        data = {
+          branch,
+          branches: branches.split(/\r?\n/).filter(Boolean).map((line) => {
+            const [name, head] = line.split('\t'); return { name, current: head === '*' };
+          }),
+          remotes: remotes.split(/\r?\n/).filter(Boolean),
+          tags: tags.split(/\r?\n/).filter(Boolean),
+        };
+      } else if (operation === 'createBranch') {
+        data = await runGit(root, ['switch', '-c', validateGitRef(String(payload.name ?? ''))]);
+      } else if (operation === 'switchBranch') {
+        data = await runGit(root, ['switch', validateGitRef(String(payload.name ?? ''))]);
+      } else if (operation === 'fetch') {
+        data = await runGit(root, ['fetch', '--all', '--prune'], 20 * 1024 * 1024);
+      } else if (operation === 'pull') {
+        data = await runGit(root, ['pull', '--ff-only'], 20 * 1024 * 1024);
+      } else if (operation === 'push') {
+        data = await runGit(root, ['push'], 20 * 1024 * 1024);
+      } else if (operation === 'sync') {
+        const pull = await runGit(root, ['pull', '--ff-only'], 20 * 1024 * 1024);
+        const push = await runGit(root, ['push'], 20 * 1024 * 1024);
+        data = `${pull}\n${push}`.trim();
+      } else if (operation === 'log') {
+        const limit = Math.max(1, Math.min(500, Number(payload.limit) || 100));
+        const args = ['log', `-${limit}`, '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e'];
+        if (payload.path) args.push('--', path.relative(root, resolveWorkspacePath(rootPath, String(payload.path))));
+        const output = await runGit(root, args, 20 * 1024 * 1024);
+        data = output.split('\x1e').map((record) => record.trim()).filter(Boolean).map((record) => {
+          const [hash, shortHash, author, date, subject] = record.split('\x1f');
+          return { hash, shortHash, author, date, subject };
+        });
+      } else if (operation === 'showCommit') {
+        const hash = validateGitRef(String(payload.hash ?? ''));
+        data = await runGit(root, ['show', '--format=fuller', '--stat', '--patch', hash], 30 * 1024 * 1024);
+      } else if (operation === 'stashList') {
+        const output = await runGit(root, ['stash', 'list', '--format=%gd%x1f%H%x1f%cr%x1f%s']);
+        data = output.split(/\r?\n/).filter(Boolean).map((line) => {
+          const [ref, hash, date, subject] = line.split('\x1f'); return { ref, hash, date, subject };
+        });
+      } else if (operation === 'stashPush') {
+        const message = String(payload.message ?? '').trim();
+        data = await runGit(root, message ? ['stash', 'push', '-u', '-m', message] : ['stash', 'push', '-u']);
+      } else if (operation === 'stashApply' || operation === 'stashPop' || operation === 'stashDrop') {
+        const ref = String(payload.ref ?? 'stash@{0}').trim();
+        if (!/^stash@\{\d+\}$/.test(ref)) throw new Error('INVALID_STASH_REF');
+        data = await runGit(root, ['stash', operation.slice(5).toLowerCase(), ref]);
+      } else if (operation === 'createTag') {
+        const name = validateGitRef(String(payload.name ?? ''));
+        const message = String(payload.message ?? '').trim();
+        data = await runGit(root, message ? ['tag', '-a', name, '-m', message] : ['tag', name]);
+      } else if (operation === 'deleteTag') {
+        data = await runGit(root, ['tag', '-d', validateGitRef(String(payload.name ?? ''))]);
+      } else if (operation === 'addRemote') {
+        const name = validateGitRef(String(payload.name ?? ''));
+        const url = String(payload.url ?? '').trim();
+        if (!url || /[\r\n]/.test(url)) throw new Error('INVALID_REMOTE_URL');
+        data = await runGit(root, ['remote', 'add', name, url]);
+      } else if (operation === 'removeRemote') {
+        data = await runGit(root, ['remote', 'remove', validateGitRef(String(payload.name ?? ''))]);
+      } else {
+        throw new Error('UNSUPPORTED_GIT_OPERATION');
+      }
+      progress('completed', `${operation} 执行完成`);
+      return { success: true, data };
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const message = /Authentication failed|could not read Username|terminal prompts disabled/i.test(raw)
+        ? 'GIT_AUTH_REQUIRED'
+        : /conflict|CONFLICT/i.test(raw) ? 'GIT_CONFLICT' : raw;
+      progress('failed', message);
+      return { success: false, error: message };
     }
   });
 

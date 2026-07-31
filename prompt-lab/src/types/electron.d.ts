@@ -65,6 +65,8 @@ export interface ElectronAPI {
     gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
     gitUnstage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
     gitCommit: (rootPath: string, message: string) => Promise<WorkspaceResult<string>>;
+    gitOperation: <T = unknown>(rootPath: string, operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => Promise<WorkspaceResult<T>>;
+    onGitProgress: (callback: (event: WorkspaceGitProgress) => void) => () => void;
     watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
     unwatch: () => Promise<void>;
     onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;
@@ -144,6 +146,30 @@ export interface WorkspaceSearchOptions {
 export interface WorkspaceGitStatus {
   path: string;
   status: string;
+}
+
+export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'stashList' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
+
+export interface WorkspaceGitProgress {
+  operationId: string;
+  operation: WorkspaceGitOperation;
+  state: 'started' | 'completed' | 'failed';
+  message: string;
+}
+
+export interface WorkspaceGitOverview {
+  branch: string;
+  branches: Array<{ name: string; current: boolean }>;
+  remotes: string[];
+  tags: string[];
+}
+
+export interface WorkspaceGitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
 }
 
 export interface WorkspaceEntry {

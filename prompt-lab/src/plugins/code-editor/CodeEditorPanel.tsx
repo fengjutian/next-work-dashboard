@@ -28,6 +28,9 @@ import type {
   FilePickResult,
   WorkspaceEncoding,
   WorkspaceGitStatus,
+  WorkspaceGitOverview,
+  WorkspaceGitCommit,
+  WorkspaceGitOperation,
   WorkspaceSearchResult,
 } from '@/types/electron';
 import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
@@ -114,6 +117,10 @@ export const CodeEditorPanel: React.FC = () => {
   const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
+  const [gitOverview, setGitOverview] = useState<WorkspaceGitOverview | null>(null);
+  const [gitHistory, setGitHistory] = useState<WorkspaceGitCommit[]>([]);
+  const [gitView, setGitView] = useState<'changes' | 'history' | 'stash'>('changes');
+  const [gitBusy, setGitBusy] = useState<string | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiEditing, setAiEditing] = useState(false);
@@ -161,6 +168,30 @@ export const CodeEditorPanel: React.FC = () => {
       appendOutput(`Git 状态读取失败：${displayError(result.error)}`);
     }
   }, [appendOutput, workspace]);
+
+  const refreshGitOverview = useCallback(async () => {
+    if (!workspace) return;
+    const [overview, history] = await Promise.all([
+      window.electronAPI.workspace.gitOperation<WorkspaceGitOverview>(workspace.path, 'overview'),
+      window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100 }),
+    ]);
+    if (overview.success) setGitOverview(overview.data ?? null);
+    if (history.success) setGitHistory(history.data ?? []);
+  }, [workspace]);
+
+  const runGitOperation = useCallback(async (operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => {
+    if (!workspace) return false;
+    const result = await window.electronAPI.workspace.gitOperation(workspace.path, operation, payload);
+    if (!result.success) {
+      const message = result.error === 'GIT_AUTH_REQUIRED' ? 'Git 凭据不可用，请在系统凭据管理器或终端中完成登录' : result.error === 'GIT_CONFLICT' ? '操作产生冲突，请在冲突列表中解决后继续' : displayError(result.error);
+      setStatus(message);
+      appendOutput(`${operation} 失败：${message}`);
+      return false;
+    }
+    if (typeof result.data === 'string' && result.data) appendOutput(result.data);
+    await Promise.all([refreshGitStatus(), refreshGitOverview()]);
+    return true;
+  }, [appendOutput, refreshGitOverview, refreshGitStatus, workspace]);
 
   const createTerminalTab = useCallback(() => {
     terminalCounterRef.current += 1;
@@ -1045,8 +1076,14 @@ export const CodeEditorPanel: React.FC = () => {
 
   useEffect(() => {
     if (!workspace || !bottomPanel.open || bottomPanel.tab !== 'sourceControl') return;
-    void refreshGitStatus();
-  }, [bottomPanel.open, bottomPanel.tab, refreshGitStatus, workspace]);
+    void Promise.all([refreshGitStatus(), refreshGitOverview()]);
+  }, [bottomPanel.open, bottomPanel.tab, refreshGitOverview, refreshGitStatus, workspace]);
+
+  useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
+    if (event.state === 'started') setGitBusy(event.operation);
+    else setGitBusy(null);
+    setStatus(event.message);
+  }), []);
 
   const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
     if (!workspace) return;
@@ -1688,11 +1725,26 @@ export const CodeEditorPanel: React.FC = () => {
                 )}
                 {bottomPanel.tab === 'output' && <pre className="min-h-full whitespace-pre-wrap p-3 font-mono text-xs text-muted-foreground">{outputLines.join('\n')}</pre>}
                 {bottomPanel.tab === 'sourceControl' && (
-                  <div className="py-1">
+                  <div className="flex min-h-full flex-col py-1">
+                    <div className="flex flex-wrap items-center gap-1 border-b p-2 text-xs">
+                      <select value={gitOverview?.branch ?? ''} disabled={!!gitBusy} onChange={(event) => void runGitOperation('switchBranch', { name: event.target.value })} className="h-8 max-w-48 rounded border bg-background px-2">
+                        {(gitOverview?.branches ?? []).map((branch) => <option key={branch.name} value={branch.name}>{branch.current ? '✓ ' : ''}{branch.name}</option>)}
+                      </select>
+                      <Button size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('新分支名称'); if (name) void runGitOperation('createBranch', { name }); }}>新建分支</Button>
+                      {(['fetch', 'pull', 'push', 'sync'] as const).map((operation) => <Button key={operation} size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation(operation)}>{operation === 'fetch' ? 'Fetch' : operation === 'pull' ? '拉取' : operation === 'push' ? '推送' : '同步'}</Button>)}
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const message = window.prompt('Stash 说明（可选）') ?? ''; void runGitOperation('stashPush', { message }); }}>Stash</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('Tag 名称'); if (name) void runGitOperation('createTag', { name }); }}>新建 Tag</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('Remote 名称', 'origin'); const url = name && window.prompt('Remote URL'); if (name && url) void runGitOperation('addRemote', { name, url }); }}>添加 Remote</Button>
+                      {gitBusy && <span className="ml-auto text-muted-foreground">正在执行 {gitBusy}…</span>}
+                    </div>
+                    <div className="flex h-8 items-center gap-1 border-b px-2 text-xs">
+                      {(['changes', 'history', 'stash'] as const).map((view) => <button key={view} type="button" className={`h-full border-b-2 px-2 ${gitView === view ? 'border-primary' : 'border-transparent text-muted-foreground'}`} onClick={() => setGitView(view)}>{view === 'changes' ? `更改 (${gitStatus.length})` : view === 'history' ? `历史 (${gitHistory.length})` : 'Stash / Tags / Remotes'}</button>)}
+                    </div>
+                    {gitView === 'changes' && <>
                     <div className="flex gap-2 border-b p-2">
                       <input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void commitGitChanges(); }} placeholder="提交消息（Ctrl+Enter 提交）" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none" />
                       <Button size="sm" className="h-8 px-3 text-xs" disabled={!commitMessage.trim() || !gitStatus.some((entry) => entry.status[0] !== ' ' && entry.status[0] !== '?')} onClick={() => void commitGitChanges()}>提交</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void refreshGitStatus()}>刷新</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void Promise.all([refreshGitStatus(), refreshGitOverview()])}>刷新</Button>
                     </div>
                     {gitStatus.map((entry) => (
                       <div key={`${entry.status}:${entry.path}`} className="group flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent">
@@ -1704,6 +1756,17 @@ export const CodeEditorPanel: React.FC = () => {
                       </div>
                     ))}
                     {gitStatus.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">工作区干净，或当前目录不是 Git 仓库</div>}
+                    </>}
+                    {gitView === 'history' && <div className="min-h-0 flex-1 overflow-auto py-1">{gitHistory.map((commit) => <button key={commit.hash} type="button" className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={async () => {
+                      if (!workspace) return;
+                      const result = await window.electronAPI.workspace.gitOperation<string>(workspace.path, 'showCommit', { hash: commit.hash });
+                      if (result.success) { setOutputLines((previous) => [...previous, `\n=== ${commit.shortHash} ${commit.subject} ===\n${result.data ?? ''}`]); setBottomPanel((previous) => ({ ...previous, tab: 'output' })); }
+                    }}><code className="text-primary">{commit.shortHash}</code><span className="min-w-0 flex-1 truncate">{commit.subject}</span><span className="text-muted-foreground">{commit.author} · {new Date(commit.date).toLocaleString()}</span></button>)}</div>}
+                    {gitView === 'stash' && <div className="grid grid-cols-[100px_1fr] gap-2 p-3 text-xs">
+                      <span>Tags</span><div className="flex items-start gap-2"><span className="flex-1 break-all text-muted-foreground">{gitOverview?.tags.join(', ') || '无'}</span><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const name = window.prompt('要删除的 Tag'); if (name) void runGitOperation('deleteTag', { name }); }}>删除</Button></div>
+                      <span>Remotes</span><div className="flex items-start gap-2"><pre className="flex-1 whitespace-pre-wrap text-muted-foreground">{gitOverview?.remotes.join('\n') || '无'}</pre><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const name = window.prompt('要删除的 Remote'); if (name) void runGitOperation('removeRemote', { name }); }}>删除</Button></div>
+                      <span>Stash</span><div className="flex gap-1"><Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => { if (!workspace) return; const result = await window.electronAPI.workspace.gitOperation<Array<{ ref: string; subject: string }>>(workspace.path, 'stashList'); setOutputLines((previous) => [...previous, ...(result.data ?? []).map((item) => `${item.ref} ${item.subject}`)]); setBottomPanel((previous) => ({ ...previous, tab: 'output' })); }}>查看列表</Button><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const ref = window.prompt('Stash 引用', 'stash@{0}'); if (ref) void runGitOperation('stashApply', { ref }); }}>应用</Button><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const ref = window.prompt('Stash 引用', 'stash@{0}'); if (ref) void runGitOperation('stashPop', { ref }); }}>Pop</Button><Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => { const ref = window.prompt('要删除的 Stash', 'stash@{0}'); if (ref) void runGitOperation('stashDrop', { ref }); }}>删除</Button></div>
+                    </div>}
                   </div>
                 )}
                 {bottomPanel.tab === 'ai' && (

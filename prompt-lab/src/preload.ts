@@ -118,6 +118,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     gitStage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitStage', rootPath, relativePaths),
     gitUnstage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitUnstage', rootPath, relativePaths),
     gitCommit: (rootPath: string, message: string) => ipcRenderer.invoke('workspace:gitCommit', rootPath, message),
+    gitOperation: (rootPath: string, operation: import('./types/electron').WorkspaceGitOperation, payload?: Record<string, unknown>) => ipcRenderer.invoke('workspace:gitOperation', rootPath, operation, payload),
+    onGitProgress: (callback: (event: import('./types/electron').WorkspaceGitProgress) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: import('./types/electron').WorkspaceGitProgress) => callback(payload);
+      ipcRenderer.on('workspace:gitProgress', handler);
+      return () => ipcRenderer.removeListener('workspace:gitProgress', handler);
+    },
     watch: (rootPath: string) => ipcRenderer.invoke('workspace:watch', rootPath),
     unwatch: () => ipcRenderer.invoke('workspace:unwatch'),
     onFileChanged: (callback: (event: { path: string; type: 'change' | 'rename' }) => void) => {
