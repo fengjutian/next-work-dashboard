@@ -52,6 +52,11 @@ export interface ElectronAPI {
     listDirectory: (rootPath: string, relativePath?: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     readTextFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<{ content: string; size: number }>>;
     writeTextFile: (rootPath: string, relativePath: string, content: string) => Promise<WorkspaceResult<{ size: number }>>;
+    createFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
+    createDirectory: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
+    renameEntry: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<void>>;
+    deleteEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
+    listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
   };
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;

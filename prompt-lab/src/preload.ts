@@ -88,6 +88,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:readTextFile', rootPath, relativePath),
     writeTextFile: (rootPath: string, relativePath: string, content: string) =>
       ipcRenderer.invoke('workspace:writeTextFile', rootPath, relativePath, content),
+    createFile: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('workspace:createFile', rootPath, relativePath),
+    createDirectory: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('workspace:createDirectory', rootPath, relativePath),
+    renameEntry: (rootPath: string, relativePath: string, nextRelativePath: string) =>
+      ipcRenderer.invoke('workspace:renameEntry', rootPath, relativePath, nextRelativePath),
+    deleteEntry: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('workspace:deleteEntry', rootPath, relativePath),
+    listFiles: (rootPath: string) =>
+      ipcRenderer.invoke('workspace:listFiles', rootPath),
   },
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),

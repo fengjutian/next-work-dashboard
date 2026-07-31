@@ -6,27 +6,12 @@ import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
+import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
 ]);
 const MAX_EDITOR_FILE_SIZE = 5 * 1024 * 1024;
-
-function resolveWorkspacePath(rootPath: string, relativePath = ''): string {
-  const root = path.resolve(rootPath);
-  const target = path.resolve(root, relativePath);
-  const relative = path.relative(root, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('ACCESS_DENIED');
-  }
-  const realRoot = fs.realpathSync(root);
-  const realTarget = fs.realpathSync(target);
-  const realRelative = path.relative(realRoot, realTarget);
-  if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
-    throw new Error('ACCESS_DENIED');
-  }
-  return realTarget;
-}
 
 export function setupIPC(webviewPreloadPath: string) {
   const mw = getMainWindow();
@@ -544,6 +529,99 @@ export function setupIPC(webviewPreloadPath: string) {
       if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
       fs.writeFileSync(filePath, content, 'utf-8');
       return { success: true, data: { size: Buffer.byteLength(content, 'utf-8') } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:createFile', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+  ) => {
+    try {
+      const filePath = resolveNewWorkspacePath(rootPath, relativePath);
+      if (fs.existsSync(filePath)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.writeFileSync(filePath, '', { encoding: 'utf-8', flag: 'wx' });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:createDirectory', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+  ) => {
+    try {
+      const directory = resolveNewWorkspacePath(rootPath, relativePath);
+      if (fs.existsSync(directory)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.mkdirSync(directory);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:renameEntry', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+    nextRelativePath: string,
+  ) => {
+    try {
+      const source = resolveWorkspacePath(rootPath, relativePath);
+      const target = resolveNewWorkspacePath(rootPath, nextRelativePath);
+      if (fs.existsSync(target)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.renameSync(source, target);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:deleteEntry', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+  ) => {
+    try {
+      const target = resolveWorkspacePath(rootPath, relativePath);
+      if (path.relative(fs.realpathSync(rootPath), target) === '') {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      const stat = fs.statSync(target);
+      if (stat.isDirectory()) fs.rmSync(target, { recursive: true });
+      else fs.unlinkSync(target);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:listFiles', async (_event, rootPath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const files: Array<{ name: string; path: string; type: 'file' }> = [];
+      const visit = (directory: string) => {
+        if (files.length >= 5000) return;
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          if (WORKSPACE_IGNORED_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
+          const fullPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) visit(fullPath);
+          else if (entry.isFile()) {
+            files.push({
+              name: entry.name,
+              path: path.relative(root, fullPath),
+              type: 'file',
+            });
+          }
+          if (files.length >= 5000) break;
+        }
+      };
+      visit(root);
+      return { success: true, data: files };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

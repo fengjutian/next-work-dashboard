@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
@@ -12,8 +12,12 @@ import {
   Code,
   FileText,
   FolderOpen,
+  Edit3,
   PanelLeft,
+  Plus,
   RefreshCw,
+  Search,
+  Trash2,
   X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
@@ -58,6 +62,8 @@ const errorMessages: Record<string, string> = {
   FILE_TOO_LARGE: '文件超过 5MB，请使用其他工具打开',
   NOT_A_FILE: '目标不是文件',
   NOT_A_DIRECTORY: '目标不是目录',
+  ALREADY_EXISTS: '同名文件或文件夹已经存在',
+  ENOENT: '文件或文件夹不存在',
 };
 
 function displayError(error?: string): string {
@@ -68,9 +74,11 @@ const FileTreeRow: React.FC<{
   node: TreeNode;
   depth: number;
   activePath: string | null;
+  selectedPath: string | null;
   onOpen: (node: TreeNode) => void;
   onToggle: (node: TreeNode) => void;
-}> = ({ node, depth, activePath, onOpen, onToggle }) => {
+  onSelect: (node: TreeNode) => void;
+}> = ({ node, depth, activePath, selectedPath, onOpen, onToggle, onSelect }) => {
   const isDirectory = node.type === 'directory';
   const expanded = node.children !== undefined;
   return (
@@ -78,10 +86,16 @@ const FileTreeRow: React.FC<{
       <button
         type="button"
         className={`flex h-7 w-full items-center gap-1.5 truncate pr-2 text-left text-xs hover:bg-accent/60 ${
-          activePath === node.path ? 'bg-accent text-accent-foreground' : 'text-foreground'
+          activePath === node.path || selectedPath === node.path
+            ? 'bg-accent text-accent-foreground'
+            : 'text-foreground'
         }`}
         style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => (isDirectory ? onToggle(node) : onOpen(node))}
+        onClick={() => {
+          onSelect(node);
+          if (isDirectory) onToggle(node);
+          else onOpen(node);
+        }}
         title={node.path}
       >
         {isDirectory ? (
@@ -104,8 +118,10 @@ const FileTreeRow: React.FC<{
           node={child}
           depth={depth + 1}
           activePath={activePath}
+          selectedPath={selectedPath}
           onOpen={onOpen}
           onToggle={onToggle}
+          onSelect={onSelect}
         />
       ))}
     </>
@@ -129,9 +145,14 @@ export const CodeEditorPanel: React.FC = () => {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [status, setStatus] = useState('就绪');
   const [position, setPosition] = useState({ line: 1, column: 1 });
+  const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
+    open: false, query: '', files: [],
+  });
+  const restoringRef = useRef(true);
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
@@ -141,6 +162,12 @@ export const CodeEditorPanel: React.FC = () => {
     if (!result.success) throw new Error(displayError(result.error));
     return (result.data ?? []) as TreeNode[];
   }, []);
+
+  const refreshWorkspaceTree = useCallback(async () => {
+    if (!workspace) return;
+    const entries = await loadDirectory(workspace.path);
+    setTree(entries);
+  }, [loadDirectory, workspace]);
 
   const openWorkspace = useCallback(async () => {
     if (hasDirtyDocuments && !window.confirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
@@ -153,11 +180,102 @@ export const CodeEditorPanel: React.FC = () => {
       setTree(entries);
       setDocuments([]);
       setActivePath(null);
+      setSelectedNode(null);
       setStatus(`已打开 ${folder.name}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '工作区打开失败');
     }
   }, [hasDirtyDocuments, loadDirectory]);
+
+  const createEntry = useCallback(async (type: 'file' | 'directory') => {
+    if (!workspace) return;
+    const suggestedParent = selectedNode?.type === 'directory'
+      ? `${selectedNode.path.replace(/\\/g, '/')}/`
+      : '';
+    const label = type === 'file' ? '文件' : '文件夹';
+    const relativePath = window.prompt(`输入新${label}的工作区相对路径`, suggestedParent);
+    if (!relativePath?.trim()) return;
+    const result = type === 'file'
+      ? await window.electronAPI.workspace.createFile(workspace.path, relativePath.trim())
+      : await window.electronAPI.workspace.createDirectory(workspace.path, relativePath.trim());
+    if (!result.success) {
+      setStatus(`新建失败：${displayError(result.error)}`);
+      return;
+    }
+    await refreshWorkspaceTree();
+    setStatus(`已新建${label} ${relativePath.trim()}`);
+  }, [refreshWorkspaceTree, selectedNode, workspace]);
+
+  const renameSelected = useCallback(async () => {
+    if (!workspace || !selectedNode) return;
+    const parent = selectedNode.path.replace(/[\\/][^\\/]+$/, '');
+    const nextName = window.prompt('输入新名称', selectedNode.name);
+    if (!nextName?.trim() || nextName.trim() === selectedNode.name) return;
+    const nextPath = parent ? `${parent}/${nextName.trim()}` : nextName.trim();
+    const result = await window.electronAPI.workspace.renameEntry(
+      workspace.path, selectedNode.path, nextPath,
+    );
+    if (!result.success) {
+      setStatus(`重命名失败：${displayError(result.error)}`);
+      return;
+    }
+    const oldPath = selectedNode.path;
+    setDocuments((previous) => previous.map((document) => {
+      if (document.path !== oldPath && !document.path.startsWith(`${oldPath}\\`) && !document.path.startsWith(`${oldPath}/`)) {
+        return document;
+      }
+      const pathSuffix = document.path.slice(oldPath.length);
+      const path = `${nextPath}${pathSuffix}`;
+      return { ...document, path, name: path.split(/[\\/]/).pop() ?? document.name };
+    }));
+    if (activePath === oldPath || activePath?.startsWith(`${oldPath}\\`) || activePath?.startsWith(`${oldPath}/`)) {
+      setActivePath(`${nextPath}${activePath.slice(oldPath.length)}`);
+    }
+    setSelectedNode(null);
+    await refreshWorkspaceTree();
+    setStatus(`已重命名为 ${nextName.trim()}`);
+  }, [activePath, refreshWorkspaceTree, selectedNode, workspace]);
+
+  const deleteSelected = useCallback(async () => {
+    if (!workspace || !selectedNode) return;
+    const affectedDocuments = documents.filter((document) => (
+      document.path === selectedNode.path
+      || document.path.startsWith(`${selectedNode.path}\\`)
+      || document.path.startsWith(`${selectedNode.path}/`)
+    ));
+    if (affectedDocuments.some((document) => document.content !== document.savedContent)) {
+      setStatus('删除目标中包含未保存文件，请先保存或关闭');
+      return;
+    }
+    if (!window.confirm(`确定永久删除“${selectedNode.name}”吗？此操作无法撤销。`)) return;
+    const result = await window.electronAPI.workspace.deleteEntry(workspace.path, selectedNode.path);
+    if (!result.success) {
+      setStatus(`删除失败：${displayError(result.error)}`);
+      return;
+    }
+    const affectedPaths = new Set(affectedDocuments.map((document) => document.path));
+    const remaining = documents.filter((document) => !affectedPaths.has(document.path));
+    setDocuments(remaining);
+    if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
+    setSelectedNode(null);
+    await refreshWorkspaceTree();
+    setStatus(`已删除 ${selectedNode.name}`);
+  }, [activePath, documents, refreshWorkspaceTree, selectedNode, workspace]);
+
+  const showQuickOpen = useCallback(async () => {
+    if (!workspace) {
+      setStatus('请先打开工作区');
+      return;
+    }
+    setStatus('正在索引工作区文件…');
+    const result = await window.electronAPI.workspace.listFiles(workspace.path);
+    if (!result.success) {
+      setStatus(`文件索引失败：${displayError(result.error)}`);
+      return;
+    }
+    setQuickOpen({ open: true, query: '', files: (result.data ?? []) as TreeNode[] });
+    setStatus(`已索引 ${result.data?.length ?? 0} 个文件`);
+  }, [workspace]);
 
   const openStandaloneFile = useCallback(async () => {
     const result = await window.electronAPI.pickFile({ multiple: false });
@@ -278,6 +396,69 @@ export const CodeEditorPanel: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const restoreSession = async () => {
+      const raw = localStorage.getItem('code-editor.session.v1');
+      if (!raw) {
+        restoringRef.current = false;
+        return;
+      }
+      try {
+        const session = JSON.parse(raw) as {
+          workspace?: { path: string; name: string };
+          openPaths?: string[];
+          activePath?: string | null;
+          sidebarVisible?: boolean;
+        };
+        if (!session.workspace) return;
+        const entries = await loadDirectory(session.workspace.path);
+        const restoredDocuments: OpenDocument[] = [];
+        for (const filePath of session.openPaths?.slice(0, 20) ?? []) {
+          const result = await window.electronAPI.workspace.readTextFile(
+            session.workspace.path, filePath,
+          );
+          if (!result.success || !result.data) continue;
+          restoredDocuments.push({
+            path: filePath,
+            name: filePath.split(/[\\/]/).pop() ?? filePath,
+            content: result.data.content,
+            savedContent: result.data.content,
+            language: languageIdFromName(filePath),
+          });
+        }
+        setWorkspace(session.workspace);
+        setTree(entries);
+        setDocuments(restoredDocuments);
+        setActivePath(
+          restoredDocuments.some((document) => document.path === session.activePath)
+            ? session.activePath ?? null
+            : restoredDocuments[0]?.path ?? null,
+        );
+        setSidebarVisible(session.sidebarVisible ?? true);
+        setStatus(`已恢复 ${session.workspace.name}`);
+      } catch {
+        localStorage.removeItem('code-editor.session.v1');
+      } finally {
+        restoringRef.current = false;
+      }
+    };
+    void restoreSession();
+  }, [loadDirectory]);
+
+  useEffect(() => {
+    if (restoringRef.current) return;
+    if (!workspace) {
+      localStorage.removeItem('code-editor.session.v1');
+      return;
+    }
+    localStorage.setItem('code-editor.session.v1', JSON.stringify({
+      workspace,
+      openPaths: documents.filter((document) => !document.standalone).map((document) => document.path),
+      activePath: activeDocument?.standalone ? null : activePath,
+      sidebarVisible,
+    }));
+  }, [activeDocument?.standalone, activePath, documents, sidebarVisible, workspace]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const command = event.ctrlKey || event.metaKey;
       if (command && event.key.toLowerCase() === 's') {
@@ -297,10 +478,17 @@ export const CodeEditorPanel: React.FC = () => {
         event.preventDefault();
         setSidebarVisible((visible) => !visible);
       }
+      if (command && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        void showQuickOpen();
+      }
+      if (event.key === 'Escape') {
+        setQuickOpen((previous) => ({ ...previous, open: false }));
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activePath, closeDocument, openStandaloneFile, saveActive, saveAll]);
+  }, [activePath, closeDocument, openStandaloneFile, saveActive, saveAll, showQuickOpen]);
 
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -316,9 +504,21 @@ export const CodeEditorPanel: React.FC = () => {
     () => activeDocument ? `file:///${activeDocument.path.replace(/\\/g, '/')}` : undefined,
     [activeDocument],
   );
+  const quickOpenResults = useMemo(() => {
+    const query = quickOpen.query.trim().toLowerCase();
+    if (!query) return quickOpen.files.slice(0, 100);
+    return quickOpen.files
+      .filter((file) => file.path.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const aNameMatch = a.name.toLowerCase().startsWith(query) ? 0 : 1;
+        const bNameMatch = b.name.toLowerCase().startsWith(query) ? 0 : 1;
+        return aNameMatch - bNameMatch || a.path.length - b.path.length;
+      })
+      .slice(0, 100);
+  }, [quickOpen.files, quickOpen.query]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+    <div className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
       <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setSidebarVisible((value) => !value)} title="切换资源管理器 (Ctrl+B)">
           <PanelLeft className="h-4 w-4" />
@@ -341,8 +541,23 @@ export const CodeEditorPanel: React.FC = () => {
       <div className="flex min-h-0 flex-1">
         {sidebarVisible && (
           <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar-bg">
-            <div className="flex h-9 items-center px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Explorer
+            <div className="flex h-9 items-center gap-0.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span className="flex-1 px-1">Explorer</span>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => void createEntry('file')} disabled={!workspace}>
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件夹" onClick={() => void createEntry('directory')} disabled={!workspace}>
+                <FolderOpen className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="重命名选中项" onClick={() => void renameSelected()} disabled={!selectedNode}>
+                <Edit3 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="删除选中项" onClick={() => void deleteSelected()} disabled={!selectedNode}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="快速打开 (Ctrl+P)" onClick={() => void showQuickOpen()} disabled={!workspace}>
+                <Search className="h-3.5 w-3.5" />
+              </button>
             </div>
             {workspace ? (
               <div className="min-h-0 flex-1 overflow-auto">
@@ -351,7 +566,16 @@ export const CodeEditorPanel: React.FC = () => {
                   <span className="truncate uppercase">{workspace.name}</span>
                 </div>
                 {tree.map((node) => (
-                  <FileTreeRow key={node.path} node={node} depth={0} activePath={activePath} onOpen={openTreeFile} onToggle={toggleDirectory} />
+                  <FileTreeRow
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    activePath={activePath}
+                    selectedPath={selectedNode?.path ?? null}
+                    onOpen={openTreeFile}
+                    onToggle={toggleDirectory}
+                    onSelect={setSelectedNode}
+                  />
                 ))}
               </div>
             ) : (
@@ -457,6 +681,50 @@ export const CodeEditorPanel: React.FC = () => {
           </>
         )}
       </footer>
+
+      {quickOpen.open && (
+        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setQuickOpen((previous) => ({ ...previous, open: false }))}>
+          <div className="w-[min(640px,80vw)] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center gap-2 border-b px-3">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input
+                autoFocus
+                value={quickOpen.query}
+                onChange={(event) => setQuickOpen((previous) => ({ ...previous, query: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && quickOpenResults[0]) {
+                    void openTreeFile(quickOpenResults[0]);
+                    setQuickOpen((previous) => ({ ...previous, open: false }));
+                  }
+                }}
+                placeholder="输入文件名快速打开"
+                className="h-10 flex-1 bg-transparent text-sm outline-none"
+              />
+              <kbd className="text-[10px] text-muted-foreground">Esc</kbd>
+            </div>
+            <div className="max-h-80 overflow-auto py-1">
+              {quickOpenResults.map((file) => (
+                <button
+                  type="button"
+                  key={file.path}
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent"
+                  onClick={() => {
+                    void openTreeFile(file);
+                    setQuickOpen((previous) => ({ ...previous, open: false }));
+                  }}
+                >
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="font-medium">{file.name}</span>
+                  <span className="truncate text-muted-foreground">{file.path}</span>
+                </button>
+              ))}
+              {quickOpenResults.length === 0 && (
+                <div className="px-3 py-6 text-center text-xs text-muted-foreground">没有匹配的文件</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
