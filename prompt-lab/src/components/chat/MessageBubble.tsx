@@ -8,6 +8,8 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'tool';
   content: string;
+  /** 发送给模型的完整内容；界面仍只显示 content。 */
+  contextContent?: string;
   timestamp: number;
   /** 生成该回答的模型；旧会话没有此字段时沿用会话默认模型。 */
   model?: string;

@@ -81,6 +81,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('dialog:pickFile', options),
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),
+  writeTextFile: (filePath: string, content: string) =>
+    ipcRenderer.invoke('dialog:writeTextFile', filePath, content),
 
   // 按路径读取文件（供 AI 工具使用）
   readFileBuffer: (filePath: string) =>

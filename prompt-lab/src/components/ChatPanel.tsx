@@ -13,6 +13,16 @@ import { setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './chat/ToolManagerDialog';
 import { PromptManagerDialog } from './chat/PromptManagerDialog';
 import { RoleManagerDialog } from './chat/RoleManagerDialog';
+import { buildAttachmentContext, parseAttachment } from './chat/attachment-parser';
+
+interface ChatAttachment {
+  key: string;
+  name: string;
+  size: number;
+  file: File;
+  status: 'pending' | 'parsing' | 'ready' | 'error';
+  error?: string;
+}
 
 // ── 常量 ──
 const ALL_TOOLS = [
@@ -55,7 +65,7 @@ export const ChatPanel: React.FC = () => {
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
-  const [attachments, setAttachments] = useState<any[]>([]);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const senderRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,7 +76,13 @@ export const ChatPanel: React.FC = () => {
     if (!files) return;
     setAttachments((prev) => [
       ...prev,
-      ...Array.from(files).map((f, i) => ({ key: `f-${Date.now()}-${i}`, name: f.name, size: f.size, file: f })),
+      ...Array.from(files).map((f, i): ChatAttachment => ({
+        key: `f-${Date.now()}-${i}`,
+        name: f.name,
+        size: f.size,
+        file: f,
+        status: 'pending',
+      })),
     ]);
   }, []);
 
@@ -158,16 +174,55 @@ export const ChatPanel: React.FC = () => {
     })), [sessions]);
 
   // ── Sender 提交（含附件处理 + 自动聚焦） ──
-  const onSenderSubmit = useCallback((text: string) => {
-    let msg = text;
-    if (attachments.length > 0) {
-      const names = attachments.map((a: any) => a.name || '文件').join(', ');
-      msg = text ? `[已上传: ${names}]\n${text}` : `[已上传: ${names}]`;
-      setAttachments([]);
+  const onSenderSubmit = useCallback(async (text: string) => {
+    if (attachments.length === 0) {
+      setInput('');
+      await handleSend(text);
+      setTimeout(() => senderRef.current?.focus(), 50);
+      return;
     }
+
+    setAttachments((current) =>
+      current.map((attachment) => ({ ...attachment, status: 'parsing' }))
+    );
+    const results = await Promise.allSettled(
+      attachments.map((attachment) => parseAttachment(attachment.file))
+    );
+    const parsed = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : []
+    );
+    const failedIndexes = new Map<number, string>();
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        failedIndexes.set(
+          index,
+          result.reason instanceof Error ? result.reason.message : '解析失败',
+        );
+      }
+    });
+
+    if (failedIndexes.size > 0) {
+      setAttachments((current) => current.map((attachment, index) => ({
+        ...attachment,
+        status: failedIndexes.has(index) ? 'error' : 'ready',
+        error: failedIndexes.get(index),
+      })));
+      return;
+    }
+    if (parsed.length === 0) return;
+
+    const names = parsed.map((file) => file.name).join(', ');
+    const displayText = text
+      ? `[附件：${names}]\n${text}`
+      : `[附件：${names}]\n请阅读并分析附件内容。`;
+    const contextText = [
+      buildAttachmentContext(parsed),
+      text || '请阅读并分析以上附件内容。',
+    ].join('\n\n');
+
     setInput('');
-    handleSend(msg);
-    // 发送后自动聚焦输入框
+    setAttachments([]);
+    await handleSend(displayText, contextText);
     setTimeout(() => senderRef.current?.focus(), 50);
   }, [handleSend, setInput, attachments]);
 
@@ -478,8 +533,19 @@ export const ChatPanel: React.FC = () => {
               {attachments.length > 0 && (
                 <div className="px-3 pt-2">
                   <Attachments
-                    items={attachments}
-                    onRemove={(key) => setAttachments((prev) => prev.filter((a: any) => a.key !== key))}
+                    items={attachments.map((attachment) => ({
+                      ...attachment,
+                      description: attachment.status === 'parsing'
+                        ? '正在读取内容…'
+                        : attachment.status === 'ready'
+                          ? '已读取'
+                          : attachment.status === 'error'
+                            ? attachment.error
+                            : `${(attachment.size / 1024).toFixed(1)} KB · 待读取`,
+                    }))}
+                    onRemove={(key) => setAttachments((prev) =>
+                      prev.filter((attachment) => attachment.key !== key)
+                    )}
                   />
                 </div>
               )}

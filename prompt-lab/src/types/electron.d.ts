@@ -48,6 +48,8 @@ export interface ElectronAPI {
   pickFile: (options?: { accept?: string; multiple?: boolean }) => Promise<FilePickResult | FilePickResult[] | null>;
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;
+  /** 保存到已经打开的文本文件。 */
+  writeTextFile: (filePath: string, content: string) => Promise<{ success: boolean; path?: string; error?: string }>;
   /** 按路径读取文件，返回 base64 内容（供 AI 工具使用） */
   readFileBuffer: (filePath: string) => Promise<{
     success: boolean;

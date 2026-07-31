@@ -267,7 +267,10 @@ export function useChatSession() {
           m.role !== 'tool' &&
           (m.role !== 'assistant' || !m.model || m.model === model)
         )
-        .map((m) => ({ role: m.role as 'user'|'assistant', content: m.content })),
+        .map((m) => ({
+          role: m.role as 'user'|'assistant',
+          content: m.contextContent ?? m.content,
+        })),
     ];
     let full = '';
     const stream = provider.chat(chatMessages, { model, signal });
@@ -285,7 +288,12 @@ export function useChatSession() {
   const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
-    const chatHistory: ChatMessage[] = history.filter((m) => m.content.trim() && m.role !== 'tool').map((m) => ({ role: m.role as 'user'|'assistant', content: m.content }));
+    const chatHistory: ChatMessage[] = history
+      .filter((m) => m.content.trim() && m.role !== 'tool')
+      .map((m) => ({
+        role: m.role as 'user'|'assistant',
+        content: m.contextContent ?? m.content,
+      }));
     if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') chatHistory.pop();
 
     // 注入绑定提示词到 system prompt 层面
@@ -319,12 +327,18 @@ export function useChatSession() {
   }, [currentModel, getProvider, updateSession]);
 
   // ── 发送 ──
-  const handleSend = useCallback(async (directText?: string) => {
+  const handleSend = useCallback(async (directText?: string, contextText?: string) => {
     const text = (directText ?? input).trim();
     if (!text || streaming) return;
     if (!directText) setInput('');
     setError(null);
-    const userMsg: Message = { id: `u-${Date.now()}`, role: 'user', content: text, timestamp: Date.now() };
+    const userMsg: Message = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: text,
+      contextContent: contextText?.trim() || undefined,
+      timestamp: Date.now(),
+    };
     const comparisonId = `cmp-${Date.now()}`;
     const models = agentMode ? [currentModel] : [...new Set(compareModels)];
     const assistantMsgs: Message[] = models.map((model, index) => ({
@@ -342,7 +356,12 @@ export function useChatSession() {
     abortRef.current = controllers;
     try {
       if (agentMode) {
-        await runAgentChat(newHistory, assistantMsgs[0].id, text, controllers[0].signal);
+        await runAgentChat(
+          newHistory,
+          assistantMsgs[0].id,
+          userMsg.contextContent ?? text,
+          controllers[0].signal,
+        );
       } else {
         const results = await Promise.allSettled(
           assistantMsgs.map((message, index) =>
@@ -395,7 +414,12 @@ export function useChatSession() {
     const ctrl = new AbortController();
     abortRef.current = [ctrl];
     try {
-      if (agentMode) await runAgentChat(trimmed, assistantMsg.id, lastUser.content, ctrl.signal);
+      if (agentMode) await runAgentChat(
+        trimmed,
+        assistantMsg.id,
+        lastUser.contextContent ?? lastUser.content,
+        ctrl.signal,
+      );
       else await runChat(trimmed, assistantMsg.id, currentModel, ctrl.signal);
     } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
     finally { setStreaming(false); }
@@ -453,7 +477,12 @@ export function useChatSession() {
     const ctrl = new AbortController();
     abortRef.current = [ctrl];
     try {
-      if (agentMode) await runAgentChat(newHistory, assistantMsg.id, lastUser.content, ctrl.signal);
+      if (agentMode) await runAgentChat(
+        newHistory,
+        assistantMsg.id,
+        lastUser.contextContent ?? lastUser.content,
+        ctrl.signal,
+      );
       else await runChat(newHistory, assistantMsg.id, currentModel, ctrl.signal);
     } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
     finally { setStreaming(false); }

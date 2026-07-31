@@ -428,6 +428,19 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('dialog:writeTextFile', async (_event, filePath: string, content: string) => {
+    try {
+      const resolved = path.resolve(filePath);
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+        return { success: false, error: 'FILE_NOT_FOUND' };
+      }
+      fs.writeFileSync(resolved, content, 'utf-8');
+      return { success: true, path: resolved };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
   // ── 打开对话文件夹 ──
   ipcMain.handle('open-conversation-folder', async () => {
     try {

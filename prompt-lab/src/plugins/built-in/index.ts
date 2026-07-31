@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf } from '@/components/icons';
+import { Bot, MessageSquare, History, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code } from '@/components/icons';
 import { AIPanel } from '@/components/AIPanel';
 import { PromptSidebar } from '@/components/PromptSidebar';
 import { ConversationHistory } from '@/components/ConversationHistory';
@@ -20,6 +20,7 @@ import { WindyPanel } from '../windy';
 import { TerminalPluginPanel } from '../terminal';
 import { DatabaseBrowser } from '@/components/DatabaseBrowser';
 import { ChatPanel } from '@/components/ChatPanel';
+import { CodeEditorPanel } from '../code-editor';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
 
@@ -185,6 +186,20 @@ const builtInPlugins: Plugin[] = [
       commands: [
         { id: 'pdf-preview.open', title: '打开 PDF 文件', category: 'PDF 预览' },
         { id: 'pdf-preview.close', title: '关闭当前 PDF', category: 'PDF 预览' },
+      ],
+    },
+  },
+  {
+    id: 'code-editor',
+    name: '代码编辑',
+    icon: Code,
+    component: CodeEditorPanel,
+    enabled: true,
+    order: 17,
+    contributions: {
+      commands: [
+        { id: 'code-editor.open', title: '打开代码文件', category: '代码编辑' },
+        { id: 'code-editor.save', title: '保存代码文件', category: '代码编辑' },
       ],
     },
   },
