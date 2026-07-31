@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
@@ -53,6 +53,9 @@ interface OpenDocument {
   lineEnding: 'LF' | 'CRLF';
   modifiedAt?: number;
   externalChanged?: boolean;
+  readOnly?: boolean;
+  pinned?: boolean;
+  missing?: boolean;
 }
 
 interface TreeNode extends WorkspaceEntry {
@@ -60,10 +63,18 @@ interface TreeNode extends WorkspaceEntry {
   loading?: boolean;
 }
 
+interface TreeEditState {
+  mode: 'create-file' | 'create-directory' | 'rename';
+  value: string;
+  target?: TreeNode;
+}
+
 const errorMessages: Record<string, string> = {
   ACCESS_DENIED: '路径不在当前工作区内',
   BINARY_FILE: '二进制文件无法在代码编辑器中打开',
-  FILE_TOO_LARGE: '文件超过 5MB，请使用其他工具打开',
+  FILE_TOO_LARGE: '文件超过 20MB，请使用其他工具打开',
+  FILE_READ_ONLY: '文件为只读，无法保存',
+  FILE_MODIFIED_EXTERNALLY: '文件已在外部修改，请重新加载或确认覆盖',
   NOT_A_FILE: '目标不是文件',
   NOT_A_DIRECTORY: '目标不是目录',
   ALREADY_EXISTS: '同名文件或文件夹已经存在',
@@ -82,7 +93,16 @@ const FileTreeRow: React.FC<{
   onOpen: (node: TreeNode) => void;
   onToggle: (node: TreeNode) => void;
   onSelect: (node: TreeNode) => void;
-}> = ({ node, depth, activePath, selectedPath, onOpen, onToggle, onSelect }) => {
+  editing?: TreeEditState | null;
+  onEditChange: (value: string) => void;
+  onEditCommit: () => void;
+  onEditCancel: () => void;
+  onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
+  onMove: (source: TreeNode, target: TreeNode) => void;
+}> = ({
+  node, depth, activePath, selectedPath, onOpen, onToggle, onSelect,
+  editing, onEditChange, onEditCommit, onEditCancel, onContextMenu, onMove,
+}) => {
   const isDirectory = node.type === 'directory';
   const expanded = node.children !== undefined;
   return (
@@ -101,6 +121,21 @@ const FileTreeRow: React.FC<{
           else onOpen(node);
         }}
         title={node.path}
+        draggable={!editing}
+        onDragStart={(event) => {
+          event.dataTransfer.setData('application/x-nwd-tree-path', node.path);
+          event.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragOver={(event) => {
+          if (isDirectory) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!isDirectory) return;
+          event.preventDefault();
+          const sourcePath = event.dataTransfer.getData('application/x-nwd-tree-path');
+          if (sourcePath) onMove({ name: sourcePath.split(/[\\/]/).pop() ?? sourcePath, path: sourcePath, type: 'file' }, node);
+        }}
+        onContextMenu={(event) => onContextMenu(event, node)}
       >
         {isDirectory ? (
           <>
@@ -113,7 +148,23 @@ const FileTreeRow: React.FC<{
             <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </>
         )}
-        <span className="truncate">{node.name}</span>
+        {editing?.mode === 'rename' && editing.target?.path === node.path ? (
+          <input
+            autoFocus
+            value={editing.value}
+            onChange={(event) => onEditChange(event.target.value)}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === 'Enter') onEditCommit();
+              if (event.key === 'Escape') onEditCancel();
+            }}
+            onBlur={onEditCommit}
+            className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+          />
+        ) : (
+          <span className="truncate">{node.name}</span>
+        )}
         {node.loading && <RefreshCw className="ml-auto h-3 w-3 animate-spin" />}
       </button>
       {expanded && node.children?.map((child) => (
@@ -126,6 +177,12 @@ const FileTreeRow: React.FC<{
           onOpen={onOpen}
           onToggle={onToggle}
           onSelect={onSelect}
+          editing={editing}
+          onEditChange={onEditChange}
+          onEditCommit={onEditCommit}
+          onEditCancel={onEditCancel}
+          onContextMenu={onContextMenu}
+          onMove={onMove}
         />
       ))}
     </>
@@ -147,10 +204,16 @@ export const CodeEditorPanel: React.FC = () => {
     : theme;
   const [workspace, setWorkspace] = useState<{ path: string; name: string } | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+  const [treeEdit, setTreeEdit] = useState<TreeEditState | null>(null);
+  const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
+  const [treeClipboard, setTreeClipboard] = useState<{ node: TreeNode; cut: boolean } | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [autoSave, setAutoSave] = useState(false);
   const [status, setStatus] = useState('就绪');
   const [position, setPosition] = useState({ line: 1, column: 1 });
   const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
@@ -168,6 +231,7 @@ export const CodeEditorPanel: React.FC = () => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const pendingRevealRef = useRef<{ path: string; line: number; column: number } | null>(null);
   const recentlySavedRef = useRef(new Map<string, number>());
+  const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
@@ -181,11 +245,55 @@ export const CodeEditorPanel: React.FC = () => {
     return (result.data ?? []) as TreeNode[];
   }, []);
 
+  const hydrateExpandedTree = useCallback(async (
+    rootPath: string,
+    nodes: TreeNode[],
+    paths: Set<string>,
+  ): Promise<TreeNode[]> => Promise.all(nodes.map(async (node) => {
+    if (node.type !== 'directory' || !paths.has(node.path)) return node;
+    const children = await loadDirectory(rootPath, node.path);
+    return { ...node, children: await hydrateExpandedTree(rootPath, children, paths) };
+  })), [loadDirectory]);
+
   const refreshWorkspaceTree = useCallback(async () => {
     if (!workspace) return;
     const entries = await loadDirectory(workspace.path);
-    setTree(entries);
-  }, [loadDirectory, workspace]);
+    setTree(await hydrateExpandedTree(workspace.path, entries, expandedPaths));
+  }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
+
+  const remapOpenPaths = useCallback((oldPath: string, nextPath: string) => {
+    setDocuments((previous) => previous.map((document) => {
+      if (
+        document.path !== oldPath
+        && !document.path.startsWith(`${oldPath}\\`)
+        && !document.path.startsWith(`${oldPath}/`)
+      ) return document;
+      const path = `${nextPath}${document.path.slice(oldPath.length)}`;
+      return { ...document, path, name: path.split(/[\\/]/).pop() ?? document.name };
+    }));
+    setActivePath((current) => {
+      if (!current) return current;
+      if (current !== oldPath && !current.startsWith(`${oldPath}\\`) && !current.startsWith(`${oldPath}/`)) {
+        return current;
+      }
+      return `${nextPath}${current.slice(oldPath.length)}`;
+    });
+  }, []);
+
+  const revealWorkspacePath = useCallback(async (relativePath: string) => {
+    if (!workspace) return;
+    const parts = relativePath.split(/[\\/]/);
+    const separator = relativePath.includes('\\') ? '\\' : '/';
+    const nextExpanded = new Set(expandedPaths);
+    let current = '';
+    for (const part of parts.slice(0, -1)) {
+      current = current ? `${current}${separator}${part}` : part;
+      nextExpanded.add(current);
+    }
+    setExpandedPaths(nextExpanded);
+    const entries = await loadDirectory(workspace.path);
+    setTree(await hydrateExpandedTree(workspace.path, entries, nextExpanded));
+  }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
 
   const openWorkspace = useCallback(async () => {
     if (hasDirtyDocuments && !window.confirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
@@ -198,6 +306,7 @@ export const CodeEditorPanel: React.FC = () => {
       setTree(entries);
       setDocuments([]);
       setActivePath(null);
+      setExpandedPaths(new Set());
       setSelectedNode(null);
       setStatus(`已打开 ${folder.name}`);
     } catch (error) {
@@ -210,68 +319,74 @@ export const CodeEditorPanel: React.FC = () => {
     }
   }, [hasDirtyDocuments, loadDirectory]);
 
-  const createEntry = useCallback(async (type: 'file' | 'directory') => {
+  const beginCreate = useCallback((type: 'file' | 'directory') => {
     if (!workspace) return;
-    const suggestedParent = selectedNode?.type === 'directory'
-      ? `${selectedNode.path.replace(/\\/g, '/')}/`
-      : '';
-    const label = type === 'file' ? '文件' : '文件夹';
-    const relativePath = window.prompt(`输入新${label}的工作区相对路径`, suggestedParent);
-    if (!relativePath?.trim()) return;
-    const result = type === 'file'
-      ? await window.electronAPI.workspace.createFile(workspace.path, relativePath.trim())
-      : await window.electronAPI.workspace.createDirectory(workspace.path, relativePath.trim());
-    if (!result.success) {
-      setStatus(`新建失败：${displayError(result.error)}`);
+    setTreeEdit({ mode: type === 'file' ? 'create-file' : 'create-directory', value: '' });
+  }, [workspace]);
+
+  const beginRename = useCallback((node = selectedNode) => {
+    if (!node) return;
+    setSelectedNode(node);
+    setTreeEdit({ mode: 'rename', value: node.name, target: node });
+    setTreeMenu(null);
+  }, [selectedNode]);
+
+  const commitTreeEdit = useCallback(async () => {
+    if (!workspace || !treeEdit?.value.trim()) {
+      setTreeEdit(null);
       return;
     }
-    await refreshWorkspaceTree();
-    setStatus(`已新建${label} ${relativePath.trim()}`);
-  }, [refreshWorkspaceTree, selectedNode, workspace]);
-
-  const renameSelected = useCallback(async () => {
-    if (!workspace || !selectedNode) return;
-    const parent = selectedNode.path.replace(/[\\/][^\\/]+$/, '');
-    const nextName = window.prompt('输入新名称', selectedNode.name);
-    if (!nextName?.trim() || nextName.trim() === selectedNode.name) return;
-    const nextPath = parent ? `${parent}/${nextName.trim()}` : nextName.trim();
+    if (treeEdit.mode !== 'rename') {
+      const parent = selectedNode?.type === 'directory' ? selectedNode.path : '';
+      const relativePath = parent ? `${parent}/${treeEdit.value.trim()}` : treeEdit.value.trim();
+      const result = treeEdit.mode === 'create-file'
+        ? await window.electronAPI.workspace.createFile(workspace.path, relativePath)
+        : await window.electronAPI.workspace.createDirectory(workspace.path, relativePath);
+      if (!result.success) {
+        setStatus(`新建失败：${displayError(result.error)}`);
+        return;
+      }
+      setTreeEdit(null);
+      await refreshWorkspaceTree();
+      setStatus(`已新建 ${relativePath}`);
+      return;
+    }
+    const target = treeEdit.target;
+    if (!target || treeEdit.value.trim() === target.name) {
+      setTreeEdit(null);
+      return;
+    }
+    const parent = target.path.replace(/[\\/][^\\/]+$/, '');
+    const nextName = treeEdit.value.trim();
+    const nextPath = parent ? `${parent}/${nextName}` : nextName;
     const result = await window.electronAPI.workspace.renameEntry(
-      workspace.path, selectedNode.path, nextPath,
+      workspace.path, target.path, nextPath,
     );
     if (!result.success) {
       setStatus(`重命名失败：${displayError(result.error)}`);
       return;
     }
-    const oldPath = selectedNode.path;
-    setDocuments((previous) => previous.map((document) => {
-      if (document.path !== oldPath && !document.path.startsWith(`${oldPath}\\`) && !document.path.startsWith(`${oldPath}/`)) {
-        return document;
-      }
-      const pathSuffix = document.path.slice(oldPath.length);
-      const path = `${nextPath}${pathSuffix}`;
-      return { ...document, path, name: path.split(/[\\/]/).pop() ?? document.name };
-    }));
-    if (activePath === oldPath || activePath?.startsWith(`${oldPath}\\`) || activePath?.startsWith(`${oldPath}/`)) {
-      setActivePath(`${nextPath}${activePath.slice(oldPath.length)}`);
-    }
+    const oldPath = target.path;
+    remapOpenPaths(oldPath, nextPath);
     setSelectedNode(null);
+    setTreeEdit(null);
     await refreshWorkspaceTree();
-    setStatus(`已重命名为 ${nextName.trim()}`);
-  }, [activePath, refreshWorkspaceTree, selectedNode, workspace]);
+    setStatus(`已重命名为 ${nextName}`);
+  }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeEdit, workspace]);
 
-  const deleteSelected = useCallback(async () => {
-    if (!workspace || !selectedNode) return;
+  const deleteSelected = useCallback(async (node = selectedNode) => {
+    if (!workspace || !node) return;
     const affectedDocuments = documents.filter((document) => (
-      document.path === selectedNode.path
-      || document.path.startsWith(`${selectedNode.path}\\`)
-      || document.path.startsWith(`${selectedNode.path}/`)
+      document.path === node.path
+      || document.path.startsWith(`${node.path}\\`)
+      || document.path.startsWith(`${node.path}/`)
     ));
     if (affectedDocuments.some((document) => document.content !== document.savedContent)) {
       setStatus('删除目标中包含未保存文件，请先保存或关闭');
       return;
     }
-    if (!window.confirm(`确定永久删除“${selectedNode.name}”吗？此操作无法撤销。`)) return;
-    const result = await window.electronAPI.workspace.deleteEntry(workspace.path, selectedNode.path);
+    if (!window.confirm(`确定将“${node.name}”移到系统回收站吗？`)) return;
+    const result = await window.electronAPI.workspace.trashEntry(workspace.path, node.path);
     if (!result.success) {
       setStatus(`删除失败：${displayError(result.error)}`);
       return;
@@ -282,8 +397,59 @@ export const CodeEditorPanel: React.FC = () => {
     if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
     setSelectedNode(null);
     await refreshWorkspaceTree();
-    setStatus(`已删除 ${selectedNode.name}`);
+    setStatus(`已将 ${node.name} 移到回收站`);
   }, [activePath, documents, refreshWorkspaceTree, selectedNode, workspace]);
+
+  const pasteTreeEntry = useCallback(async (target = selectedNode) => {
+    if (!workspace || !treeClipboard) return;
+    const parent = target?.type === 'directory'
+      ? target.path
+      : target?.path.replace(/[\\/][^\\/]+$/, '') ?? '';
+    const nextPath = parent ? `${parent}/${treeClipboard.node.name}` : treeClipboard.node.name;
+    if (
+      nextPath === treeClipboard.node.path
+      || nextPath.startsWith(`${treeClipboard.node.path}/`)
+      || nextPath.startsWith(`${treeClipboard.node.path}\\`)
+    ) {
+      setStatus('不能将文件夹粘贴到自身内部');
+      return;
+    }
+    const result = treeClipboard.cut
+      ? await window.electronAPI.workspace.renameEntry(
+        workspace.path, treeClipboard.node.path, nextPath,
+      )
+      : await window.electronAPI.workspace.copyEntry(
+        workspace.path, treeClipboard.node.path, nextPath,
+      );
+    if (!result.success) {
+      setStatus(`粘贴失败：${displayError(result.error)}`);
+      return;
+    }
+    if (treeClipboard.cut) {
+      remapOpenPaths(treeClipboard.node.path, nextPath);
+      setTreeClipboard(null);
+    }
+    await refreshWorkspaceTree();
+    setStatus(`已${treeClipboard.cut ? '移动' : '复制'}到 ${nextPath}`);
+  }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeClipboard, workspace]);
+
+  const moveTreeEntry = useCallback(async (source: TreeNode, target: TreeNode) => {
+    if (!workspace || target.type !== 'directory') return;
+    const sourceName = source.path.split(/[\\/]/).pop() ?? source.name;
+    const nextPath = `${target.path}/${sourceName}`;
+    if (source.path === target.path || nextPath.startsWith(`${source.path}/`) || nextPath.startsWith(`${source.path}\\`)) {
+      setStatus('不能将文件夹移动到自身内部');
+      return;
+    }
+    const result = await window.electronAPI.workspace.renameEntry(workspace.path, source.path, nextPath);
+    if (!result.success) {
+      setStatus(`移动失败：${displayError(result.error)}`);
+      return;
+    }
+    remapOpenPaths(source.path, nextPath);
+    await refreshWorkspaceTree();
+    setStatus(`已移动到 ${target.path}`);
+  }, [refreshWorkspaceTree, remapOpenPaths, workspace]);
 
   const showQuickOpen = useCallback(async () => {
     if (!workspace) {
@@ -317,6 +483,8 @@ export const CodeEditorPanel: React.FC = () => {
           standalone: true,
           encoding: 'utf8',
           lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
+          readOnly: false,
+          pinned: true,
         }]);
       }
       setActivePath(file.path);
@@ -330,6 +498,7 @@ export const CodeEditorPanel: React.FC = () => {
     if (!workspace) return;
     if (documents.some((document) => document.path === node.path)) {
       setActivePath(node.path);
+      void revealWorkspacePath(node.path);
       return;
     }
     setStatus(`正在打开 ${node.name}…`);
@@ -338,23 +507,36 @@ export const CodeEditorPanel: React.FC = () => {
       setStatus(displayError(result.error));
       return;
     }
-    setDocuments((previous) => [...previous, {
-      path: node.path,
-      name: node.name,
-      content: result.data!.content,
-      savedContent: result.data!.content,
-      language: languageIdFromName(node.name),
-      encoding: result.data.encoding,
-      lineEnding: result.data.lineEnding,
-      modifiedAt: result.data.modifiedAt,
-    }]);
+    setDocuments((previous) => [
+      ...previous.filter((document) => (
+        document.pinned !== false || document.content !== document.savedContent
+      )),
+      {
+        path: node.path,
+        name: node.name,
+        content: result.data!.content,
+        savedContent: result.data!.content,
+        language: languageIdFromName(node.name),
+        encoding: result.data.encoding,
+        lineEnding: result.data.lineEnding,
+        modifiedAt: result.data.modifiedAt,
+        readOnly: result.data.readOnly,
+        pinned: false,
+      },
+    ]);
     setActivePath(node.path);
+    void revealWorkspacePath(node.path);
     setStatus(`已打开 ${node.name}`);
-  }, [documents, workspace]);
+  }, [documents, revealWorkspacePath, workspace]);
 
   const toggleDirectory = useCallback(async (node: TreeNode) => {
     if (!workspace) return;
     if (node.children !== undefined) {
+      setExpandedPaths((previous) => {
+        const next = new Set(previous);
+        next.delete(node.path);
+        return next;
+      });
       setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
         ...current, children: undefined,
       })));
@@ -365,6 +547,7 @@ export const CodeEditorPanel: React.FC = () => {
     })));
     try {
       const children = await loadDirectory(workspace.path, node.path);
+      setExpandedPaths((previous) => new Set(previous).add(node.path));
       setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
         ...current, loading: false, children,
       })));
@@ -376,7 +559,11 @@ export const CodeEditorPanel: React.FC = () => {
     }
   }, [loadDirectory, workspace]);
 
-  const saveDocument = useCallback(async (document: OpenDocument) => {
+  const saveDocument = useCallback(async (document: OpenDocument, force = false) => {
+    if (document.readOnly) {
+      setStatus(`${document.name} 为只读文件`);
+      return false;
+    }
     setStatus(`正在保存 ${document.name}…`);
     if (!document.standalone) recentlySavedRef.current.set(document.path, Date.now());
     const result = document.standalone
@@ -386,10 +573,20 @@ export const CodeEditorPanel: React.FC = () => {
           workspace.path,
           document.path,
           document.content,
-          { encoding: document.encoding, lineEnding: document.lineEnding },
+          {
+            encoding: document.encoding,
+            lineEnding: document.lineEnding,
+            expectedModifiedAt: document.modifiedAt,
+            force,
+          },
         )
         : { success: false, error: 'NO_WORKSPACE' };
     if (!result.success) {
+      if (result.error === 'FILE_MODIFIED_EXTERNALLY') {
+        setDocuments((previous) => previous.map((item) => (
+          item.path === document.path ? { ...item, externalChanged: true } : item
+        )));
+      }
       setStatus(`保存失败：${displayError(result.error)}`);
       return false;
     }
@@ -428,6 +625,30 @@ export const CodeEditorPanel: React.FC = () => {
       setActivePath(remaining[Math.min(index, remaining.length - 1)]?.path ?? null);
     }
   }, [activePath, documents]);
+
+  const closeDocumentSet = useCallback((paths: string[]) => {
+    const pathSet = new Set(paths);
+    const dirty = documents.filter((document) => (
+      pathSet.has(document.path) && document.content !== document.savedContent
+    ));
+    if (dirty.length > 0 && !window.confirm(`${dirty.length} 个文件尚未保存，仍要关闭吗？`)) return;
+    const remaining = documents.filter((document) => !pathSet.has(document.path));
+    setDocuments(remaining);
+    if (activePath && pathSet.has(activePath)) setActivePath(remaining[0]?.path ?? null);
+  }, [activePath, documents]);
+
+  const moveTab = useCallback((sourcePath: string, targetPath: string) => {
+    if (sourcePath === targetPath) return;
+    setDocuments((previous) => {
+      const sourceIndex = previous.findIndex((document) => document.path === sourcePath);
+      const targetIndex = previous.findIndex((document) => document.path === targetPath);
+      if (sourceIndex < 0 || targetIndex < 0) return previous;
+      const next = [...previous];
+      const [source] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, source);
+      return next;
+    });
+  }, []);
 
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
@@ -484,6 +705,7 @@ export const CodeEditorPanel: React.FC = () => {
         lineEnding: result.data!.lineEnding,
         modifiedAt: result.data!.modifiedAt,
         externalChanged: false,
+        readOnly: result.data!.readOnly,
       }
       : item));
     setStatus(`已重新加载 ${document.name}`);
@@ -502,9 +724,19 @@ export const CodeEditorPanel: React.FC = () => {
           openPaths?: string[];
           activePath?: string | null;
           sidebarVisible?: boolean;
+          drafts?: Record<string, { content: string; pinned?: boolean }>;
+          pinned?: Record<string, boolean>;
+          viewStates?: Record<string, monaco.editor.ICodeEditorViewState | null>;
+          expandedPaths?: string[];
+          autoSave?: boolean;
         };
         if (!session.workspace) return;
-        const entries = await loadDirectory(session.workspace.path);
+        const restoredExpandedPaths = new Set(session.expandedPaths ?? []);
+        const entries = await hydrateExpandedTree(
+          session.workspace.path,
+          await loadDirectory(session.workspace.path),
+          restoredExpandedPaths,
+        );
         const restoredDocuments: OpenDocument[] = [];
         for (const filePath of session.openPaths?.slice(0, 20) ?? []) {
           const result = await window.electronAPI.workspace.readTextFile(
@@ -514,16 +746,19 @@ export const CodeEditorPanel: React.FC = () => {
           restoredDocuments.push({
             path: filePath,
             name: filePath.split(/[\\/]/).pop() ?? filePath,
-            content: result.data.content,
+            content: session.drafts?.[filePath]?.content ?? result.data.content,
             savedContent: result.data.content,
             language: languageIdFromName(filePath),
             encoding: result.data.encoding,
             lineEnding: result.data.lineEnding,
             modifiedAt: result.data.modifiedAt,
+            readOnly: result.data.readOnly,
+            pinned: session.drafts?.[filePath]?.pinned ?? session.pinned?.[filePath] ?? true,
           });
         }
         setWorkspace(session.workspace);
         setTree(entries);
+        setExpandedPaths(restoredExpandedPaths);
         setDocuments(restoredDocuments);
         setActivePath(
           restoredDocuments.some((document) => document.path === session.activePath)
@@ -531,6 +766,8 @@ export const CodeEditorPanel: React.FC = () => {
             : restoredDocuments[0]?.path ?? null,
         );
         setSidebarVisible(session.sidebarVisible ?? true);
+        setAutoSave(session.autoSave ?? false);
+        viewStatesRef.current = session.viewStates ?? {};
         setStatus(`已恢复 ${session.workspace.name}`);
       } catch {
         localStorage.removeItem('code-editor.session.v1');
@@ -539,7 +776,7 @@ export const CodeEditorPanel: React.FC = () => {
       }
     };
     void restoreSession();
-  }, [loadDirectory]);
+  }, [hydrateExpandedTree, loadDirectory]);
 
   useEffect(() => {
     if (restoringRef.current) return;
@@ -547,13 +784,60 @@ export const CodeEditorPanel: React.FC = () => {
       localStorage.removeItem('code-editor.session.v1');
       return;
     }
-    localStorage.setItem('code-editor.session.v1', JSON.stringify({
-      workspace,
-      openPaths: documents.filter((document) => !document.standalone).map((document) => document.path),
-      activePath: activeDocument?.standalone ? null : activePath,
-      sidebarVisible,
-    }));
-  }, [activeDocument?.standalone, activePath, documents, sidebarVisible, workspace]);
+    const timer = window.setTimeout(() => {
+      let draftBytes = 0;
+      const drafts: Record<string, { content: string; pinned?: boolean }> = {};
+      for (const document of documents) {
+        if (
+          document.standalone
+          || document.content === document.savedContent
+          || document.content.length > 1024 * 1024
+          || draftBytes + document.content.length > 2 * 1024 * 1024
+        ) continue;
+        drafts[document.path] = { content: document.content, pinned: document.pinned };
+        draftBytes += document.content.length;
+      }
+      localStorage.setItem('code-editor.session.v1', JSON.stringify({
+        workspace,
+        openPaths: documents.filter((document) => !document.standalone).map((document) => document.path),
+        activePath: activeDocument?.standalone ? null : activePath,
+        sidebarVisible,
+        drafts,
+        pinned: Object.fromEntries(documents.map((document) => [document.path, document.pinned !== false])),
+        viewStates: viewStatesRef.current,
+        expandedPaths: [...expandedPaths],
+        autoSave,
+      }));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeDocument?.standalone, activePath, autoSave, documents, expandedPaths, sidebarVisible, workspace]);
+
+  useEffect(() => {
+    if (!autoSave) return;
+    const dirtyDocuments = documents.filter((document) => (
+      document.content !== document.savedContent && !document.readOnly && !document.externalChanged
+    ));
+    if (dirtyDocuments.length === 0) return;
+    const timer = window.setTimeout(() => {
+      for (const document of dirtyDocuments) void saveDocument(document);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [autoSave, documents, saveDocument]);
+
+  useLayoutEffect(() => {
+    if (!activePath || !editorRef.current) return;
+    const pathForEffect = activePath;
+    const restoreTimer = window.setTimeout(() => {
+      const viewState = viewStatesRef.current[pathForEffect];
+      if (viewState && editorRef.current) editorRef.current.restoreViewState(viewState);
+    }, 0);
+    return () => {
+      window.clearTimeout(restoreTimer);
+      if (editorRef.current) {
+        viewStatesRef.current[pathForEffect] = editorRef.current.saveViewState();
+      }
+    };
+  }, [activePath]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -572,15 +856,24 @@ export const CodeEditorPanel: React.FC = () => {
       if (!document || document.standalone) return;
       const savedAt = recentlySavedRef.current.get(event.path) ?? 0;
       if (Date.now() - savedAt < 1500) return;
-      if (document.content !== document.savedContent) {
-        setDocuments((previous) => previous.map((item) => (
-          item.path === event.path ? { ...item, externalChanged: true } : item
-        )));
-        setStatus(`${document.name} 已在外部修改，请选择重新加载或覆盖保存`);
-        return;
-      }
       void window.electronAPI.workspace.readTextFile(workspace.path, event.path).then((result) => {
-        if (!result.success || !result.data) return;
+        if (!result.success || !result.data) {
+          if (event.type === 'rename') {
+            setDocuments((previous) => previous.map((item) => item.path === event.path
+              ? { ...item, missing: true, readOnly: true }
+              : item));
+            setStatus(`${document.name} 已在外部删除或重命名`);
+          }
+          return;
+        }
+        const latest = documentsRef.current.find((item) => item.path === event.path);
+        if (latest && latest.content !== latest.savedContent) {
+          setDocuments((previous) => previous.map((item) => (
+            item.path === event.path ? { ...item, externalChanged: true } : item
+          )));
+          setStatus(`${document.name} 已在外部修改，请选择重新加载或覆盖保存`);
+          return;
+        }
         setDocuments((previous) => previous.map((item) => item.path === event.path
           ? {
             ...item,
@@ -590,6 +883,8 @@ export const CodeEditorPanel: React.FC = () => {
             lineEnding: result.data!.lineEnding,
             modifiedAt: result.data!.modifiedAt,
             externalChanged: false,
+            readOnly: result.data!.readOnly,
+            missing: false,
           }
           : item));
         setStatus(`已自动刷新 ${document.name}`);
@@ -698,6 +993,9 @@ export const CodeEditorPanel: React.FC = () => {
           <Search className="h-4 w-4" /> 全文搜索
         </Button>
         <div className="flex-1" />
+        <Button size="sm" variant={autoSave ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setAutoSave((value) => !value)}>
+          自动保存
+        </Button>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument || activeDocument.content === activeDocument.savedContent} onClick={saveActive}>
           保存
         </Button>
@@ -711,13 +1009,13 @@ export const CodeEditorPanel: React.FC = () => {
           <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar-bg">
             <div className="flex h-9 items-center gap-0.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               <span className="flex-1 px-1">Explorer</span>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => void createEntry('file')} disabled={!workspace}>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => beginCreate('file')} disabled={!workspace}>
                 <Plus className="h-3.5 w-3.5" />
               </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件夹" onClick={() => void createEntry('directory')} disabled={!workspace}>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件夹" onClick={() => beginCreate('directory')} disabled={!workspace}>
                 <FolderOpen className="h-3.5 w-3.5" />
               </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="重命名选中项" onClick={() => void renameSelected()} disabled={!selectedNode}>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="重命名选中项" onClick={() => beginRename()} disabled={!selectedNode}>
                 <Edit3 className="h-3.5 w-3.5" />
               </button>
               <button type="button" className="rounded p-1 hover:bg-accent" title="删除选中项" onClick={() => void deleteSelected()} disabled={!selectedNode}>
@@ -733,6 +1031,25 @@ export const CodeEditorPanel: React.FC = () => {
                   <ChevronDown className="h-3 w-3" />
                   <span className="truncate uppercase">{workspace.name}</span>
                 </div>
+                {treeEdit && treeEdit.mode !== 'rename' && (
+                  <div className="flex h-7 items-center gap-1 px-2">
+                    {treeEdit.mode === 'create-directory'
+                      ? <FolderOpen className="h-3.5 w-3.5 text-primary" />
+                      : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <input
+                      autoFocus
+                      value={treeEdit.value}
+                      onChange={(event) => setTreeEdit((previous) => previous ? { ...previous, value: event.target.value } : previous)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') void commitTreeEdit();
+                        if (event.key === 'Escape') setTreeEdit(null);
+                      }}
+                      onBlur={() => void commitTreeEdit()}
+                      placeholder={selectedNode?.type === 'directory' ? `在 ${selectedNode.name} 中创建` : '输入名称'}
+                      className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                )}
                 {tree.map((node) => (
                   <FileTreeRow
                     key={node.path}
@@ -743,6 +1060,16 @@ export const CodeEditorPanel: React.FC = () => {
                     onOpen={openTreeFile}
                     onToggle={toggleDirectory}
                     onSelect={setSelectedNode}
+                    editing={treeEdit}
+                    onEditChange={(value) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
+                    onEditCommit={() => void commitTreeEdit()}
+                    onEditCancel={() => setTreeEdit(null)}
+                    onContextMenu={(event, current) => {
+                      event.preventDefault();
+                      setSelectedNode(current);
+                      setTreeMenu({ x: event.clientX, y: event.clientY, node: current });
+                    }}
+                    onMove={(source, target) => void moveTreeEntry(source, target)}
                   />
                 ))}
               </div>
@@ -768,10 +1095,24 @@ export const CodeEditorPanel: React.FC = () => {
                       active ? 'border-t-2 border-t-primary bg-background text-foreground' : 'text-muted-foreground hover:bg-accent/50'
                     }`}
                     onClick={() => setActivePath(document.path)}
+                    onDoubleClick={() => setDocuments((previous) => previous.map((item) => (
+                      item.path === document.path ? { ...item, pinned: true } : item
+                    )))}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setTabMenu({ x: event.clientX, y: event.clientY, path: document.path });
+                    }}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData('application/x-nwd-tab-path', document.path)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      moveTab(event.dataTransfer.getData('application/x-nwd-tab-path'), document.path);
+                    }}
                     title={document.path}
                   >
                     <Code className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{document.name}</span>
+                    <span className={`truncate ${document.pinned === false ? 'italic' : ''}`}>{document.name}</span>
                     <span
                       role="button"
                       tabIndex={0}
@@ -799,8 +1140,17 @@ export const CodeEditorPanel: React.FC = () => {
               <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void reloadExternalDocument(activeDocument)}>
                 重新加载
               </Button>
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void saveDocument(activeDocument)}>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void saveDocument(activeDocument, true)}>
                 覆盖保存
+              </Button>
+            </div>
+          )}
+
+          {activeDocument?.missing && (
+            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-3 text-xs">
+              <span className="flex-1 truncate">该文件已在外部删除或重命名，当前内容以只读方式保留。</span>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => closeDocument(activeDocument.path)}>
+                关闭标签
               </Button>
             </div>
           )}
@@ -816,7 +1166,7 @@ export const CodeEditorPanel: React.FC = () => {
                 onChange={(value) => {
                   setDocuments((previous) => previous.map((document) => (
                     document.path === activeDocument.path
-                      ? { ...document, content: value ?? '' }
+                      ? { ...document, content: value ?? '', pinned: true }
                       : document
                   )));
                 }}
@@ -830,6 +1180,7 @@ export const CodeEditorPanel: React.FC = () => {
                   scrollBeyondLastLine: false,
                   smoothScrolling: true,
                   tabSize: 2,
+                  readOnly: activeDocument.readOnly,
                 }}
               />
             </div>
@@ -858,10 +1209,54 @@ export const CodeEditorPanel: React.FC = () => {
             <span>Spaces: 2</span>
             <span>{activeDocument.encoding === 'utf8bom' ? 'UTF-8 with BOM' : 'UTF-8'}</span>
             <span>{activeDocument.lineEnding}</span>
+            {activeDocument.readOnly && <span>只读</span>}
             <span>{languageFromName(activeDocument.name)}</span>
           </>
         )}
       </footer>
+
+      {treeMenu && (
+        <div className="fixed inset-0 z-50" onMouseDown={() => setTreeMenu(null)}>
+          <div
+            className="fixed min-w-44 rounded-md border bg-popover py-1 text-xs text-popover-foreground shadow-lg"
+            style={{ left: treeMenu.x, top: treeMenu.y }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => beginRename(treeMenu.node)}>重命名</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setTreeClipboard({ node: treeMenu.node, cut: false }); setTreeMenu(null); }}>复制</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setTreeClipboard({ node: treeMenu.node, cut: true }); setTreeMenu(null); }}>剪切</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={!treeClipboard} onClick={() => { void pasteTreeEntry(treeMenu.node); setTreeMenu(null); }}>粘贴</button>
+            <div className="my-1 border-t" />
+            <button type="button" className="w-full px-3 py-1.5 text-left text-destructive hover:bg-accent" onClick={() => { void deleteSelected(treeMenu.node); setTreeMenu(null); }}>移到回收站</button>
+          </div>
+        </div>
+      )}
+
+      {tabMenu && (() => {
+        const document = documents.find((item) => item.path === tabMenu.path);
+        const index = documents.findIndex((item) => item.path === tabMenu.path);
+        if (!document) return null;
+        return (
+          <div className="fixed inset-0 z-50" onMouseDown={() => setTabMenu(null)}>
+            <div
+              className="fixed min-w-44 rounded-md border bg-popover py-1 text-xs text-popover-foreground shadow-lg"
+              style={{ left: tabMenu.x, top: tabMenu.y }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => {
+                setDocuments((previous) => previous.map((item) => item.path === document.path ? { ...item, pinned: item.pinned === false } : item));
+                setTabMenu(null);
+              }}>
+                {document.pinned === false ? '固定标签' : '取消固定'}
+              </button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocument(document.path); setTabMenu(null); }}>关闭</button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.path !== document.path).map((item) => item.path)); setTabMenu(null); }}>关闭其他</button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={index === documents.length - 1} onClick={() => { closeDocumentSet(documents.slice(index + 1).map((item) => item.path)); setTabMenu(null); }}>关闭右侧</button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.content === item.savedContent).map((item) => item.path)); setTabMenu(null); }}>关闭已保存</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {searchPanel.open && (
         <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setSearchPanel((previous) => ({ ...previous, open: false }))}>

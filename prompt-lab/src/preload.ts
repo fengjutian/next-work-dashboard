@@ -90,7 +90,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       rootPath: string,
       relativePath: string,
       content: string,
-      options?: { encoding?: 'utf8' | 'utf8bom'; lineEnding?: 'LF' | 'CRLF' },
+      options?: {
+        encoding?: 'utf8' | 'utf8bom';
+        lineEnding?: 'LF' | 'CRLF';
+        expectedModifiedAt?: number;
+        force?: boolean;
+      },
     ) => ipcRenderer.invoke('workspace:writeTextFile', rootPath, relativePath, content, options),
     createFile: (rootPath: string, relativePath: string) =>
       ipcRenderer.invoke('workspace:createFile', rootPath, relativePath),
@@ -100,6 +105,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:renameEntry', rootPath, relativePath, nextRelativePath),
     deleteEntry: (rootPath: string, relativePath: string) =>
       ipcRenderer.invoke('workspace:deleteEntry', rootPath, relativePath),
+    trashEntry: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('workspace:trashEntry', rootPath, relativePath),
+    copyEntry: (rootPath: string, sourcePath: string, targetPath: string) =>
+      ipcRenderer.invoke('workspace:copyEntry', rootPath, sourcePath, targetPath),
     listFiles: (rootPath: string) =>
       ipcRenderer.invoke('workspace:listFiles', rootPath),
     search: (rootPath: string, query: string, options?: { caseSensitive?: boolean }) =>

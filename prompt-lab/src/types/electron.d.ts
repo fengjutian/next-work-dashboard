@@ -56,6 +56,8 @@ export interface ElectronAPI {
     createDirectory: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     renameEntry: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<void>>;
     deleteEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
+    trashEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
+    copyEntry: (rootPath: string, sourcePath: string, targetPath: string) => Promise<WorkspaceResult<void>>;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: { caseSensitive?: boolean }) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
     watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
@@ -145,11 +147,14 @@ export interface WorkspaceTextFile {
   encoding: 'utf8' | 'utf8bom';
   lineEnding: 'LF' | 'CRLF';
   modifiedAt: number;
+  readOnly: boolean;
 }
 
 export interface WorkspaceWriteOptions {
   encoding?: 'utf8' | 'utf8bom';
   lineEnding?: 'LF' | 'CRLF';
+  expectedModifiedAt?: number;
+  force?: boolean;
 }
 
 export interface WorkspaceSearchResult {

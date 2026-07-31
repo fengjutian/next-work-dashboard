@@ -13,6 +13,7 @@ const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
 ]);
 const MAX_EDITOR_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_READ_ONLY_FILE_SIZE = 20 * 1024 * 1024;
 
 export function setupIPC(webviewPreloadPath: string) {
   const mw = getMainWindow();
@@ -507,7 +508,7 @@ export function setupIPC(webviewPreloadPath: string) {
       const filePath = resolveWorkspacePath(rootPath, relativePath);
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
-      if (stat.size > MAX_EDITOR_FILE_SIZE) return { success: false, error: 'FILE_TOO_LARGE' };
+      if (stat.size > MAX_READ_ONLY_FILE_SIZE) return { success: false, error: 'FILE_TOO_LARGE' };
       const buffer = fs.readFileSync(filePath);
       const decoded = decodeWorkspaceText(buffer);
       return {
@@ -516,6 +517,7 @@ export function setupIPC(webviewPreloadPath: string) {
           ...decoded,
           size: buffer.length,
           modifiedAt: stat.mtimeMs,
+          readOnly: stat.size > MAX_EDITOR_FILE_SIZE || (stat.mode & 0o200) === 0,
         },
       };
     } catch (error) {
@@ -528,12 +530,25 @@ export function setupIPC(webviewPreloadPath: string) {
     rootPath: string,
     relativePath: string,
     content: string,
-    options?: { encoding?: 'utf8' | 'utf8bom'; lineEnding?: 'LF' | 'CRLF' },
+    options?: {
+      encoding?: 'utf8' | 'utf8bom';
+      lineEnding?: 'LF' | 'CRLF';
+      expectedModifiedAt?: number;
+      force?: boolean;
+    },
   ) => {
     try {
       const filePath = resolveWorkspacePath(rootPath, relativePath);
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
+      if ((stat.mode & 0o200) === 0) return { success: false, error: 'FILE_READ_ONLY' };
+      if (
+        !options?.force
+        && options?.expectedModifiedAt !== undefined
+        && Math.abs(stat.mtimeMs - options.expectedModifiedAt) > 1
+      ) {
+        return { success: false, error: 'FILE_MODIFIED_EXTERNALLY' };
+      }
       const buffer = encodeWorkspaceText(content, options);
       fs.writeFileSync(filePath, buffer);
       const modifiedAt = fs.statSync(filePath).mtimeMs;
@@ -603,6 +618,40 @@ export function setupIPC(webviewPreloadPath: string) {
       const stat = fs.statSync(target);
       if (stat.isDirectory()) fs.rmSync(target, { recursive: true });
       else fs.unlinkSync(target);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:trashEntry', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+  ) => {
+    try {
+      const target = resolveWorkspacePath(rootPath, relativePath);
+      if (path.relative(fs.realpathSync(rootPath), target) === '') {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      await shell.trashItem(target);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:copyEntry', async (
+    _event,
+    rootPath: string,
+    sourcePath: string,
+    targetPath: string,
+  ) => {
+    try {
+      const source = resolveWorkspacePath(rootPath, sourcePath);
+      const target = resolveNewWorkspacePath(rootPath, targetPath);
+      if (fs.existsSync(target)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.cpSync(source, target, { recursive: true, errorOnExist: true });
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
