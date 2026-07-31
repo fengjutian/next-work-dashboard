@@ -86,8 +86,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:listDirectory', rootPath, relativePath),
     readTextFile: (rootPath: string, relativePath: string) =>
       ipcRenderer.invoke('workspace:readTextFile', rootPath, relativePath),
-    writeTextFile: (rootPath: string, relativePath: string, content: string) =>
-      ipcRenderer.invoke('workspace:writeTextFile', rootPath, relativePath, content),
+    writeTextFile: (
+      rootPath: string,
+      relativePath: string,
+      content: string,
+      options?: { encoding?: 'utf8' | 'utf8bom'; lineEnding?: 'LF' | 'CRLF' },
+    ) => ipcRenderer.invoke('workspace:writeTextFile', rootPath, relativePath, content, options),
     createFile: (rootPath: string, relativePath: string) =>
       ipcRenderer.invoke('workspace:createFile', rootPath, relativePath),
     createDirectory: (rootPath: string, relativePath: string) =>
@@ -98,6 +102,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:deleteEntry', rootPath, relativePath),
     listFiles: (rootPath: string) =>
       ipcRenderer.invoke('workspace:listFiles', rootPath),
+    search: (rootPath: string, query: string, options?: { caseSensitive?: boolean }) =>
+      ipcRenderer.invoke('workspace:search', rootPath, query, options),
+    watch: (rootPath: string) => ipcRenderer.invoke('workspace:watch', rootPath),
+    unwatch: () => ipcRenderer.invoke('workspace:unwatch'),
+    onFileChanged: (callback: (event: { path: string; type: 'change' | 'rename' }) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: { path: string; type: 'change' | 'rename' }) =>
+        callback(payload);
+      ipcRenderer.on('workspace:fileChanged', handler);
+      return () => ipcRenderer.removeListener('workspace:fileChanged', handler);
+    },
   },
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),

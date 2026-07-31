@@ -22,7 +22,7 @@ import {
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import type { FilePickResult, WorkspaceEntry } from '@/types/electron';
+import type { FilePickResult, WorkspaceEntry, WorkspaceSearchResult } from '@/types/electron';
 import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
 
 export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
@@ -49,6 +49,10 @@ interface OpenDocument {
   savedContent: string;
   language: string;
   standalone?: boolean;
+  encoding: 'utf8' | 'utf8bom';
+  lineEnding: 'LF' | 'CRLF';
+  modifiedAt?: number;
+  externalChanged?: boolean;
 }
 
 interface TreeNode extends WorkspaceEntry {
@@ -152,10 +156,24 @@ export const CodeEditorPanel: React.FC = () => {
   const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
     open: false, query: '', files: [],
   });
+  const [searchPanel, setSearchPanel] = useState<{
+    open: boolean;
+    query: string;
+    caseSensitive: boolean;
+    loading: boolean;
+    results: WorkspaceSearchResult[];
+  }>({ open: false, query: '', caseSensitive: false, loading: false, results: [] });
   const restoringRef = useRef(true);
+  const documentsRef = useRef<OpenDocument[]>([]);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const pendingRevealRef = useRef<{ path: string; line: number; column: number } | null>(null);
+  const recentlySavedRef = useRef(new Map<string, number>());
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
+  useEffect(() => {
+    documentsRef.current = documents;
+  }, [documents]);
 
   const loadDirectory = useCallback(async (rootPath: string, relativePath = '') => {
     const result = await window.electronAPI.workspace.listDirectory(rootPath, relativePath);
@@ -171,9 +189,9 @@ export const CodeEditorPanel: React.FC = () => {
 
   const openWorkspace = useCallback(async () => {
     if (hasDirtyDocuments && !window.confirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
-    const folder = await window.electronAPI.workspace.openFolder();
-    if (!folder) return;
     try {
+      const folder = await window.electronAPI.workspace.openFolder();
+      if (!folder) return;
       setStatus('正在读取工作区…');
       const entries = await loadDirectory(folder.path);
       setWorkspace(folder);
@@ -183,7 +201,12 @@ export const CodeEditorPanel: React.FC = () => {
       setSelectedNode(null);
       setStatus(`已打开 ${folder.name}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '工作区打开失败');
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(
+        message.includes('No handler registered')
+          ? '主进程版本过旧，请完全退出并重新启动应用'
+          : `工作区打开失败：${message}`,
+      );
     }
   }, [hasDirtyDocuments, loadDirectory]);
 
@@ -292,6 +315,8 @@ export const CodeEditorPanel: React.FC = () => {
           savedContent: content,
           language: languageIdFromName(file.name),
           standalone: true,
+          encoding: 'utf8',
+          lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
         }]);
       }
       setActivePath(file.path);
@@ -319,6 +344,9 @@ export const CodeEditorPanel: React.FC = () => {
       content: result.data!.content,
       savedContent: result.data!.content,
       language: languageIdFromName(node.name),
+      encoding: result.data.encoding,
+      lineEnding: result.data.lineEnding,
+      modifiedAt: result.data.modifiedAt,
     }]);
     setActivePath(node.path);
     setStatus(`已打开 ${node.name}`);
@@ -350,17 +378,30 @@ export const CodeEditorPanel: React.FC = () => {
 
   const saveDocument = useCallback(async (document: OpenDocument) => {
     setStatus(`正在保存 ${document.name}…`);
+    if (!document.standalone) recentlySavedRef.current.set(document.path, Date.now());
     const result = document.standalone
       ? await window.electronAPI.writeTextFile(document.path, document.content)
       : workspace
-        ? await window.electronAPI.workspace.writeTextFile(workspace.path, document.path, document.content)
+        ? await window.electronAPI.workspace.writeTextFile(
+          workspace.path,
+          document.path,
+          document.content,
+          { encoding: document.encoding, lineEnding: document.lineEnding },
+        )
         : { success: false, error: 'NO_WORKSPACE' };
     if (!result.success) {
       setStatus(`保存失败：${displayError(result.error)}`);
       return false;
     }
     setDocuments((previous) => previous.map((item) => (
-      item.path === document.path ? { ...item, savedContent: item.content } : item
+      item.path === document.path
+        ? {
+          ...item,
+          savedContent: item.content,
+          modifiedAt: 'data' in result ? result.data?.modifiedAt : item.modifiedAt,
+          externalChanged: false,
+        }
+        : item
     )));
     setStatus(`已保存 ${document.name}`);
     return true;
@@ -389,11 +430,64 @@ export const CodeEditorPanel: React.FC = () => {
   }, [activePath, documents]);
 
   const handleMount: OnMount = useCallback((editor) => {
+    editorRef.current = editor;
     editor.onDidChangeCursorPosition((event) => {
       setPosition({ line: event.position.lineNumber, column: event.position.column });
     });
     editor.focus();
   }, []);
+
+  const runSearch = useCallback(async () => {
+    if (!workspace || !searchPanel.query.trim()) return;
+    setSearchPanel((previous) => ({ ...previous, loading: true }));
+    const result = await window.electronAPI.workspace.search(
+      workspace.path,
+      searchPanel.query.trim(),
+      { caseSensitive: searchPanel.caseSensitive },
+    );
+    if (!result.success) {
+      setStatus(`搜索失败：${displayError(result.error)}`);
+      setSearchPanel((previous) => ({ ...previous, loading: false }));
+      return;
+    }
+    setSearchPanel((previous) => ({
+      ...previous,
+      loading: false,
+      results: result.data ?? [],
+    }));
+    setStatus(`找到 ${result.data?.length ?? 0} 个结果`);
+  }, [searchPanel.caseSensitive, searchPanel.query, workspace]);
+
+  const openSearchResult = useCallback(async (result: WorkspaceSearchResult) => {
+    pendingRevealRef.current = { path: result.path, line: result.line, column: result.column };
+    await openTreeFile({
+      name: result.path.split(/[\\/]/).pop() ?? result.path,
+      path: result.path,
+      type: 'file',
+    });
+    setSearchPanel((previous) => ({ ...previous, open: false }));
+  }, [openTreeFile]);
+
+  const reloadExternalDocument = useCallback(async (document: OpenDocument) => {
+    if (!workspace || document.standalone) return;
+    const result = await window.electronAPI.workspace.readTextFile(workspace.path, document.path);
+    if (!result.success || !result.data) {
+      setStatus(`重新加载失败：${displayError(result.error)}`);
+      return;
+    }
+    setDocuments((previous) => previous.map((item) => item.path === document.path
+      ? {
+        ...item,
+        content: result.data!.content,
+        savedContent: result.data!.content,
+        encoding: result.data!.encoding,
+        lineEnding: result.data!.lineEnding,
+        modifiedAt: result.data!.modifiedAt,
+        externalChanged: false,
+      }
+      : item));
+    setStatus(`已重新加载 ${document.name}`);
+  }, [workspace]);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -423,6 +517,9 @@ export const CodeEditorPanel: React.FC = () => {
             content: result.data.content,
             savedContent: result.data.content,
             language: languageIdFromName(filePath),
+            encoding: result.data.encoding,
+            lineEnding: result.data.lineEnding,
+            modifiedAt: result.data.modifiedAt,
           });
         }
         setWorkspace(session.workspace);
@@ -459,6 +556,63 @@ export const CodeEditorPanel: React.FC = () => {
   }, [activeDocument?.standalone, activePath, documents, sidebarVisible, workspace]);
 
   useEffect(() => {
+    if (!workspace) return;
+    let disposed = false;
+    void window.electronAPI.workspace.watch(workspace.path)
+      .then((result) => {
+        if (!result.success && !disposed) setStatus(`文件监听不可用：${displayError(result.error)}`);
+      })
+      .catch((error) => {
+        if (!disposed) setStatus(`文件监听不可用：${String(error)}`);
+      });
+    const unsubscribe = window.electronAPI.workspace.onFileChanged((event) => {
+      if (disposed) return;
+      if (event.type === 'rename') void refreshWorkspaceTree();
+      const document = documentsRef.current.find((item) => item.path === event.path);
+      if (!document || document.standalone) return;
+      const savedAt = recentlySavedRef.current.get(event.path) ?? 0;
+      if (Date.now() - savedAt < 1500) return;
+      if (document.content !== document.savedContent) {
+        setDocuments((previous) => previous.map((item) => (
+          item.path === event.path ? { ...item, externalChanged: true } : item
+        )));
+        setStatus(`${document.name} 已在外部修改，请选择重新加载或覆盖保存`);
+        return;
+      }
+      void window.electronAPI.workspace.readTextFile(workspace.path, event.path).then((result) => {
+        if (!result.success || !result.data) return;
+        setDocuments((previous) => previous.map((item) => item.path === event.path
+          ? {
+            ...item,
+            content: result.data!.content,
+            savedContent: result.data!.content,
+            encoding: result.data!.encoding,
+            lineEnding: result.data!.lineEnding,
+            modifiedAt: result.data!.modifiedAt,
+            externalChanged: false,
+          }
+          : item));
+        setStatus(`已自动刷新 ${document.name}`);
+      });
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+      void window.electronAPI.workspace.unwatch().catch(() => undefined);
+    };
+  }, [refreshWorkspaceTree, workspace]);
+
+  useEffect(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending || pending.path !== activePath || !editorRef.current) return;
+    const position = { lineNumber: pending.line, column: pending.column };
+    editorRef.current.setPosition(position);
+    editorRef.current.revealPositionInCenter(position);
+    editorRef.current.focus();
+    pendingRevealRef.current = null;
+  }, [activePath, activeDocument?.content]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const command = event.ctrlKey || event.metaKey;
       if (command && event.key.toLowerCase() === 's') {
@@ -482,8 +636,13 @@ export const CodeEditorPanel: React.FC = () => {
         event.preventDefault();
         void showQuickOpen();
       }
+      if (command && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setSearchPanel((previous) => ({ ...previous, open: true }));
+      }
       if (event.key === 'Escape') {
         setQuickOpen((previous) => ({ ...previous, open: false }));
+        setSearchPanel((previous) => ({ ...previous, open: false }));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -528,6 +687,15 @@ export const CodeEditorPanel: React.FC = () => {
         </Button>
         <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openStandaloneFile}>
           <FileText className="h-4 w-4" /> 打开文件
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1.5 px-2 text-xs"
+          onClick={() => setSearchPanel((previous) => ({ ...previous, open: true }))}
+          disabled={!workspace}
+        >
+          <Search className="h-4 w-4" /> 全文搜索
         </Button>
         <div className="flex-1" />
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument || activeDocument.content === activeDocument.savedContent} onClick={saveActive}>
@@ -625,6 +793,18 @@ export const CodeEditorPanel: React.FC = () => {
             </div>
           )}
 
+          {activeDocument?.externalChanged && (
+            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 text-xs">
+              <span className="flex-1 truncate">该文件已在外部修改，本地编辑内容尚未保存。</span>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void reloadExternalDocument(activeDocument)}>
+                重新加载
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void saveDocument(activeDocument)}>
+                覆盖保存
+              </Button>
+            </div>
+          )}
+
           {activeDocument ? (
             <div className="min-h-0 flex-1">
               <Editor
@@ -676,11 +856,63 @@ export const CodeEditorPanel: React.FC = () => {
           <>
             <span>Ln {position.line}, Col {position.column}</span>
             <span>Spaces: 2</span>
-            <span>UTF-8</span>
+            <span>{activeDocument.encoding === 'utf8bom' ? 'UTF-8 with BOM' : 'UTF-8'}</span>
+            <span>{activeDocument.lineEnding}</span>
             <span>{languageFromName(activeDocument.name)}</span>
           </>
         )}
       </footer>
+
+      {searchPanel.open && (
+        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setSearchPanel((previous) => ({ ...previous, open: false }))}>
+          <div className="w-[min(720px,85vw)] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center gap-2 border-b px-3">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input
+                autoFocus
+                value={searchPanel.query}
+                onChange={(event) => setSearchPanel((previous) => ({ ...previous, query: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void runSearch();
+                }}
+                placeholder="在工作区文件内容中搜索"
+                className="h-10 flex-1 bg-transparent text-sm outline-none"
+              />
+              <button
+                type="button"
+                className={`rounded px-1.5 py-1 font-mono text-xs ${searchPanel.caseSensitive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/60'}`}
+                onClick={() => setSearchPanel((previous) => ({ ...previous, caseSensitive: !previous.caseSensitive }))}
+                title="区分大小写"
+              >
+                Aa
+              </button>
+              <Button size="sm" className="h-7 px-3 text-xs" disabled={!searchPanel.query.trim() || searchPanel.loading} onClick={() => void runSearch()}>
+                {searchPanel.loading ? '搜索中…' : '搜索'}
+              </Button>
+              <kbd className="text-[10px] text-muted-foreground">Esc</kbd>
+            </div>
+            <div className="max-h-[420px] overflow-auto py-1">
+              {searchPanel.results.map((result, index) => (
+                <button
+                  type="button"
+                  key={`${result.path}:${result.line}:${result.column}:${index}`}
+                  className="flex min-h-10 w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-accent"
+                  onClick={() => void openSearchResult(result)}
+                >
+                  <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="w-52 shrink-0 truncate font-medium" title={result.path}>
+                    {result.path}:{result.line}:{result.column}
+                  </span>
+                  <span className="truncate font-mono text-muted-foreground">{result.preview}</span>
+                </button>
+              ))}
+              {!searchPanel.loading && searchPanel.query && searchPanel.results.length === 0 && (
+                <div className="px-3 py-8 text-center text-xs text-muted-foreground">没有搜索结果</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {quickOpen.open && (
         <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 pt-16" onMouseDown={() => setQuickOpen((previous) => ({ ...previous, open: false }))}>

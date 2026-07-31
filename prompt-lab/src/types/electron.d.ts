@@ -50,13 +50,17 @@ export interface ElectronAPI {
   workspace: {
     openFolder: () => Promise<WorkspaceFolder | null>;
     listDirectory: (rootPath: string, relativePath?: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
-    readTextFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<{ content: string; size: number }>>;
-    writeTextFile: (rootPath: string, relativePath: string, content: string) => Promise<WorkspaceResult<{ size: number }>>;
+    readTextFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<WorkspaceTextFile>>;
+    writeTextFile: (rootPath: string, relativePath: string, content: string, options?: WorkspaceWriteOptions) => Promise<WorkspaceResult<{ size: number; modifiedAt: number }>>;
     createFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     createDirectory: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     renameEntry: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<void>>;
     deleteEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
+    search: (rootPath: string, query: string, options?: { caseSensitive?: boolean }) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
+    watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
+    unwatch: () => Promise<void>;
+    onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;
   };
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;
@@ -133,6 +137,31 @@ export interface WorkspaceResult<T> {
   success: boolean;
   data?: T;
   error?: string;
+}
+
+export interface WorkspaceTextFile {
+  content: string;
+  size: number;
+  encoding: 'utf8' | 'utf8bom';
+  lineEnding: 'LF' | 'CRLF';
+  modifiedAt: number;
+}
+
+export interface WorkspaceWriteOptions {
+  encoding?: 'utf8' | 'utf8bom';
+  lineEnding?: 'LF' | 'CRLF';
+}
+
+export interface WorkspaceSearchResult {
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+}
+
+export interface WorkspaceFileChange {
+  path: string;
+  type: 'change' | 'rename';
 }
 
 declare global {

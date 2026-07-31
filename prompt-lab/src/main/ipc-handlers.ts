@@ -7,6 +7,7 @@ import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
 import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
+import { decodeWorkspaceText, encodeWorkspaceText } from './workspace-text';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -16,6 +17,7 @@ const MAX_EDITOR_FILE_SIZE = 5 * 1024 * 1024;
 export function setupIPC(webviewPreloadPath: string) {
   const mw = getMainWindow();
   if (!mw) return;
+  let workspaceWatcher: fs.FSWatcher | null = null;
 
   // 暴露 webview preload 路径给渲染进程
   ipcMain.handle('get-webview-preload-path', () => {
@@ -507,10 +509,14 @@ export function setupIPC(webviewPreloadPath: string) {
       if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
       if (stat.size > MAX_EDITOR_FILE_SIZE) return { success: false, error: 'FILE_TOO_LARGE' };
       const buffer = fs.readFileSync(filePath);
-      if (buffer.includes(0)) return { success: false, error: 'BINARY_FILE' };
+      const decoded = decodeWorkspaceText(buffer);
       return {
         success: true,
-        data: { content: buffer.toString('utf-8'), size: buffer.length },
+        data: {
+          ...decoded,
+          size: buffer.length,
+          modifiedAt: stat.mtimeMs,
+        },
       };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -522,13 +528,16 @@ export function setupIPC(webviewPreloadPath: string) {
     rootPath: string,
     relativePath: string,
     content: string,
+    options?: { encoding?: 'utf8' | 'utf8bom'; lineEnding?: 'LF' | 'CRLF' },
   ) => {
     try {
       const filePath = resolveWorkspacePath(rootPath, relativePath);
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
-      fs.writeFileSync(filePath, content, 'utf-8');
-      return { success: true, data: { size: Buffer.byteLength(content, 'utf-8') } };
+      const buffer = encodeWorkspaceText(content, options);
+      fs.writeFileSync(filePath, buffer);
+      const modifiedAt = fs.statSync(filePath).mtimeMs;
+      return { success: true, data: { size: buffer.length, modifiedAt } };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -626,6 +635,81 @@ export function setupIPC(webviewPreloadPath: string) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  ipcMain.handle('workspace:search', async (
+    _event,
+    rootPath: string,
+    query: string,
+    options?: { caseSensitive?: boolean },
+  ) => {
+    try {
+      if (!query || query.length > 500) return { success: true, data: [] };
+      const root = resolveWorkspacePath(rootPath);
+      const needle = options?.caseSensitive ? query : query.toLocaleLowerCase();
+      const results: Array<{ path: string; line: number; column: number; preview: string }> = [];
+      const visit = (directory: string) => {
+        if (results.length >= 500) return;
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          if (WORKSPACE_IGNORED_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
+          const fullPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) {
+            visit(fullPath);
+          } else if (entry.isFile()) {
+            const stat = fs.statSync(fullPath);
+            if (stat.size > 1024 * 1024) continue;
+            let decoded;
+            try {
+              decoded = decodeWorkspaceText(fs.readFileSync(fullPath));
+            } catch {
+              continue;
+            }
+            const lines = decoded.content.split(/\r?\n/);
+            for (let index = 0; index < lines.length && results.length < 500; index += 1) {
+              const haystack = options?.caseSensitive ? lines[index] : lines[index].toLocaleLowerCase();
+              const column = haystack.indexOf(needle);
+              if (column < 0) continue;
+              results.push({
+                path: path.relative(root, fullPath),
+                line: index + 1,
+                column: column + 1,
+                preview: lines[index].trim().slice(0, 240),
+              });
+            }
+          }
+          if (results.length >= 500) break;
+        }
+      };
+      visit(root);
+      return { success: true, data: results };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:watch', async (_event, rootPath: string) => {
+    try {
+      workspaceWatcher?.close();
+      const root = resolveWorkspacePath(rootPath);
+      workspaceWatcher = fs.watch(root, { recursive: true }, (eventType, fileName) => {
+        if (!fileName) return;
+        const relativePath = String(fileName);
+        if (relativePath.split(/[\\/]/).some((part) => WORKSPACE_IGNORED_NAMES.has(part))) return;
+        mw.webContents.send('workspace:fileChanged', {
+          path: relativePath,
+          type: eventType === 'rename' ? 'rename' : 'change',
+        });
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:unwatch', () => {
+    workspaceWatcher?.close();
+    workspaceWatcher = null;
+  });
+  mw.webContents.once('destroyed', () => workspaceWatcher?.close());
 
   ipcMain.handle('dialog:saveFile', async (_event, content: string, defaultName?: string) => {
     try {
