@@ -80,6 +80,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickFile: (options?: { accept?: string; multiple?: boolean }) =>
     ipcRenderer.invoke('dialog:pickFile', options),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  workspace: {
+    openFolder: () => ipcRenderer.invoke('workspace:openFolder'),
+    listDirectory: (rootPath: string, relativePath = '') =>
+      ipcRenderer.invoke('workspace:listDirectory', rootPath, relativePath),
+    readTextFile: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('workspace:readTextFile', rootPath, relativePath),
+    writeTextFile: (rootPath: string, relativePath: string, content: string) =>
+      ipcRenderer.invoke('workspace:writeTextFile', rootPath, relativePath, content),
+  },
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),
   writeTextFile: (filePath: string, content: string) =>

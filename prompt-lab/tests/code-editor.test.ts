@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { decodeBase64Utf8, languageFromName } from '../src/plugins/code-editor/CodeEditorPanel';
+import {
+  decodeBase64Utf8,
+  languageFromName,
+  languageIdFromName,
+} from '../src/plugins/code-editor/CodeEditorPanel';
 
 describe('代码编辑器', () => {
   it('正确解码 UTF-8 文件', () => {
@@ -19,5 +23,7 @@ describe('代码编辑器', () => {
     expect(languageFromName('App.tsx')).toBe('TypeScript React');
     expect(languageFromName('main.py')).toBe('Python');
     expect(languageFromName('Dockerfile')).toBe('Dockerfile');
+    expect(languageIdFromName('settings.json')).toBe('json');
+    expect(languageIdFromName('unknown.extension')).toBe('plaintext');
   });
 });

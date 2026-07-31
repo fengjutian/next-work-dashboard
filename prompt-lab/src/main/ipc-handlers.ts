@@ -7,6 +7,27 @@ import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
 
+const WORKSPACE_IGNORED_NAMES = new Set([
+  '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
+]);
+const MAX_EDITOR_FILE_SIZE = 5 * 1024 * 1024;
+
+function resolveWorkspacePath(rootPath: string, relativePath = ''): string {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(root, relativePath);
+  const relative = path.relative(root, target);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('ACCESS_DENIED');
+  }
+  const realRoot = fs.realpathSync(root);
+  const realTarget = fs.realpathSync(target);
+  const realRelative = path.relative(realRoot, realTarget);
+  if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+    throw new Error('ACCESS_DENIED');
+  }
+  return realTarget;
+}
+
 export function setupIPC(webviewPreloadPath: string) {
   const mw = getMainWindow();
   if (!mw) return;
@@ -443,6 +464,88 @@ export function setupIPC(webviewPreloadPath: string) {
       return { path: rootPath, name: path.basename(rootPath), files };
     } catch (err) {
       return { error: String(err), files: [] };
+    }
+  });
+
+  // ── 代码编辑器工作区（目录按需读取，不递归扫描） ──
+  ipcMain.handle('workspace:openFolder', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const rootPath = path.resolve(result.filePaths[0]);
+    return { path: rootPath, name: path.basename(rootPath) };
+  });
+
+  ipcMain.handle('workspace:listDirectory', async (
+    _event,
+    rootPath: string,
+    relativePath = '',
+  ) => {
+    try {
+      const directory = resolveWorkspacePath(rootPath, relativePath);
+      const stat = fs.statSync(directory);
+      if (!stat.isDirectory()) return { success: false, error: 'NOT_A_DIRECTORY' };
+
+      const entries = fs.readdirSync(directory, { withFileTypes: true })
+        .filter((entry) => !WORKSPACE_IGNORED_NAMES.has(entry.name))
+        .filter((entry) => entry.isDirectory() || entry.isFile())
+        .map((entry) => {
+          const entryRelativePath = path.join(relativePath, entry.name);
+          if (entry.isDirectory()) {
+            return { name: entry.name, path: entryRelativePath, type: 'directory' as const };
+          }
+          return {
+            name: entry.name,
+            path: entryRelativePath,
+            type: 'file' as const,
+            size: fs.statSync(resolveWorkspacePath(rootPath, entryRelativePath)).size,
+          };
+        })
+        .sort((a, b) => {
+          if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+          return a.name.localeCompare(b.name, undefined, { numeric: true });
+        });
+      return { success: true, data: entries };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:readTextFile', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+  ) => {
+    try {
+      const filePath = resolveWorkspacePath(rootPath, relativePath);
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
+      if (stat.size > MAX_EDITOR_FILE_SIZE) return { success: false, error: 'FILE_TOO_LARGE' };
+      const buffer = fs.readFileSync(filePath);
+      if (buffer.includes(0)) return { success: false, error: 'BINARY_FILE' };
+      return {
+        success: true,
+        data: { content: buffer.toString('utf-8'), size: buffer.length },
+      };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:writeTextFile', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+    content: string,
+  ) => {
+    try {
+      const filePath = resolveWorkspacePath(rootPath, relativePath);
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) return { success: false, error: 'NOT_A_FILE' };
+      fs.writeFileSync(filePath, content, 'utf-8');
+      return { success: true, data: { size: Buffer.byteLength(content, 'utf-8') } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 

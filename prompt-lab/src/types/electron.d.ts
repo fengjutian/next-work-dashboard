@@ -47,6 +47,12 @@ export interface ElectronAPI {
   /** 打开文件选择对话框，返回文件信息(base64 content) */
   pickFile: (options?: { accept?: string; multiple?: boolean }) => Promise<FilePickResult | FilePickResult[] | null>;
   pickFolder: () => Promise<FolderPickResult | null>;
+  workspace: {
+    openFolder: () => Promise<WorkspaceFolder | null>;
+    listDirectory: (rootPath: string, relativePath?: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
+    readTextFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<{ content: string; size: number }>>;
+    writeTextFile: (rootPath: string, relativePath: string, content: string) => Promise<WorkspaceResult<{ size: number }>>;
+  };
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;
   /** 保存到已经打开的文本文件。 */
@@ -103,6 +109,24 @@ export interface FolderPickResult {
   path: string;
   name: string;
   files: Array<{ path: string; name: string; size: number }>;
+  error?: string;
+}
+
+export interface WorkspaceFolder {
+  path: string;
+  name: string;
+}
+
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+}
+
+export interface WorkspaceResult<T> {
+  success: boolean;
+  data?: T;
   error?: string;
 }
 
