@@ -17,6 +17,8 @@ import {
   type WorkspaceTextEdit,
 } from './workspace-transaction';
 import { redactGitSecrets } from './git-security';
+import { parseGitLog } from './git-history';
+import { classifyGitError } from './git-diagnostics';
 import { parseGitBranches } from './git-overview';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
@@ -1040,7 +1042,9 @@ export function setupIPC(webviewPreloadPath: string) {
           data = await runGit(root, args, 20 * 1024 * 1024, signal);
         } else if (operation === 'push') {
           const remote = validateGitRef(String(payload.remote ?? 'origin'));
-          const args = payload.setUpstream ? ['push', '--set-upstream', remote, 'HEAD'] : ['push'];
+          const args = ['push'];
+          if (payload.forceWithLease) args.push('--force-with-lease');
+          if (payload.setUpstream) args.push('--set-upstream', remote, 'HEAD');
           data = await runGit(root, args, 20 * 1024 * 1024, signal);
         } else if (operation === 'sync') {
           const strategy = (['ff-only', 'merge', 'rebase'] as const).includes(payload.strategy as 'ff-only') ? payload.strategy : 'ff-only';
@@ -1049,17 +1053,27 @@ export function setupIPC(webviewPreloadPath: string) {
           const push = await runGit(root, ['push'], 20 * 1024 * 1024, signal);
           data = `${pull}\n${push}`.trim();
         } else if (operation === 'log') {
-          const limit = Math.max(1, Math.min(500, Number(payload.limit) || 100));
-          const args = ['log', `-${limit}`, '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e'];
+          const limit = Math.max(1, Math.min(100, Number(payload.limit) || 50));
+          const skip = Math.max(0, Number(payload.skip) || 0);
+          const args = ['log', '--all', `--max-count=${limit}`, `--skip=${skip}`, '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%P%x1f%D%x1f%an%x1f%ae%x1f%aI%x1f%G?%x1f%GS%x1f%s%x1e'];
+          const author = String(payload.author ?? '').trim().slice(0, 200);
+          const query = String(payload.query ?? '').trim().slice(0, 200);
+          const since = String(payload.since ?? '').trim().slice(0, 32);
+          const until = String(payload.until ?? '').trim().slice(0, 32);
+          if (author) args.push(`--author=${author}`);
+          if (query) args.push(`--grep=${query}`, '--regexp-ignore-case');
+          if (since && /^\d{4}-\d{2}-\d{2}$/.test(since)) args.push(`--since=${since}`);
+          if (until && /^\d{4}-\d{2}-\d{2}$/.test(until)) args.push(`--until=${until}`);
           if (payload.path) args.push('--', path.relative(root, resolveWorkspacePath(rootPath, String(payload.path))));
           const output = await runGit(root, args, 20 * 1024 * 1024, signal);
-          data = output.split('\x1e').map((record) => record.trim()).filter(Boolean).map((record) => {
-            const [hash, shortHash, author, date, subject] = record.split('\x1f');
-            return { hash, shortHash, author, date, subject };
-          });
+          data = parseGitLog(output);
         } else if (operation === 'showCommit') {
           const hash = validateGitRef(String(payload.hash ?? ''));
           data = await runGit(root, ['show', '--format=fuller', '--stat', '--patch', hash], 30 * 1024 * 1024, signal);
+        } else if (operation === 'compareCommits') {
+          const from = validateGitRef(String(payload.from ?? ''));
+          const to = validateGitRef(String(payload.to ?? ''));
+          data = await runGit(root, ['diff', '--stat', '--patch', `${from}..${to}`], 30 * 1024 * 1024, signal);
         } else if (operation === 'fileDiff') {
           const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
           const staged = payload.staged ? ['--cached'] : [];
@@ -1124,9 +1138,7 @@ export function setupIPC(webviewPreloadPath: string) {
           progress('cancelled', '操作已取消');
           return { success: false, error: 'GIT_CANCELLED' };
         }
-        const message = /Authentication failed|could not read Username|terminal prompts disabled/i.test(raw)
-          ? 'GIT_AUTH_REQUIRED'
-          : /conflict|CONFLICT/i.test(raw) ? 'GIT_CONFLICT' : raw;
+        const message = classifyGitError(raw) ?? raw;
         progress('failed', message);
         return { success: false, error: message };
       } finally {

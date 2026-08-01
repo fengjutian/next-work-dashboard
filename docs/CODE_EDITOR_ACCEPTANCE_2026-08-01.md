@@ -9,7 +9,7 @@
 | 检查 | 结果 | 证据 |
 |---|---:|---|
 | TypeScript | 通过 | `npx tsc --noEmit`，0 错误 |
-| Vitest | 通过 | 12 个测试文件、98 个测试全部通过 |
+| Vitest | 通过 | 13 个测试文件、101 个测试全部通过 |
 | Electron package | 通过 | Windows x64 打包完成；存在第三方 `use client` sourcemap 警告，不阻断产物 |
 | ESLint（全仓） | 未通过 | 189 errors / 201 warnings；多数为 `@/` alias 未配置 resolver，另含少量存量规则错误 |
 | 本批变更定向 ESLint | 部分通过 | 排除 alias 配置噪声后无新增阻断错误，仍有 39 个警告 |
@@ -18,8 +18,8 @@
 
 | 清单项 | 状态 | 已确认实现 | 尚未满足 / 验收缺口 |
 |---|:---:|---|---|
-| 2.1 分支管理 | 部分通过 | 创建、删除、重命名、切换；overview 返回当前/本地分支、remote、tag、ahead/behind；应用内对话框 | 远程分支与 tracking 展示、切换前覆盖风险检测、完整刷新链路缺少测试 |
-| 2.2 Fetch/Pull/Push/Sync | 部分通过 | 操作 IPC、ff-only/merge/rebase、队列、AbortController、进度事件 | 首次 push 选 remote/upstream、force-with-lease 二次确认、真实传输百分比、凭据错误分类未完整实现 |
+| 2.1 分支管理 | 部分通过 | 创建、删除、重命名、切换；结构化展示本地/远程分支、upstream 和逐分支 ahead/behind；远程分支检出自动 tracking | 切换前未跟踪文件覆盖风险检测和完整 Electron 刷新链路仍缺测试 |
+| 2.2 Fetch/Pull/Push/Sync | 部分通过 | 操作 IPC、ff-only/merge/rebase、队列、AbortController、进度事件；首次 push 选择 remote 并设置 upstream；force-with-lease 二次确认且不暴露 `--force` | 真实传输百分比和更细的凭据错误分类仍未完整实现 |
 | 2.3 Commit 历史/Diff | 部分通过 | log、showCommit、fileDiff、独立 Diff 面板 | 分页/筛选/拓扑图、两 Commit 比较、签名状态未实现或无证据 |
 | 2.4 文件时间线 | 部分通过 | 文件 log/历史入口与 Diff 组件 | 独立 Timeline、文件状态、恢复前 Diff/撤销点、本地保存历史不完整 |
 | 2.5 行内 Git 标记 | 部分通过 | Git diff 装饰基础逻辑 | Peek Diff、staged/unstaged 双状态、行级回滚/暂存、性能基准无证据 |
@@ -27,7 +27,7 @@
 | 2.7 Merge Editor | 部分通过 | Base/Current/Incoming/Result 四路视图、可编辑 Result、逐块选择、冲突标记阻断、关闭未保存确认、保存并暂存失败回滚，以及 Merge/Rebase/Cherry-pick Continue/Abort | add/add、delete/modify、rename/rename 等复杂冲突类型的专用 UI 仍需补齐 |
 | 2.8 Stash/Tag/Remote | 部分通过 | list/show/push/apply/pop/drop；tag 创建/删除；remote 添加/移除 | remote URL 编辑、远程 tag、默认 remote、连接测试等缺失；高风险操作需人工确认二次确认行为 |
 | 2.9 Git 进度与凭据 | 部分通过 | 每工作区队列、取消控制器、网络/本地超时、进度事件、输出限制；remote URL、查询 token 和 Authorization 输出脱敏已有专项测试 | 独立 Output Channel、Credential/SSH 检测仍未完成 |
-| 3.1 多文件 AI 修改 | 部分通过 | 多文件候选、路径约束、外部修改预检，以及新建/修改/删除的主进程磁盘事务和失败回滚 | 重命名与完整 Electron 集成测试仍未完成 |
+| 3.1 多文件 AI 修改 | 部分通过 | 多文件候选、路径约束、外部修改预检，以及新建/修改/删除/重命名的主进程磁盘事务和失败回滚 | 完整 Electron 集成测试仍未完成 |
 | 3.2 Agent 自动搜索 | 部分通过 | 文件名/全文搜索基础与候选文件 | 符号/引用/import 图、Problems 扩展、迭代轮次与读取原因展示不足 |
 | 3.3 Patch/Hunk 审核 | 部分通过 | Hunk 接受/拒绝入口及剩余 Diff 重算基础 | 单行接受、三方合并、跨标签持久候选缺少测试 |
 | 3.4 AI Inline Edit | 未通过 | 未发现完整选区快捷键 + Ghost Text/Inline Diff 闭环 | 原清单核心子项均需继续实现 |
@@ -66,6 +66,8 @@
 10. AI 多文件接受已接入磁盘级 create/write/delete 事务，任何预检或执行失败都会拒绝或回滚整批操作。
 11. Merge Editor 升级为 Base/Current/Incoming/Result 四路视图；Result 可编辑，冲突标记未清除时禁止完成，关闭脏 Result 前确认。
 12. Merge Result 写入后若 Git 暂存失败，会恢复写入前文件，避免半完成 resolved 状态。
+13. AI 协议与磁盘事务支持 `oldPath → path` 重命名，可同时修改内容并在失败时恢复原路径和原内容。
+14. Git 分支概览新增远程分支、upstream 和逐分支 ahead/behind；首次 Push 可选择 remote，force-with-lease 使用两次确认。
 
 ## 4. 验收结论
 

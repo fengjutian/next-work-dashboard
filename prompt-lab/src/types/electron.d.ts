@@ -154,7 +154,7 @@ export interface WorkspaceGitStatus {
   status: string;
 }
 
-export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
+export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'compareCommits' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
 
 export interface WorkspaceGitProgress {
   operationId: string;
@@ -176,8 +176,13 @@ export interface WorkspaceGitOverview {
 export interface WorkspaceGitCommit {
   hash: string;
   shortHash: string;
+  parents: string[];
+  refs: string[];
   author: string;
+  authorEmail: string;
   date: string;
+  signatureStatus: string;
+  signer: string;
   subject: string;
 }
 

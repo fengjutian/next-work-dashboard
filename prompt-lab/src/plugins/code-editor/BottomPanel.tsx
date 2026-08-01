@@ -60,6 +60,8 @@ interface BottomPanelProps {
   setGitView: React.Dispatch<React.SetStateAction<'changes' | 'history' | 'stash'>>;
   gitStatus: WorkspaceGitStatus[];
   gitHistory: WorkspaceGitCommit[];
+  loadGitHistory: (filters: { query?: string; author?: string; since?: string; until?: string }, append?: boolean) => Promise<void>;
+  compareGitCommits: (from: string, to: string) => Promise<void>;
   commitMessage: string;
   setCommitMessage: React.Dispatch<React.SetStateAction<string>>;
   commitGitChanges: () => Promise<void>;
@@ -203,7 +205,14 @@ const OutlineTabContent: React.FC<BottomPanelProps> = (p) => (
   </div>
 );
 
-const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => (
+const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => {
+  const [historyQuery, setHistoryQuery] = React.useState('');
+  const [historyAuthor, setHistoryAuthor] = React.useState('');
+  const [historySince, setHistorySince] = React.useState('');
+  const [historyUntil, setHistoryUntil] = React.useState('');
+  const [compareSelection, setCompareSelection] = React.useState<string[]>([]);
+  const filters = { query: historyQuery, author: historyAuthor, since: historySince, until: historyUntil };
+  return (
   <div className="flex min-h-full flex-col py-1">
     <div className="flex flex-wrap items-center gap-1 border-b p-2 text-xs">
       <select value={p.gitOverview?.branch ?? ''} disabled={!!p.gitBusy} onChange={(e) => { const branch = p.gitOverview?.branches.find((item) => item.name === e.target.value); void p.runGitOperation('switchBranch', { name: e.target.value, track: branch?.remote }); }} className="h-8 max-w-56 rounded border bg-background px-2">
@@ -222,6 +231,11 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => (
         const remote = await p.appPrompt(`首次 Push，请选择 Remote${names.length ? `（${names.join(', ')}）` : ''}`, names[0] ?? 'origin');
         if (remote) void p.runGitOperation('push', { setUpstream: true, remote });
       }}>推送</Button>
+      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-destructive" disabled={!!p.gitBusy || !p.gitOverview?.upstream} onClick={async () => {
+        if (!await p.appConfirm('force-with-lease 会重写远程历史，但会保护他人的新提交。是否继续？')) return;
+        if (!await p.appConfirm(`再次确认：使用 force-with-lease 推送 ${p.gitOverview?.branch ?? '当前分支'}？`)) return;
+        void p.runGitOperation('push', { forceWithLease: true });
+      }}>Force Lease</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('sync', { strategy: p.pullStrategy })}>同步</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const m = await p.appPrompt('Stash 说明（可选）') ?? ''; void p.runGitOperation('stashPush', { message: m }); }}>Stash</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const n = await p.appPrompt('Tag 名称'); if (n) void p.runGitOperation('createTag', { name: n }); }}>新建 Tag</Button>
@@ -249,10 +263,23 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => (
       ))}
       {p.gitStatus.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">工作区干净，或当前目录不是 Git 仓库</div>}
     </>}
-    {p.gitView === 'history' && <div className="min-h-0 flex-1 overflow-auto py-1">{p.gitHistory.map((c) => <button key={c.hash} className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={async () => {
+    {p.gitView === 'history' && <div className="min-h-0 flex-1 overflow-auto py-1">
+      <div className="sticky top-0 z-10 grid grid-cols-4 gap-1 border-b bg-background p-2">
+        <input value={historyQuery} onChange={(e) => setHistoryQuery(e.target.value)} placeholder="消息筛选" className="h-7 rounded border bg-background px-2 text-xs" />
+        <input value={historyAuthor} onChange={(e) => setHistoryAuthor(e.target.value)} placeholder="作者筛选" className="h-7 rounded border bg-background px-2 text-xs" />
+        <input type="date" value={historySince} onChange={(e) => setHistorySince(e.target.value)} className="h-7 rounded border bg-background px-2 text-xs" />
+        <div className="flex gap-1"><input type="date" value={historyUntil} onChange={(e) => setHistoryUntil(e.target.value)} className="h-7 min-w-0 flex-1 rounded border bg-background px-2 text-xs" /><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void p.loadGitHistory(filters)}>筛选</Button></div>
+      </div>
+      {compareSelection.length === 2 && <div className="flex items-center gap-2 border-b bg-primary/5 px-3 py-1 text-xs"><span>比较 {compareSelection[0].slice(0, 7)}..{compareSelection[1].slice(0, 7)}</span><Button size="sm" className="h-6 px-2 text-[10px]" onClick={() => void p.compareGitCommits(compareSelection[0], compareSelection[1])}>打开 Diff</Button><button onClick={() => setCompareSelection([])}>清除</button></div>}
+      {p.gitHistory.map((c, index) => <div key={c.hash} className="flex min-h-10 items-center gap-2 px-3 text-xs hover:bg-accent">
+        <button type="button" className={`h-4 w-4 rounded-full border-2 ${c.parents.length > 1 ? 'border-warning bg-warning/30' : 'border-primary bg-background'}`} title={c.parents.length > 1 ? `Merge commit · ${c.parents.length} parents` : `拓扑节点 ${index + 1}`} onClick={() => setCompareSelection((current) => current.includes(c.hash) ? current.filter((hash) => hash !== c.hash) : [...current.slice(-1), c.hash])} />
+        <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={async () => {
       const r = await window.electronAPI.workspace.gitOperation<string>(p.workspacePath || '', 'showCommit', { hash: c.hash });
       if (r.success) p.setDiffView({ path: c.hash, name: `${c.shortHash} ${c.subject}`, original: '', modified: r.data ?? '', language: 'diff', source: 'external' });
-    }}><code className="text-primary">{c.shortHash}</code><span className="min-w-0 flex-1 truncate">{c.subject}</span><span className="text-muted-foreground">{c.author} · {new Date(c.date).toLocaleString()}</span></button>)}</div>}
+    }}><code className="text-primary">{c.shortHash}</code><span className="min-w-0 flex-1 truncate">{c.subject} {c.refs.map((ref) => <span key={ref} className="ml-1 rounded bg-primary/10 px-1 text-[10px] text-primary">{ref}</span>)}</span><span title={c.signer || '未签名'} className={c.signatureStatus === 'G' ? 'text-success' : c.signatureStatus && c.signatureStatus !== 'N' ? 'text-warning' : 'text-muted-foreground'}>{c.signatureStatus === 'G' ? '✓ 已验证' : c.signatureStatus && c.signatureStatus !== 'N' ? `⚠ ${c.signatureStatus}` : '未签名'}</span><span className="text-muted-foreground">{c.author} · {new Date(c.date).toLocaleString()}</span></button>
+      </div>)}
+      <div className="p-2 text-center"><Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void p.loadGitHistory(filters, true)}>加载更多</Button></div>
+    </div>}
     {p.gitView === 'stash' && <div className="grid grid-cols-[100px_1fr] gap-2 p-3 text-xs">
       <span>Tags</span><div className="flex items-start gap-2"><span className="flex-1 break-all text-muted-foreground">{p.gitOverview?.tags.join(', ') || '无'}</span><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={async () => { const n = await p.appPrompt('要删除的 Tag'); if (n) void p.runGitOperation('deleteTag', { name: n }); }}>删除</Button></div>
       <span>Remotes</span><div className="flex items-start gap-2"><pre className="flex-1 whitespace-pre-wrap text-muted-foreground">{p.gitOverview?.remotes.join('\n') || '无'}</pre><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={async () => { const n = await p.appPrompt('要删除的 Remote'); if (n) void p.runGitOperation('removeRemote', { name: n }); }}>删除</Button></div>
@@ -265,7 +292,8 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => (
       </div>
     </div>}
   </div>
-);
+  );
+};
 
 const AiTabContent: React.FC<BottomPanelProps> = (p) => (
   <div className="flex h-full min-h-0 flex-col gap-2 p-3">

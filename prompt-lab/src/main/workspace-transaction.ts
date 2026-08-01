@@ -109,12 +109,13 @@ export function applyWorkspaceFileMutations(
     if (seen.has(absolutePath)) throw new Error('DUPLICATE_MUTATION_PATH');
     seen.add(absolutePath);
 
-    const targetAbsolutePath = mutation.kind === 'rename'
-      ? resolveNewWorkspacePath(rootPath, mutation.targetPath)
+    const targetPath = mutation.kind === 'rename' ? mutation.targetPath : undefined;
+    const targetAbsolutePath = targetPath
+      ? resolveNewWorkspacePath(rootPath, targetPath)
       : undefined;
     if (targetAbsolutePath) {
       if (seen.has(targetAbsolutePath)) throw new Error('DUPLICATE_MUTATION_PATH');
-      if (fs.existsSync(targetAbsolutePath)) throw new Error(`ALREADY_EXISTS:${mutation.targetPath}`);
+      if (fs.existsSync(targetAbsolutePath)) throw new Error(`ALREADY_EXISTS:${targetPath}`);
       seen.add(targetAbsolutePath);
     }
 

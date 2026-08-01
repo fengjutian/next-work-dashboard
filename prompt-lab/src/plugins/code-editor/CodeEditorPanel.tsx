@@ -1538,6 +1538,20 @@ export const CodeEditorPanel: React.FC = () => {
     setTreeMenu(null);
   }, [workspace]);
 
+  const loadGitHistory = useCallback(async (filters: { query?: string; author?: string; since?: string; until?: string }, append = false) => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 50, skip: append ? gitHistory.length : 0, ...filters });
+    if (!result.success) { setStatus(`历史加载失败：${displayError(result.error)}`); return; }
+    setGitHistory((previous) => append ? [...previous, ...(result.data ?? [])] : (result.data ?? []));
+  }, [gitHistory.length, workspace]);
+
+  const compareGitCommits = useCallback(async (from: string, to: string) => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitOperation<string>(workspace.path, 'compareCommits', { from, to });
+    if (!result.success) { setStatus(`Commit 比较失败：${displayError(result.error)}`); return; }
+    setDiffView({ path: `${from}..${to}`, name: `${from.slice(0, 7)} ↔ ${to.slice(0, 7)}`, original: '', modified: result.data ?? '', language: 'diff', source: 'external' });
+  }, [workspace]);
+
   const stageGitHunk = useCallback(async (hunk: GitHunk) => {
     if (!workspace) return;
     const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'stagePatch', { patch: hunk.patch });
@@ -2596,6 +2610,7 @@ export const CodeEditorPanel: React.FC = () => {
         cancelGitOp={() => { if (workspace && gitBusy) void window.electronAPI.workspace.cancelGitOperation(workspace.path, gitBusy.operationId); }}
         gitView={gitView} setGitView={setGitView}
         gitStatus={gitStatus} gitHistory={gitHistory}
+        loadGitHistory={loadGitHistory} compareGitCommits={compareGitCommits}
         commitMessage={commitMessage} setCommitMessage={setCommitMessage}
         commitGitChanges={commitGitChanges}
         refreshGitStatus={refreshGitStatus} refreshGitOverview={refreshGitOverview}
