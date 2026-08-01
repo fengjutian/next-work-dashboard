@@ -54,6 +54,7 @@ export interface ElectronAPI {
     readTextFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<WorkspaceTextFile>>;
     writeTextFile: (rootPath: string, relativePath: string, content: string, options?: WorkspaceWriteOptions) => Promise<WorkspaceResult<{ size: number; modifiedAt: number }>>;
     writeTextFiles: (rootPath: string, edits: WorkspaceTextEdit[]) => Promise<WorkspaceResult<WorkspaceTextEditResult[]>>;
+    mutateFiles: (rootPath: string, mutations: WorkspaceFileMutation[]) => Promise<WorkspaceResult<WorkspaceFileMutationResult[]>>;
     createFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     createDirectory: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     renameEntry: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<void>>;
@@ -153,7 +154,7 @@ export interface WorkspaceGitStatus {
   status: string;
 }
 
-export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
+export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
 
 export interface WorkspaceGitProgress {
   operationId: string;
@@ -164,9 +165,10 @@ export interface WorkspaceGitProgress {
 
 export interface WorkspaceGitOverview {
   branch: string;
+  upstream?: string;
   ahead: number;
   behind: number;
-  branches: Array<{ name: string; current: boolean }>;
+  branches: Array<{ name: string; current: boolean; remote: boolean; upstream?: string; ahead: number; behind: number }>;
   remotes: string[];
   tags: string[];
 }
@@ -218,6 +220,19 @@ export interface WorkspaceTextEditResult {
   path: string;
   size: number;
   modifiedAt: number;
+}
+
+export type WorkspaceFileMutation =
+  | ({ kind: 'write' } & WorkspaceTextEdit)
+  | { kind: 'create'; path: string; content: string; encoding?: WorkspaceEncoding; lineEnding?: 'LF' | 'CRLF' }
+  | { kind: 'delete'; path: string; expectedModifiedAt?: number }
+  | { kind: 'rename'; path: string; targetPath: string; content?: string; encoding?: WorkspaceEncoding; lineEnding?: 'LF' | 'CRLF'; expectedModifiedAt?: number };
+
+export interface WorkspaceFileMutationResult {
+  kind: WorkspaceFileMutation['kind'];
+  path: string;
+  size?: number;
+  modifiedAt?: number;
 }
 
 export type WorkspaceEncoding = 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk';

@@ -33,7 +33,7 @@ import type {
   WorkspaceGitOperation,
   WorkspaceSearchResult,
 } from '@/types/electron';
-import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
+import { decodeBase64Utf8, hasGitConflictMarkers, languageFromName, languageIdFromName } from './editor-utils';
 import { DialogOverlay } from './DialogOverlay';
 import { BottomPanel } from './BottomPanel';
 import { DiffViewPanel } from './DiffViewPanel';
@@ -81,7 +81,7 @@ function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode
 }
 
 interface GitHunk { label: string; patch: string }
-interface AiFileProposal { path: string; original: string; modified: string; language: string; metadata?: OpenDocument }
+interface AiFileProposal { path: string; previousPath?: string; original: string; modified: string; language: string; metadata?: OpenDocument }
 interface AiEditHistory { id: number; path: string; before: string; after: string }
 
 function computeDiffHunks(original: string, modified: string): AiHunk[] {
@@ -229,6 +229,8 @@ export const CodeEditorPanel: React.FC = () => {
   const [aiHunks, setAiHunks] = useState<AiHunk[]>([]);
   const [mergeHunks, setMergeHunks] = useState<AiHunk[]>([]);
   const [mergeBase, setMergeBase] = useState<string | null>(null);
+  const [mergeResult, setMergeResult] = useState<string | null>(null);
+  const [mergeInitialResult, setMergeInitialResult] = useState<string | null>(null);
   const terminalCounterRef = useRef(1);
   const terminalProfiles = useMemo<TerminalProfile[]>(() => navigator.userAgent.includes('Win') ? [
     { name: 'PowerShell', shell: 'powershell.exe' }, { name: 'cmd', shell: 'cmd.exe' }, { name: 'Git Bash', shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['-i'] },
@@ -1498,6 +1500,8 @@ export const CodeEditorPanel: React.FC = () => {
       }
       setGitHunks([]);
       setMergeBase(versions.data.base);
+      setMergeResult(versions.data.ours);
+      setMergeInitialResult(versions.data.ours);
       setDiffView({ path: entry.path, name: entry.path, original: versions.data.ours, modified: versions.data.theirs, language: languageIdFromName(entry.path), source: 'merge' });
       return;
     }
@@ -1590,18 +1594,22 @@ export const CodeEditorPanel: React.FC = () => {
     const remaining = computeDiffHunks(newOriginal, newModified);
     setMergeHunks(remaining);
     setDiffView({ ...diffView, original: newOriginal, modified: newModified });
+    setMergeResult(newOriginal);
     setStatus(`冲突块 ${hunkIndex + 1}：选择${side === 'ours' ? '当前分支' : '传入分支'}，剩余 ${remaining.length} 个`);
   }, [diffView, mergeHunks]);
 
   const finishMerge = useCallback(async () => {
-    if (!workspace || !diffView || diffView.source !== 'merge') return;
-    // Write the resolved file content (newOriginal === newModified after all blocks resolved)
+    if (!workspace || !diffView || diffView.source !== 'merge' || mergeResult === null) return;
+    if (hasGitConflictMarkers(mergeResult)) {
+      setStatus('Result 中仍有冲突标记，无法完成合并');
+      return;
+    }
     const read = await window.electronAPI.workspace.readTextFile(workspace.path, diffView.path);
     if (!read.success || !read.data) {
       setStatus('无法读取文件以完成合并');
       return;
     }
-    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, diffView.original, {
+    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, mergeResult, {
       encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt,
     });
     if (!write.success) {
@@ -1611,17 +1619,24 @@ export const CodeEditorPanel: React.FC = () => {
     // Stage the resolved file
     const stage = await window.electronAPI.workspace.gitStage(workspace.path, [diffView.path]);
     if (!stage.success) {
+      await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, read.data.content, {
+        encoding: read.data.encoding,
+        lineEnding: read.data.lineEnding,
+        expectedModifiedAt: write.data?.modifiedAt,
+      });
       setStatus(`暂存失败：${displayError(stage.error)}`);
       return;
     }
     setDiffView(null);
     setMergeHunks([]);
     setMergeBase(null);
+    setMergeResult(null);
+    setMergeInitialResult(null);
     await refreshGitStatus();
-    setDocuments((previous) => previous.map((d) => d.path === diffView.path ? { ...d, content: diffView.original, savedContent: diffView.original } : d));
+    setDocuments((previous) => previous.map((d) => d.path === diffView.path ? { ...d, content: mergeResult, savedContent: mergeResult, modifiedAt: write.data?.modifiedAt } : d));
     appendOutput(`合并完成：${diffView.name}`);
     setStatus('合并冲突已解决并暂存');
-  }, [appendOutput, diffView, refreshGitStatus, workspace]);
+  }, [appendOutput, diffView, mergeResult, refreshGitStatus, workspace]);
 
   const generateAiEdit = useCallback(async () => {
     if (!activeDocument || !aiInstruction.trim()) return;
@@ -1678,18 +1693,23 @@ export const CodeEditorPanel: React.FC = () => {
           }
         }
         const messages = [
-          { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"相对路径","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串 ""。只返回需要变更的文件，不得返回 Markdown。' },
+          { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"目标相对路径","oldPath":"重命名前相对路径（仅重命名时）","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串。重命名：同时提供 oldPath、path 和重命名后的完整 content。只返回需要变更的文件，不得返回 Markdown。' },
           { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${contexts.map((item) => `--- ${item.path} ---\n${item.original}`).join('\n\n')}` },
         ];
         let response = '';
         for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: 24000 })) response += chunk.delta;
         const jsonText = response.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-        const parsed = JSON.parse(jsonText) as { files?: Array<{ path: string; content: string }> };
+        const parsed = JSON.parse(jsonText) as { files?: Array<{ path: string; oldPath?: string; content: string }> };
         const allowed = new Map(contexts.map((item) => [item.path.replace(/\\/g, '/'), item]));
         const proposals = (parsed.files ?? []).flatMap((file) => {
           const normalizedPath = file.path.replace(/\\/g, '/');
-          const context = allowed.get(normalizedPath);
+          const previousPath = file.oldPath?.replace(/\\/g, '/');
+          const context = allowed.get(previousPath ?? normalizedPath);
           if (typeof file.content !== 'string') return [];
+          if (previousPath) {
+            if (!context || !file.content || previousPath === normalizedPath || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
+            return [{ ...context, path: normalizedPath, previousPath, modified: file.content, language: languageIdFromName(normalizedPath) }];
+          }
           // New file: path not in existing contexts
           if (!context) {
             if (!file.content || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
@@ -1819,13 +1839,14 @@ export const CodeEditorPanel: React.FC = () => {
     // Preflight every proposal before mutating editor state. A conflict in one
     // file rejects the whole group so the user never gets a half-accepted edit.
     for (const proposal of aiProposals) {
-      const opened = documents.find((document) => document.path === proposal.path);
+      const sourcePath = proposal.previousPath ?? proposal.path;
+      const opened = documents.find((document) => document.path === sourcePath);
       if (opened && opened.content !== proposal.original) {
         setStatus(`AI 候选已过期：${proposal.path} 在生成后被修改，未接受任何文件`);
         return;
       }
       if (proposal.metadata && !opened) {
-        const current = await window.electronAPI.workspace.readTextFile(workspace.path, proposal.path);
+        const current = await window.electronAPI.workspace.readTextFile(workspace.path, sourcePath);
         if (!current.success || !current.data || current.data.modifiedAt !== proposal.metadata.modifiedAt) {
           setStatus(`AI 候选已过期：${proposal.path} 的磁盘版本已变化，未接受任何文件`);
           return;
@@ -1833,13 +1854,55 @@ export const CodeEditorPanel: React.FC = () => {
       }
     }
 
+    const mutations = aiProposals.map((proposal) => {
+      if (!proposal.metadata) {
+        return { kind: 'create' as const, path: proposal.path, content: proposal.modified, encoding: 'utf8' as const, lineEnding: 'LF' as const };
+      }
+      if (proposal.modified === '') {
+        return { kind: 'delete' as const, path: proposal.path, expectedModifiedAt: proposal.metadata.modifiedAt };
+      }
+      if (proposal.previousPath) {
+        return {
+          kind: 'rename' as const,
+          path: proposal.previousPath,
+          targetPath: proposal.path,
+          content: proposal.modified,
+          encoding: proposal.metadata.encoding,
+          lineEnding: proposal.metadata.lineEnding,
+          expectedModifiedAt: proposal.metadata.modifiedAt,
+        };
+      }
+      return {
+        kind: 'write' as const,
+        path: proposal.path,
+        content: proposal.modified,
+        encoding: proposal.metadata.encoding,
+        lineEnding: proposal.metadata.lineEnding,
+        expectedModifiedAt: proposal.metadata.modifiedAt,
+      };
+    });
+    const diskResult = await window.electronAPI.workspace.mutateFiles(workspace.path, mutations);
+    if (!diskResult.success) {
+      setStatus(`AI 文件事务失败，工作区未产生部分修改：${displayError(diskResult.error)}`);
+      return;
+    }
+    const modifiedAtByPath = new Map((diskResult.data ?? []).map((item) => [item.path, item.modifiedAt]));
+
     setDocuments((previous) => {
-      const proposalByPath = new Map(aiProposals.map((proposal) => [proposal.path, proposal]));
       const updated = previous
-        .filter((document) => proposalByPath.get(document.path)?.modified !== '')
+        .filter((document) => aiProposals.find((proposal) => (proposal.previousPath ?? proposal.path) === document.path)?.modified !== '')
         .map((document) => {
-          const proposal = proposalByPath.get(document.path);
-          return proposal ? { ...document, content: proposal.modified, pinned: true } : document;
+          const proposal = aiProposals.find((item) => (item.previousPath ?? item.path) === document.path);
+          return proposal ? {
+            ...document,
+            path: proposal.path,
+            name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
+            content: proposal.modified,
+            savedContent: proposal.modified,
+            language: proposal.language,
+            modifiedAt: modifiedAtByPath.get(proposal.path),
+            pinned: true,
+          } : document;
         });
       const existingPaths = new Set(updated.map((document) => document.path));
       for (const proposal of aiProposals) {
@@ -1848,10 +1911,11 @@ export const CodeEditorPanel: React.FC = () => {
           path: proposal.path,
           name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
           content: proposal.modified,
-          savedContent: '',
+          savedContent: proposal.modified,
           language: proposal.language,
           encoding: 'utf8',
           lineEnding: 'LF',
+          modifiedAt: modifiedAtByPath.get(proposal.path),
           pinned: true,
         });
       }
@@ -1867,9 +1931,29 @@ export const CodeEditorPanel: React.FC = () => {
     setAiProposals([]);
     setDiffView(null);
     updateSessionAcceptCount();
-    appendOutput(`已原子接受 ${aiProposals.length} 个 AI 文件候选（尚未保存）`);
-    setStatus(`已接受 ${aiProposals.length} 个文件，请检查后统一保存`);
+    appendOutput(`已原子应用 ${aiProposals.length} 个 AI 文件修改到磁盘`);
+    setStatus(`已原子应用 ${aiProposals.length} 个文件`);
   }, [aiProposals, appendOutput, documents, workspace]);
+
+  const closeDiffView = useCallback(async () => {
+    if (!diffView) return;
+    if (diffView.source === 'ai') {
+      rejectAiEdit();
+      return;
+    }
+    if (diffView.source === 'search') {
+      rejectSearchReplace();
+      return;
+    }
+    if (diffView.source === 'merge') {
+      if (mergeResult !== mergeInitialResult && !await appConfirm('Result 有未保存的合并修改，确定关闭吗？')) return;
+      setMergeHunks([]);
+      setMergeBase(null);
+      setMergeResult(null);
+      setMergeInitialResult(null);
+    }
+    setDiffView(null);
+  }, [appConfirm, diffView, mergeInitialResult, mergeResult, rejectAiEdit, rejectSearchReplace]);
 
   // Compute hunks whenever an AI or merge diff view is opened
   useEffect(() => {
@@ -2607,7 +2691,11 @@ export const CodeEditorPanel: React.FC = () => {
         mergeHunks={mergeHunks}
         searchPreviews={searchPreviews}
         aiProposals={aiProposals}
-        onClose={() => diffView.source === 'ai' ? rejectAiEdit() : diffView.source === 'merge' ? (mergeHunks.length === 0 ? setDiffView(null) : resolveGitConflict('ours')) : diffView.source === 'search' ? rejectSearchReplace() : setDiffView(null)}
+        mergeBase={mergeBase}
+        mergeResult={mergeResult}
+        onMergeResultChange={setMergeResult}
+        canFinishMerge={mergeResult !== null && !hasGitConflictMarkers(mergeResult)}
+        onClose={() => void closeDiffView()}
         onStageGitHunk={stageGitHunk}
         onUnstageFile={unstageFile}
         gitStatusHasStaged={gitStatus.some((e) => e.path === diffView.path && e.status[0] !== ' ' && e.status[0] !== '?')}

@@ -10,8 +10,14 @@ import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionA
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
 import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace-path';
 import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
-import { applyWorkspaceTextEdits, type WorkspaceTextEdit } from './workspace-transaction';
+import {
+  applyWorkspaceFileMutations,
+  applyWorkspaceTextEdits,
+  type WorkspaceFileMutation,
+  type WorkspaceTextEdit,
+} from './workspace-transaction';
 import { redactGitSecrets } from './git-security';
+import { parseGitBranches } from './git-overview';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -641,6 +647,18 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:mutateFiles', async (
+    _event,
+    rootPath: string,
+    mutations: WorkspaceFileMutation[],
+  ) => {
+    try {
+      return { success: true, data: applyWorkspaceFileMutations(rootPath, mutations) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:createFile', async (
     _event,
     rootPath: string,
@@ -983,22 +1001,22 @@ export function setupIPC(webviewPreloadPath: string) {
         if (signal.aborted) throw new Error('GIT_CANCELLED');
         let data: unknown;
         if (operation === 'overview') {
-          const [branchResult, branches, remotes, tags, ab] = await Promise.all([
+          const [branchResult, branches, remotes, tags, ab, upstream] = await Promise.all([
             runGit(root, ['branch', '--show-current'], 2 * 1024 * 1024, signal),
-            runGit(root, ['branch', '--format=%(refname:short)%09%(HEAD)'], 2 * 1024 * 1024, signal).catch(() => ''),
+            runGit(root, ['for-each-ref', '--format=%(refname)%09%(refname:short)%09%(HEAD)%09%(upstream:short)%09%(upstream:track,nobracket)', 'refs/heads', 'refs/remotes'], 2 * 1024 * 1024, signal).catch(() => ''),
             runGit(root, ['remote', '-v'], 2 * 1024 * 1024, signal).catch(() => ''),
             runGit(root, ['tag', '--sort=-creatordate'], 2 * 1024 * 1024, signal).catch(() => ''),
             runGit(root, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], 2 * 1024 * 1024, signal).catch(() => ''),
+            runGit(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], 2 * 1024 * 1024, signal).catch(() => ''),
           ]);
           const branch = branchResult;
           const [ahead, behind] = ab.split('\t').map(Number);
           data = {
             branch,
+            upstream: upstream || undefined,
             ahead: Number.isFinite(ahead) ? ahead : 0,
             behind: Number.isFinite(behind) ? behind : 0,
-            branches: branches.split(/\r?\n/).filter(Boolean).map((line) => {
-              const [name, head] = line.split('\t'); return { name, current: head === '*' };
-            }),
+            branches: parseGitBranches(branches),
             remotes: remotes.split(/\r?\n/).filter(Boolean),
             tags: tags.split(/\r?\n/).filter(Boolean),
           };
@@ -1012,7 +1030,8 @@ export function setupIPC(webviewPreloadPath: string) {
           const to = validateGitRef(String(payload.to ?? ''));
           data = await runGit(root, ['branch', '-m', from, to], 2 * 1024 * 1024, signal);
         } else if (operation === 'switchBranch') {
-          data = await runGit(root, ['switch', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
+          const name = validateGitRef(String(payload.name ?? ''));
+          data = await runGit(root, payload.track ? ['switch', '--track', name] : ['switch', name], 2 * 1024 * 1024, signal);
         } else if (operation === 'fetch') {
           data = await runGit(root, ['fetch', '--all', '--prune'], 20 * 1024 * 1024, signal);
         } else if (operation === 'pull') {
@@ -1020,7 +1039,8 @@ export function setupIPC(webviewPreloadPath: string) {
           const args = strategy === 'rebase' ? ['pull', '--rebase'] : strategy === 'merge' ? ['pull', '--no-ff'] : ['pull', '--ff-only'];
           data = await runGit(root, args, 20 * 1024 * 1024, signal);
         } else if (operation === 'push') {
-          const args = payload.setUpstream ? ['push', '--set-upstream', 'origin', 'HEAD'] : ['push'];
+          const remote = validateGitRef(String(payload.remote ?? 'origin'));
+          const args = payload.setUpstream ? ['push', '--set-upstream', remote, 'HEAD'] : ['push'];
           data = await runGit(root, args, 20 * 1024 * 1024, signal);
         } else if (operation === 'sync') {
           const strategy = (['ff-only', 'merge', 'rebase'] as const).includes(payload.strategy as 'ff-only') ? payload.strategy : 'ff-only';
@@ -1056,6 +1076,11 @@ export function setupIPC(webviewPreloadPath: string) {
           const strategy = payload.strategy === 'theirs' ? '--theirs' : '--ours';
           await runGit(root, ['checkout', strategy, '--', relativePath], 2 * 1024 * 1024, signal);
           data = await runGit(root, ['add', '--', relativePath], 2 * 1024 * 1024, signal);
+        } else if (operation === 'continueOperation' || operation === 'abortOperation') {
+          const kind = String(payload.kind ?? '');
+          if (!['merge', 'rebase', 'cherry-pick'].includes(kind)) throw new Error('INVALID_GIT_SEQUENCE');
+          const action = operation === 'continueOperation' ? '--continue' : '--abort';
+          data = await runGit(root, [kind, action], 20 * 1024 * 1024, signal);
         } else if (operation === 'stashList') {
           const output = await runGit(root, ['stash', 'list', '--format=%gd%x1f%H%x1f%cr%x1f%s'], 2 * 1024 * 1024, signal);
           data = output.split(/\r?\n/).filter(Boolean).map((line) => {

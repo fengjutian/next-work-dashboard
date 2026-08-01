@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decodeBase64Utf8,
+  hasGitConflictMarkers,
   languageFromName,
   languageIdFromName,
 } from '../src/plugins/code-editor/editor-utils';
@@ -25,5 +26,11 @@ describe('代码编辑器', () => {
     expect(languageFromName('Dockerfile')).toBe('Dockerfile');
     expect(languageIdFromName('settings.json')).toBe('json');
     expect(languageIdFromName('unknown.extension')).toBe('plaintext');
+  });
+
+  it('仅在完整行上识别未解决的 Git 冲突标记', () => {
+    expect(hasGitConflictMarkers('before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch')).toBe(true);
+    expect(hasGitConflictMarkers('const text = "<<<<<<< is documentation";')).toBe(false);
+    expect(hasGitConflictMarkers('resolved result')).toBe(false);
   });
 });

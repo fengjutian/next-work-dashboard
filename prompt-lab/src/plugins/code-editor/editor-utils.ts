@@ -36,3 +36,7 @@ export function languageFromName(name: string): string {
   };
   return labels[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
 }
+
+export function hasGitConflictMarkers(content: string): boolean {
+  return /^(?:<<<<<<<|=======|>>>>>>>)(?: |$)/m.test(content);
+}

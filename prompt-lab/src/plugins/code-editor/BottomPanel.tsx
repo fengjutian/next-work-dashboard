@@ -206,8 +206,8 @@ const OutlineTabContent: React.FC<BottomPanelProps> = (p) => (
 const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => (
   <div className="flex min-h-full flex-col py-1">
     <div className="flex flex-wrap items-center gap-1 border-b p-2 text-xs">
-      <select value={p.gitOverview?.branch ?? ''} disabled={!!p.gitBusy} onChange={(e) => void p.runGitOperation('switchBranch', { name: e.target.value })} className="h-8 max-w-48 rounded border bg-background px-2">
-        {(p.gitOverview?.branches ?? []).map((b) => <option key={b.name} value={b.name}>{b.current ? '✓ ' : ''}{b.name}</option>)}
+      <select value={p.gitOverview?.branch ?? ''} disabled={!!p.gitBusy} onChange={(e) => { const branch = p.gitOverview?.branches.find((item) => item.name === e.target.value); void p.runGitOperation('switchBranch', { name: e.target.value, track: branch?.remote }); }} className="h-8 max-w-56 rounded border bg-background px-2">
+        {(p.gitOverview?.branches ?? []).map((b) => <option key={b.name} value={b.name}>{b.current ? '✓ ' : ''}{b.remote ? '远程 · ' : ''}{b.name}{b.upstream ? ` → ${b.upstream}` : ''}{b.ahead ? ` ↑${b.ahead}` : ''}{b.behind ? ` ↓${b.behind}` : ''}</option>)}
       </select>
       <Button size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const n = await p.appPrompt('新分支名称'); if (n) void p.runGitOperation('createBranch', { name: n }); }}>新建分支</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-destructive" disabled={!!p.gitBusy || !p.gitOverview?.branch} onClick={async () => { const n = await p.appPrompt('删除分支名称'); if (n && await p.appConfirm(`确定删除分支 ${n}？`)) void p.runGitOperation('deleteBranch', { name: n }); }}>删除分支</Button>
@@ -216,11 +216,18 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => (
       <select value={p.pullStrategy} disabled={!!p.gitBusy} onChange={(e) => p.setPullStrategy(e.target.value as 'ff-only' | 'merge' | 'rebase')} className="h-8 rounded border bg-background px-1 text-[10px]" title="拉取策略">{[{v:'ff-only',l:'FF'},{v:'merge',l:'Merge'},{v:'rebase',l:'Rebase'}]?.map(({v,l}) => <option key={v} value={v}>{l}</option>)}</select>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('fetch')}>Fetch</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('pull', { strategy: p.pullStrategy })}>拉取</Button>
-      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('push', p.gitOverview?.branch && !p.gitOverview.remotes?.some((r) => r.includes('(push)')) ? { setUpstream: true } : undefined)}>推送</Button>
+      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => {
+        if (p.gitOverview?.upstream) { void p.runGitOperation('push'); return; }
+        const names = [...new Set((p.gitOverview?.remotes ?? []).map((line) => line.split(/\s+/)[0]).filter(Boolean))];
+        const remote = await p.appPrompt(`首次 Push，请选择 Remote${names.length ? `（${names.join(', ')}）` : ''}`, names[0] ?? 'origin');
+        if (remote) void p.runGitOperation('push', { setUpstream: true, remote });
+      }}>推送</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('sync', { strategy: p.pullStrategy })}>同步</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const m = await p.appPrompt('Stash 说明（可选）') ?? ''; void p.runGitOperation('stashPush', { message: m }); }}>Stash</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const n = await p.appPrompt('Tag 名称'); if (n) void p.runGitOperation('createTag', { name: n }); }}>新建 Tag</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const n = await p.appPrompt('Remote 名称', 'origin'); const u = n ? await p.appPrompt('Remote URL') : null; if (n && u) void p.runGitOperation('addRemote', { name: n, url: u }); }}>添加 Remote</Button>
+      <Button size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => { const kind = await p.appPrompt('继续操作类型：merge / rebase / cherry-pick', 'merge'); if (kind) void p.runGitOperation('continueOperation', { kind }); }}>Continue</Button>
+      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-destructive" disabled={!!p.gitBusy} onClick={async () => { const kind = await p.appPrompt('中止操作类型：merge / rebase / cherry-pick', 'merge'); if (kind && await p.appConfirm(`确定中止 ${kind}？`)) void p.runGitOperation('abortOperation', { kind }); }}>Abort</Button>
       {p.gitBusy && <span className="ml-auto text-muted-foreground">正在执行 {p.gitBusy.operation}…</span>}
       {p.gitBusy && <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-destructive" onClick={p.cancelGitOp}>取消</Button>}
     </div>

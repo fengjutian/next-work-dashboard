@@ -1,5 +1,5 @@
 import React from 'react';
-import { DiffEditor } from '@monaco-editor/react';
+import Editor, { DiffEditor } from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
 import type { AiHunk } from './editor-types';
 
@@ -18,6 +18,10 @@ interface DiffViewProps {
   mergeHunks: AiHunk[];
   searchPreviews: Array<{ path: string }>;
   aiProposals: Array<{ path: string }>;
+  mergeBase: string | null;
+  mergeResult: string | null;
+  onMergeResultChange: (value: string) => void;
+  canFinishMerge: boolean;
   onClose: () => void;
   onStageGitHunk: (hunk: { label: string; patch: string }) => void;
   onUnstageFile: () => void;
@@ -35,6 +39,7 @@ interface DiffViewProps {
 
 export const DiffViewPanel: React.FC<DiffViewProps> = ({
   diffView, resolvedTheme, gitHunks, aiHunks, mergeHunks, searchPreviews, aiProposals,
+  mergeBase, mergeResult, onMergeResultChange, canFinishMerge,
   onClose, onStageGitHunk, onUnstageFile, gitStatusHasStaged,
   onAcceptAi, onAcceptAllAi, onApplyAiHunk,
   onApplyMergeHunk, onFinishMerge, onAcceptSearch,
@@ -58,7 +63,7 @@ export const DiffViewPanel: React.FC<DiffViewProps> = ({
           {mergeHunks.length > 12 && <span className="text-muted-foreground">+{mergeHunks.length - 12}</span>}
         </div>
       )}
-      {diffView.source === 'merge' && mergeHunks.length === 0 && <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void onFinishMerge()}>完成合并</Button>}
+      {diffView.source === 'merge' && <Button size="sm" className="h-7 px-3 text-xs" disabled={!canFinishMerge} onClick={() => void onFinishMerge()}>保存 Result 并暂存</Button>}
       {diffView.source === 'ai' && aiHunks.length > 0 && (
         <div className="flex items-center gap-1 overflow-x-auto">
           {aiHunks.slice(0, 12).map((hunk) => (
@@ -84,7 +89,24 @@ export const DiffViewPanel: React.FC<DiffViewProps> = ({
       </Button>
     </div>
     <div className="min-h-0 flex-1">
-      <DiffEditor
+      {diffView.source === 'merge' ? (
+        <div className="grid h-full grid-cols-3 grid-rows-2 gap-px bg-border">
+          {[
+            ['Base', mergeBase ?? ''],
+            ['Current', diffView.original],
+            ['Incoming', diffView.modified],
+          ].map(([label, value]) => (
+            <div key={label} className="relative min-h-0 bg-background pt-6">
+              <span className="absolute left-2 top-1 z-10 text-[10px] font-semibold text-muted-foreground">{label}</span>
+              <Editor value={value} language={diffView.language} theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, lineNumbersMinChars: 3 }} />
+            </div>
+          ))}
+          <div className="relative col-span-3 min-h-0 bg-background pt-6">
+            <span className="absolute left-2 top-1 z-10 text-[10px] font-semibold text-primary">Result（可编辑）</span>
+            <Editor value={mergeResult ?? ''} onChange={(value) => onMergeResultChange(value ?? '')} language={diffView.language} theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'} options={{ automaticLayout: true, minimap: { enabled: false }, lineNumbersMinChars: 3 }} />
+          </div>
+        </div>
+      ) : <DiffEditor
         original={diffView.original}
         modified={diffView.modified}
         language={diffView.language}
@@ -97,7 +119,7 @@ export const DiffViewPanel: React.FC<DiffViewProps> = ({
           renderSideBySide: true,
           minimap: { enabled: false },
         }}
-      />
+      />}
     </div>
   </div>
 );
