@@ -7,6 +7,7 @@ import type { BottomPanelTab, EditorPreferences, EditorProblem, EditorSymbol } f
 import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus, WorkspaceTask } from '@/types/electron';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { classifyConflictStatus } from '../../main/git-conflicts';
+import { layoutGitGraph } from './git-graph';
 
 interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
 
@@ -224,6 +225,9 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => {
   const [historyUntil, setHistoryUntil] = React.useState('');
   const [compareSelection, setCompareSelection] = React.useState<string[]>([]);
   const filters = { query: historyQuery, author: historyAuthor, since: historySince, until: historyUntil };
+  const graph = React.useMemo(() => layoutGitGraph(p.gitHistory), [p.gitHistory]);
+  const graphColors = ['#3b82f6', '#a855f7', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
+  const graphWidth = graph.laneCount * 18 + 12;
   return (
   <div className="flex min-h-full flex-col py-1">
     <div className="flex flex-wrap items-center gap-1 border-b p-2 text-xs">
@@ -285,13 +289,19 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => {
         <div className="flex gap-1"><input type="date" value={historyUntil} onChange={(e) => setHistoryUntil(e.target.value)} className="h-7 min-w-0 flex-1 rounded border bg-background px-2 text-xs" /><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void p.loadGitHistory(filters)}>筛选</Button></div>
       </div>
       {compareSelection.length === 2 && <div className="flex items-center gap-2 border-b bg-primary/5 px-3 py-1 text-xs"><span>比较 {compareSelection[0].slice(0, 7)}..{compareSelection[1].slice(0, 7)}</span><Button size="sm" className="h-6 px-2 text-[10px]" onClick={() => void p.compareGitCommits(compareSelection[0], compareSelection[1])}>打开 Diff</Button><button onClick={() => setCompareSelection([])}>清除</button></div>}
-      {p.gitHistory.map((c, index) => <div key={c.hash} className="flex min-h-10 items-center gap-2 px-3 text-xs hover:bg-accent">
-        <button type="button" className={`h-4 w-4 rounded-full border-2 ${c.parents.length > 1 ? 'border-warning bg-warning/30' : 'border-primary bg-background'}`} title={c.parents.length > 1 ? `Merge commit · ${c.parents.length} parents` : `拓扑节点 ${index + 1}`} onClick={() => setCompareSelection((current) => current.includes(c.hash) ? current.filter((hash) => hash !== c.hash) : [...current.slice(-1), c.hash])} />
+      <div className="relative" style={{ minHeight: p.gitHistory.length * 40 }}>
+      <svg className="pointer-events-none absolute left-0 top-0" width={graphWidth} height={Math.max(1, p.gitHistory.length * 40)} aria-label="Git 提交拓扑图">
+        {graph.edges.map((edge, index) => { const x1 = 12 + edge.fromLane * 18; const y1 = edge.fromRow * 40 + 20; const x2 = 12 + edge.toLane * 18; const y2 = Math.min(p.gitHistory.length * 40, edge.toRow * 40 + 20); const middle = y1 + Math.max(10, (y2 - y1) / 2); return <path key={`${edge.parent}:${index}`} d={`M ${x1} ${y1} C ${x1} ${middle}, ${x2} ${middle}, ${x2} ${y2}`} fill="none" stroke={graphColors[edge.color]} strokeWidth="2" />; })}
+        {graph.nodes.map((node) => <circle key={node.hash} cx={12 + node.lane * 18} cy={node.row * 40 + 20} r="5" fill="var(--background)" stroke={graphColors[node.color]} strokeWidth="3" />)}
+      </svg>
+      {p.gitHistory.map((c, index) => { const node = graph.nodes[index]; return <div key={c.hash} className="flex h-10 items-center gap-2 pr-3 text-xs hover:bg-accent" style={{ paddingLeft: graphWidth }}>
+        <button type="button" className="absolute h-4 w-4 rounded-full opacity-0 focus:opacity-100" style={{ left: 4 + node.lane * 18, top: index * 40 + 12 }} title={c.parents.length > 1 ? `Merge commit · ${c.parents.length} parents` : `拓扑节点 ${index + 1}`} onClick={() => setCompareSelection((current) => current.includes(c.hash) ? current.filter((hash) => hash !== c.hash) : [...current.slice(-1), c.hash])} />
         <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={async () => {
       const r = await window.electronAPI.workspace.gitOperation<string>(p.workspacePath || '', 'showCommit', { hash: c.hash });
       if (r.success) p.setDiffView({ path: c.hash, name: `${c.shortHash} ${c.subject}`, original: '', modified: r.data ?? '', language: 'diff', source: 'external' });
     }}><code className="text-primary">{c.shortHash}</code><span className="min-w-0 flex-1 truncate">{c.subject} {c.refs.map((ref) => <span key={ref} className="ml-1 rounded bg-primary/10 px-1 text-[10px] text-primary">{ref}</span>)}</span><span title={c.signer || '未签名'} className={c.signatureStatus === 'G' ? 'text-success' : c.signatureStatus && c.signatureStatus !== 'N' ? 'text-warning' : 'text-muted-foreground'}>{c.signatureStatus === 'G' ? '✓ 已验证' : c.signatureStatus && c.signatureStatus !== 'N' ? `⚠ ${c.signatureStatus}` : '未签名'}</span><span className="text-muted-foreground">{c.author} · {new Date(c.date).toLocaleString()}</span></button>
-      </div>)}
+      </div>; })}
+      </div>
       <div className="p-2 text-center"><Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void p.loadGitHistory(filters, true)}>加载更多</Button></div>
     </div>}
     {p.gitView === 'stash' && <div className="grid grid-cols-[100px_1fr] gap-2 p-3 text-xs">

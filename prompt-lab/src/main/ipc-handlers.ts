@@ -25,6 +25,7 @@ import { parseGitBranches } from './git-overview';
 import { findSemanticMatches, type SemanticMatch } from './semantic-search';
 import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-tasks';
 import { WorkspaceTaskRunner } from './task-runner';
+import { detectRenameRename, parseUnmergedIndex } from './git-rename-conflict';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -802,7 +803,8 @@ export function setupIPC(webviewPreloadPath: string) {
     try {
       const root = resolveWorkspacePath(rootPath);
       const resolvedEnv = resolveSecretReferences(environment ?? {}, (name) => getToken(`terminal-env:${name}`));
-      const result = await workspaceTaskRunner.run(runId, loadWorkspaceTaskDefinitions(root), taskName, root, { ...(process.env as Record<string, string>), ...resolvedEnv }, (payload) => event.sender.send('workspace:taskEvent', payload));
+      const tasks = loadWorkspaceTaskDefinitions(root).map((task) => ({ ...task, env: resolveSecretReferences(task.env ?? {}, (name) => getToken(`terminal-env:${name}`)) }));
+      const result = await workspaceTaskRunner.run(runId, tasks, taskName, root, { ...(process.env as Record<string, string>), ...resolvedEnv }, (payload) => event.sender.send('workspace:taskEvent', payload));
       return { success: true, data: result };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -1146,14 +1148,23 @@ export function setupIPC(webviewPreloadPath: string) {
           data = await applyGitPatch(root, String(payload.patch ?? ''));
         } else if (operation === 'conflictVersions') {
           const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? ''))).replace(/\\/g, '/');
-          const readStage = (stage: number) => runGit(root, ['show', `:${stage}:${relativePath}`], 20 * 1024 * 1024, signal).catch(() => '');
-          const [base, ours, theirs] = await Promise.all([readStage(1), readStage(2), readStage(3)]);
-          data = { base, ours, theirs };
+          const [statusOutput, indexOutput] = await Promise.all([runGit(root, ['status', '--porcelain=v1', '--untracked-files=no'], 2 * 1024 * 1024, signal), runGit(root, ['ls-files', '-u'], 5 * 1024 * 1024, signal)]);
+          const statuses = statusOutput.split(/\r?\n/).filter(Boolean).map((line) => ({ status: line.slice(0, 2), path: line.slice(3).trim().replace(/\\/g, '/') }));
+          const renameGroup = detectRenameRename(statuses, parseUnmergedIndex(indexOutput), relativePath);
+          const paths = renameGroup ? { base: renameGroup.basePath, ours: renameGroup.oursPath, theirs: renameGroup.theirsPath } : { base: relativePath, ours: relativePath, theirs: relativePath };
+          const readStage = (stage: number, stagePath: string) => runGit(root, ['show', `:${stage}:${stagePath}`], 20 * 1024 * 1024, signal).catch(() => '');
+          const [base, ours, theirs] = await Promise.all([readStage(1, paths.base), readStage(2, paths.ours), readStage(3, paths.theirs)]);
+          data = { base, ours, theirs, conflictType: renameGroup?.type, paths };
         } else if (operation === 'resolveConflict') {
           const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
           const strategy = payload.strategy === 'theirs' ? '--theirs' : '--ours';
           await runGit(root, ['checkout', strategy, '--', relativePath], 2 * 1024 * 1024, signal);
           data = await runGit(root, ['add', '--', relativePath], 2 * 1024 * 1024, signal);
+        } else if (operation === 'stageConflictResult') {
+          const resultPath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.resultPath ?? '')));
+          const obsoletePaths = Array.isArray(payload.obsoletePaths) ? payload.obsoletePaths.map((item) => path.relative(root, resolveWorkspacePath(rootPath, String(item)))) : [];
+          if (obsoletePaths.length) await runGit(root, ['rm', '--ignore-unmatch', '--', ...obsoletePaths], 2 * 1024 * 1024, signal);
+          data = await runGit(root, ['add', '--', resultPath], 2 * 1024 * 1024, signal);
         } else if (operation === 'continueOperation' || operation === 'abortOperation') {
           const kind = String(payload.kind ?? '');
           if (!['merge', 'rebase', 'cherry-pick'].includes(kind)) throw new Error('INVALID_GIT_SEQUENCE');

@@ -44,6 +44,7 @@ import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
 import { estimateTokens, fitContextToTokenBudget } from './ai-context';
 import { parseProblemLine, resolveTaskOrder } from '../../main/workspace-tasks';
+import { classifyConflictStatus } from '../../main/git-conflicts';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -240,6 +241,7 @@ export const CodeEditorPanel: React.FC = () => {
   const [mergeBase, setMergeBase] = useState<string | null>(null);
   const [mergeResult, setMergeResult] = useState<string | null>(null);
   const [mergeInitialResult, setMergeInitialResult] = useState<string | null>(null);
+  const [mergeConflictPaths, setMergeConflictPaths] = useState<{ base: string; ours: string; theirs: string } | null>(null);
   const terminalCounterRef = useRef(1);
   const [terminalProfiles, setTerminalProfiles] = useState<TerminalProfile[]>(() => {
     try { return JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { return []; }
@@ -257,7 +259,8 @@ export const CodeEditorPanel: React.FC = () => {
     setDialog({ type: 'confirm', message, resolve });
   }), []);
   const refreshTerminalProfiles = useCallback(async () => {
-    const discovered = await window.electronAPI.terminal.profiles();
+    let discovered: { data?: TerminalProfile[] } = {};
+    try { discovered = await window.electronAPI.terminal.profiles(); } catch { /* handler may not be registered yet */ }
     let custom: TerminalProfile[] = [];
     try { custom = JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { /* ignore invalid custom profiles */ }
     const merged = [...(discovered.data ?? []), ...custom].filter((profile, index, all) => all.findIndex((item) => item.name === profile.name) === index);
@@ -343,12 +346,14 @@ export const CodeEditorPanel: React.FC = () => {
 
   const refreshGitOverview = useCallback(async () => {
     if (!workspace) return;
-    const [overview, history] = await Promise.all([
-      window.electronAPI.workspace.gitOperation<WorkspaceGitOverview>(workspace.path, 'overview'),
-      window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100 }),
-    ]);
-    if (overview.success) setGitOverview(overview.data ?? null);
-    if (history.success) setGitHistory(history.data ?? []);
+    try {
+      const [overview, history] = await Promise.all([
+        window.electronAPI.workspace.gitOperation<WorkspaceGitOverview>(workspace.path, 'overview'),
+        window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100 }),
+      ]);
+      if (overview.success) setGitOverview(overview.data ?? null);
+      if (history.success) setGitHistory(history.data ?? []);
+    } catch { /* IPC handlers may not be registered yet */ }
   }, [workspace]);
 
   const runGitOperation = useCallback(async (operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => {
@@ -1436,7 +1441,7 @@ export const CodeEditorPanel: React.FC = () => {
         setWorkspace(session.workspace);
         if (session.folders) setWorkspaceFolders(session.folders);
         else setWorkspaceFolders(session.workspace ? [{ id: `${Date.now()}`, path: session.workspace.path, name: session.workspace.name }] : []);
-        void window.electronAPI.workspace.reauthorize(session.workspace.path);
+        void window.electronAPI.workspace.reauthorize(session.workspace.path).catch(() => undefined);
         setTree(entries);
         setExpandedPaths(restoredExpandedPaths);
         setDocuments(restoredDocuments);
@@ -1597,7 +1602,7 @@ export const CodeEditorPanel: React.FC = () => {
 
   useEffect(() => {
     if (!workspace) { setWorkspaceTasks([]); return; }
-    void window.electronAPI.workspace.listTasks(workspace.path).then((result) => setWorkspaceTasks(result.data ?? []));
+    void window.electronAPI.workspace.listTasks(workspace.path).then((result) => setWorkspaceTasks(result.data ?? [])).catch(() => undefined);
   }, [workspace]);
 
   useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
@@ -1608,8 +1613,8 @@ export const CodeEditorPanel: React.FC = () => {
 
   const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
     if (!workspace) return;
-    if (entry.status.includes('U')) {
-      const versions = await window.electronAPI.workspace.gitOperation<{ base: string; ours: string; theirs: string }>(workspace.path, 'conflictVersions', { path: entry.path });
+    if (classifyConflictStatus(entry.status)) {
+      const versions = await window.electronAPI.workspace.gitOperation<{ base: string; ours: string; theirs: string; conflictType?: string; paths: { base: string; ours: string; theirs: string } }>(workspace.path, 'conflictVersions', { path: entry.path });
       if (!versions.success || !versions.data) {
         setStatus(`冲突版本读取失败：${displayError(versions.error)}`);
         return;
@@ -1618,7 +1623,9 @@ export const CodeEditorPanel: React.FC = () => {
       setMergeBase(versions.data.base);
       setMergeResult(versions.data.ours);
       setMergeInitialResult(versions.data.ours);
-      setDiffView({ path: entry.path, name: entry.path, original: versions.data.ours, modified: versions.data.theirs, language: languageIdFromName(entry.path), source: 'merge' });
+      setMergeConflictPaths(versions.data.conflictType === 'rename/rename' ? versions.data.paths : null);
+      const name = versions.data.conflictType === 'rename/rename' ? `rename/rename: ${versions.data.paths.base} → ${versions.data.paths.ours} | ${versions.data.paths.theirs}` : entry.path;
+      setDiffView({ path: versions.data.paths.ours, name, original: versions.data.ours, modified: versions.data.theirs, language: languageIdFromName(versions.data.paths.ours), source: 'merge' });
       return;
     }
     const current = await window.electronAPI.workspace.readTextFile(workspace.path, entry.path);
@@ -1747,7 +1754,9 @@ export const CodeEditorPanel: React.FC = () => {
       return;
     }
     // Stage the resolved file
-    const stage = await window.electronAPI.workspace.gitStage(workspace.path, [diffView.path]);
+    const stage = mergeConflictPaths
+      ? await window.electronAPI.workspace.gitOperation(workspace.path, 'stageConflictResult', { resultPath: diffView.path, obsoletePaths: [mergeConflictPaths.base, mergeConflictPaths.theirs].filter((item) => item !== diffView.path) })
+      : await window.electronAPI.workspace.gitStage(workspace.path, [diffView.path]);
     if (!stage.success) {
       await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, read.data.content, {
         encoding: read.data.encoding,
@@ -1762,11 +1771,12 @@ export const CodeEditorPanel: React.FC = () => {
     setMergeBase(null);
     setMergeResult(null);
     setMergeInitialResult(null);
+    setMergeConflictPaths(null);
     await refreshGitStatus();
     setDocuments((previous) => previous.map((d) => d.path === diffView.path ? { ...d, content: mergeResult, savedContent: mergeResult, modifiedAt: write.data?.modifiedAt } : d));
     appendOutput(`合并完成：${diffView.name}`);
     setStatus('合并冲突已解决并暂存');
-  }, [appendOutput, diffView, mergeResult, refreshGitStatus, workspace]);
+  }, [appendOutput, diffView, mergeConflictPaths, mergeResult, refreshGitStatus, workspace]);
 
   const generateAiEdit = useCallback(async () => {
     if (!activeDocument || !aiInstruction.trim()) return;
