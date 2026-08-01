@@ -68,6 +68,7 @@ export interface ElectronAPI {
     gitUnstage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
     gitCommit: (rootPath: string, message: string) => Promise<WorkspaceResult<string>>;
     gitOperation: <T = unknown>(rootPath: string, operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => Promise<WorkspaceResult<T>>;
+    cancelGitOperation: (rootPath: string, operationId: string) => Promise<{ success: boolean }>;
     onGitProgress: (callback: (event: WorkspaceGitProgress) => void) => () => void;
     watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
     unwatch: () => Promise<void>;
@@ -155,7 +156,7 @@ export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'switchBranch'
 export interface WorkspaceGitProgress {
   operationId: string;
   operation: WorkspaceGitOperation;
-  state: 'started' | 'completed' | 'failed';
+  state: 'started' | 'completed' | 'failed' | 'cancelled';
   message: string;
 }
 

@@ -18,19 +18,47 @@ const MAX_EDITOR_FILE_SIZE = 5 * 1024 * 1024;
 const MAX_READ_ONLY_FILE_SIZE = 20 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 
+// --- Git operation queue (per-workspace serial + cancellation) ---
+const gitQueues = new Map<string, Promise<void>>();
+const gitControllers = new Map<string, AbortController>();
+const GIT_NETWORK_TIMEOUT_MS = 120_000;
+const GIT_LOCAL_TIMEOUT_MS = 30_000;
+const networkOps = new Set(['fetch', 'pull', 'push', 'sync']);
+
+function enqueueGitOp(root: string, fn: () => Promise<unknown>): Promise<unknown> {
+  const previous = gitQueues.get(root) ?? Promise.resolve();
+  let resolveOp!: (v: unknown) => void;
+  const promise = new Promise<unknown>((res) => { resolveOp = res; });
+  const next = previous
+    .then(() => fn(), () => undefined)
+    .then(resolveOp, resolveOp);
+  gitQueues.set(root, next.then(() => undefined, () => undefined));
+  return promise;
+}
+
+function cancelGitOp(_root: string, operationId: string): boolean {
+  const ctrl = gitControllers.get(operationId);
+  if (!ctrl) return false;
+  ctrl.abort();
+  gitControllers.delete(operationId);
+  return true;
+}
+
 function validateGitRef(value: string): string {
   const ref = value.trim();
   if (!ref || ref.startsWith('-') || !/^[\w./-]+$/.test(ref) || ref.includes('..')) throw new Error('INVALID_GIT_REF');
   return ref;
 }
 
-async function runGit(root: string, args: string[], maxBuffer = 10 * 1024 * 1024): Promise<string> {
+async function runGit(root: string, args: string[], maxBuffer = 10 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) throw new Error('GIT_CANCELLED');
   const result = await execFileAsync('git', args, {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
+    signal,
   });
   return result.stdout.trim();
 }
@@ -880,6 +908,10 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:cancelGitOperation', async (_event, rootPath: string, operationId: string) => {
+    return { success: cancelGitOp(rootPath, operationId) };
+  });
+
   ipcMain.handle('workspace:gitOperation', async (
     _event,
     rootPath: string,
@@ -888,106 +920,129 @@ export function setupIPC(webviewPreloadPath: string) {
   ) => {
     const root = resolveWorkspacePath(rootPath);
     const operationId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const progress = (state: 'started' | 'completed' | 'failed', message: string) => {
+    const progress = (state: 'started' | 'completed' | 'failed' | 'cancelled', message: string) => {
       mw.webContents.send('workspace:gitProgress', { operationId, operation, state, message });
     };
-    progress('started', `正在执行 ${operation}`);
-    try {
-      let data: unknown;
-      if (operation === 'overview') {
-        const [branch, branches, remotes, tags] = await Promise.all([
-          runGit(root, ['branch', '--show-current']),
-          runGit(root, ['branch', '--format=%(refname:short)%09%(HEAD)']).catch(() => ''),
-          runGit(root, ['remote', '-v']).catch(() => ''),
-          runGit(root, ['tag', '--sort=-creatordate']).catch(() => ''),
-        ]);
-        data = {
-          branch,
-          branches: branches.split(/\r?\n/).filter(Boolean).map((line) => {
-            const [name, head] = line.split('\t'); return { name, current: head === '*' };
-          }),
-          remotes: remotes.split(/\r?\n/).filter(Boolean),
-          tags: tags.split(/\r?\n/).filter(Boolean),
-        };
-      } else if (operation === 'createBranch') {
-        data = await runGit(root, ['switch', '-c', validateGitRef(String(payload.name ?? ''))]);
-      } else if (operation === 'switchBranch') {
-        data = await runGit(root, ['switch', validateGitRef(String(payload.name ?? ''))]);
-      } else if (operation === 'fetch') {
-        data = await runGit(root, ['fetch', '--all', '--prune'], 20 * 1024 * 1024);
-      } else if (operation === 'pull') {
-        data = await runGit(root, ['pull', '--ff-only'], 20 * 1024 * 1024);
-      } else if (operation === 'push') {
-        data = await runGit(root, ['push'], 20 * 1024 * 1024);
-      } else if (operation === 'sync') {
-        const pull = await runGit(root, ['pull', '--ff-only'], 20 * 1024 * 1024);
-        const push = await runGit(root, ['push'], 20 * 1024 * 1024);
-        data = `${pull}\n${push}`.trim();
-      } else if (operation === 'log') {
-        const limit = Math.max(1, Math.min(500, Number(payload.limit) || 100));
-        const args = ['log', `-${limit}`, '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e'];
-        if (payload.path) args.push('--', path.relative(root, resolveWorkspacePath(rootPath, String(payload.path))));
-        const output = await runGit(root, args, 20 * 1024 * 1024);
-        data = output.split('\x1e').map((record) => record.trim()).filter(Boolean).map((record) => {
-          const [hash, shortHash, author, date, subject] = record.split('\x1f');
-          return { hash, shortHash, author, date, subject };
-        });
-      } else if (operation === 'showCommit') {
-        const hash = validateGitRef(String(payload.hash ?? ''));
-        data = await runGit(root, ['show', '--format=fuller', '--stat', '--patch', hash], 30 * 1024 * 1024);
-      } else if (operation === 'fileDiff') {
-        const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
-        data = await runGit(root, ['diff', '--no-ext-diff', '--unified=3', '--', relativePath], 20 * 1024 * 1024);
-      } else if (operation === 'stagePatch') {
-        data = await applyGitPatch(root, String(payload.patch ?? ''));
-      } else if (operation === 'conflictVersions') {
-        const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? ''))).replace(/\\/g, '/');
-        const readStage = (stage: number) => runGit(root, ['show', `:${stage}:${relativePath}`], 20 * 1024 * 1024).catch(() => '');
-        const [base, ours, theirs] = await Promise.all([readStage(1), readStage(2), readStage(3)]);
-        data = { base, ours, theirs };
-      } else if (operation === 'resolveConflict') {
-        const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
-        const strategy = payload.strategy === 'theirs' ? '--theirs' : '--ours';
-        await runGit(root, ['checkout', strategy, '--', relativePath]);
-        data = await runGit(root, ['add', '--', relativePath]);
-      } else if (operation === 'stashList') {
-        const output = await runGit(root, ['stash', 'list', '--format=%gd%x1f%H%x1f%cr%x1f%s']);
-        data = output.split(/\r?\n/).filter(Boolean).map((line) => {
-          const [ref, hash, date, subject] = line.split('\x1f'); return { ref, hash, date, subject };
-        });
-      } else if (operation === 'stashPush') {
-        const message = String(payload.message ?? '').trim();
-        data = await runGit(root, message ? ['stash', 'push', '-u', '-m', message] : ['stash', 'push', '-u']);
-      } else if (operation === 'stashApply' || operation === 'stashPop' || operation === 'stashDrop') {
-        const ref = String(payload.ref ?? 'stash@{0}').trim();
-        if (!/^stash@\{\d+\}$/.test(ref)) throw new Error('INVALID_STASH_REF');
-        data = await runGit(root, ['stash', operation.slice(5).toLowerCase(), ref]);
-      } else if (operation === 'createTag') {
-        const name = validateGitRef(String(payload.name ?? ''));
-        const message = String(payload.message ?? '').trim();
-        data = await runGit(root, message ? ['tag', '-a', name, '-m', message] : ['tag', name]);
-      } else if (operation === 'deleteTag') {
-        data = await runGit(root, ['tag', '-d', validateGitRef(String(payload.name ?? ''))]);
-      } else if (operation === 'addRemote') {
-        const name = validateGitRef(String(payload.name ?? ''));
-        const url = String(payload.url ?? '').trim();
-        if (!url || /[\r\n]/.test(url)) throw new Error('INVALID_REMOTE_URL');
-        data = await runGit(root, ['remote', 'add', name, url]);
-      } else if (operation === 'removeRemote') {
-        data = await runGit(root, ['remote', 'remove', validateGitRef(String(payload.name ?? ''))]);
-      } else {
-        throw new Error('UNSUPPORTED_GIT_OPERATION');
+
+    const timeoutMs = networkOps.has(operation) ? GIT_NETWORK_TIMEOUT_MS : GIT_LOCAL_TIMEOUT_MS;
+    const controller = new AbortController();
+    gitControllers.set(operationId, controller);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    return enqueueGitOp(root, async () => {
+      const signal = controller.signal;
+      progress('started', `正在执行 ${operation}`);
+      try {
+        if (signal.aborted) throw new Error('GIT_CANCELLED');
+        let data: unknown;
+        if (operation === 'overview') {
+          const [branch, branches, remotes, tags] = await Promise.all([
+            runGit(root, ['branch', '--show-current'], 2 * 1024 * 1024, signal),
+            runGit(root, ['branch', '--format=%(refname:short)%09%(HEAD)'], 2 * 1024 * 1024, signal).catch(() => ''),
+            runGit(root, ['remote', '-v'], 2 * 1024 * 1024, signal).catch(() => ''),
+            runGit(root, ['tag', '--sort=-creatordate'], 2 * 1024 * 1024, signal).catch(() => ''),
+          ]);
+          data = {
+            branch,
+            branches: branches.split(/\r?\n/).filter(Boolean).map((line) => {
+              const [name, head] = line.split('\t'); return { name, current: head === '*' };
+            }),
+            remotes: remotes.split(/\r?\n/).filter(Boolean),
+            tags: tags.split(/\r?\n/).filter(Boolean),
+          };
+        } else if (operation === 'createBranch') {
+          data = await runGit(root, ['switch', '-c', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
+        } else if (operation === 'switchBranch') {
+          data = await runGit(root, ['switch', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
+        } else if (operation === 'fetch') {
+          data = await runGit(root, ['fetch', '--all', '--prune'], 20 * 1024 * 1024, signal);
+        } else if (operation === 'pull') {
+          const strategy = (['ff-only', 'merge', 'rebase'] as const).includes(payload.strategy as 'ff-only') ? payload.strategy : 'ff-only';
+          const args = strategy === 'rebase' ? ['pull', '--rebase'] : strategy === 'merge' ? ['pull', '--no-ff'] : ['pull', '--ff-only'];
+          data = await runGit(root, args, 20 * 1024 * 1024, signal);
+        } else if (operation === 'push') {
+          const args = payload.setUpstream ? ['push', '--set-upstream', 'origin', 'HEAD'] : ['push'];
+          data = await runGit(root, args, 20 * 1024 * 1024, signal);
+        } else if (operation === 'sync') {
+          const strategy = (['ff-only', 'merge', 'rebase'] as const).includes(payload.strategy as 'ff-only') ? payload.strategy : 'ff-only';
+          const pullArgs = strategy === 'rebase' ? ['pull', '--rebase'] : strategy === 'merge' ? ['pull', '--no-ff'] : ['pull', '--ff-only'];
+          const pull = await runGit(root, pullArgs, 20 * 1024 * 1024, signal);
+          const push = await runGit(root, ['push'], 20 * 1024 * 1024, signal);
+          data = `${pull}\n${push}`.trim();
+        } else if (operation === 'log') {
+          const limit = Math.max(1, Math.min(500, Number(payload.limit) || 100));
+          const args = ['log', `-${limit}`, '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e'];
+          if (payload.path) args.push('--', path.relative(root, resolveWorkspacePath(rootPath, String(payload.path))));
+          const output = await runGit(root, args, 20 * 1024 * 1024, signal);
+          data = output.split('\x1e').map((record) => record.trim()).filter(Boolean).map((record) => {
+            const [hash, shortHash, author, date, subject] = record.split('\x1f');
+            return { hash, shortHash, author, date, subject };
+          });
+        } else if (operation === 'showCommit') {
+          const hash = validateGitRef(String(payload.hash ?? ''));
+          data = await runGit(root, ['show', '--format=fuller', '--stat', '--patch', hash], 30 * 1024 * 1024, signal);
+        } else if (operation === 'fileDiff') {
+          const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
+          const staged = payload.staged ? ['--cached'] : [];
+          data = await runGit(root, ['diff', '--no-ext-diff', '--unified=3', ...staged, '--', relativePath], 20 * 1024 * 1024, signal);
+        } else if (operation === 'stagePatch') {
+          data = await applyGitPatch(root, String(payload.patch ?? ''));
+        } else if (operation === 'conflictVersions') {
+          const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? ''))).replace(/\\/g, '/');
+          const readStage = (stage: number) => runGit(root, ['show', `:${stage}:${relativePath}`], 20 * 1024 * 1024, signal).catch(() => '');
+          const [base, ours, theirs] = await Promise.all([readStage(1), readStage(2), readStage(3)]);
+          data = { base, ours, theirs };
+        } else if (operation === 'resolveConflict') {
+          const relativePath = path.relative(root, resolveWorkspacePath(rootPath, String(payload.path ?? '')));
+          const strategy = payload.strategy === 'theirs' ? '--theirs' : '--ours';
+          await runGit(root, ['checkout', strategy, '--', relativePath], 2 * 1024 * 1024, signal);
+          data = await runGit(root, ['add', '--', relativePath], 2 * 1024 * 1024, signal);
+        } else if (operation === 'stashList') {
+          const output = await runGit(root, ['stash', 'list', '--format=%gd%x1f%H%x1f%cr%x1f%s'], 2 * 1024 * 1024, signal);
+          data = output.split(/\r?\n/).filter(Boolean).map((line) => {
+            const [ref, hash, date, subject] = line.split('\x1f'); return { ref, hash, date, subject };
+          });
+        } else if (operation === 'stashPush') {
+          const message = String(payload.message ?? '').trim();
+          data = await runGit(root, message ? ['stash', 'push', '-u', '-m', message] : ['stash', 'push', '-u'], 2 * 1024 * 1024, signal);
+        } else if (operation === 'stashApply' || operation === 'stashPop' || operation === 'stashDrop') {
+          const ref = String(payload.ref ?? 'stash@{0}').trim();
+          if (!/^stash@\{\d+\}$/.test(ref)) throw new Error('INVALID_STASH_REF');
+          data = await runGit(root, ['stash', operation.slice(5).toLowerCase(), ref], 2 * 1024 * 1024, signal);
+        } else if (operation === 'createTag') {
+          const name = validateGitRef(String(payload.name ?? ''));
+          const message = String(payload.message ?? '').trim();
+          data = await runGit(root, message ? ['tag', '-a', name, '-m', message] : ['tag', name], 2 * 1024 * 1024, signal);
+        } else if (operation === 'deleteTag') {
+          data = await runGit(root, ['tag', '-d', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
+        } else if (operation === 'addRemote') {
+          const name = validateGitRef(String(payload.name ?? ''));
+          const url = String(payload.url ?? '').trim();
+          if (!url || /[\r\n]/.test(url)) throw new Error('INVALID_REMOTE_URL');
+          data = await runGit(root, ['remote', 'add', name, url], 2 * 1024 * 1024, signal);
+        } else if (operation === 'removeRemote') {
+          data = await runGit(root, ['remote', 'remove', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
+        } else {
+          throw new Error('UNSUPPORTED_GIT_OPERATION');
+        }
+        progress('completed', `${operation} 执行完成`);
+        return { success: true, data };
+      } catch (error) {
+        const raw = error instanceof Error ? error.message : String(error);
+        if (raw === 'GIT_CANCELLED' || raw.includes('abort') || raw.includes('cancel')) {
+          progress('cancelled', '操作已取消');
+          return { success: false, error: 'GIT_CANCELLED' };
+        }
+        const message = /Authentication failed|could not read Username|terminal prompts disabled/i.test(raw)
+          ? 'GIT_AUTH_REQUIRED'
+          : /conflict|CONFLICT/i.test(raw) ? 'GIT_CONFLICT' : raw;
+        progress('failed', message);
+        return { success: false, error: message };
+      } finally {
+        clearTimeout(timeout);
+        gitControllers.delete(operationId);
       }
-      progress('completed', `${operation} 执行完成`);
-      return { success: true, data };
-    } catch (error) {
-      const raw = error instanceof Error ? error.message : String(error);
-      const message = /Authentication failed|could not read Username|terminal prompts disabled/i.test(raw)
-        ? 'GIT_AUTH_REQUIRED'
-        : /conflict|CONFLICT/i.test(raw) ? 'GIT_CONFLICT' : raw;
-      progress('failed', message);
-      return { success: false, error: message };
-    }
+    });
   });
 
   ipcMain.handle('workspace:watch', async (_event, rootPath: string) => {

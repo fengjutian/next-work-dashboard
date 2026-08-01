@@ -25,6 +25,8 @@ interface SearchPanelProps {
   replaceResults: (results: WorkspaceSearchResult[]) => Promise<void>;
   undoReplace: () => Promise<void>;
   canUndoReplace: boolean;
+  previewReplace: (results: WorkspaceSearchResult[]) => Promise<void>;
+  openSearchAsEditor: () => void;
 }
 
 export const SearchPanel: React.FC<SearchPanelProps> = ({
@@ -36,6 +38,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({
   replaceResults,
   undoReplace,
   canUndoReplace,
+  previewReplace,
+  openSearchAsEditor,
 }) => {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [history, setHistory] = useState<string[]>(() => {
@@ -95,8 +99,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({
         </div>
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <input value={searchPanel.replacement} onChange={(event) => setSearchPanel((previous) => ({ ...previous, replacement: event.target.value }))} placeholder="替换为" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none" />
-          <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={searchPanel.loading || searchPanel.results.length === 0} onClick={() => void replaceResults(searchPanel.results)}>全部替换</Button>
+          <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={searchPanel.loading || searchPanel.results.length === 0 || !searchPanel.replacement} onClick={() => void replaceResults(searchPanel.results)}>全部替换</Button>
+          <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={searchPanel.loading || searchPanel.results.length === 0 || !searchPanel.replacement} onClick={() => void previewReplace(searchPanel.results)}>预览变更</Button>
           <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!canUndoReplace || searchPanel.loading} onClick={() => void undoReplace()}>撤销替换</Button>
+          <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={searchPanel.results.length === 0} onClick={openSearchAsEditor}>在编辑器中打开</Button>
         </div>
         <div className="max-h-[420px] overflow-auto py-1">
           {groupedResults.map(([path, results]) => <div key={path}>

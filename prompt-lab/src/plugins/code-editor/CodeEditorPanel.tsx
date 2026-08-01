@@ -79,8 +79,70 @@ function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode
 interface GitHunk { label: string; patch: string }
 interface AiFileProposal { path: string; original: string; modified: string; language: string; metadata?: OpenDocument }
 interface AiEditHistory { id: number; path: string; before: string; after: string }
+
+interface AiHunk {
+  index: number;
+  originalStart: number;
+  originalLines: string[];
+  modifiedStart: number;
+  modifiedLines: string[];
+}
+
+function computeDiffHunks(original: string, modified: string): AiHunk[] {
+  const o = original.split('\n');
+  const m = modified.split('\n');
+  const hunks: AiHunk[] = [];
+  let oIdx = 0;
+  let mIdx = 0;
+  let hunkIdx = 0;
+
+  while (oIdx < o.length || mIdx < m.length) {
+    while (oIdx < o.length && mIdx < m.length && o[oIdx] === m[mIdx]) { oIdx += 1; mIdx += 1; }
+    if (oIdx >= o.length && mIdx >= m.length) break;
+
+    const originalStart = oIdx + 1;
+    const modifiedStart = mIdx + 1;
+    const originalLines: string[] = [];
+    const modifiedLines: string[] = [];
+
+    while (oIdx < o.length) {
+      const lookAhead = m.slice(mIdx, mIdx + 8);
+      if (lookAhead.includes(o[oIdx])) break;
+      originalLines.push(o[oIdx]);
+      oIdx += 1;
+    }
+    while (mIdx < m.length) {
+      const lookAhead = o.slice(oIdx, oIdx + 8);
+      if (lookAhead.includes(m[mIdx])) break;
+      modifiedLines.push(m[mIdx]);
+      mIdx += 1;
+    }
+
+    if (originalLines.length > 0 || modifiedLines.length > 0) {
+      hunks.push({ index: hunkIdx, originalStart, modifiedStart, originalLines, modifiedLines });
+      hunkIdx += 1;
+    } else {
+      if (oIdx < o.length) { originalLines.push(o[oIdx]); oIdx += 1; }
+      if (mIdx < m.length) { modifiedLines.push(m[mIdx]); mIdx += 1; }
+      hunks.push({ index: hunkIdx, originalStart, modifiedStart, originalLines, modifiedLines });
+      hunkIdx += 1;
+    }
+  }
+  return hunks;
+}
 interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
 interface ReplaceSnapshot { path: string; content: string; encoding: WorkspaceEncoding; lineEnding: 'LF' | 'CRLF' }
+
+interface SearchPreview {
+  path: string;
+  name: string;
+  original: string;
+  modified: string;
+  language: string;
+  encoding: WorkspaceEncoding;
+  lineEnding: 'LF' | 'CRLF';
+  modifiedAt?: number;
+}
 
 function extractGitHunks(patchText: string): GitHunk[] {
   const lines = patchText.split('\n');
@@ -113,7 +175,7 @@ export const CodeEditorPanel: React.FC = () => {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [treeEdit, setTreeEdit] = useState<TreeEditState | null>(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
-  const [treeClipboard, setTreeClipboard] = useState<{ node: TreeNode; cut: boolean } | null>(null);
+  const [treeClipboard, setTreeClipboard] = useState<{ nodes: TreeNode[]; cut: boolean } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const [secondaryPath, setSecondaryPath] = useState<string | null>(null);
   const [diffView, setDiffView] = useState<{
@@ -122,11 +184,16 @@ export const CodeEditorPanel: React.FC = () => {
     original: string;
     modified: string;
     language: string;
-    source?: 'external' | 'git' | 'merge' | 'ai';
+    source?: 'external' | 'git' | 'merge' | 'ai' | 'search';
   } | null>(null);
   const [gitHunks, setGitHunks] = useState<GitHunk[]>([]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
+  const [explorerFilter, setExplorerFilter] = useState('');
+  const [explorerSort, setExplorerSort] = useState<'name' | 'type'>(() => (localStorage.getItem('code-editor.explorer-sort') as 'name' | 'type') || 'name');
+  const [recentWorkspaces, setRecentWorkspaces] = useState<Array<{ path: string; name: string }>>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.recent-workspaces') ?? '[]'); } catch { return []; }
+  });
   const [autoSave, setAutoSave] = useState(false);
   const [preferences, setPreferences] = useState<EditorPreferences>(() => {
     try {
@@ -147,19 +214,30 @@ export const CodeEditorPanel: React.FC = () => {
   const [gitOverview, setGitOverview] = useState<WorkspaceGitOverview | null>(null);
   const [gitHistory, setGitHistory] = useState<WorkspaceGitCommit[]>([]);
   const [gitView, setGitView] = useState<'changes' | 'history' | 'stash'>('changes');
-  const [gitBusy, setGitBusy] = useState<string | null>(null);
+  const [gitBusy, setGitBusy] = useState<{ operation: string; operationId: string } | null>(null);
+  const [pullStrategy, setPullStrategy] = useState<'ff-only' | 'merge' | 'rebase'>('ff-only');
   const [commitMessage, setCommitMessage] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiEditing, setAiEditing] = useState(false);
+  const [inlineEdit, setInlineEdit] = useState<{ instruction: string; visible: boolean }>({ instruction: '', visible: false });
+  const [aiSessions, setAiSessions] = useState<Array<{ id: number; workspace: string; instruction: string; timestamp: number; filesChanged: number; accepted: number }>>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.ai-sessions') ?? '[]'); } catch { return []; }
+  });
   const [aiMultiFile, setAiMultiFile] = useState(false);
   const [aiProposals, setAiProposals] = useState<AiFileProposal[]>([]);
-  const [aiHistory, setAiHistory] = useState<AiEditHistory[]>([]);
+  const [aiHistory, setAiHistory] = useState<AiEditHistory[]>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.ai-history') ?? '[]'); } catch { return []; }
+  });
+  const [aiHunks, setAiHunks] = useState<AiHunk[]>([]);
+  const [mergeHunks, setMergeHunks] = useState<AiHunk[]>([]);
+  const [mergeBase, setMergeBase] = useState<string | null>(null);
   const terminalCounterRef = useRef(1);
   const terminalProfiles = useMemo<TerminalProfile[]>(() => navigator.userAgent.includes('Win') ? [
     { name: 'PowerShell', shell: 'powershell.exe' }, { name: 'cmd', shell: 'cmd.exe' }, { name: 'Git Bash', shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: ['-i'] },
   ] : [{ name: 'zsh', shell: '/bin/zsh' }, { name: 'bash', shell: '/bin/bash' }, { name: 'fish', shell: '/usr/bin/fish' }], []);
   const [terminalProfileName, setTerminalProfileName] = useState(() => localStorage.getItem('code-editor.terminal-profile') ?? terminalProfiles[0]?.name ?? '');
   const [terminalEnvText, setTerminalEnvText] = useState(() => localStorage.getItem('code-editor.terminal-env') ?? '');
+  const [showEnvValues, setShowEnvValues] = useState(false);
   const [terminalTabs, setTerminalTabs] = useState<EditorTerminalTab[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('code-editor.terminal-tabs') ?? '[]') as Array<Pick<EditorTerminalTab, 'title' | 'cwd' | 'profile'>>;
@@ -187,6 +265,7 @@ export const CodeEditorPanel: React.FC = () => {
     results: WorkspaceSearchResult[];
   }>({ open: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, useRegex: false, include: '', exclude: '', loading: false, results: [] });
   const [replaceHistory, setReplaceHistory] = useState<ReplaceSnapshot[][]>([]);
+  const [searchPreviews, setSearchPreviews] = useState<SearchPreview[]>([]);
   const restoringRef = useRef(true);
   const documentsRef = useRef<OpenDocument[]>([]);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -297,6 +376,15 @@ export const CodeEditorPanel: React.FC = () => {
     visit(tree);
     return result;
   }, [tree]);
+  const displayedTree = useMemo(() => {
+    const query = explorerFilter.trim().toLocaleLowerCase();
+    const visit = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
+      const children = node.children ? visit(node.children) : undefined;
+      if (query && !node.name.toLocaleLowerCase().includes(query) && !children?.length) return [];
+      return [{ ...node, children }];
+    }).sort((a, b) => explorerSort === 'type' ? (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1) : a.name.localeCompare(b.name));
+    return visit(tree);
+  }, [explorerFilter, explorerSort, tree]);
   const treeDecorations = useMemo(() => {
     const result = new Map<string, { git?: string; errors?: number; warnings?: number }>();
     for (const entry of gitStatus) {
@@ -535,32 +623,33 @@ export const CodeEditorPanel: React.FC = () => {
     const parent = target?.type === 'directory'
       ? target.path
       : target?.path.replace(/[\\/][^\\/]+$/, '') ?? '';
-    const nextPath = parent ? `${parent}/${treeClipboard.node.name}` : treeClipboard.node.name;
-    if (
-      nextPath === treeClipboard.node.path
-      || nextPath.startsWith(`${treeClipboard.node.path}/`)
-      || nextPath.startsWith(`${treeClipboard.node.path}\\`)
-    ) {
-      setStatus('不能将文件夹粘贴到自身内部');
-      return;
+    let completed = 0;
+    let skipped = 0;
+    for (const node of treeClipboard.nodes) {
+      let nextPath = parent ? `${parent}/${node.name}` : node.name;
+      if (nextPath === node.path || nextPath.startsWith(`${node.path}/`) || nextPath.startsWith(`${node.path}\\`)) { skipped += 1; continue; }
+      let result = treeClipboard.cut ? await window.electronAPI.workspace.renameEntry(workspace.path, node.path, nextPath) : await window.electronAPI.workspace.copyEntry(workspace.path, node.path, nextPath);
+      // Auto-rename on conflict: append " - Copy" counter
+      if (!result.success && result.error === 'ALREADY_EXISTS') {
+        let counter = 1;
+        const ext = node.name.includes('.') ? node.name.slice(node.name.lastIndexOf('.')) : '';
+        const base = ext ? node.name.slice(0, node.name.lastIndexOf('.')) : node.name;
+        while (counter < 100) {
+          const renamed = `${base} - Copy${counter > 1 ? ` (${counter})` : ''}${ext}`;
+          const renamedPath = parent ? `${parent}/${renamed}` : renamed;
+          result = treeClipboard.cut ? await window.electronAPI.workspace.renameEntry(workspace.path, node.path, renamedPath) : await window.electronAPI.workspace.copyEntry(workspace.path, node.path, renamedPath);
+          if (result.success) { nextPath = renamedPath; break; }
+          if (result.error !== 'ALREADY_EXISTS') break;
+          counter += 1;
+        }
+      }
+      if (!result.success) { setStatus(`粘贴失败：${node.name} — ${displayError(result.error)}`); return; }
+      if (treeClipboard.cut) remapOpenPaths(node.path, nextPath);
+      completed += 1;
     }
-    const result = treeClipboard.cut
-      ? await window.electronAPI.workspace.renameEntry(
-        workspace.path, treeClipboard.node.path, nextPath,
-      )
-      : await window.electronAPI.workspace.copyEntry(
-        workspace.path, treeClipboard.node.path, nextPath,
-      );
-    if (!result.success) {
-      setStatus(`粘贴失败：${displayError(result.error)}`);
-      return;
-    }
-    if (treeClipboard.cut) {
-      remapOpenPaths(treeClipboard.node.path, nextPath);
-      setTreeClipboard(null);
-    }
+    if (treeClipboard.cut) setTreeClipboard(null);
     await refreshWorkspaceTree();
-    setStatus(`已${treeClipboard.cut ? '移动' : '复制'}到 ${nextPath}`);
+    setStatus(`已${treeClipboard.cut ? '移动' : '复制'} ${completed} 个项目${skipped > 0 ? `，跳过 ${skipped} 个` : ''}`);
   }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeClipboard, workspace]);
 
   const moveTreeEntry = useCallback(async (source: TreeNode, target: TreeNode) => {
@@ -903,6 +992,22 @@ export const CodeEditorPanel: React.FC = () => {
     editor.onDidChangeCursorPosition((event) => {
       setPosition({ line: event.position.lineNumber, column: event.position.column });
     });
+    // Gutter click → revert line/hunk
+    editor.onMouseDown((event) => {
+      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && event.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) return;
+      const line = event.target.position?.lineNumber;
+      if (!line || !workspace || !activeDocument || activeDocument.readOnly) return;
+      if (!window.confirm(`回滚第 ${line} 行的更改？此操作将用 HEAD 版本覆盖该行所在 Hunk。`)) return;
+      void (async () => {
+        // Revert: git checkout HEAD -- <file> (entire file, simplest)
+        const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'resolveConflict', { path: activeDocument.path, strategy: 'ours' });
+        // Actually use git checkout HEAD -- <file>
+        const revert = await window.electronAPI.workspace.gitShowHead(workspace.path, activeDocument.path);
+        if (!revert.success) { setStatus(`回滚失败：${displayError(revert.error)}`); return; }
+        setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: revert.data ?? '', savedContent: revert.data ?? '', externalChanged: false } : d));
+        setStatus(`已回滚 ${activeDocument.name}`);
+      })();
+    });
     refreshProblems();
     void refreshSymbols(editor);
     editor.focus();
@@ -934,6 +1039,92 @@ export const CodeEditorPanel: React.FC = () => {
     }));
     setStatus(`找到 ${result.data?.length ?? 0} 个结果`);
   }, [searchPanel.caseSensitive, searchPanel.exclude, searchPanel.include, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
+
+  const buildReplaceMatcher = useCallback(() => {
+    const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const source = searchPanel.useRegex ? searchPanel.query : escaped;
+    return new RegExp(searchPanel.wholeWord ? `\\b(?:${source})\\b` : source, searchPanel.caseSensitive ? 'g' : 'gi');
+  }, [searchPanel.caseSensitive, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord]);
+
+  const previewSearchReplace = useCallback(async (results: WorkspaceSearchResult[]) => {
+    if (!workspace || results.length === 0 || !searchPanel.replacement) return;
+    let matcher: RegExp;
+    try {
+      matcher = buildReplaceMatcher();
+    } catch (error) {
+      setStatus(`预览失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    setSearchPanel((previous) => ({ ...previous, loading: true }));
+    const paths = [...new Set(results.map((r) => r.path))];
+    const previews: SearchPreview[] = [];
+    for (const filePath of paths) {
+      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
+      if (!read.success || !read.data) continue;
+      const modified = read.data.content.replace(matcher, searchPanel.replacement);
+      if (modified === read.data.content) continue;
+      previews.push({
+        path: filePath,
+        name: filePath.split(/[\\/]/).pop() ?? filePath,
+        original: read.data.content,
+        modified,
+        language: languageIdFromName(filePath),
+        encoding: read.data.encoding,
+        lineEnding: read.data.lineEnding,
+        modifiedAt: read.data.modifiedAt,
+      });
+    }
+    setSearchPanel((previous) => ({ ...previous, loading: false }));
+    if (previews.length === 0) {
+      setStatus('没有文件需要修改');
+      return;
+    }
+    setSearchPreviews(previews);
+    const first = previews[0];
+    setDiffView({ path: first.path, name: first.name, original: first.original, modified: first.modified, language: first.language, source: 'search' });
+    appendOutput(`替换预览：${previews.length} 个文件，${results.length} 处匹配`);
+    setStatus(`预览 ${previews.length} 个文件的变更`);
+  }, [appendOutput, buildReplaceMatcher, searchPanel.replacement, workspace]);
+
+  const acceptSearchReplace = useCallback(async () => {
+    if (!diffView || diffView.source !== 'search' || !workspace) return;
+    const preview = searchPreviews.find((p) => p.path === diffView.path);
+    if (!preview) return;
+    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, preview.path, preview.modified, {
+      encoding: preview.encoding, lineEnding: preview.lineEnding, expectedModifiedAt: preview.modifiedAt,
+    });
+    if (!write.success) {
+      setStatus(`替换失败：${preview.path} — ${displayError(write.error)}`);
+      return;
+    }
+    recentlySavedRef.current.set(preview.path, Date.now());
+    setDocuments((previous) => previous.map((d) => d.path === preview.path ? { ...d, content: preview.modified, savedContent: preview.modified, modifiedAt: write.data?.modifiedAt } : d));
+    const remaining = searchPreviews.filter((p) => p.path !== diffView.path);
+    setSearchPreviews(remaining);
+    const next = remaining[0];
+    setDiffView(next ? { path: next.path, name: next.name, original: next.original, modified: next.modified, language: next.language, source: 'search' } : null);
+    if (!next) {
+      appendOutput('全部替换预览已应用');
+      setStatus('所有替换已应用');
+      setSearchPanel((previous) => ({ ...previous, results: [] }));
+    } else {
+      setStatus(`已应用 ${preview.name}，剩余 ${remaining.length} 个文件`);
+    }
+  }, [diffView, searchPreviews, workspace]);
+
+  const rejectSearchReplace = useCallback(() => {
+    if (!diffView || diffView.source !== 'search') return;
+    const remaining = searchPreviews.filter((p) => p.path !== diffView.path);
+    setSearchPreviews(remaining);
+    const next = remaining[0];
+    setDiffView(next ? { path: next.path, name: next.name, original: next.original, modified: next.modified, language: next.language, source: 'search' } : null);
+    if (!next) {
+      appendOutput('已取消所有替换预览');
+      setStatus('已取消替换预览');
+    } else {
+      setStatus(`已跳过，剩余 ${remaining.length} 个文件`);
+    }
+  }, [diffView, searchPreviews]);
 
   const replaceAllSearchResults = useCallback(async () => {
     if (!workspace || searchPanel.results.length === 0) return;
@@ -1200,18 +1391,33 @@ export const CodeEditorPanel: React.FC = () => {
     localStorage.setItem('code-editor.preferences.v1', JSON.stringify(preferences));
   }, [preferences]);
 
+  useEffect(() => {
+    localStorage.setItem('code-editor.ai-history', JSON.stringify(aiHistory.slice(-50)));
+  }, [aiHistory]);
+
+  useEffect(() => {
+    localStorage.setItem('code-editor.ai-sessions', JSON.stringify(aiSessions.slice(-100)));
+  }, [aiSessions]);
+
+  const recordAiSession = useCallback((fileCount: number) => {
+    if (!workspace) return;
+    setAiSessions((prev) => [...prev, { id: Date.now(), workspace: workspace.name, instruction: aiInstruction.trim().slice(0, 80), timestamp: Date.now(), filesChanged: fileCount, accepted: 0 }]);
+  }, [aiInstruction, workspace]);
+
+  const updateSessionAcceptCount = useCallback(() => {
+    setAiSessions((prev) => {
+      const last = prev.at(-1);
+      if (!last) return prev;
+      return [...prev.slice(0, -1), { ...last, accepted: last.accepted + 1 }];
+    });
+  }, []);
+
   useEffect(() => localStorage.setItem('code-editor.sidebar-width', String(sidebarWidth)), [sidebarWidth]);
   useEffect(() => {
     localStorage.setItem('code-editor.terminal-profile', terminalProfileName);
     localStorage.setItem('code-editor.terminal-env', terminalEnvText);
     localStorage.setItem('code-editor.terminal-tabs', JSON.stringify(terminalTabs.map(({ title, cwd, profile }) => ({ title, cwd, profile }))));
   }, [terminalEnvText, terminalProfileName, terminalTabs]);
-  useEffect(() => {
-    localStorage.setItem('code-editor.terminal-profile', terminalProfileName);
-    localStorage.setItem('code-editor.terminal-env', terminalEnvText);
-    localStorage.setItem('code-editor.terminal-tabs', JSON.stringify(terminalTabs.map(({ title, cwd, profile }) => ({ title, cwd, profile }))));
-  }, [terminalEnvText, terminalProfileName, terminalTabs]);
-
   useEffect(() => {
     const disposable = monaco.editor.onDidChangeMarkers(() => refreshProblems());
     refreshProblems();
@@ -1234,7 +1440,7 @@ export const CodeEditorPanel: React.FC = () => {
   }, [workspace]);
 
   useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
-    if (event.state === 'started') setGitBusy(event.operation);
+    if (event.state === 'started') setGitBusy({ operation: event.operation, operationId: event.operationId });
     else setGitBusy(null);
     setStatus(event.message);
   }), []);
@@ -1248,6 +1454,7 @@ export const CodeEditorPanel: React.FC = () => {
         return;
       }
       setGitHunks([]);
+      setMergeBase(versions.data.base);
       setDiffView({ path: entry.path, name: entry.path, original: versions.data.ours, modified: versions.data.theirs, language: languageIdFromName(entry.path), source: 'merge' });
       return;
     }
@@ -1296,6 +1503,17 @@ export const CodeEditorPanel: React.FC = () => {
     setStatus(`已暂存 ${hunk.label}`);
   }, [refreshGitStatus, workspace]);
 
+  const unstageFile = useCallback(async () => {
+    if (!workspace || !diffView) return;
+    const result = await window.electronAPI.workspace.gitUnstage(workspace.path, [diffView.path]);
+    if (!result.success) {
+      setStatus(`取消暂存失败：${displayError(result.error)}`);
+      return;
+    }
+    await refreshGitStatus();
+    setStatus('已取消暂存全部更改');
+  }, [diffView, refreshGitStatus, workspace]);
+
   const resolveGitConflict = useCallback(async (strategy: 'ours' | 'theirs') => {
     if (!workspace || !diffView || diffView.source !== 'merge') return;
     const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'resolveConflict', { path: diffView.path, strategy });
@@ -1307,6 +1525,60 @@ export const CodeEditorPanel: React.FC = () => {
     await refreshGitStatus();
     setStatus(`已使用${strategy === 'ours' ? '当前分支' : '传入分支'}版本并暂存`);
   }, [diffView, refreshGitStatus, workspace]);
+
+  const applyMergeHunk = useCallback((hunkIndex: number, side: 'ours' | 'theirs') => {
+    if (!diffView || diffView.source !== 'merge') return;
+    const hunk = mergeHunks.find((h) => h.index === hunkIndex);
+    if (!hunk) return;
+
+    const oLines = diffView.original.split('\n');
+    const mLines = diffView.modified.split('\n');
+
+    // ours: keep original lines → apply originalLines into modified (like reject in AI)
+    // theirs: use modified lines → apply modifiedLines into original (like accept in AI)
+    const newOriginal = side === 'theirs'
+      ? [...oLines.slice(0, hunk.originalStart - 1), ...hunk.modifiedLines, ...oLines.slice(hunk.originalStart - 1 + hunk.originalLines.length)].join('\n')
+      : diffView.original;
+
+    const newModified = side === 'ours'
+      ? [...mLines.slice(0, hunk.modifiedStart - 1), ...hunk.originalLines, ...mLines.slice(hunk.modifiedStart - 1 + hunk.modifiedLines.length)].join('\n')
+      : diffView.modified;
+
+    const remaining = computeDiffHunks(newOriginal, newModified);
+    setMergeHunks(remaining);
+    setDiffView({ ...diffView, original: newOriginal, modified: newModified });
+    setStatus(`冲突块 ${hunkIndex + 1}：选择${side === 'ours' ? '当前分支' : '传入分支'}，剩余 ${remaining.length} 个`);
+  }, [diffView, mergeHunks]);
+
+  const finishMerge = useCallback(async () => {
+    if (!workspace || !diffView || diffView.source !== 'merge') return;
+    // Write the resolved file content (newOriginal === newModified after all blocks resolved)
+    const read = await window.electronAPI.workspace.readTextFile(workspace.path, diffView.path);
+    if (!read.success || !read.data) {
+      setStatus('无法读取文件以完成合并');
+      return;
+    }
+    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, diffView.original, {
+      encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt, force: true,
+    });
+    if (!write.success) {
+      setStatus(`写入合并结果失败：${displayError(write.error)}`);
+      return;
+    }
+    // Stage the resolved file
+    const stage = await window.electronAPI.workspace.gitStage(workspace.path, [diffView.path]);
+    if (!stage.success) {
+      setStatus(`暂存失败：${displayError(stage.error)}`);
+      return;
+    }
+    setDiffView(null);
+    setMergeHunks([]);
+    setMergeBase(null);
+    await refreshGitStatus();
+    setDocuments((previous) => previous.map((d) => d.path === diffView.path ? { ...d, content: diffView.original, savedContent: diffView.original } : d));
+    appendOutput(`合并完成：${diffView.name}`);
+    setStatus('合并冲突已解决并暂存');
+  }, [appendOutput, diffView, refreshGitStatus, workspace]);
 
   const generateAiEdit = useCallback(async () => {
     if (!activeDocument || !aiInstruction.trim()) return;
@@ -1339,7 +1611,7 @@ export const CodeEditorPanel: React.FC = () => {
           }
         }
         const messages = [
-          { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"相对路径","content":"修改后的完整文件"}]}。只返回需要修改的文件，不得返回 Markdown。不得修改未提供的路径。' },
+          { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"相对路径","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串 ""。只返回需要变更的文件，不得返回 Markdown。' },
           { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${contexts.map((item) => `--- ${item.path} ---\n${item.original}`).join('\n\n')}` },
         ];
         let response = '';
@@ -1348,8 +1620,20 @@ export const CodeEditorPanel: React.FC = () => {
         const parsed = JSON.parse(jsonText) as { files?: Array<{ path: string; content: string }> };
         const allowed = new Map(contexts.map((item) => [item.path.replace(/\\/g, '/'), item]));
         const proposals = (parsed.files ?? []).flatMap((file) => {
-          const context = allowed.get(file.path.replace(/\\/g, '/'));
-          if (!context || typeof file.content !== 'string' || file.content === context.original) return [];
+          const normalizedPath = file.path.replace(/\\/g, '/');
+          const context = allowed.get(normalizedPath);
+          if (typeof file.content !== 'string') return [];
+          // New file: path not in existing contexts
+          if (!context) {
+            if (!file.content || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
+            const lang = languageIdFromName(file.path);
+            return [{ path: normalizedPath, original: '', modified: file.content, language: lang, metadata: undefined }];
+          }
+          // Delete: empty content means delete
+          if (file.content === '' && context.original !== '') {
+            return [{ ...context, modified: '', language: context.language }];
+          }
+          if (file.content === context.original) return [];
           return [{ ...context, modified: file.content }];
         });
         if (proposals.length === 0) {
@@ -1357,6 +1641,7 @@ export const CodeEditorPanel: React.FC = () => {
           return;
         }
         setAiProposals(proposals);
+        recordAiSession(proposals.length);
         const first = proposals[0];
         setDiffView({ path: first.path, name: first.path, original: first.original, modified: first.modified, language: first.language, source: 'ai' });
         appendOutput(`AI 已生成 ${proposals.length} 个文件的修改候选`);
@@ -1377,6 +1662,7 @@ export const CodeEditorPanel: React.FC = () => {
         return;
       }
       setDiffView({ path: activeDocument.path, name: activeDocument.name, original: activeDocument.content, modified, language: activeDocument.language, source: 'ai' });
+      recordAiSession(1);
       appendOutput(`AI 已生成 ${activeDocument.name} 的修改候选，等待确认`);
     } catch (error) {
       setStatus(`AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
@@ -1385,19 +1671,67 @@ export const CodeEditorPanel: React.FC = () => {
     }
   }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMultiFile, appendOutput, documents, workspace]);
 
+  const runInlineEdit = useCallback(async () => {
+    if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
+    setInlineEdit({ instruction: '', visible: false });
+    setAiEditing(true);
+    setStatus('AI 正在生成内联修改…');
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const selection = editorRef.current?.getSelection();
+      const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
+      const messages = [
+        { role: 'system' as const, content: '你是内联代码助手。在光标处或选中代码处进行修改。只返回要插入的代码片段，不要解释，不要 Markdown。如果选中了代码，返回替换该选区的代码。' },
+        { role: 'user' as const, content: `${selectedText ? `选中代码：\n${selectedText}\n\n` : ''}${activeDocument.name} (${activeDocument.language})\n修改指令：${inlineEdit.instruction.trim()}` },
+      ];
+      let response = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.1, maxTokens: 4000 })) response += chunk.delta;
+      const snippet = response.replace(/```[\s\S]*?\n?/g, '').trim();
+      if (!snippet) { setStatus('AI 未生成有效代码'); return; }
+      editorRef.current?.focus();
+      if (selection && !selection.isEmpty()) {
+        editorRef.current?.executeEdits('ai-inline', [{ range: selection, text: snippet }]);
+      } else {
+        const pos = editorRef.current?.getPosition();
+        if (pos) editorRef.current?.executeEdits('ai-inline', [{ range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column), text: snippet }]);
+      }
+      setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: editorRef.current?.getValue() ?? d.content, pinned: true } : d));
+      appendOutput(`AI 内联修改已应用：${activeDocument.name}`);
+      setStatus('AI 内联修改已应用');
+    } catch (error) {
+      setStatus(`内联修改失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAiEditing(false);
+    }
+  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, appendOutput, inlineEdit.instruction]);
+
   const acceptAiEdit = useCallback(() => {
     if (!diffView || diffView.source !== 'ai') return;
     const proposal = aiProposals.find((item) => item.path === diffView.path);
+    const isNew = !proposal?.metadata;
+    const isDelete = diffView.modified === '' && diffView.original !== '';
+
     setDocuments((previous) => {
       const exists = previous.some((document) => document.path === diffView.path);
+      if (isDelete) return previous.filter((d) => d.path !== diffView.path);
       const updated = previous.map((document) => document.path === diffView.path ? { ...document, content: diffView.modified, pinned: true } : document);
-      if (exists || !proposal?.metadata) return updated;
-      return [...updated, { ...proposal.metadata, content: diffView.modified, pinned: true }];
+      if (exists) return updated;
+      return [...updated, {
+        path: diffView.path,
+        name: diffView.path.split(/[\\/]/).pop() ?? diffView.path,
+        content: diffView.modified,
+        savedContent: isNew ? '' : diffView.modified,
+        language: diffView.language,
+        encoding: 'utf8' as WorkspaceEncoding,
+        lineEnding: 'LF' as const,
+        pinned: true,
+      }];
     });
     setAiHistory((previous) => [...previous.slice(-49), { id: Date.now(), path: diffView.path, before: diffView.original, after: diffView.modified }]);
     setActivePath(diffView.path);
     appendOutput(`已接受 AI 对 ${diffView.name} 的修改（尚未保存）`);
     setStatus('已接受 AI 修改，请检查后保存');
+    updateSessionAcceptCount();
     const remaining = aiProposals.filter((item) => item.path !== diffView.path);
     setAiProposals(remaining);
     const next = remaining[0];
@@ -1411,6 +1745,59 @@ export const CodeEditorPanel: React.FC = () => {
     const next = remaining[0];
     setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
   }, [aiProposals, diffView]);
+
+  // Compute hunks whenever an AI or merge diff view is opened
+  useEffect(() => {
+    if (diffView?.source === 'ai') {
+      setAiHunks(computeDiffHunks(diffView.original, diffView.modified));
+    } else if (diffView?.source === 'merge') {
+      setMergeHunks(computeDiffHunks(diffView.original, diffView.modified));
+    }
+  }, [diffView]);
+
+  const applyAiHunk = useCallback((hunkIndex: number, accept: boolean) => {
+    if (!diffView || diffView.source !== 'ai') return;
+    const hunk = aiHunks.find((h) => h.index === hunkIndex);
+    if (!hunk) return;
+
+    const oLines = diffView.original.split('\n');
+    const mLines = diffView.modified.split('\n');
+
+    // Accept: apply modifiedLines into original at the hunk position
+    // Reject: apply originalLines into modified at the hunk position
+    const newOriginal = accept
+      ? [...oLines.slice(0, hunk.originalStart - 1), ...hunk.modifiedLines, ...oLines.slice(hunk.originalStart - 1 + hunk.originalLines.length)].join('\n')
+      : diffView.original;
+
+    const newModified = accept
+      ? diffView.modified
+      : [...mLines.slice(0, hunk.modifiedStart - 1), ...hunk.originalLines, ...mLines.slice(hunk.modifiedStart - 1 + hunk.modifiedLines.length)].join('\n');
+
+    // Recompute hunks for the remaining diff
+    const remaining = computeDiffHunks(newOriginal, newModified);
+
+    setAiHunks(remaining);
+    setDiffView({ ...diffView, original: newOriginal, modified: newModified });
+
+    // Update document content with accepted changes
+    setDocuments((previous) => previous.map((d) =>
+      d.path === diffView.path ? { ...d, content: newOriginal, pinned: true } : d,
+    ));
+
+    if (remaining.length === 0) {
+      // All hunks processed — advance to next proposal
+      const proposal = aiProposals.find((p) => p.path === diffView.path);
+      setAiHistory((previous) => [...previous.slice(-49), { id: Date.now(), path: diffView.path, before: proposal?.original ?? '', after: newModified }]);
+      appendOutput(`已审阅 AI 对 ${diffView.name} 的修改（尚未保存）`);
+      setStatus('AI 修改审阅完成，请检查后保存');
+      const remainingProposals = aiProposals.filter((p) => p.path !== diffView.path);
+      setAiProposals(remainingProposals);
+      const next = remainingProposals[0];
+      setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
+    } else {
+      setStatus(`${accept ? '接受' : '拒绝'} Hunk ${hunkIndex + 1}，剩余 ${remaining.length} 个`);
+    }
+  }, [aiHunks, aiProposals, appendOutput, diffView]);
 
   const undoLastAiEdit = useCallback(() => {
     const edit = aiHistory.at(-1);
@@ -1534,22 +1921,34 @@ export const CodeEditorPanel: React.FC = () => {
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: activeDocument.path }).then((result) => {
-        if (cancelled || !editorRef.current || !result.success) return;
+      Promise.all([
+        window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: activeDocument.path }),
+        window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: activeDocument.path, staged: true }).catch(() => ({ success: false, data: '' }) as const),
+      ]).then(([unstaged, staged]) => {
+        if (cancelled || !editorRef.current) return;
         const decorations: monaco.editor.IModelDeltaDecoration[] = [];
-        for (const line of (result.data ?? '').split('\n')) {
-          const match = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
-          if (!match) continue;
-          const oldCount = Number(match[1] ?? 1);
-          const start = Number(match[2]);
-          const newCount = Number(match[3] ?? 1);
-          const kind = newCount === 0 ? 'deleted' : oldCount === 0 ? 'added' : 'modified';
-          const count = Math.max(1, newCount);
-          decorations.push({
-            range: new monaco.Range(Math.max(1, start), 1, Math.max(1, start + count - 1), 1),
-            options: { isWholeLine: true, className: `git-line-${kind}`, linesDecorationsClassName: `git-gutter-${kind}`, overviewRuler: { color: kind === 'added' ? '#22c55e' : kind === 'deleted' ? '#ef4444' : '#3b82f6', position: monaco.editor.OverviewRulerLane.Left } },
-          });
-        }
+        const addHunk = (patch: string, prefix: string) => {
+          for (const line of patch.split('\n')) {
+            const match = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+            if (!match) continue;
+            const oldCount = Number(match[1] ?? 1);
+            const start = Number(match[2]);
+            const newCount = Number(match[3] ?? 1);
+            const kind = newCount === 0 ? 'deleted' : oldCount === 0 ? 'added' : 'modified';
+            const count = Math.max(1, newCount);
+            decorations.push({
+              range: new monaco.Range(Math.max(1, start), 1, Math.max(1, start + count - 1), 1),
+              options: {
+                isWholeLine: true,
+                className: `git-line-${prefix}-${kind}`,
+                linesDecorationsClassName: `git-gutter-${prefix}-${kind}`,
+                overviewRuler: { color: prefix === 'staged' ? '#a78bfa' : kind === 'added' ? '#22c55e' : kind === 'deleted' ? '#ef4444' : '#3b82f6', position: monaco.editor.OverviewRulerLane.Left },
+              },
+            });
+          }
+        };
+        if (unstaged.success) addHunk(unstaged.data ?? '', 'unstaged');
+        if (staged.success) addHunk(staged.data ?? '', 'staged');
         gitDecorationsRef.current?.clear();
         gitDecorationsRef.current = editorRef.current.createDecorationsCollection(decorations);
       });
@@ -1596,6 +1995,15 @@ export const CodeEditorPanel: React.FC = () => {
       if (event.key === 'Escape') {
         setQuickOpen((previous) => ({ ...previous, open: false }));
         setSearchPanel((previous) => ({ ...previous, open: false }));
+        setInlineEdit({ instruction: '', visible: false });
+      }
+      if (command && event.key.toLowerCase() === 'k' && activeDocument && !activeDocument.readOnly) {
+        event.preventDefault();
+        const sel = editorRef.current?.getSelection();
+        const hasSelection = sel && !sel.isEmpty();
+        setInlineEdit({ instruction: '', visible: true });
+        if (hasSelection) setStatus('已选中代码，输入 AI 修改指令后回车');
+        else setStatus('输入 AI 生成指令后回车');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1857,6 +2265,13 @@ export const CodeEditorPanel: React.FC = () => {
 
           {activeDocument ? (
             <div className="flex min-h-0 flex-1">
+              {inlineEdit.visible && (
+                <div className="absolute top-1 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border bg-popover px-3 py-2 shadow-lg">
+                  <input autoFocus value={inlineEdit.instruction} onChange={(e) => setInlineEdit((p) => ({ ...p, instruction: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') void runInlineEdit(); if (e.key === 'Escape') setInlineEdit({ instruction: '', visible: false }); }} placeholder="AI 内联修改指令…" className="h-7 w-64 rounded border bg-background px-2 text-xs outline-none" />
+                  <Button size="sm" className="h-7 px-3 text-xs" disabled={!inlineEdit.instruction.trim() || aiEditing} onClick={() => void runInlineEdit()}>{aiEditing ? '…' : '生成'}</Button>
+                  <kbd className="text-[10px] text-muted-foreground">Ctrl+K</kbd>
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <Editor
                   path={editorPath}
@@ -1958,7 +2373,7 @@ export const CodeEditorPanel: React.FC = () => {
               />
               <div className="flex h-8 shrink-0 items-center gap-1 border-b px-2 text-[11px]">
                 {([
-                  ['problems', `问题 (${problems.length})`],
+                  ['problems', `问题 (${allProblems.length})`],
                   ['output', '输出'],
                   ['terminal', '终端'],
                   ['outline', `大纲 (${symbols.length})`],
@@ -1987,6 +2402,7 @@ export const CodeEditorPanel: React.FC = () => {
                         ))}
                       </div>
                       <select value={terminalProfileName} onChange={(event) => setTerminalProfileName(event.target.value)} className="h-7 max-w-28 rounded border bg-background px-1 text-[10px]">{terminalProfiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}</select>
+                      <select defaultValue="" onChange={(event) => { if (event.target.value) runWorkspaceTask(event.target.value); event.target.value = ''; }} className="h-7 max-w-36 rounded border bg-background px-1 text-[10px]"><option value="">运行任务…</option>{workspaceTasks.map((task) => <option key={task.name} value={task.command}>{task.name}</option>)}</select>
                       <button type="button" className="rounded px-2 py-1 text-sm hover:bg-accent" onClick={() => createTerminalTab(false)} title="新建终端">＋</button>
                       <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => createTerminalTab(true)} title="拆分终端">拆分</button>
                       {splitTerminalId && <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setSplitTerminalId(null)}>关闭分屏</button>}
@@ -1995,7 +2411,7 @@ export const CodeEditorPanel: React.FC = () => {
                     <div className="relative flex min-h-0 flex-1">
                       {terminalTabs.map((tab) => (
                         <div key={tab.id} className={`${splitTerminalId ? 'relative w-1/2 border-r' : 'absolute inset-0'} min-h-0`} style={{ display: tab.id === activeTerminalId || tab.id === splitTerminalId ? 'flex' : 'none' }}>
-                          <TerminalSingle {...tab} profile={tab.profile} cwd={tab.cwd ?? workspace?.path} theme={resolvedTheme === 'dark' ? 'dark' : 'light'} onTitleChange={(id, title) => setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, title } : item))} onExit={(id, code) => {
+                          <TerminalSingle {...tab} profile={tab.profile} cwd={tab.cwd ?? workspace?.path} theme={resolvedTheme === 'dark' ? 'dark' : 'light'} onOutput={handleTerminalOutput} onTitleChange={(id, title) => setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, title } : item))} onExit={(id, code) => {
                             setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, alive: false, exitCode: code } : item));
                             appendOutput(`终端进程退出，代码 ${code}`);
                           }} />
@@ -2006,7 +2422,7 @@ export const CodeEditorPanel: React.FC = () => {
                 )}
                 {bottomPanel.tab === 'problems' && (
                   <div className="py-1">
-                    {problems.map((problem, index) => (
+                    {allProblems.map((problem, index) => (
                       <div key={`${problem.path}:${problem.line}:${problem.column}:${index}`} className="group flex min-h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => {
                         const relativePath = problem.path.replace(/^.*?file:\/\//, '').replace(/^\//, '');
                         const document = documents.find((item) => problem.path.endsWith(item.path.replace(/\\/g, '/')));
@@ -2020,7 +2436,7 @@ export const CodeEditorPanel: React.FC = () => {
                         <span className="shrink-0 text-muted-foreground">{problem.path.split('/').pop()} [{problem.line}, {problem.column}]</span>
                       </button><button type="button" className="rounded px-1.5 py-0.5 text-[10px] opacity-0 hover:bg-background group-hover:opacity-100" onClick={() => { setAiInstruction(`修复以下问题：${problem.message}（${problem.path}:${problem.line}:${problem.column}）`); setBottomPanel((previous) => ({ ...previous, tab: 'ai' })); }}>AI 修复</button></div>
                     ))}
-                    {problems.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">未发现问题</div>}
+                    {allProblems.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">未发现问题</div>}
                   </div>
                 )}
                 {bottomPanel.tab === 'outline' && (
@@ -2048,11 +2464,16 @@ export const CodeEditorPanel: React.FC = () => {
                         {(gitOverview?.branches ?? []).map((branch) => <option key={branch.name} value={branch.name}>{branch.current ? '✓ ' : ''}{branch.name}</option>)}
                       </select>
                       <Button size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('新分支名称'); if (name) void runGitOperation('createBranch', { name }); }}>新建分支</Button>
-                      {(['fetch', 'pull', 'push', 'sync'] as const).map((operation) => <Button key={operation} size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation(operation)}>{operation === 'fetch' ? 'Fetch' : operation === 'pull' ? '拉取' : operation === 'push' ? '推送' : '同步'}</Button>)}
+                      <select value={pullStrategy} disabled={!!gitBusy} onChange={(e) => setPullStrategy(e.target.value as 'ff-only' | 'merge' | 'rebase')} className="h-8 rounded border bg-background px-1 text-[10px]" title="拉取策略">{[{v:'ff-only',l:'FF'},{v:'merge',l:'Merge'},{v:'rebase',l:'Rebase'}]?.map(({v,l}) => <option key={v} value={v}>{l}</option>)}</select>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('fetch')}>Fetch</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('pull', { strategy: pullStrategy })}>拉取</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('push', gitOverview?.branch && !gitOverview.remotes?.some((r) => r.includes('(push)')) ? { setUpstream: true } : undefined)}>推送</Button>
+                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('sync', { strategy: pullStrategy })}>同步</Button>
                       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const message = window.prompt('Stash 说明（可选）') ?? ''; void runGitOperation('stashPush', { message }); }}>Stash</Button>
                       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('Tag 名称'); if (name) void runGitOperation('createTag', { name }); }}>新建 Tag</Button>
                       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('Remote 名称', 'origin'); const url = name && window.prompt('Remote URL'); if (name && url) void runGitOperation('addRemote', { name, url }); }}>添加 Remote</Button>
-                      {gitBusy && <span className="ml-auto text-muted-foreground">正在执行 {gitBusy}…</span>}
+                      {gitBusy && <span className="ml-auto text-muted-foreground">正在执行 {gitBusy.operation}…</span>}
+                      {gitBusy && <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-destructive" onClick={() => { if (workspace) void window.electronAPI.workspace.cancelGitOperation(workspace.path, gitBusy.operationId); }}>取消</Button>}
                     </div>
                     <div className="flex h-8 items-center gap-1 border-b px-2 text-xs">
                       {(['changes', 'history', 'stash'] as const).map((view) => <button key={view} type="button" className={`h-full border-b-2 px-2 ${gitView === view ? 'border-primary' : 'border-transparent text-muted-foreground'}`} onClick={() => setGitView(view)}>{view === 'changes' ? `更改 (${gitStatus.length})` : view === 'history' ? `历史 (${gitHistory.length})` : 'Stash / Tags / Remotes'}</button>)}
@@ -2089,7 +2510,8 @@ export const CodeEditorPanel: React.FC = () => {
                 {bottomPanel.tab === 'ai' && (
                   <div className="flex h-full min-h-0 flex-col gap-2 p-3">
                     <div className="text-xs text-muted-foreground">描述希望对当前文件执行的修改。AI 结果会先进入 Diff，不会自动保存。</div>
-                    <div className="flex items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={aiMultiFile} onChange={(event) => setAiMultiFile(event.target.checked)} />多文件 Agent（自动筛选相关文件）</label><span className="text-muted-foreground">待审阅 {aiProposals.length}</span><span className="text-muted-foreground">已接受 {aiHistory.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={aiHistory.length === 0} onClick={undoLastAiEdit}>撤销上次 AI 修改</Button></div>
+                    <div className="flex items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={aiMultiFile} onChange={(event) => setAiMultiFile(event.target.checked)} />多文件 Agent（自动筛选相关文件）</label><span className="text-muted-foreground">待审阅 {aiProposals.length}</span><span className="text-muted-foreground">已接受 {aiHistory.length}</span><span className="text-muted-foreground">会话 {aiSessions.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={aiHistory.length === 0} onClick={undoLastAiEdit}>撤销上次 AI 修改</Button></div>
+                    {aiSessions.length > 0 && <div className="max-h-24 overflow-auto border-t px-3 py-1"><div className="text-[10px] font-semibold text-muted-foreground">最近会话</div>{aiSessions.slice(-5).reverse().map((s) => <div key={s.id} className="flex items-center gap-2 py-0.5 text-[10px] text-muted-foreground"><span className="max-w-32 truncate">{s.instruction}</span><span>{s.filesChanged} 文件</span><span>{new Date(s.timestamp).toLocaleTimeString()}</span></div>)}</div>}
                     <textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
                     <div className="flex justify-end">
                       <Button size="sm" variant="ghost" className="mr-2" disabled={!activeDocument} onClick={() => { setAiMultiFile(true); setAiInstruction(`为 ${activeDocument?.path ?? '当前模块'} 生成或完善单元测试，复用项目现有测试框架和约定`); }}>生成测试</Button>
@@ -2107,7 +2529,11 @@ export const CodeEditorPanel: React.FC = () => {
                     <span>Minimap</span><input type="checkbox" checked={preferences.minimap} onChange={(event) => setPreferences((previous) => ({ ...previous, minimap: event.target.checked }))} />
                     <span>保存时格式化</span><input type="checkbox" checked={preferences.formatOnSave} onChange={(event) => setPreferences((previous) => ({ ...previous, formatOnSave: event.target.checked }))} />
                     <label htmlFor="terminal-profile">默认终端 Profile</label><select id="terminal-profile" value={terminalProfileName} onChange={(event) => setTerminalProfileName(event.target.value)} className="h-8 rounded border bg-background px-2">{terminalProfiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}</select>
-                    <label htmlFor="terminal-env">终端环境变量</label><textarea id="terminal-env" value={terminalEnvText} onChange={(event) => setTerminalEnvText(event.target.value)} placeholder={'KEY=value\nANOTHER=value'} className="min-h-20 rounded border bg-background p-2 font-mono text-xs" />
+                    <label htmlFor="terminal-env">终端环境变量 <button type="button" className="ml-1 rounded px-1 text-[10px] hover:bg-accent" onClick={() => setShowEnvValues((v) => !v)}>{showEnvValues ? '隐藏值' : '显示值'}</button></label>
+                    <div className="flex flex-col gap-1">
+                      <textarea id="terminal-env" value={showEnvValues ? terminalEnvText : terminalEnvText.replace(/=.*/gm, '=••••')} onChange={(event) => setTerminalEnvText(event.target.value)} onFocus={() => !showEnvValues && setShowEnvValues(true)} placeholder={'KEY=value\nANOTHER=${workspaceFolder}/bin'} className="min-h-20 rounded border bg-background p-2 font-mono text-xs" spellCheck={false} />
+                      {terminalEnvText.split(/\r?\n/).some((line) => line.trim() && !/^[A-Z_][A-Z0-9_]*=.+$/i.test(line.trim())) && <span className="text-[10px] text-warning">格式：KEY=value（一行一个）</span>}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2139,8 +2565,8 @@ export const CodeEditorPanel: React.FC = () => {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => beginRename(treeMenu.node)}>重命名</button>
-            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setTreeClipboard({ node: treeMenu.node, cut: false }); setTreeMenu(null); }}>复制</button>
-            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setTreeClipboard({ node: treeMenu.node, cut: true }); setTreeMenu(null); }}>剪切</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: false }); setTreeMenu(null); }}>复制{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: true }); setTreeMenu(null); }}>剪切{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={!treeClipboard} onClick={() => { void pasteTreeEntry(treeMenu.node); setTreeMenu(null); }}>粘贴</button>
             {treeMenu.node.type === 'file' && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => void showGitDiff({ path: treeMenu.node.path, status: ' M' })}>与 HEAD 比较</button>}
             {treeMenu.node.type === 'file' && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => void showFileTimeline(treeMenu.node)}>文件时间线</button>}
@@ -2148,7 +2574,7 @@ export const CodeEditorPanel: React.FC = () => {
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { if (workspace) void navigator.clipboard.writeText(`${workspace.path}\\${treeMenu.node.path}`); setTreeMenu(null); }}>复制路径</button>
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { void navigator.clipboard.writeText(treeMenu.node.path); setTreeMenu(null); }}>复制相对路径</button>
             <div className="my-1 border-t" />
-            <button type="button" className="w-full px-3 py-1.5 text-left text-destructive hover:bg-accent" onClick={() => { void deleteSelected(treeMenu.node); setTreeMenu(null); }}>移到回收站</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left text-destructive hover:bg-accent" onClick={() => { void (selectedPaths.size > 1 ? deleteTreeSelection() : deleteSelected(treeMenu.node)); setTreeMenu(null); }}>移到回收站{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
           </div>
         </div>
       )}
@@ -2186,15 +2612,48 @@ export const CodeEditorPanel: React.FC = () => {
         <div className="absolute inset-0 z-40 flex flex-col bg-background">
           <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
             <span className="font-semibold">{diffView.name}</span>
-            <span className="text-muted-foreground">{diffView.source === 'ai' ? '修改前 ↔ AI 候选' : diffView.source === 'git' ? 'HEAD ↔ 工作区' : diffView.source === 'merge' ? '当前分支 ↔ 传入分支' : '磁盘版本 ↔ 本地版本'}</span>
+            <span className="text-muted-foreground">{diffView.source === 'ai' ? '修改前 ↔ AI 候选' : diffView.source === 'git' ? 'HEAD ↔ 工作区' : diffView.source === 'merge' ? '当前分支 ↔ 传入分支' : diffView.source === 'search' ? '替换前 ↔ 替换后' : '磁盘版本 ↔ 本地版本'}</span>
             <div className="flex-1" />
             {diffView.source === 'git' && gitHunks.slice(0, 8).map((hunk, index) => <Button key={hunk.label} size="sm" variant="outline" className="h-7 max-w-32 truncate px-2 text-xs" title={hunk.label} onClick={() => void stageGitHunk(hunk)}>暂存块 {index + 1}</Button>)}
-            {diffView.source === 'merge' && <><Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void resolveGitConflict('ours')}>接受当前分支</Button><Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void resolveGitConflict('theirs')}>接受传入分支</Button></>}
-            {diffView.source === 'ai' && (
-              <Button size="sm" className="h-7 px-3 text-xs" onClick={acceptAiEdit}>接受修改</Button>
+            {diffView.source === 'git' && gitStatus.some((e) => e.path === diffView.path && e.status[0] !== ' ' && e.status[0] !== '?') && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-destructive" onClick={() => void unstageFile()}>取消暂存全部</Button>}
+            {diffView.source === 'merge' && mergeHunks.length > 0 && (
+              <div className="flex items-center gap-1 overflow-x-auto">
+                {mergeHunks.slice(0, 12).map((hunk) => (
+                  <span key={hunk.index} className="inline-flex items-center gap-0.5 rounded border bg-background px-1.5 py-0.5 text-[10px]">
+                    <button type="button" className="rounded px-1 hover:bg-success/20 hover:text-success" title="接受当前分支版本" onClick={() => applyMergeHunk(hunk.index, 'ours')}>我的</button>
+                    <span className="max-w-32 truncate text-muted-foreground">{hunk.originalLines[0]?.slice(0, 16) || '⋯'} ↔ {hunk.modifiedLines[0]?.slice(0, 16) || '⋯'}</span>
+                    <button type="button" className="rounded px-1 hover:bg-primary/20 hover:text-primary" title="接受传入分支版本" onClick={() => applyMergeHunk(hunk.index, 'theirs')}>传入</button>
+                  </span>
+                ))}
+                {mergeHunks.length > 12 && <span className="text-muted-foreground">+{mergeHunks.length - 12}</span>}
+              </div>
             )}
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => diffView.source === 'ai' ? rejectAiEdit() : setDiffView(null)}>
-              {diffView.source === 'ai' ? '拒绝修改' : '关闭比较'}
+            {diffView.source === 'merge' && mergeHunks.length === 0 && (
+              <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void finishMerge()}>完成合并</Button>
+            )}
+            {diffView.source === 'ai' && aiHunks.length > 0 && (
+              <div className="flex items-center gap-1 overflow-x-auto">
+                {aiHunks.slice(0, 12).map((hunk) => (
+                  <span key={hunk.index} className="inline-flex items-center gap-0.5 rounded border bg-background px-1.5 py-0.5 text-[10px]">
+                    <button type="button" className="rounded px-1 hover:bg-success/20 hover:text-success" title={`接受：${hunk.modifiedLines.slice(0, 2).join(' / ')}`} onClick={() => applyAiHunk(hunk.index, true)}>✓</button>
+                    <span className="max-w-32 truncate text-muted-foreground">{hunk.modifiedLines[0]?.slice(0, 40) || '(空)'}{hunk.modifiedLines.length > 1 ? ` +${hunk.modifiedLines.length - 1}` : ''}</span>
+                    <button type="button" className="rounded px-1 hover:bg-destructive/20 hover:text-destructive" title="拒绝" onClick={() => applyAiHunk(hunk.index, false)}>✗</button>
+                  </span>
+                ))}
+                {aiHunks.length > 12 && <span className="text-muted-foreground">+{aiHunks.length - 12}</span>}
+              </div>
+            )}
+            {diffView.source === 'ai' && aiHunks.length === 0 && (
+              <Button size="sm" className="h-7 px-3 text-xs" onClick={acceptAiEdit}>接受全部</Button>
+            )}
+            {diffView.source === 'search' && (
+              <>
+                <span className="text-muted-foreground">{searchPreviews.findIndex((p) => p.path === diffView.path) + 1}/{searchPreviews.length}</span>
+                <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void acceptSearchReplace()}>接受替换</Button>
+              </>
+            )}
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => diffView.source === 'ai' ? rejectAiEdit() : diffView.source === 'merge' ? (mergeHunks.length === 0 ? setDiffView(null) : resolveGitConflict('ours')) : diffView.source === 'search' ? rejectSearchReplace() : setDiffView(null)}>
+              {diffView.source === 'ai' ? (aiHunks.length > 0 ? '拒绝全部' : '关闭') : diffView.source === 'merge' ? (mergeHunks.length === 0 ? '关闭' : '全部接受当前分支') : diffView.source === 'search' ? '跳过' : '关闭比较'}
             </Button>
           </div>
           <div className="min-h-0 flex-1">
@@ -2225,6 +2684,17 @@ export const CodeEditorPanel: React.FC = () => {
         replaceResults={replaceSearchResults}
         undoReplace={undoSearchReplace}
         canUndoReplace={replaceHistory.length > 0}
+        previewReplace={previewSearchReplace}
+        openSearchAsEditor={() => {
+          if (searchPanel.results.length === 0) return;
+          const content = searchPanel.results.map((r) => `${r.path}:${r.line}:${r.column}  ${r.preview}`).join('\n');
+          const name = `搜索结果: ${searchPanel.query.slice(0, 40)}`;
+          const path = `__search__/${Date.now()}`;
+          setDocuments((prev) => [...prev, { path, name, content, savedContent: content, language: 'plaintext', encoding: 'utf8', lineEnding: 'LF', pinned: true, readOnly: false, standalone: false }]);
+          setActivePath(path);
+          setSearchPanel((p) => ({ ...p, open: false }));
+          setStatus(`已打开搜索编辑器：${searchPanel.results.length} 条结果`);
+        }}
       />
 
       <QuickOpenPanel
