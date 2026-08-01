@@ -40,6 +40,7 @@ import { DiffViewPanel } from './DiffViewPanel';
 import { FileTreeRow } from './FileTreeRow';
 import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
+import { estimateTokens, fitContextToTokenBudget } from './ai-context';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -223,6 +224,7 @@ export const CodeEditorPanel: React.FC = () => {
   });
   const [aiMultiFile, setAiMultiFile] = useState(false);
   const [aiProposals, setAiProposals] = useState<AiFileProposal[]>([]);
+  const [aiTokenBudget, setAiTokenBudget] = useState(() => Math.max(4_000, Math.min(64_000, Number(localStorage.getItem('code-editor.ai-token-budget')) || 24_000)));
   const [aiHistory, setAiHistory] = useState<AiEditHistory[]>(() => {
     try { return JSON.parse(localStorage.getItem('code-editor.ai-history') ?? '[]'); } catch { return []; }
   });
@@ -284,6 +286,7 @@ export const CodeEditorPanel: React.FC = () => {
   const recentlySavedRef = useRef(new Map<string, number>());
   const openRequestRef = useRef(0);
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
+  const restoredAiDraftWorkspaceRef = useRef<string | null>(null);
 
   const appendOutput = useCallback((message: string) => {
     const line = `${new Date().toLocaleTimeString()}  ${message}`;
@@ -314,7 +317,19 @@ export const CodeEditorPanel: React.FC = () => {
     if (!workspace) return false;
     const result = await window.electronAPI.workspace.gitOperation(workspace.path, operation, payload);
     if (!result.success) {
-      const message = result.error === 'GIT_AUTH_REQUIRED' ? 'Git 凭据不可用，请在系统凭据管理器或终端中完成登录' : result.error === 'GIT_CONFLICT' ? '操作产生冲突，请在冲突列表中解决后继续' : displayError(result.error);
+      const gitErrors: Record<string, string> = {
+        GIT_AUTH_REQUIRED: 'Git 凭据不可用，请检查 Git Credential Manager 或重新登录。',
+        GIT_CERTIFICATE_ERROR: 'TLS 证书验证失败，请检查证书链、系统时间或企业 CA 配置。',
+        GIT_PROXY_ERROR: 'Git 代理连接失败，请检查 http.proxy/https.proxy 和代理凭据。',
+        GIT_NETWORK_ERROR: '网络连接失败，请检查 DNS、网络和远端服务状态。',
+        GIT_REPOSITORY_NOT_FOUND: '远端仓库不存在，或当前账号无权查看。',
+        GIT_SSH_AGENT_ERROR: 'SSH Agent 不可用，请启动 Agent 并加载私钥。',
+        GIT_PERMISSION_DENIED: 'Git 权限被拒绝，请检查 SSH Key、仓库权限或访问令牌。',
+        GIT_INDEX_LOCKED: 'Git 索引被锁定，请确认没有其他 Git 进程正在运行。',
+        GIT_SAFE_DIRECTORY: 'Git 拒绝了仓库所有权，请核对目录所有者和 safe.directory 配置。',
+        GIT_CONFLICT: '操作产生冲突，请在冲突列表中解决后继续。',
+      };
+      const message = gitErrors[result.error ?? ''] ?? displayError(result.error);
       setStatus(message);
       appendOutput(`${operation} 失败：${message}`);
       return false;
@@ -1444,6 +1459,34 @@ export const CodeEditorPanel: React.FC = () => {
     localStorage.setItem('code-editor.ai-sessions', JSON.stringify(aiSessions.slice(-100)));
   }, [aiSessions]);
 
+  useEffect(() => {
+    if (!workspace) return;
+    try {
+      const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string }>;
+      const draft = drafts[workspace.path];
+      setAiProposals(draft?.proposals ?? []);
+      if (draft?.instruction) setAiInstruction(draft.instruction);
+      restoredAiDraftWorkspaceRef.current = workspace.path;
+      if (draft?.proposals.length) appendOutput(`已恢复 ${draft.proposals.length} 个待审 AI 修改候选`);
+    } catch {
+      restoredAiDraftWorkspaceRef.current = workspace.path;
+    }
+  }, [appendOutput, workspace]);
+
+  useEffect(() => {
+    if (!workspace || restoredAiDraftWorkspaceRef.current !== workspace.path) return;
+    try {
+      const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string; savedAt?: number }>;
+      if (aiProposals.length) drafts[workspace.path] = { proposals: aiProposals, instruction: aiInstruction, savedAt: Date.now() };
+      else delete drafts[workspace.path];
+      localStorage.setItem('code-editor.ai-drafts.v1', JSON.stringify(drafts));
+    } catch (error) {
+      appendOutput(`AI 待审候选持久化失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [aiInstruction, aiProposals, appendOutput, workspace]);
+
+  useEffect(() => localStorage.setItem('code-editor.ai-token-budget', String(aiTokenBudget)), [aiTokenBudget]);
+
   const recordAiSession = useCallback((fileCount: number) => {
     if (!workspace) return;
     setAiSessions((prev) => [...prev, { id: Date.now(), workspace: workspace.name, instruction: aiInstruction.trim().slice(0, 80), timestamp: Date.now(), filesChanged: fileCount, accepted: 0 }]);
@@ -1706,12 +1749,18 @@ export const CodeEditorPanel: React.FC = () => {
             });
           }
         }
+        const fittedContext = fitContextToTokenBudget(contexts.map((item) => ({
+          path: item.path,
+          content: item.original,
+          priority: item.path === activeDocument.path ? 100 : documents.some((document) => document.path === item.path) ? 50 : 0,
+        })), aiTokenBudget);
+        if (fittedContext.omitted.length) appendOutput(`Token 预算压缩：省略 ${fittedContext.omitted.length} 个低优先级文件（约 ${fittedContext.estimatedTokens} tokens）`);
         const messages = [
           { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"目标相对路径","oldPath":"重命名前相对路径（仅重命名时）","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串。重命名：同时提供 oldPath、path 和重命名后的完整 content。只返回需要变更的文件，不得返回 Markdown。' },
-          { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${contexts.map((item) => `--- ${item.path} ---\n${item.original}`).join('\n\n')}` },
+          { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fittedContext.files.map((item) => `--- ${item.path} ---\n${item.content}`).join('\n\n')}` },
         ];
         let response = '';
-        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: 24000 })) response += chunk.delta;
+        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))) })) response += chunk.delta;
         const jsonText = response.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
         const parsed = JSON.parse(jsonText) as { files?: Array<{ path: string; oldPath?: string; content: string }> };
         const allowed = new Map(contexts.map((item) => [item.path.replace(/\\/g, '/'), item]));
@@ -1755,7 +1804,7 @@ export const CodeEditorPanel: React.FC = () => {
         { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selectedText ? `\n重点关注的选中代码：\n${selectedText}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
       ];
       let response = '';
-      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: 16000 })) response += chunk.delta;
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))) })) response += chunk.delta;
       const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
       const modified = (fenced?.[1] ?? response).trimEnd();
       if (!modified || modified === activeDocument.content.trimEnd()) {
@@ -1770,7 +1819,7 @@ export const CodeEditorPanel: React.FC = () => {
     } finally {
       setAiEditing(false);
     }
-  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMultiFile, appendOutput, documents, workspace]);
+  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMultiFile, aiTokenBudget, appendOutput, documents, workspace]);
 
   const runInlineEdit = useCallback(async () => {
     if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
@@ -2260,6 +2309,23 @@ export const CodeEditorPanel: React.FC = () => {
       .slice(0, 100);
   }, [quickOpen.files, quickOpen.query]);
 
+  const runSemanticSearch = useCallback(async () => {
+    if (!workspace) return;
+    const model = editorRef.current?.getModel();
+    const cursor = editorRef.current?.getPosition();
+    const word = model && cursor ? model.getWordAtPosition(cursor)?.word ?? '' : '';
+    const symbol = await appPrompt('搜索符号、引用和 import 图', word);
+    if (!symbol) return;
+    setSearchPanel((previous) => ({ ...previous, open: true, query: symbol, loading: true, results: [] }));
+    const result = await window.electronAPI.workspace.semanticSearch(workspace.path, symbol);
+    setSearchPanel((previous) => ({
+      ...previous,
+      loading: false,
+      results: (result.data ?? []).map((item) => ({ ...item, preview: `[${item.kind}${item.importedFrom ? ` ← ${item.importedFrom}` : ''}] ${item.preview}` })),
+    }));
+    setStatus(result.success ? `语义搜索找到 ${result.data?.length ?? 0} 项` : `语义搜索失败：${displayError(result.error)}`);
+  }, [appPrompt, workspace]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
       <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
@@ -2284,6 +2350,7 @@ export const CodeEditorPanel: React.FC = () => {
         >
           <Search className="h-4 w-4" /> 全文搜索
         </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!workspace} onClick={() => void runSemanticSearch()} title="跨工作区搜索定义、引用和 import">语义搜索</Button>
         <div className="flex-1" />
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.revealDefinition', '当前位置没有可跳转的定义')} title="转到定义 (F12)">定义</Button>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.referenceSearch.trigger', '当前位置没有可查找的引用')} title="查找所有引用 (Shift+F12)">引用</Button>
@@ -2618,6 +2685,7 @@ export const CodeEditorPanel: React.FC = () => {
         setDiffView={setDiffView}
         aiMultiFile={aiMultiFile} setAiMultiFile={setAiMultiFile}
         aiProposals={aiProposals} aiHistory={aiHistory} aiSessions={aiSessions}
+        aiTokenBudget={aiTokenBudget} setAiTokenBudget={setAiTokenBudget} aiEstimatedTokens={estimateTokens(`${aiInstruction}\n${activeDocument?.content ?? ''}`)}
         undoLastAiEdit={undoLastAiEdit}
         aiInstruction={aiInstruction} aiEditing={aiEditing}
         activeDocument={activeDocument} generateAiEdit={generateAiEdit}

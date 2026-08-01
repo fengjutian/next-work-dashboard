@@ -65,6 +65,7 @@ export interface ElectronAPI {
     listTasks: (rootPath: string) => Promise<WorkspaceResult<Array<{ name: string; command: string; detail: string }>>>;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
+    semanticSearch: (rootPath: string, symbol: string) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
     gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
     gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
@@ -154,7 +155,7 @@ export interface WorkspaceGitStatus {
   status: string;
 }
 
-export type WorkspaceGitOperation = 'overview' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'compareCommits' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
+export type WorkspaceGitOperation = 'overview' | 'diagnostics' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'compareCommits' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
 
 export interface WorkspaceGitProgress {
   operationId: string;
@@ -247,6 +248,12 @@ export interface WorkspaceSearchResult {
   line: number;
   column: number;
   preview: string;
+}
+
+export interface WorkspaceSemanticResult extends WorkspaceSearchResult {
+  kind: 'definition' | 'reference' | 'import';
+  symbol: string;
+  importedFrom?: string;
 }
 
 export interface WorkspaceFileChange {

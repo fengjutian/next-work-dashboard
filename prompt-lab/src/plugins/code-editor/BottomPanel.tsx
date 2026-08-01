@@ -6,6 +6,7 @@ import { Code, X } from '@/components/icons';
 import type { BottomPanelTab, EditorPreferences, EditorProblem, EditorSymbol } from './editor-types';
 import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus } from '@/types/electron';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import { classifyConflictStatus } from '../../main/git-conflicts';
 
 interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
 
@@ -79,6 +80,9 @@ interface BottomPanelProps {
   aiProposals: Array<{ path: string }>;
   aiHistory: Array<{ id: number; path: string }>;
   aiSessions: Array<{ id: number; instruction: string; filesChanged: number; timestamp: number }>;
+  aiTokenBudget: number;
+  setAiTokenBudget: React.Dispatch<React.SetStateAction<number>>;
+  aiEstimatedTokens: number;
   undoLastAiEdit: () => void;
   aiInstruction: string;
   aiEditing: boolean;
@@ -224,6 +228,7 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => {
       {(p.gitOverview?.behind ?? 0) > 0 && <span className="text-warning">↓{p.gitOverview?.behind}</span>}
       <select value={p.pullStrategy} disabled={!!p.gitBusy} onChange={(e) => p.setPullStrategy(e.target.value as 'ff-only' | 'merge' | 'rebase')} className="h-8 rounded border bg-background px-1 text-[10px]" title="拉取策略">{[{v:'ff-only',l:'FF'},{v:'merge',l:'Merge'},{v:'rebase',l:'Rebase'}]?.map(({v,l}) => <option key={v} value={v}>{l}</option>)}</select>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('fetch')}>Fetch</Button>
+      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('diagnostics')}>诊断</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={() => void p.runGitOperation('pull', { strategy: p.pullStrategy })}>拉取</Button>
       <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!p.gitBusy} onClick={async () => {
         if (p.gitOverview?.upstream) { void p.runGitOperation('push'); return; }
@@ -257,6 +262,7 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => {
       {p.gitStatus.map((e) => (
         <div key={`${e.status}:${e.path}`} className="group flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent">
           <span className="w-5 shrink-0 font-mono text-primary">{e.status.trim() || '?'}</span>
+          {classifyConflictStatus(e.status) && <span className="shrink-0 rounded bg-destructive/10 px-1 text-[10px] text-destructive">{classifyConflictStatus(e.status)}</span>}
           <button className="min-w-0 flex-1 truncate text-left" onClick={() => void p.showGitDiff(e)} title="查看相对 HEAD 的 Diff">{e.path}</button>
           <button className="rounded px-1.5 py-0.5 opacity-0 hover:bg-background group-hover:opacity-100" onClick={() => void p.updateGitStage(e, e.status[0] === ' ' || e.status === '??')}>{e.status[0] !== ' ' && e.status[0] !== '?' ? '取消暂存' : '暂存'}</button>
         </div>
@@ -298,7 +304,7 @@ const SourceControlTabContent: React.FC<BottomPanelProps> = (p) => {
 const AiTabContent: React.FC<BottomPanelProps> = (p) => (
   <div className="flex h-full min-h-0 flex-col gap-2 p-3">
     <div className="text-xs text-muted-foreground">描述希望对当前文件执行的修改。AI 结果会先进入 Diff，不会自动保存。</div>
-    <div className="flex items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={p.aiMultiFile} onChange={(e) => p.setAiMultiFile(e.target.checked)} />多文件 Agent（自动筛选相关文件）</label><span className="text-muted-foreground">待审阅 {p.aiProposals.length}</span><span className="text-muted-foreground">已接受 {p.aiHistory.length}</span><span className="text-muted-foreground">会话 {p.aiSessions.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={p.aiHistory.length === 0} onClick={p.undoLastAiEdit}>撤销上次 AI 修改</Button></div>
+    <div className="flex flex-wrap items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={p.aiMultiFile} onChange={(e) => p.setAiMultiFile(e.target.checked)} />多文件 Agent（自动筛选相关文件）</label><label className="flex items-center gap-1">Token 预算 <input type="number" min={4000} max={64000} step={1000} value={p.aiTokenBudget} onChange={(e) => p.setAiTokenBudget(Math.max(4000, Math.min(64000, Number(e.target.value) || 24000)))} className="h-7 w-20 rounded border bg-background px-1" /></label><span className={p.aiEstimatedTokens > p.aiTokenBudget ? 'text-warning' : 'text-muted-foreground'}>当前约 {p.aiEstimatedTokens} tokens</span><span className="text-muted-foreground">待审阅 {p.aiProposals.length}</span><span className="text-muted-foreground">已接受 {p.aiHistory.length}</span><span className="text-muted-foreground">会话 {p.aiSessions.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={p.aiHistory.length === 0} onClick={p.undoLastAiEdit}>撤销上次 AI 修改</Button></div>
     {p.aiSessions.length > 0 && <div className="max-h-24 overflow-auto border-t px-3 py-1"><div className="text-[10px] font-semibold text-muted-foreground">最近会话</div>{p.aiSessions.slice(-5).reverse().map((s) => <div key={s.id} className="flex items-center gap-2 py-0.5 text-[10px] text-muted-foreground"><span className="max-w-32 truncate">{s.instruction}</span><span>{s.filesChanged} 文件</span><span>{new Date(s.timestamp).toLocaleTimeString()}</span></div>)}</div>}
     <textarea value={p.aiInstruction} onChange={(e) => p.setAiInstruction(e.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
     <div className="flex justify-end">

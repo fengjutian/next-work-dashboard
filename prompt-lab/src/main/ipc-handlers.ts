@@ -20,6 +20,7 @@ import { redactGitSecrets } from './git-security';
 import { parseGitLog } from './git-history';
 import { classifyGitError } from './git-diagnostics';
 import { parseGitBranches } from './git-overview';
+import { findSemanticMatches, type SemanticMatch } from './semantic-search';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -903,6 +904,37 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:semanticSearch', async (_event, rootPath: string, symbol: string) => {
+    try {
+      if (!/^[A-Za-z_$][\w$]*$/.test(symbol.trim())) return { success: false, error: 'INVALID_SYMBOL' };
+      const root = resolveWorkspacePath(rootPath);
+      const results: SemanticMatch[] = [];
+      const visit = (directory: string) => {
+        if (results.length >= 1_000) return;
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          if (WORKSPACE_IGNORED_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
+          const fullPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) visit(fullPath);
+          else if (entry.isFile() && /\.(?:[cm]?[jt]sx?|py|go|rs|java|vue|svelte)$/i.test(entry.name)) {
+            const stat = fs.statSync(fullPath);
+            if (stat.size > 1024 * 1024) continue;
+            try {
+              const content = decodeWorkspaceText(fs.readFileSync(fullPath)).content;
+              results.push(...findSemanticMatches(path.relative(root, fullPath), content, symbol));
+            } catch { /* skip binary or unsupported text */ }
+          }
+          if (results.length >= 1_000) break;
+        }
+      };
+      visit(root);
+      const order = { definition: 0, import: 1, reference: 2 } as const;
+      results.sort((a, b) => order[a.kind] - order[b.kind] || a.path.localeCompare(b.path) || a.line - b.line);
+      return { success: true, data: results.slice(0, 1_000) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:gitStatus', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
@@ -1022,6 +1054,23 @@ export function setupIPC(webviewPreloadPath: string) {
             remotes: remotes.split(/\r?\n/).filter(Boolean),
             tags: tags.split(/\r?\n/).filter(Boolean),
           };
+        } else if (operation === 'diagnostics') {
+          const read = (args: string[]) => runGit(root, args, 2 * 1024 * 1024, signal).catch((error) => `不可用：${redactGitSecrets(error instanceof Error ? error.message : String(error))}`);
+          const [gitVersion, credentialHelper, credentialManagerVersion, userName, userEmail] = await Promise.all([
+            read(['--version']),
+            read(['config', '--show-origin', '--get-all', 'credential.helper']),
+            read(['credential-manager', '--version']),
+            read(['config', '--get', 'user.name']),
+            read(['config', '--get', 'user.email']),
+          ]);
+          data = [
+            `Git: ${gitVersion || '未发现'}`,
+            `Credential Helper: ${credentialHelper || '未配置'}`,
+            `Git Credential Manager: ${credentialManagerVersion || '未发现'}`,
+            `SSH Agent: ${process.env.SSH_AUTH_SOCK ? `已连接 (${process.env.SSH_AUTH_SOCK})` : '未发现 SSH_AUTH_SOCK；Windows OpenSSH 可通过 ssh-agent 服务提供'}`,
+            `提交身份: ${userName || '未配置'} <${userEmail || '未配置'}>`,
+            `HTTPS Proxy: ${process.env.HTTPS_PROXY || process.env.https_proxy || '未配置'}`,
+          ].join('\n');
         } else if (operation === 'createBranch') {
           data = await runGit(root, ['switch', '-c', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
         } else if (operation === 'deleteBranch') {
