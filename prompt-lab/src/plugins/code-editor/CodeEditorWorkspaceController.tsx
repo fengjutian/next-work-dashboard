@@ -1,0 +1,2972 @@
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import Editor, { loader, type OnMount } from '@monaco-editor/react';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import 'monaco-editor/esm/vs/editor/editor.all.js';
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
+import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+import {
+  ChevronDown,
+  Code,
+  FileText,
+  FolderOpen,
+  Edit3,
+  PanelLeft,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from '@/components/icons';
+import { Button } from '@/components/ui/button';
+import type { TerminalTab, TerminalProfile } from '@/components/Terminal';
+import { useStore } from '@/store';
+import { createOpenAIProvider } from '@/core/llm';
+import type {
+  FilePickResult,
+  WorkspaceEncoding,
+  WorkspaceGitStatus,
+  WorkspaceGitOverview,
+  WorkspaceGitCommit,
+  WorkspaceGitOperation,
+  WorkspaceSearchResult,
+  WorkspaceTask,
+  WorkspaceTaskEvent,
+} from '@/types/electron';
+import { decodeBase64Utf8, hasGitConflictMarkers, languageFromName, languageIdFromName } from './editor-utils';
+import { DialogOverlay } from './DialogOverlay';
+import { BottomPanel } from './BottomPanel';
+import { DiffViewPanel } from './DiffViewPanel';
+import { FileTreeRow } from './FileTreeRow';
+import { SearchPanel } from './SearchPanel';
+import { QuickOpenPanel } from './QuickOpenPanel';
+import { estimateTokens, fitContextToTokenBudget } from './ai-context';
+import { parseProblemLine, resolveTaskOrder } from '../../main/workspace-tasks';
+import { classifyConflictStatus } from '../../main/git-conflicts';
+import { applyConversationSummary, conversationNeedsSummary, recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
+import {
+  type BottomPanelTab,
+  type EditorPreferences,
+  type EditorProblem,
+  type EditorSymbol,
+  type OpenDocument,
+  type TreeNode,
+  type TreeEditState,
+  type AiHunk,
+  DEFAULT_PREFERENCES,
+  displayError,
+  encodingLabel,
+} from './editor-types';
+
+export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
+export { type BottomPanelTab, type EditorPreferences, type EditorProblem, type EditorSymbol, type OpenDocument, type TreeNode, type TreeEditState, DEFAULT_PREFERENCES, displayError, encodingLabel } from './editor-types';
+
+loader.config({ monaco });
+if (typeof self !== 'undefined') {
+  (self as typeof self & {
+    MonacoEnvironment?: { getWorker: (_moduleId: string, label: string) => Worker };
+  }).MonacoEnvironment = {
+    getWorker: (_moduleId, label) => {
+      if (label === 'json') return new JsonWorker();
+      if (label === 'css' || label === 'scss' || label === 'less') return new CssWorker();
+      if (label === 'html' || label === 'handlebars' || label === 'razor') return new HtmlWorker();
+      if (label === 'typescript' || label === 'javascript') return new TsWorker();
+      return new EditorWorker();
+    },
+  };
+}
+
+function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode) => TreeNode): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.path === path) return update(node);
+    if (node.children) return { ...node, children: updateTreeNode(node.children, path, update) };
+    return node;
+  });
+}
+
+interface GitHunk { label: string; patch: string }
+interface AiFileProposal { path: string; previousPath?: string; original: string; modified: string; language: string; metadata?: OpenDocument }
+interface AiEditHistory { id: number; path: string; before: string; after: string }
+
+function computeDiffHunks(original: string, modified: string): AiHunk[] {
+  const o = original.split('\n');
+  const m = modified.split('\n');
+  const hunks: AiHunk[] = [];
+  let oIdx = 0;
+  let mIdx = 0;
+  let hunkIdx = 0;
+
+  while (oIdx < o.length || mIdx < m.length) {
+    while (oIdx < o.length && mIdx < m.length && o[oIdx] === m[mIdx]) { oIdx += 1; mIdx += 1; }
+    if (oIdx >= o.length && mIdx >= m.length) break;
+
+    const originalStart = oIdx + 1;
+    const modifiedStart = mIdx + 1;
+    const originalLines: string[] = [];
+    const modifiedLines: string[] = [];
+
+    while (oIdx < o.length) {
+      const lookAhead = m.slice(mIdx, mIdx + 8);
+      if (lookAhead.includes(o[oIdx])) break;
+      originalLines.push(o[oIdx]);
+      oIdx += 1;
+    }
+    while (mIdx < m.length) {
+      const lookAhead = o.slice(oIdx, oIdx + 8);
+      if (lookAhead.includes(m[mIdx])) break;
+      modifiedLines.push(m[mIdx]);
+      mIdx += 1;
+    }
+
+    if (originalLines.length > 0 || modifiedLines.length > 0) {
+      hunks.push({ index: hunkIdx, originalStart, modifiedStart, originalLines, modifiedLines });
+      hunkIdx += 1;
+    } else {
+      if (oIdx < o.length) { originalLines.push(o[oIdx]); oIdx += 1; }
+      if (mIdx < m.length) { modifiedLines.push(m[mIdx]); mIdx += 1; }
+      hunks.push({ index: hunkIdx, originalStart, modifiedStart, originalLines, modifiedLines });
+      hunkIdx += 1;
+    }
+  }
+  return hunks;
+}
+interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
+interface ReplaceSnapshot { path: string; content: string; encoding: WorkspaceEncoding; lineEnding: 'LF' | 'CRLF' }
+
+interface SearchPreview {
+  path: string;
+  name: string;
+  original: string;
+  modified: string;
+  language: string;
+  encoding: WorkspaceEncoding;
+  lineEnding: 'LF' | 'CRLF';
+  modifiedAt?: number;
+}
+
+function extractGitHunks(patchText: string): GitHunk[] {
+  const lines = patchText.split('\n');
+  const firstHunk = lines.findIndex((line) => line.startsWith('@@'));
+  if (firstHunk < 0) return [];
+  const header = lines.slice(0, firstHunk).join('\n');
+  const hunks: GitHunk[] = [];
+  let start = firstHunk;
+  for (let index = firstHunk + 1; index <= lines.length; index += 1) {
+    if (index === lines.length || lines[index].startsWith('@@')) {
+      const hunkLines = lines.slice(start, index);
+      hunks.push({ label: hunkLines[0], patch: `${header}\n${hunkLines.join('\n')}\n` });
+      start = index;
+    }
+  }
+  return hunks;
+}
+
+export const CodeEditorWorkspaceController: React.FC = () => {
+  const { theme, aiApi } = useStore();
+  const resolvedTheme = theme === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : theme;
+  const [workspace, setWorkspace] = useState<{ path: string; name: string } | null>(null);
+  const [workspaceFolders, setWorkspaceFolders] = useState<Array<{ id: string; path: string; name: string }>>([]);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [tree, setTree] = useState<TreeNode[]>([]);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [documents, setDocuments] = useState<OpenDocument[]>([]);
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [treeEdit, setTreeEdit] = useState<TreeEditState | null>(null);
+  const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
+  const [treeClipboard, setTreeClipboard] = useState<{ nodes: TreeNode[]; cut: boolean } | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const [secondaryPath, setSecondaryPath] = useState<string | null>(null);
+  const [diffView, setDiffView] = useState<{
+    path: string;
+    name: string;
+    original: string;
+    modified: string;
+    language: string;
+    source?: 'external' | 'git' | 'merge' | 'ai' | 'search';
+  } | null>(null);
+  const [gitHunks, setGitHunks] = useState<GitHunk[]>([]);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
+  const [explorerFilter, setExplorerFilter] = useState('');
+  const [explorerSort, setExplorerSort] = useState<'name' | 'type'>(() => (localStorage.getItem('code-editor.explorer-sort') as 'name' | 'type') || 'name');
+  const [recentWorkspaces, setRecentWorkspaces] = useState<Array<{ path: string; name: string }>>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.recent-workspaces') ?? '[]'); } catch { return []; }
+  });
+  const [autoSave, setAutoSave] = useState(false);
+  const [preferences, setPreferences] = useState<EditorPreferences>(() => {
+    try {
+      return { ...DEFAULT_PREFERENCES, ...JSON.parse(localStorage.getItem('code-editor.preferences.v1') ?? '{}') };
+    } catch {
+      return DEFAULT_PREFERENCES;
+    }
+  });
+  const [bottomPanel, setBottomPanel] = useState<{ open: boolean; tab: BottomPanelTab; height: number }>({
+    open: false, tab: 'problems', height: 220,
+  });
+  const [problems, setProblems] = useState<EditorProblem[]>([]);
+  const [taskProblems, setTaskProblems] = useState<EditorProblem[]>([]);
+  const [workspaceTasks, setWorkspaceTasks] = useState<WorkspaceTask[]>([]);
+  const [taskRun, setTaskRun] = useState<{ runId: string; name: string; state: 'running' | 'background' | 'completed' | 'failed' | 'cancelled'; startedAt: number } | null>(null);
+  const [taskHistory, setTaskHistory] = useState<Array<{ runId: string; name: string; state: 'completed' | 'failed' | 'cancelled'; startedAt: number; endedAt: number }>>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.task-history') ?? '[]'); } catch { return []; }
+  });
+  const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
+  const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
+  const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
+  const [gitOverview, setGitOverview] = useState<WorkspaceGitOverview | null>(null);
+  const [gitHistory, setGitHistory] = useState<WorkspaceGitCommit[]>([]);
+  const [gitView, setGitView] = useState<'changes' | 'history' | 'stash'>('changes');
+  const [gitBusy, setGitBusy] = useState<{ operation: string; operationId: string } | null>(null);
+  const [pullStrategy, setPullStrategy] = useState<'ff-only' | 'merge' | 'rebase'>('ff-only');
+  const [commitMessage, setCommitMessage] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiEditing, setAiEditing] = useState(false);
+  const [inlineEdit, setInlineEdit] = useState<{ instruction: string; visible: boolean }>({ instruction: '', visible: false });
+  const [aiSessions, setAiSessions] = useState<Array<{ id: number; workspace: string; instruction: string; timestamp: number; filesChanged: number; accepted: number }>>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.ai-sessions') ?? '[]'); } catch { return []; }
+  });
+  const [aiMultiFile, setAiMultiFile] = useState(false);
+  const [aiProposals, setAiProposals] = useState<AiFileProposal[]>([]);
+  const [aiTokenBudget, setAiTokenBudget] = useState(() => Math.max(4_000, Math.min(64_000, Number(localStorage.getItem('code-editor.ai-token-budget')) || 24_000)));
+  const [aiHistory, setAiHistory] = useState<AiEditHistory[]>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.ai-history') ?? '[]'); } catch { return []; }
+  });
+  const [aiHunks, setAiHunks] = useState<AiHunk[]>([]);
+  const [aiMessages, setAiMessages] = useState<AiConversationMessage[]>([]);
+  const [aiPendingRequest, setAiPendingRequest] = useState<AiPendingRequest | null>(null);
+  const [mergeHunks, setMergeHunks] = useState<AiHunk[]>([]);
+  const [mergeBase, setMergeBase] = useState<string | null>(null);
+  const [mergeResult, setMergeResult] = useState<string | null>(null);
+  const [mergeInitialResult, setMergeInitialResult] = useState<string | null>(null);
+  const [mergeConflictPaths, setMergeConflictPaths] = useState<{ base: string; ours: string; theirs: string } | null>(null);
+  const terminalCounterRef = useRef(1);
+  const [terminalProfiles, setTerminalProfiles] = useState<TerminalProfile[]>(() => {
+    try { return JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { return []; }
+  });
+  const [terminalProfileName, setTerminalProfileName] = useState(() => localStorage.getItem('code-editor.terminal-profile') ?? terminalProfiles[0]?.name ?? '');
+  const [terminalEnvText, setTerminalEnvText] = useState(() => localStorage.getItem('code-editor.terminal-env') ?? '');
+  const [renamingTerminalId, setRenamingTerminalId] = useState<string | null>(null);
+  const [renamingTerminalTitle, setRenamingTerminalTitle] = useState('');
+  const [dialog, setDialog] = useState<{ type: 'prompt'; title: string; defaultValue?: string; resolve: (value: string | null) => void } | { type: 'confirm'; message: string; resolve: (ok: boolean) => void } | null>(null);
+  const appPrompt = useCallback((title: string, defaultValue = ''): Promise<string | null> => new Promise((resolve) => {
+    setDialog({ type: 'prompt', title, defaultValue, resolve });
+  }), []);
+
+  const appConfirm = useCallback((message: string): Promise<boolean> => new Promise((resolve) => {
+    setDialog({ type: 'confirm', message, resolve });
+  }), []);
+  const refreshTerminalProfiles = useCallback(async () => {
+    let discovered: { data?: TerminalProfile[] } = {};
+    try { discovered = await window.electronAPI.terminal.profiles(); } catch { /* handler may not be registered yet */ }
+    let custom: TerminalProfile[] = [];
+    try { custom = JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { /* ignore invalid custom profiles */ }
+    const merged = [...(discovered.data ?? []), ...custom].filter((profile, index, all) => all.findIndex((item) => item.name === profile.name) === index);
+    setTerminalProfiles(merged);
+    setTerminalProfileName((current) => merged.some((profile) => profile.name === current) ? current : merged[0]?.name ?? '');
+  }, []);
+
+  const addTerminalProfile = useCallback(async () => {
+    const name = await appPrompt('自定义终端 Profile 名称');
+    const shell = name ? await appPrompt('Shell 可执行文件路径') : null;
+    if (!name || !shell) return;
+    const argsText = await appPrompt('启动参数（空格分隔，可留空）', '') ?? '';
+    let custom: TerminalProfile[] = [];
+    try { custom = JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { /* ignore */ }
+    const profile = { name: name.trim(), shell: shell.trim(), args: argsText.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((arg) => arg.replace(/^"|"$/g, '')) ?? [] };
+    custom = [...custom.filter((item) => item.name !== profile.name), profile];
+    localStorage.setItem('code-editor.terminal-custom-profiles', JSON.stringify(custom));
+    await refreshTerminalProfiles();
+    setTerminalProfileName(profile.name);
+  }, [appPrompt, refreshTerminalProfiles]);
+  const saveTerminalSecret = useCallback(async () => {
+    const name = await appPrompt('Secret 名称（在环境变量中使用 ${secret:NAME}）');
+    if (!name || !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name)) return;
+    const value = await appPrompt(`输入 ${name} 的 Secret 值`);
+    if (!value) return;
+    const saved = await window.electronAPI.auth.saveToken(`terminal-env:${name}`, value, 'Terminal environment secret');
+    setStatus(saved ? `Secret ${name} 已安全保存` : 'Secret 保存失败：系统加密存储不可用');
+  }, [appPrompt]);
+  const [showEnvValues, setShowEnvValues] = useState(false);
+  const [terminalTabs, setTerminalTabs] = useState<EditorTerminalTab[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('code-editor.terminal-tabs') ?? '[]') as Array<Pick<EditorTerminalTab, 'title' | 'cwd' | 'profile'>>;
+      if (saved.length > 0) return saved.slice(0, 8).map((tab, index) => ({ ...tab, id: `code-editor-terminal-${Date.now()}-${index}`, alive: true }));
+    } catch { /* ignore invalid persisted terminal metadata */ }
+    return [{ id: `code-editor-terminal-${Date.now()}`, title: 'Terminal 1', alive: true }];
+  });
+  const [activeTerminalId, setActiveTerminalId] = useState(() => terminalTabs[0].id);
+  const [splitTerminalId, setSplitTerminalId] = useState<string | null>(null);
+  const [status, setStatus] = useState('就绪');
+  const [position, setPosition] = useState({ line: 1, column: 1 });
+  const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
+    open: false, query: '', files: [],
+  });
+  const [searchPanel, setSearchPanel] = useState<{
+    open: boolean;
+    query: string;
+    replacement: string;
+    caseSensitive: boolean;
+    wholeWord: boolean;
+    useRegex: boolean;
+    include: string;
+    exclude: string;
+    loading: boolean;
+    results: WorkspaceSearchResult[];
+  }>({ open: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, useRegex: false, include: '', exclude: '', loading: false, results: [] });
+  const [replaceHistory, setReplaceHistory] = useState<ReplaceSnapshot[][]>([]);
+  const [searchPreviews, setSearchPreviews] = useState<SearchPreview[]>([]);
+  const restoringRef = useRef(true);
+  const documentsRef = useRef<OpenDocument[]>([]);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const gitDecorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  const pendingRevealRef = useRef<{ path: string; line: number; column: number } | null>(null);
+  const recentlySavedRef = useRef(new Map<string, number>());
+  const openRequestRef = useRef(0);
+  const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
+  const activeProblemMatcherRef = useRef<string | undefined>();
+  const restoredAiDraftWorkspaceRef = useRef<string | null>(null);
+
+  const appendOutput = useCallback((message: string) => {
+    const line = `${new Date().toLocaleTimeString()}  ${message}`;
+    setOutputLines((previous) => [...previous.slice(-199), line]);
+  }, []);
+
+  const refreshGitStatus = useCallback(async () => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitStatus(workspace.path);
+    if (result.success) setGitStatus(result.data ?? []);
+    else {
+      setGitStatus([]);
+      appendOutput(`Git 状态读取失败：${displayError(result.error)}`);
+    }
+  }, [appendOutput, workspace]);
+
+  const refreshGitOverview = useCallback(async () => {
+    if (!workspace) return;
+    try {
+      const [overview, history] = await Promise.all([
+        window.electronAPI.workspace.gitOperation<WorkspaceGitOverview>(workspace.path, 'overview'),
+        window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100 }),
+      ]);
+      if (overview.success) setGitOverview(overview.data ?? null);
+      if (history.success) setGitHistory(history.data ?? []);
+    } catch { /* IPC handlers may not be registered yet */ }
+  }, [workspace]);
+
+  const runGitOperation = useCallback(async (operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => {
+    if (!workspace) return false;
+    const result = await window.electronAPI.workspace.gitOperation(workspace.path, operation, payload);
+    if (!result.success) {
+      const gitErrors: Record<string, string> = {
+        GIT_AUTH_REQUIRED: 'Git 凭据不可用，请检查 Git Credential Manager 或重新登录。',
+        GIT_CERTIFICATE_ERROR: 'TLS 证书验证失败，请检查证书链、系统时间或企业 CA 配置。',
+        GIT_PROXY_ERROR: 'Git 代理连接失败，请检查 http.proxy/https.proxy 和代理凭据。',
+        GIT_NETWORK_ERROR: '网络连接失败，请检查 DNS、网络和远端服务状态。',
+        GIT_REPOSITORY_NOT_FOUND: '远端仓库不存在，或当前账号无权查看。',
+        GIT_SSH_AGENT_ERROR: 'SSH Agent 不可用，请启动 Agent 并加载私钥。',
+        GIT_PERMISSION_DENIED: 'Git 权限被拒绝，请检查 SSH Key、仓库权限或访问令牌。',
+        GIT_INDEX_LOCKED: 'Git 索引被锁定，请确认没有其他 Git 进程正在运行。',
+        GIT_SAFE_DIRECTORY: 'Git 拒绝了仓库所有权，请核对目录所有者和 safe.directory 配置。',
+        GIT_CONFLICT: '操作产生冲突，请在冲突列表中解决后继续。',
+      };
+      const message = gitErrors[result.error ?? ''] ?? displayError(result.error);
+      setStatus(message);
+      appendOutput(`${operation} 失败：${message}`);
+      return false;
+    }
+    if (typeof result.data === 'string' && result.data) appendOutput(result.data);
+    await Promise.all([refreshGitStatus(), refreshGitOverview()]);
+    return true;
+  }, [appendOutput, refreshGitOverview, refreshGitStatus, workspace]);
+
+  const createTerminalTab = useCallback((split = false) => {
+    terminalCounterRef.current += 1;
+    const id = `code-editor-terminal-${Date.now()}-${terminalCounterRef.current}`;
+    const profile = terminalProfiles.find((item) => item.name === terminalProfileName);
+    const env = Object.fromEntries(terminalEnvText.split(/\r?\n/).map((line) => line.split('=')).filter((parts) => parts.length >= 2).map(([key, ...value]) => [key.trim(), value.join('=').trim()]));
+    setTerminalTabs((previous) => [...previous, { id, title: profile?.name ?? `Terminal ${terminalCounterRef.current}`, cwd: workspace?.path, alive: true, profile: profile ? { ...profile, env } : undefined }]);
+    if (split) setSplitTerminalId(id); else setActiveTerminalId(id);
+  }, [terminalEnvText, terminalProfileName, terminalProfiles, workspace?.path]);
+
+  const closeTerminalTab = useCallback((id: string) => {
+    setTerminalTabs((previous) => {
+      const remaining = previous.filter((tab) => tab.id !== id);
+      if (remaining.length === 0) {
+        const nextId = `code-editor-terminal-${Date.now()}-${++terminalCounterRef.current}`;
+        setActiveTerminalId(nextId);
+        return [{ id: nextId, title: `Terminal ${terminalCounterRef.current}`, cwd: workspace?.path, alive: true }];
+      }
+      if (activeTerminalId === id) setActiveTerminalId(remaining[0].id);
+      if (splitTerminalId === id) setSplitTerminalId(null);
+      return remaining;
+    });
+  }, [activeTerminalId, splitTerminalId, workspace?.path]);
+
+  const restartTerminalTab = useCallback((id: string) => {
+    const nextId = `code-editor-terminal-${Date.now()}-${++terminalCounterRef.current}`;
+    setTerminalTabs((previous) => previous.map((tab) => tab.id === id ? {
+      ...tab, id: nextId, title: tab.title, alive: true, exitCode: undefined,
+    } : tab));
+    setActiveTerminalId(nextId);
+  }, []);
+
+  const handleTerminalOutput = useCallback((_id: string, data: string) => {
+    // ANSI CSI sequences necessarily start with the ESC control character.
+    // eslint-disable-next-line no-control-regex
+    const clean = data.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+    const found: EditorProblem[] = [];
+    for (const line of clean.split(/\r?\n/)) {
+      const configured = parseProblemLine(line, activeProblemMatcherRef.current);
+      if (configured) {
+        found.push({ ...configured, severity: configured.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error });
+        continue;
+      }
+      const match = /(.+?)(?:\((\d+),(\d+)\)|:(\d+):(\d+))(?:\s*-?\s*)(error|warning)?\s*(.*)/i.exec(line);
+      if (!match) continue;
+      found.push({ path: match[1].trim(), line: Number(match[2] ?? match[4]), column: Number(match[3] ?? match[5]), severity: match[6]?.toLowerCase() === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error, message: (match[7] || line).trim() });
+    }
+    if (found.length > 0) setTaskProblems((previous) => [...previous.slice(-499), ...found]);
+  }, []);
+
+  const runWorkspaceTask = useCallback((taskName: string) => {
+    const task = workspaceTasks.find((item) => item.name === taskName);
+    if (!task || !workspace) return;
+    setTaskProblems([]);
+    try { resolveTaskOrder(workspaceTasks, task.name); } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); return; }
+    activeProblemMatcherRef.current = task.problemMatcher;
+    const runId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setTaskRun({ runId, name: task.name, state: task.isBackground ? 'background' : 'running', startedAt: Date.now() });
+    setBottomPanel((previous) => ({ ...previous, open: true, tab: 'terminal' }));
+    const env = Object.fromEntries(terminalEnvText.split(/\r?\n/).map((line) => line.split('=')).filter((parts) => parts.length >= 2).map(([key, ...value]) => [key.trim(), value.join('=').trim()]));
+    void window.electronAPI.workspace.runTask(workspace.path, task.name, runId, env).then((result) => {
+      if (!result.success) setStatus(`任务失败：${displayError(result.error)}`);
+    });
+    setStatus(`正在运行任务：${task.name}`);
+  }, [terminalEnvText, workspace, workspaceTasks]);
+
+  const cancelWorkspaceTask = useCallback(() => {
+    if (taskRun) void window.electronAPI.workspace.cancelTask(taskRun.runId);
+  }, [taskRun]);
+
+  useEffect(() => window.electronAPI.workspace.onTaskEvent((event: WorkspaceTaskEvent) => {
+    if (event.state === 'output' && event.output) {
+      appendOutput(`[${event.task}] ${event.output.trimEnd()}`);
+      handleTerminalOutput(event.runId, event.output);
+      return;
+    }
+    if (event.state === 'started') setTaskRun((current) => current?.runId === event.runId ? { ...current, state: current.state === 'background' ? 'background' : 'running' } : current);
+    if (event.state === 'completed' || event.state === 'failed' || event.state === 'cancelled') {
+      const state = event.state;
+      setTaskRun((current) => current?.runId === event.runId ? { ...current, state } : current);
+      setTaskHistory((previous) => [...previous.slice(-49), { runId: event.runId, name: event.task, state, startedAt: event.startedAt, endedAt: event.endedAt ?? Date.now() }]);
+      setStatus(state === 'completed' ? `任务完成：${event.task}` : state === 'cancelled' ? `任务已取消：${event.task}` : `任务失败：${event.task}`);
+    }
+  }), [appendOutput, handleTerminalOutput]);
+
+  const activeDocument = documents.find((document) => document.path === activePath) ?? null;
+  const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
+  const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
+  const allProblems = useMemo(() => [...problems, ...taskProblems], [problems, taskProblems]);
+  const visibleTreeNodes = useMemo(() => {
+    const result: TreeNode[] = [];
+    const visit = (nodes: TreeNode[]) => nodes.forEach((node) => {
+      result.push(node);
+      if (node.children) visit(node.children);
+    });
+    visit(tree);
+    return result;
+  }, [tree]);
+  const displayedTree = useMemo(() => {
+    const query = explorerFilter.trim().toLocaleLowerCase();
+    const visit = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
+      const children = node.children ? visit(node.children) : undefined;
+      if (query && !node.name.toLocaleLowerCase().includes(query) && !children?.length) return [];
+      return [{ ...node, children }];
+    }).sort((a, b) => explorerSort === 'type' ? (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1) : a.name.localeCompare(b.name));
+    return visit(tree);
+  }, [explorerFilter, explorerSort, tree]);
+  const treeDecorations = useMemo(() => {
+    const result = new Map<string, { git?: string; errors?: number; warnings?: number }>();
+    for (const entry of gitStatus) {
+      const path = visibleTreeNodes.find((node) => node.path.replace(/\\/g, '/') === entry.path.replace(/\\/g, '/'))?.path ?? entry.path;
+      result.set(path, { ...result.get(path), git: entry.status });
+    }
+    for (const problem of allProblems) {
+      const path = [...visibleTreeNodes].find((node) => problem.path.replace(/\\/g, '/').endsWith(node.path.replace(/\\/g, '/')))?.path;
+      if (!path) continue;
+      const current = result.get(path) ?? {};
+      if (problem.severity === monaco.MarkerSeverity.Error) current.errors = (current.errors ?? 0) + 1;
+      else if (problem.severity === monaco.MarkerSeverity.Warning) current.warnings = (current.warnings ?? 0) + 1;
+      result.set(path, current);
+    }
+    return result;
+  }, [allProblems, gitStatus, visibleTreeNodes]);
+  useEffect(() => {
+    documentsRef.current = documents;
+  }, [documents]);
+
+  const loadDirectory = useCallback(async (rootPath: string, relativePath = '') => {
+    const result = await window.electronAPI.workspace.listDirectory(rootPath, relativePath);
+    if (!result.success) throw new Error(displayError(result.error));
+    return (result.data ?? []) as TreeNode[];
+  }, []);
+
+  const selectTreeNode = useCallback((node: TreeNode, event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
+    if (event?.shiftKey && selectedNode) {
+      const anchor = visibleTreeNodes.findIndex((item) => item.path === selectedNode.path);
+      const target = visibleTreeNodes.findIndex((item) => item.path === node.path);
+      if (anchor >= 0 && target >= 0) {
+        const [start, end] = anchor < target ? [anchor, target] : [target, anchor];
+        setSelectedPaths(new Set(visibleTreeNodes.slice(start, end + 1).map((item) => item.path)));
+      }
+    } else if (event?.ctrlKey || event?.metaKey) {
+      setSelectedPaths((previous) => {
+        const next = new Set(previous);
+        if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
+        return next;
+      });
+    } else {
+      setSelectedPaths(new Set([node.path]));
+    }
+    setSelectedNode(node);
+  }, [selectedNode, visibleTreeNodes]);
+
+  const hydrateExpandedTree = useCallback(async (
+    rootPath: string,
+    nodes: TreeNode[],
+    paths: Set<string>,
+  ): Promise<TreeNode[]> => Promise.all(nodes.map(async (node) => {
+    if (node.type !== 'directory' || !paths.has(node.path)) return node;
+    const children = await loadDirectory(rootPath, node.path);
+    return { ...node, children: await hydrateExpandedTree(rootPath, children, paths) };
+  })), [loadDirectory]);
+
+  const refreshWorkspaceTree = useCallback(async () => {
+    if (!workspace) return;
+    const entries = await loadDirectory(workspace.path);
+    setTree(await hydrateExpandedTree(workspace.path, entries, expandedPaths));
+  }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
+
+  const remapOpenPaths = useCallback((oldPath: string, nextPath: string) => {
+    setDocuments((previous) => previous.map((document) => {
+      if (
+        document.path !== oldPath
+        && !document.path.startsWith(`${oldPath}\\`)
+        && !document.path.startsWith(`${oldPath}/`)
+      ) return document;
+      const path = `${nextPath}${document.path.slice(oldPath.length)}`;
+      return { ...document, path, name: path.split(/[\\/]/).pop() ?? document.name };
+    }));
+    setActivePath((current) => {
+      if (!current) return current;
+      if (current !== oldPath && !current.startsWith(`${oldPath}\\`) && !current.startsWith(`${oldPath}/`)) {
+        return current;
+      }
+      return `${nextPath}${current.slice(oldPath.length)}`;
+    });
+  }, []);
+
+  const revealWorkspacePath = useCallback(async (relativePath: string) => {
+    if (!workspace) return;
+    const parts = relativePath.split(/[\\/]/);
+    const separator = relativePath.includes('\\') ? '\\' : '/';
+    const nextExpanded = new Set(expandedPaths);
+    let current = '';
+    for (const part of parts.slice(0, -1)) {
+      current = current ? `${current}${separator}${part}` : part;
+      nextExpanded.add(current);
+    }
+    setExpandedPaths(nextExpanded);
+    const entries = await loadDirectory(workspace.path);
+    setTree(await hydrateExpandedTree(workspace.path, entries, nextExpanded));
+  }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
+
+  const openWorkspace = useCallback(async (addToExisting = false) => {
+    if (!addToExisting && hasDirtyDocuments && !await appConfirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
+    try {
+      const folder = await window.electronAPI.workspace.openFolder();
+      if (!folder) return;
+      setStatus('正在读取工作区…');
+      const entries = await loadDirectory(folder.path);
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      if (addToExisting && workspace) {
+        setWorkspaceFolders((prev) => [...prev, { id, path: folder.path, name: folder.name }]);
+      } else {
+        setWorkspace(folder);
+        setActiveFolderId(id);
+        setWorkspaceFolders([{ id, path: folder.path, name: folder.name }]);
+        setDocuments([]);
+        setActivePath(null);
+        setExpandedPaths(new Set());
+      }
+      setTree(entries);
+      setSelectedNode(null);
+      setStatus(`已${addToExisting ? '添加' : '打开'} ${folder.name}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(
+        message.includes('No handler registered')
+          ? '主进程版本过旧，请完全退出并重新启动应用'
+          : `工作区打开失败：${message}`,
+      );
+    }
+  }, [hasDirtyDocuments, loadDirectory]);
+
+  const beginCreate = useCallback((type: 'file' | 'directory') => {
+    if (!workspace) return;
+    setTreeEdit({ mode: type === 'file' ? 'create-file' : 'create-directory', value: '' });
+  }, [workspace]);
+
+  const beginRename = useCallback((node = selectedNode) => {
+    if (!node) return;
+    setSelectedNode(node);
+    setTreeEdit({ mode: 'rename', value: node.name, target: node });
+    setTreeMenu(null);
+  }, [selectedNode]);
+
+  const commitTreeEdit = useCallback(async () => {
+    if (!workspace || !treeEdit?.value.trim()) {
+      setTreeEdit(null);
+      return;
+    }
+    if (treeEdit.mode !== 'rename') {
+      const parent = selectedNode?.type === 'directory' ? selectedNode.path : '';
+      const relativePath = parent ? `${parent}/${treeEdit.value.trim()}` : treeEdit.value.trim();
+      const result = treeEdit.mode === 'create-file'
+        ? await window.electronAPI.workspace.createFile(workspace.path, relativePath)
+        : await window.electronAPI.workspace.createDirectory(workspace.path, relativePath);
+      if (!result.success) {
+        setStatus(`新建失败：${displayError(result.error)}`);
+        return;
+      }
+      setTreeEdit(null);
+      await refreshWorkspaceTree();
+      setStatus(`已新建 ${relativePath}`);
+      return;
+    }
+    const target = treeEdit.target;
+    if (!target || treeEdit.value.trim() === target.name) {
+      setTreeEdit(null);
+      return;
+    }
+    const parent = target.path.replace(/[\\/][^\\/]+$/, '');
+    const nextName = treeEdit.value.trim();
+    const nextPath = parent ? `${parent}/${nextName}` : nextName;
+    const result = await window.electronAPI.workspace.renameEntry(
+      workspace.path, target.path, nextPath,
+    );
+    if (!result.success) {
+      setStatus(`重命名失败：${displayError(result.error)}`);
+      return;
+    }
+    const oldPath = target.path;
+    remapOpenPaths(oldPath, nextPath);
+    setSelectedNode(null);
+    setTreeEdit(null);
+    await refreshWorkspaceTree();
+    setStatus(`已重命名为 ${nextName}`);
+  }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeEdit, workspace]);
+
+  const deleteSelected = useCallback(async (node = selectedNode) => {
+    if (!workspace || !node) return;
+    const affectedDocuments = documents.filter((document) => (
+      document.path === node.path
+      || document.path.startsWith(`${node.path}\\`)
+      || document.path.startsWith(`${node.path}/`)
+    ));
+    if (affectedDocuments.some((document) => document.content !== document.savedContent)) {
+      setStatus('删除目标中包含未保存文件，请先保存或关闭');
+      return;
+    }
+    if (!await appConfirm(`确定将“${node.name}”移到系统回收站吗？`)) return;
+    const result = await window.electronAPI.workspace.trashEntry(workspace.path, node.path);
+    if (!result.success) {
+      setStatus(`删除失败：${displayError(result.error)}`);
+      return;
+    }
+    const affectedPaths = new Set(affectedDocuments.map((document) => document.path));
+    const remaining = documents.filter((document) => !affectedPaths.has(document.path));
+    setDocuments(remaining);
+    if (secondaryPath && affectedPaths.has(secondaryPath)) setSecondaryPath(null);
+    if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
+    setSelectedNode(null);
+    await refreshWorkspaceTree();
+    setStatus(`已将 ${node.name} 移到回收站`);
+  }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedNode, workspace]);
+
+  const deleteTreeSelection = useCallback(async () => {
+    if (!workspace || selectedPaths.size === 0) return;
+    const paths = [...selectedPaths].filter((candidate) => ![...selectedPaths].some((parent) => (
+      parent !== candidate && (candidate.startsWith(`${parent}/`) || candidate.startsWith(`${parent}\\`))
+    )));
+    const affected = documents.filter((document) => paths.some((target) => (
+      document.path === target || document.path.startsWith(`${target}/`) || document.path.startsWith(`${target}\\`)
+    )));
+    if (affected.some((document) => document.content !== document.savedContent)) {
+      setStatus('所选项目中包含未保存文件，请先保存或关闭');
+      return;
+    }
+    if (!await appConfirm(`确定将所选 ${paths.length} 个项目移到系统回收站吗？`)) return;
+    for (const target of paths) {
+      const result = await window.electronAPI.workspace.trashEntry(workspace.path, target);
+      if (!result.success) {
+        setStatus(`删除失败：${target} — ${displayError(result.error)}`);
+        return;
+      }
+    }
+    const affectedPaths = new Set(affected.map((document) => document.path));
+    const remaining = documents.filter((document) => !affectedPaths.has(document.path));
+    setDocuments(remaining);
+    if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
+    if (secondaryPath && affectedPaths.has(secondaryPath)) setSecondaryPath(null);
+    setSelectedNode(null);
+    setSelectedPaths(new Set());
+    await refreshWorkspaceTree();
+    setStatus(`已将 ${paths.length} 个项目移到回收站`);
+  }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedPaths, workspace]);
+
+  const pasteTreeEntry = useCallback(async (target = selectedNode) => {
+    if (!workspace || !treeClipboard) return;
+    const parent = target?.type === 'directory'
+      ? target.path
+      : target?.path.replace(/[\\/][^\\/]+$/, '') ?? '';
+    let completed = 0;
+    let skipped = 0;
+    for (const node of treeClipboard.nodes) {
+      let nextPath = parent ? `${parent}/${node.name}` : node.name;
+      if (nextPath === node.path || nextPath.startsWith(`${node.path}/`) || nextPath.startsWith(`${node.path}\\`)) { skipped += 1; continue; }
+      let result = treeClipboard.cut ? await window.electronAPI.workspace.renameEntry(workspace.path, node.path, nextPath) : await window.electronAPI.workspace.copyEntry(workspace.path, node.path, nextPath);
+      // Auto-rename on conflict: append " - Copy" counter
+      if (!result.success && result.error === 'ALREADY_EXISTS') {
+        let counter = 1;
+        const ext = node.name.includes('.') ? node.name.slice(node.name.lastIndexOf('.')) : '';
+        const base = ext ? node.name.slice(0, node.name.lastIndexOf('.')) : node.name;
+        while (counter < 100) {
+          const renamed = `${base} - Copy${counter > 1 ? ` (${counter})` : ''}${ext}`;
+          const renamedPath = parent ? `${parent}/${renamed}` : renamed;
+          result = treeClipboard.cut ? await window.electronAPI.workspace.renameEntry(workspace.path, node.path, renamedPath) : await window.electronAPI.workspace.copyEntry(workspace.path, node.path, renamedPath);
+          if (result.success) { nextPath = renamedPath; break; }
+          if (result.error !== 'ALREADY_EXISTS') break;
+          counter += 1;
+        }
+      }
+      if (!result.success) { setStatus(`粘贴失败：${node.name} — ${displayError(result.error)}`); return; }
+      if (treeClipboard.cut) remapOpenPaths(node.path, nextPath);
+      completed += 1;
+    }
+    if (treeClipboard.cut) setTreeClipboard(null);
+    await refreshWorkspaceTree();
+    setStatus(`已${treeClipboard.cut ? '移动' : '复制'} ${completed} 个项目${skipped > 0 ? `，跳过 ${skipped} 个` : ''}`);
+  }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeClipboard, workspace]);
+
+  const moveTreeEntry = useCallback(async (source: TreeNode, target: TreeNode) => {
+    if (!workspace || target.type !== 'directory') return;
+    const sourceName = source.path.split(/[\\/]/).pop() ?? source.name;
+    const nextPath = `${target.path}/${sourceName}`;
+    if (source.path === target.path || nextPath.startsWith(`${source.path}/`) || nextPath.startsWith(`${source.path}\\`)) {
+      setStatus('不能将文件夹移动到自身内部');
+      return;
+    }
+    const result = await window.electronAPI.workspace.renameEntry(workspace.path, source.path, nextPath);
+    if (!result.success) {
+      setStatus(`移动失败：${displayError(result.error)}`);
+      return;
+    }
+    remapOpenPaths(source.path, nextPath);
+    await refreshWorkspaceTree();
+    setStatus(`已移动到 ${target.path}`);
+  }, [refreshWorkspaceTree, remapOpenPaths, workspace]);
+
+  const showQuickOpen = useCallback(async () => {
+    if (!workspace) {
+      setStatus('请先打开工作区');
+      return;
+    }
+    setStatus('正在索引工作区文件…');
+    const result = await window.electronAPI.workspace.listFiles(workspace.path);
+    if (!result.success) {
+      setStatus(`文件索引失败：${displayError(result.error)}`);
+      return;
+    }
+    setQuickOpen({ open: true, query: '', files: (result.data ?? []) as TreeNode[] });
+    setStatus(`已索引 ${result.data?.length ?? 0} 个文件`);
+  }, [workspace]);
+
+  const openStandaloneFile = useCallback(async () => {
+    const result = await window.electronAPI.pickFile({ multiple: false });
+    const file = (Array.isArray(result) ? result[0] : result) as FilePickResult | null;
+    if (!file) return;
+    try {
+      const content = decodeBase64Utf8(file.content);
+      const existing = documents.some((document) => document.path === file.path);
+      if (!existing) {
+        setDocuments((previous) => [...previous, {
+          path: file.path,
+          name: file.name,
+          content,
+          savedContent: content,
+          language: languageIdFromName(file.name),
+          standalone: true,
+          encoding: 'utf8',
+          lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
+          mixedLineEndings: false,
+          readOnly: false,
+          pinned: true,
+        }]);
+      }
+      setActivePath(file.path);
+      setStatus(`已打开 ${file.name}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '文件打开失败');
+    }
+  }, [documents]);
+
+  const openTreeFile = useCallback(async (node: TreeNode, pinned = false) => {
+    if (!workspace) return;
+    if (documents.some((document) => document.path === node.path)) {
+      if (pinned) {
+        setDocuments((previous) => previous.map((document) => (
+          document.path === node.path ? { ...document, pinned: true } : document
+        )));
+      }
+      setActivePath(node.path);
+      void revealWorkspacePath(node.path);
+      return;
+    }
+    const requestId = ++openRequestRef.current;
+    setStatus(`正在打开 ${node.name}…`);
+    const result = await window.electronAPI.workspace.readTextFile(workspace.path, node.path);
+    if (requestId !== openRequestRef.current) return;
+    if (!result.success || !result.data) {
+      setStatus(displayError(result.error));
+      return;
+    }
+    setDocuments((previous) => [
+      ...previous.filter((document) => (
+        document.pinned !== false || document.content !== document.savedContent
+      )),
+      {
+        path: node.path,
+        name: node.name,
+        content: result.data!.content,
+        savedContent: result.data!.content,
+        language: languageIdFromName(node.name),
+        encoding: result.data.encoding,
+      lineEnding: result.data.lineEnding,
+      mixedLineEndings: result.data.mixedLineEndings,
+        modifiedAt: result.data.modifiedAt,
+        readOnly: result.data.readOnly,
+        pinned,
+      },
+    ]);
+    setActivePath(node.path);
+    void revealWorkspacePath(node.path);
+    setStatus(`已打开 ${node.name}`);
+  }, [documents, revealWorkspacePath, workspace]);
+
+  const toggleDirectory = useCallback(async (node: TreeNode) => {
+    if (!workspace) return;
+    if (node.children !== undefined) {
+      setExpandedPaths((previous) => {
+        const next = new Set(previous);
+        next.delete(node.path);
+        return next;
+      });
+      setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
+        ...current, children: undefined,
+      })));
+      return;
+    }
+    setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
+      ...current, loading: true,
+    })));
+    try {
+      const children = await loadDirectory(workspace.path, node.path);
+      setExpandedPaths((previous) => new Set(previous).add(node.path));
+      setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
+        ...current, loading: false, children,
+      })));
+    } catch (error) {
+      setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
+        ...current, loading: false,
+      })));
+      setStatus(error instanceof Error ? error.message : '目录读取失败');
+    }
+  }, [loadDirectory, workspace]);
+
+  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if ((event.target as HTMLElement).tagName === 'INPUT') return;
+    const index = selectedNode ? visibleTreeNodes.findIndex((node) => node.path === selectedNode.path) : -1;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = event.key === 'ArrowDown' ? Math.min(visibleTreeNodes.length - 1, index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
+      const next = visibleTreeNodes[nextIndex];
+      if (next) selectTreeNode(next);
+    } else if (event.key === 'ArrowRight' && selectedNode?.type === 'directory' && selectedNode.children === undefined) {
+      event.preventDefault(); void toggleDirectory(selectedNode);
+    } else if (event.key === 'ArrowLeft' && selectedNode) {
+      event.preventDefault();
+      if (selectedNode.type === 'directory' && selectedNode.children !== undefined) void toggleDirectory(selectedNode);
+      else {
+        const parentPath = selectedNode.path.replace(/[\\/][^\\/]+$/, '');
+        const parent = visibleTreeNodes.find((node) => node.path === parentPath);
+        if (parent) selectTreeNode(parent);
+      }
+    } else if (event.key === 'Enter' && selectedNode) {
+      event.preventDefault();
+      if (selectedNode.type === 'directory') void toggleDirectory(selectedNode); else void openTreeFile(selectedNode);
+    } else if (event.key === 'F2' && selectedNode) {
+      event.preventDefault(); beginRename(selectedNode);
+    } else if (event.key === 'Delete') {
+      event.preventDefault(); void deleteTreeSelection();
+    }
+  }, [beginRename, deleteTreeSelection, openTreeFile, selectTreeNode, selectedNode, toggleDirectory, visibleTreeNodes]);
+
+  const saveDocument = useCallback(async (document: OpenDocument, force = false) => {
+    if (document.readOnly) {
+      setStatus(`${document.name} 为只读文件`);
+      return false;
+    }
+    setStatus(`正在保存 ${document.name}…`);
+    if (!document.standalone) recentlySavedRef.current.set(document.path, Date.now());
+    const result = document.standalone
+      ? await window.electronAPI.writeTextFile(document.path, document.content)
+      : workspace
+        ? await window.electronAPI.workspace.writeTextFile(
+          workspace.path,
+          document.path,
+          document.content,
+          {
+            encoding: document.encoding,
+            lineEnding: document.lineEnding,
+            expectedModifiedAt: document.modifiedAt,
+            force,
+          },
+        )
+        : { success: false, error: 'NO_WORKSPACE' };
+    if (!result.success) {
+      if (result.error === 'FILE_MODIFIED_EXTERNALLY') {
+        setDocuments((previous) => previous.map((item) => (
+          item.path === document.path ? { ...item, externalChanged: true } : item
+        )));
+      }
+      setStatus(`保存失败：${displayError(result.error)}`);
+      return false;
+    }
+    setDocuments((previous) => previous.map((item) => (
+      item.path === document.path
+        ? {
+          ...item,
+          content: document.content,
+          savedContent: document.content,
+          modifiedAt: 'data' in result ? result.data?.modifiedAt : item.modifiedAt,
+          externalChanged: false,
+        }
+        : item
+    )));
+    setStatus(`已保存 ${document.name}`);
+    return true;
+  }, [workspace]);
+
+  const formatActiveDocument = useCallback(async () => {
+    const action = editorRef.current?.getAction('editor.action.formatDocument');
+    if (!action?.isSupported()) {
+      setStatus('当前语言没有可用的格式化程序');
+      return false;
+    }
+    await action.run();
+    appendOutput(`已格式化 ${activeDocument?.name ?? '当前文档'}`);
+    return true;
+  }, [activeDocument?.name, appendOutput]);
+
+  const runEditorAction = useCallback(async (actionId: string, unavailableMessage: string) => {
+    const action = editorRef.current?.getAction(actionId);
+    if (!action?.isSupported()) {
+      setStatus(unavailableMessage);
+      return;
+    }
+    await action.run();
+  }, []);
+
+  const saveActive = useCallback(async () => {
+    if (!activeDocument) return;
+    if (preferences.formatOnSave && activeDocument.path === activePath) await formatActiveDocument();
+    const latest = documentsRef.current.find((item) => item.path === activeDocument.path) ?? activeDocument;
+    await saveDocument({ ...latest, content: editorRef.current?.getValue() ?? latest.content });
+  }, [activeDocument, activePath, formatActiveDocument, preferences.formatOnSave, saveDocument]);
+
+  const saveAll = useCallback(async () => {
+    for (const document of documents.filter((item) => item.content !== item.savedContent)) {
+      if (!await saveDocument(document)) break;
+    }
+  }, [documents, saveDocument]);
+
+  const closeDocument = useCallback(async (path: string) => {
+    const document = documents.find((item) => item.path === path);
+    if (!document) return;
+    if (document.content !== document.savedContent && !await appConfirm(`“${document.name}”尚未保存，仍要关闭吗？`)) return;
+    const index = documents.findIndex((item) => item.path === path);
+    const remaining = documents.filter((item) => item.path !== path);
+    setDocuments(remaining);
+    if (secondaryPath === path) setSecondaryPath(null);
+    if (activePath === path) {
+      setActivePath(remaining[Math.min(index, remaining.length - 1)]?.path ?? null);
+    }
+  }, [activePath, documents, secondaryPath]);
+
+  const closeDocumentSet = useCallback(async (paths: string[]) => {
+    const pathSet = new Set(paths);
+    const dirty = documents.filter((document) => (
+      pathSet.has(document.path) && document.content !== document.savedContent
+    ));
+    if (dirty.length > 0 && !await appConfirm(`${dirty.length} 个文件尚未保存，仍要关闭吗？`)) return;
+    const remaining = documents.filter((document) => !pathSet.has(document.path));
+    setDocuments(remaining);
+    if (secondaryPath && pathSet.has(secondaryPath)) setSecondaryPath(null);
+    if (activePath && pathSet.has(activePath)) setActivePath(remaining[0]?.path ?? null);
+  }, [activePath, documents, secondaryPath]);
+
+  const moveTab = useCallback((sourcePath: string, targetPath: string) => {
+    if (sourcePath === targetPath) return;
+    setDocuments((previous) => {
+      const sourceIndex = previous.findIndex((document) => document.path === sourcePath);
+      const targetIndex = previous.findIndex((document) => document.path === targetPath);
+      if (sourceIndex < 0 || targetIndex < 0) return previous;
+      const next = [...previous];
+      const [source] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, source);
+      return next;
+    });
+  }, []);
+
+  const refreshProblems = useCallback(() => {
+    setProblems(monaco.editor.getModels().flatMap((model) => (
+      monaco.editor.getModelMarkers({ resource: model.uri }).map((marker) => ({
+        path: model.uri.path.replace(/^\//, ''),
+        message: marker.message,
+        line: marker.startLineNumber,
+        column: marker.startColumn,
+        severity: marker.severity,
+      }))
+    )));
+  }, []);
+
+  const refreshSymbols = useCallback(async (editor: monaco.editor.IStandaloneCodeEditor | null = editorRef.current) => {
+    const model = editor?.getModel();
+    if (!model) {
+      setSymbols([]);
+      return;
+    }
+    if (model.getLanguageId() === 'typescript' || model.getLanguageId() === 'javascript') {
+      try {
+        const getWorker = model.getLanguageId() === 'typescript'
+          ? await monaco.languages.typescript.getTypeScriptWorker()
+          : await monaco.languages.typescript.getJavaScriptWorker();
+        const worker = await getWorker(model.uri);
+        const tree = await worker.getNavigationTree(model.uri.toString());
+        if (tree) {
+          const semanticEntries: EditorSymbol[] = [];
+          const visit = (item: { text?: string; kind?: string; spans?: Array<{ start: number }>; childItems?: unknown[] }, depth: number) => {
+            const span = item.spans?.[0];
+            if (depth > 0 && item.text && span) {
+              const position = model.getPositionAt(span.start);
+              semanticEntries.push({ name: item.text, detail: item.kind, line: position.lineNumber, column: position.column, depth: depth - 1 });
+            }
+            for (const child of item.childItems ?? []) visit(child as typeof item, depth + 1);
+          };
+          visit(tree, 0);
+          setSymbols(semanticEntries);
+          return;
+        }
+      } catch {
+        // Fall through to a language-neutral outline.
+      }
+    }
+    // Language-neutral fallback for common declarations.
+    const declaration = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var|def|fn|struct)\s+([\w$]+)/;
+    const entries: EditorSymbol[] = [];
+    for (let line = 1; line <= model.getLineCount(); line += 1) {
+      const text = model.getLineContent(line);
+      const match = declaration.exec(text);
+      if (!match) continue;
+      entries.push({ name: match[2], detail: match[1], line, column: Math.max(1, text.indexOf(match[2]) + 1), depth: 0 });
+    }
+    setSymbols(entries);
+  }, []);
+
+  const handleMount: OnMount = useCallback((editor) => {
+    editorRef.current = editor;
+    editor.onDidChangeCursorPosition((event) => {
+      setPosition({ line: event.position.lineNumber, column: event.position.column });
+    });
+    // Gutter click → revert line/hunk
+    editor.onMouseDown(async (event) => {
+      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && event.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) return;
+      const line = event.target.position?.lineNumber;
+      if (!line || !workspace || !activeDocument || activeDocument.readOnly) return;
+      if (!await appConfirm(`回滚第 ${line} 行的更改？此操作将用 HEAD 版本覆盖该行所在 Hunk。`)) return;
+      const revert = await window.electronAPI.workspace.gitShowHead(workspace.path, activeDocument.path);
+      if (!revert.success) { setStatus(`回滚失败：${displayError(revert.error)}`); return; }
+      setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: revert.data ?? '', savedContent: revert.data ?? '', externalChanged: false } : d));
+      setStatus(`已回滚 ${activeDocument.name}`);
+    });
+    refreshProblems();
+    void refreshSymbols(editor);
+    editor.focus();
+  }, [refreshProblems, refreshSymbols]);
+
+  const runSearch = useCallback(async () => {
+    if (!workspace || !searchPanel.query.trim()) return;
+    setSearchPanel((previous) => ({ ...previous, loading: true }));
+    const result = await window.electronAPI.workspace.search(
+      workspace.path,
+      searchPanel.query.trim(),
+      {
+        caseSensitive: searchPanel.caseSensitive,
+        wholeWord: searchPanel.wholeWord,
+        useRegex: searchPanel.useRegex,
+        include: searchPanel.include,
+        exclude: searchPanel.exclude,
+      },
+    );
+    if (!result.success) {
+      setStatus(`搜索失败：${displayError(result.error)}`);
+      setSearchPanel((previous) => ({ ...previous, loading: false }));
+      return;
+    }
+    setSearchPanel((previous) => ({
+      ...previous,
+      loading: false,
+      results: result.data ?? [],
+    }));
+    setStatus(`找到 ${result.data?.length ?? 0} 个结果`);
+  }, [searchPanel.caseSensitive, searchPanel.exclude, searchPanel.include, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
+
+  const buildReplaceMatcher = useCallback(() => {
+    const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const source = searchPanel.useRegex ? searchPanel.query : escaped;
+    return new RegExp(searchPanel.wholeWord ? `\\b(?:${source})\\b` : source, searchPanel.caseSensitive ? 'g' : 'gi');
+  }, [searchPanel.caseSensitive, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord]);
+
+  const previewSearchReplace = useCallback(async (results: WorkspaceSearchResult[]) => {
+    if (!workspace || results.length === 0 || !searchPanel.replacement) return;
+    let matcher: RegExp;
+    try {
+      matcher = buildReplaceMatcher();
+    } catch (error) {
+      setStatus(`预览失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    setSearchPanel((previous) => ({ ...previous, loading: true }));
+    const paths = [...new Set(results.map((r) => r.path))];
+    const previews: SearchPreview[] = [];
+    for (const filePath of paths) {
+      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
+      if (!read.success || !read.data) continue;
+      const modified = read.data.content.replace(matcher, searchPanel.replacement);
+      if (modified === read.data.content) continue;
+      previews.push({
+        path: filePath,
+        name: filePath.split(/[\\/]/).pop() ?? filePath,
+        original: read.data.content,
+        modified,
+        language: languageIdFromName(filePath),
+        encoding: read.data.encoding,
+        lineEnding: read.data.lineEnding,
+        modifiedAt: read.data.modifiedAt,
+      });
+    }
+    setSearchPanel((previous) => ({ ...previous, loading: false }));
+    if (previews.length === 0) {
+      setStatus('没有文件需要修改');
+      return;
+    }
+    setSearchPreviews(previews);
+    const first = previews[0];
+    setDiffView({ path: first.path, name: first.name, original: first.original, modified: first.modified, language: first.language, source: 'search' });
+    appendOutput(`替换预览：${previews.length} 个文件，${results.length} 处匹配`);
+    setStatus(`预览 ${previews.length} 个文件的变更`);
+  }, [appendOutput, buildReplaceMatcher, searchPanel.replacement, workspace]);
+
+  const acceptSearchReplace = useCallback(async () => {
+    if (!diffView || diffView.source !== 'search' || !workspace) return;
+    const preview = searchPreviews.find((p) => p.path === diffView.path);
+    if (!preview) return;
+    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, preview.path, preview.modified, {
+      encoding: preview.encoding, lineEnding: preview.lineEnding, expectedModifiedAt: preview.modifiedAt,
+    });
+    if (!write.success) {
+      setStatus(`替换失败：${preview.path} — ${displayError(write.error)}`);
+      return;
+    }
+    recentlySavedRef.current.set(preview.path, Date.now());
+    setDocuments((previous) => previous.map((d) => d.path === preview.path ? { ...d, content: preview.modified, savedContent: preview.modified, modifiedAt: write.data?.modifiedAt } : d));
+    const remaining = searchPreviews.filter((p) => p.path !== diffView.path);
+    setSearchPreviews(remaining);
+    const next = remaining[0];
+    setDiffView(next ? { path: next.path, name: next.name, original: next.original, modified: next.modified, language: next.language, source: 'search' } : null);
+    if (!next) {
+      appendOutput('全部替换预览已应用');
+      setStatus('所有替换已应用');
+      setSearchPanel((previous) => ({ ...previous, results: [] }));
+    } else {
+      setStatus(`已应用 ${preview.name}，剩余 ${remaining.length} 个文件`);
+    }
+  }, [diffView, searchPreviews, workspace]);
+
+  const rejectSearchReplace = useCallback(() => {
+    if (!diffView || diffView.source !== 'search') return;
+    const remaining = searchPreviews.filter((p) => p.path !== diffView.path);
+    setSearchPreviews(remaining);
+    const next = remaining[0];
+    setDiffView(next ? { path: next.path, name: next.name, original: next.original, modified: next.modified, language: next.language, source: 'search' } : null);
+    if (!next) {
+      appendOutput('已取消所有替换预览');
+      setStatus('已取消替换预览');
+    } else {
+      setStatus(`已跳过，剩余 ${remaining.length} 个文件`);
+    }
+  }, [diffView, searchPreviews]);
+
+  const replaceAllSearchResults = useCallback(async () => {
+    if (!workspace || searchPanel.results.length === 0) return;
+    const paths = [...new Set(searchPanel.results.map((result) => result.path))];
+    if (!await appConfirm(`将在 ${paths.length} 个文件中替换 ${searchPanel.results.length} 处匹配，是否继续？`)) return;
+    let matcher: RegExp;
+    try {
+      const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const source = searchPanel.useRegex ? searchPanel.query : escaped;
+      matcher = new RegExp(searchPanel.wholeWord ? `\\b(?:${source})\\b` : source, searchPanel.caseSensitive ? 'g' : 'gi');
+    } catch (error) {
+      setStatus(`替换失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    setSearchPanel((previous) => ({ ...previous, loading: true }));
+    let replacedFiles = 0;
+    for (const filePath of paths) {
+      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
+      if (!read.success || !read.data) continue;
+      const content = read.data.content.replace(matcher, searchPanel.replacement);
+      if (content === read.data.content) continue;
+      const write = await window.electronAPI.workspace.writeTextFile(workspace.path, filePath, content, {
+        encoding: read.data.encoding,
+        lineEnding: read.data.lineEnding,
+        expectedModifiedAt: read.data.modifiedAt,
+      });
+      if (!write.success) {
+        setStatus(`替换中止：${filePath} — ${displayError(write.error)}`);
+        break;
+      }
+      replacedFiles += 1;
+      recentlySavedRef.current.set(filePath, Date.now());
+      setDocuments((previous) => previous.map((document) => document.path === filePath ? {
+        ...document, content, savedContent: content, modifiedAt: write.data?.modifiedAt,
+      } : document));
+    }
+    appendOutput(`工作区替换完成：${replacedFiles}/${paths.length} 个文件`);
+    setSearchPanel((previous) => ({ ...previous, loading: false, results: [] }));
+    setStatus(`已在 ${replacedFiles} 个文件中完成替换`);
+  }, [appendOutput, searchPanel.caseSensitive, searchPanel.query, searchPanel.replacement, searchPanel.results, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
+
+  const replaceSearchResults = useCallback(async (results: WorkspaceSearchResult[]) => {
+    if (!workspace || results.length === 0) return;
+    if (results.length > 1 && !await appConfirm(`将替换 ${results.length} 处匹配，是否继续？`)) return;
+    let matcher: RegExp;
+    try {
+      const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const source = searchPanel.useRegex ? searchPanel.query : escaped;
+      matcher = new RegExp(`^(?:${searchPanel.wholeWord ? `\\b(?:${source})\\b` : source})`, searchPanel.caseSensitive ? '' : 'i');
+    } catch (error) {
+      setStatus(`替换失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const grouped = new Map<string, WorkspaceSearchResult[]>();
+    for (const result of results) grouped.set(result.path, [...(grouped.get(result.path) ?? []), result]);
+    const snapshots: ReplaceSnapshot[] = [];
+    const edits: Array<{ path: string; content: string; encoding: WorkspaceEncoding; lineEnding: 'LF' | 'CRLF'; expectedModifiedAt: number }> = [];
+    for (const [filePath, matches] of grouped) {
+      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
+      if (!read.success || !read.data) continue;
+      let content = read.data.content;
+      snapshots.push({ path: filePath, content, encoding: read.data.encoding, lineEnding: read.data.lineEnding });
+      const lines = content.split('\n');
+      const offsets: number[] = [];
+      let offset = 0;
+      for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
+      for (const match of [...matches].sort((a, b) => b.line - a.line || b.column - a.column)) {
+        const start = (offsets[match.line - 1] ?? 0) + match.column - 1;
+        const tail = content.slice(start);
+        if (!matcher.test(tail)) continue;
+        matcher.lastIndex = 0;
+        content = `${content.slice(0, start)}${tail.replace(matcher, searchPanel.replacement)}`;
+      }
+      edits.push({ path: filePath, content, encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt });
+    }
+    if (edits.length === 0) return;
+    const write = await window.electronAPI.workspace.writeTextFiles(workspace.path, edits);
+    if (!write.success) {
+      setStatus(`替换失败，未写入任何文件：${displayError(write.error)}`);
+      return;
+    }
+    const modifiedAtByPath = new Map((write.data ?? []).map((item) => [item.path, item.modifiedAt]));
+    for (const edit of edits) recentlySavedRef.current.set(edit.path, Date.now());
+    setDocuments((previous) => previous.map((document) => {
+      const edit = edits.find((item) => item.path === document.path);
+      return edit ? { ...document, content: edit.content, savedContent: edit.content, modifiedAt: modifiedAtByPath.get(edit.path) } : document;
+    }));
+    if (snapshots.length > 0) setReplaceHistory((previous) => [...previous.slice(-19), snapshots]);
+    await runSearch();
+  }, [runSearch, searchPanel.caseSensitive, searchPanel.query, searchPanel.replacement, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
+
+  const undoSearchReplace = useCallback(async () => {
+    if (!workspace) return;
+    const snapshots = replaceHistory.at(-1);
+    if (!snapshots) return;
+    for (const snapshot of snapshots) {
+      const current = await window.electronAPI.workspace.readTextFile(workspace.path, snapshot.path);
+      if (!current.success || !current.data) continue;
+      const write = await window.electronAPI.workspace.writeTextFile(workspace.path, snapshot.path, snapshot.content, { encoding: snapshot.encoding, lineEnding: snapshot.lineEnding, expectedModifiedAt: current.data.modifiedAt });
+      if (!write.success) { setStatus(`撤销替换失败：${snapshot.path} — ${displayError(write.error)}`); return; }
+      recentlySavedRef.current.set(snapshot.path, Date.now());
+      setDocuments((previous) => previous.map((document) => document.path === snapshot.path ? { ...document, content: snapshot.content, savedContent: snapshot.content, modifiedAt: write.data?.modifiedAt } : document));
+    }
+    setReplaceHistory((previous) => previous.slice(0, -1));
+    await runSearch();
+    setStatus('已撤销上一次搜索替换');
+  }, [replaceHistory, runSearch, workspace]);
+
+  const openSearchResult = useCallback(async (result: WorkspaceSearchResult) => {
+    pendingRevealRef.current = { path: result.path, line: result.line, column: result.column };
+    await openTreeFile({
+      name: result.path.split(/[\\/]/).pop() ?? result.path,
+      path: result.path,
+      type: 'file',
+    });
+    setSearchPanel((previous) => ({ ...previous, open: false }));
+  }, [openTreeFile]);
+
+  const reloadExternalDocument = useCallback(async (document: OpenDocument) => {
+    if (!workspace || document.standalone) return;
+    const result = await window.electronAPI.workspace.readTextFile(workspace.path, document.path);
+    if (!result.success || !result.data) {
+      setStatus(`重新加载失败：${displayError(result.error)}`);
+      return;
+    }
+    setDocuments((previous) => previous.map((item) => item.path === document.path
+      ? {
+        ...item,
+        content: result.data!.content,
+        savedContent: result.data!.content,
+        encoding: result.data!.encoding,
+        lineEnding: result.data!.lineEnding,
+        mixedLineEndings: result.data!.mixedLineEndings,
+        modifiedAt: result.data!.modifiedAt,
+        externalChanged: false,
+        readOnly: result.data!.readOnly,
+      }
+      : item));
+    setStatus(`已重新加载 ${document.name}`);
+  }, [workspace]);
+
+  const compareExternalDocument = useCallback(async (document: OpenDocument) => {
+    if (!workspace || document.standalone) return;
+    const result = await window.electronAPI.workspace.readTextFile(workspace.path, document.path);
+    if (!result.success || !result.data) {
+      setStatus(`比较失败：${displayError(result.error)}`);
+      return;
+    }
+    setDiffView({
+      path: document.path,
+      name: document.name,
+      original: result.data.content,
+      modified: document.content,
+      language: document.language,
+      source: 'external',
+    });
+  }, [workspace]);
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      const raw = localStorage.getItem('code-editor.session.v1');
+      if (!raw) {
+        restoringRef.current = false;
+        return;
+      }
+      try {
+        const session = JSON.parse(raw) as {
+          workspace?: { path: string; name: string };
+          folders?: Array<{ id: string; path: string; name: string }>;
+          openPaths?: string[];
+          activePath?: string | null;
+          sidebarVisible?: boolean;
+          drafts?: Record<string, { content: string; pinned?: boolean }>;
+          pinned?: Record<string, boolean>;
+          viewStates?: Record<string, monaco.editor.ICodeEditorViewState | null>;
+          expandedPaths?: string[];
+          autoSave?: boolean;
+          terminals?: Array<{ id: string; title: string; cwd?: string; profileName?: string; alive: boolean }>;
+          activeTerminalId?: string;
+          splitTerminalId?: string | null;
+        };
+        if (!session.workspace) return;
+        const restoredExpandedPaths = new Set(session.expandedPaths ?? []);
+        const entries = await hydrateExpandedTree(
+          session.workspace.path,
+          await loadDirectory(session.workspace.path),
+          restoredExpandedPaths,
+        );
+        const restoredDocuments: OpenDocument[] = [];
+        for (const filePath of session.openPaths?.slice(0, 20) ?? []) {
+          const result = await window.electronAPI.workspace.readTextFile(
+            session.workspace.path, filePath,
+          );
+          if (!result.success || !result.data) continue;
+          restoredDocuments.push({
+            path: filePath,
+            name: filePath.split(/[\\/]/).pop() ?? filePath,
+            content: session.drafts?.[filePath]?.content ?? result.data.content,
+            savedContent: result.data.content,
+            language: languageIdFromName(filePath),
+            encoding: result.data.encoding,
+            lineEnding: result.data.lineEnding,
+            mixedLineEndings: result.data.mixedLineEndings,
+            modifiedAt: result.data.modifiedAt,
+            readOnly: result.data.readOnly,
+            pinned: session.drafts?.[filePath]?.pinned ?? session.pinned?.[filePath] ?? true,
+          });
+        }
+        setWorkspace(session.workspace);
+        if (session.folders) setWorkspaceFolders(session.folders);
+        else setWorkspaceFolders(session.workspace ? [{ id: `${Date.now()}`, path: session.workspace.path, name: session.workspace.name }] : []);
+        void window.electronAPI.workspace.reauthorize(session.workspace.path).catch(() => undefined);
+        setTree(entries);
+        setExpandedPaths(restoredExpandedPaths);
+        setDocuments(restoredDocuments);
+        setActivePath(
+          restoredDocuments.some((document) => document.path === session.activePath)
+            ? session.activePath ?? null
+            : restoredDocuments[0]?.path ?? null,
+        );
+        setSidebarVisible(session.sidebarVisible ?? true);
+        setAutoSave(session.autoSave ?? false);
+        viewStatesRef.current = session.viewStates ?? {};
+        // Restore terminal tabs if session had them
+        if (session.terminals?.length) {
+          setTerminalTabs(session.terminals.map((t) => ({
+            ...t,
+            alive: false,
+            profile: t.profileName ? terminalProfiles.find((p) => p.name === t.profileName) ?? terminalProfiles[0] : undefined,
+          })));
+          setActiveTerminalId(session.activeTerminalId ?? session.terminals[0].id);
+          if (session.splitTerminalId) setSplitTerminalId(session.splitTerminalId);
+        }
+        setStatus(`已恢复 ${session.workspace.name}`);
+      } catch {
+        localStorage.removeItem('code-editor.session.v1');
+      } finally {
+        restoringRef.current = false;
+      }
+    };
+    void restoreSession();
+  }, [hydrateExpandedTree, loadDirectory]);
+
+  useEffect(() => {
+    if (restoringRef.current) return;
+    if (!workspace) {
+      localStorage.removeItem('code-editor.session.v1');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      let draftBytes = 0;
+      const drafts: Record<string, { content: string; pinned?: boolean }> = {};
+      for (const document of documents) {
+        if (
+          document.standalone
+          || document.content === document.savedContent
+          || document.content.length > 1024 * 1024
+          || draftBytes + document.content.length > 2 * 1024 * 1024
+        ) continue;
+        drafts[document.path] = { content: document.content, pinned: document.pinned };
+        draftBytes += document.content.length;
+      }
+      localStorage.setItem('code-editor.session.v1', JSON.stringify({
+        workspace,
+        folders: workspaceFolders,
+        openPaths: documents.filter((document) => !document.standalone).map((document) => document.path),
+        activePath: activeDocument?.standalone ? null : activePath,
+        sidebarVisible,
+        drafts,
+        pinned: Object.fromEntries(documents.map((document) => [document.path, document.pinned !== false])),
+        viewStates: viewStatesRef.current,
+        expandedPaths: [...expandedPaths],
+        autoSave,
+        terminals: terminalTabs.map((t) => ({ id: t.id, title: t.title, cwd: t.cwd, profileName: t.profile?.name, alive: t.alive })),
+        activeTerminalId,
+        splitTerminalId,
+      }));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeDocument?.standalone, activePath, autoSave, documents, expandedPaths, sidebarVisible, workspace]);
+
+  useEffect(() => {
+    if (!autoSave) return;
+    const dirtyDocuments = documents.filter((document) => (
+      document.content !== document.savedContent && !document.readOnly && !document.externalChanged
+    ));
+    if (dirtyDocuments.length === 0) return;
+    const timer = window.setTimeout(() => {
+      for (const document of dirtyDocuments) void saveDocument(document);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [autoSave, documents, saveDocument]);
+
+  useEffect(() => {
+    localStorage.setItem('code-editor.preferences.v1', JSON.stringify(preferences));
+  }, [preferences]);
+
+  useEffect(() => {
+    localStorage.setItem('code-editor.ai-history', JSON.stringify(aiHistory.slice(-50)));
+  }, [aiHistory]);
+
+  useEffect(() => {
+    localStorage.setItem('code-editor.ai-sessions', JSON.stringify(aiSessions.slice(-100)));
+  }, [aiSessions]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    try {
+      const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string }>;
+      const draft = drafts[workspace.path];
+      setAiProposals(draft?.proposals ?? []);
+      if (draft?.instruction) setAiInstruction(draft.instruction);
+      restoredAiDraftWorkspaceRef.current = workspace.path;
+      if (draft?.proposals.length) appendOutput(`已恢复 ${draft.proposals.length} 个待审 AI 修改候选`);
+    } catch {
+      restoredAiDraftWorkspaceRef.current = workspace.path;
+    }
+  }, [appendOutput, workspace]);
+
+  useEffect(() => {
+    if (!workspace) { setAiMessages([]); setAiPendingRequest(null); return; }
+    try {
+      const conversations = JSON.parse(localStorage.getItem('code-editor.ai-conversations.v1') ?? '{}') as Record<string, AiConversationMessage[]>;
+      const pending = JSON.parse(localStorage.getItem('code-editor.ai-pending.v1') ?? '{}') as Record<string, AiPendingRequest>;
+      setAiMessages(conversations[workspace.path] ?? []);
+      const recovered = recoverInterruptedRequest(pending[workspace.path]);
+      setAiPendingRequest(recovered ?? null);
+      if (recovered) {
+        setAiInstruction(recovered.instruction);
+        appendOutput(`已恢复中断的 AI 请求：${recovered.instruction.slice(0, 80)}`);
+      }
+    } catch { setAiMessages([]); setAiPendingRequest(null); }
+  }, [appendOutput, workspace]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    const conversations = JSON.parse(localStorage.getItem('code-editor.ai-conversations.v1') ?? '{}') as Record<string, AiConversationMessage[]>;
+    conversations[workspace.path] = aiMessages.slice(-100);
+    localStorage.setItem('code-editor.ai-conversations.v1', JSON.stringify(conversations));
+  }, [aiMessages, workspace]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    const pending = JSON.parse(localStorage.getItem('code-editor.ai-pending.v1') ?? '{}') as Record<string, AiPendingRequest>;
+    if (aiPendingRequest) pending[workspace.path] = aiPendingRequest;
+    else delete pending[workspace.path];
+    localStorage.setItem('code-editor.ai-pending.v1', JSON.stringify(pending));
+  }, [aiPendingRequest, workspace]);
+
+  useEffect(() => {
+    if (!workspace || restoredAiDraftWorkspaceRef.current !== workspace.path) return;
+    try {
+      const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string; savedAt?: number }>;
+      if (aiProposals.length) drafts[workspace.path] = { proposals: aiProposals, instruction: aiInstruction, savedAt: Date.now() };
+      else delete drafts[workspace.path];
+      localStorage.setItem('code-editor.ai-drafts.v1', JSON.stringify(drafts));
+    } catch (error) {
+      appendOutput(`AI 待审候选持久化失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [aiInstruction, aiProposals, appendOutput, workspace]);
+
+  useEffect(() => localStorage.setItem('code-editor.ai-token-budget', String(aiTokenBudget)), [aiTokenBudget]);
+
+  const recordAiSession = useCallback((fileCount: number) => {
+    if (!workspace) return;
+    setAiSessions((prev) => [...prev, { id: Date.now(), workspace: workspace.name, instruction: aiInstruction.trim().slice(0, 80), timestamp: Date.now(), filesChanged: fileCount, accepted: 0 }]);
+  }, [aiInstruction, workspace]);
+
+  const updateSessionAcceptCount = useCallback(() => {
+    setAiSessions((prev) => {
+      const last = prev.at(-1);
+      if (!last) return prev;
+      return [...prev.slice(0, -1), { ...last, accepted: last.accepted + 1 }];
+    });
+  }, []);
+
+  useEffect(() => localStorage.setItem('code-editor.sidebar-width', String(sidebarWidth)), [sidebarWidth]);
+  useEffect(() => localStorage.setItem('code-editor.task-history', JSON.stringify(taskHistory.slice(-50))), [taskHistory]);
+  useEffect(() => { void refreshTerminalProfiles(); }, [refreshTerminalProfiles]);
+  useEffect(() => {
+    localStorage.setItem('code-editor.terminal-profile', terminalProfileName);
+    localStorage.setItem('code-editor.terminal-env', terminalEnvText);
+    localStorage.setItem('code-editor.terminal-tabs', JSON.stringify(terminalTabs.map(({ title, cwd, profile }) => ({ title, cwd, profile }))));
+  }, [terminalEnvText, terminalProfileName, terminalTabs]);
+  useEffect(() => {
+    const disposable = monaco.editor.onDidChangeMarkers(() => refreshProblems());
+    refreshProblems();
+    return () => disposable.dispose();
+  }, [refreshProblems]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshSymbols(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activePath, activeDocument?.content, refreshSymbols]);
+
+  useEffect(() => {
+    if (!workspace || !bottomPanel.open || bottomPanel.tab !== 'sourceControl') return;
+    void Promise.all([refreshGitStatus(), refreshGitOverview()]);
+  }, [bottomPanel.open, bottomPanel.tab, refreshGitOverview, refreshGitStatus, workspace]);
+
+  useEffect(() => {
+    if (!workspace) { setWorkspaceTasks([]); return; }
+    void window.electronAPI.workspace.listTasks(workspace.path).then((result) => setWorkspaceTasks(result.data ?? [])).catch(() => undefined);
+  }, [workspace]);
+
+  useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
+    if (event.state === 'started') setGitBusy({ operation: event.operation, operationId: event.operationId });
+    else setGitBusy(null);
+    setStatus(event.message);
+  }), []);
+
+  const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
+    if (!workspace) return;
+    if (classifyConflictStatus(entry.status)) {
+      const versions = await window.electronAPI.workspace.gitOperation<{ base: string; ours: string; theirs: string; conflictType?: string; paths: { base: string; ours: string; theirs: string } }>(workspace.path, 'conflictVersions', { path: entry.path });
+      if (!versions.success || !versions.data) {
+        setStatus(`冲突版本读取失败：${displayError(versions.error)}`);
+        return;
+      }
+      setGitHunks([]);
+      setMergeBase(versions.data.base);
+      setMergeResult(versions.data.ours);
+      setMergeInitialResult(versions.data.ours);
+      setMergeConflictPaths(versions.data.conflictType === 'rename/rename' ? versions.data.paths : null);
+      const name = versions.data.conflictType === 'rename/rename' ? `rename/rename: ${versions.data.paths.base} → ${versions.data.paths.ours} | ${versions.data.paths.theirs}` : entry.path;
+      setDiffView({ path: versions.data.paths.ours, name, original: versions.data.ours, modified: versions.data.theirs, language: languageIdFromName(versions.data.paths.ours), source: 'merge' });
+      return;
+    }
+    const current = await window.electronAPI.workspace.readTextFile(workspace.path, entry.path);
+    if (!current.success || !current.data) {
+      setStatus(`Diff 读取失败：${displayError(current.error)}`);
+      return;
+    }
+    const [head, patch] = await Promise.all([
+      window.electronAPI.workspace.gitShowHead(workspace.path, entry.path),
+      window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: entry.path }),
+    ]);
+    setGitHunks(patch.success ? extractGitHunks(patch.data ?? '') : []);
+    setDiffView({
+      path: entry.path,
+      name: entry.path,
+      original: head.success ? head.data ?? '' : '',
+      modified: current.data.content,
+      language: languageIdFromName(entry.path),
+      source: 'git',
+    });
+  }, [workspace]);
+
+  const showFileTimeline = useCallback(async (node: TreeNode) => {
+    if (!workspace || node.type !== 'file') return;
+    const result = await window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100, path: node.path });
+    if (!result.success) {
+      setStatus(`文件时间线读取失败：${displayError(result.error)}`);
+      return;
+    }
+    setGitHistory(result.data ?? []);
+    setGitView('history');
+    setBottomPanel((previous) => ({ ...previous, open: true, tab: 'sourceControl' }));
+    setTreeMenu(null);
+  }, [workspace]);
+
+  const loadGitHistory = useCallback(async (filters: { query?: string; author?: string; since?: string; until?: string }, append = false) => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 50, skip: append ? gitHistory.length : 0, ...filters });
+    if (!result.success) { setStatus(`历史加载失败：${displayError(result.error)}`); return; }
+    setGitHistory((previous) => append ? [...previous, ...(result.data ?? [])] : (result.data ?? []));
+  }, [gitHistory.length, workspace]);
+
+  const compareGitCommits = useCallback(async (from: string, to: string) => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitOperation<string>(workspace.path, 'compareCommits', { from, to });
+    if (!result.success) { setStatus(`Commit 比较失败：${displayError(result.error)}`); return; }
+    setDiffView({ path: `${from}..${to}`, name: `${from.slice(0, 7)} ↔ ${to.slice(0, 7)}`, original: '', modified: result.data ?? '', language: 'diff', source: 'external' });
+  }, [workspace]);
+
+  const stageGitHunk = useCallback(async (hunk: GitHunk) => {
+    if (!workspace) return;
+    const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'stagePatch', { patch: hunk.patch });
+    if (!result.success) {
+      setStatus(`Hunk 暂存失败：${displayError(result.error)}`);
+      return;
+    }
+    setGitHunks((previous) => previous.filter((item) => item.patch !== hunk.patch));
+    await refreshGitStatus();
+    setStatus(`已暂存 ${hunk.label}`);
+  }, [refreshGitStatus, workspace]);
+
+  const unstageFile = useCallback(async () => {
+    if (!workspace || !diffView) return;
+    const result = await window.electronAPI.workspace.gitUnstage(workspace.path, [diffView.path]);
+    if (!result.success) {
+      setStatus(`取消暂存失败：${displayError(result.error)}`);
+      return;
+    }
+    await refreshGitStatus();
+    setStatus('已取消暂存全部更改');
+  }, [diffView, refreshGitStatus, workspace]);
+
+  const resolveGitConflict = useCallback(async (strategy: 'ours' | 'theirs') => {
+    if (!workspace || !diffView || diffView.source !== 'merge') return;
+    const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'resolveConflict', { path: diffView.path, strategy });
+    if (!result.success) {
+      setStatus(`冲突解决失败：${displayError(result.error)}`);
+      return;
+    }
+    setDiffView(null);
+    await refreshGitStatus();
+    setStatus(`已使用${strategy === 'ours' ? '当前分支' : '传入分支'}版本并暂存`);
+  }, [diffView, refreshGitStatus, workspace]);
+
+  const applyMergeHunk = useCallback((hunkIndex: number, side: 'ours' | 'theirs') => {
+    if (!diffView || diffView.source !== 'merge') return;
+    const hunk = mergeHunks.find((h) => h.index === hunkIndex);
+    if (!hunk) return;
+
+    const oLines = diffView.original.split('\n');
+    const mLines = diffView.modified.split('\n');
+
+    // ours: keep original lines → apply originalLines into modified (like reject in AI)
+    // theirs: use modified lines → apply modifiedLines into original (like accept in AI)
+    const newOriginal = side === 'theirs'
+      ? [...oLines.slice(0, hunk.originalStart - 1), ...hunk.modifiedLines, ...oLines.slice(hunk.originalStart - 1 + hunk.originalLines.length)].join('\n')
+      : diffView.original;
+
+    const newModified = side === 'ours'
+      ? [...mLines.slice(0, hunk.modifiedStart - 1), ...hunk.originalLines, ...mLines.slice(hunk.modifiedStart - 1 + hunk.modifiedLines.length)].join('\n')
+      : diffView.modified;
+
+    const remaining = computeDiffHunks(newOriginal, newModified);
+    setMergeHunks(remaining);
+    setDiffView({ ...diffView, original: newOriginal, modified: newModified });
+    setMergeResult(newOriginal);
+    setStatus(`冲突块 ${hunkIndex + 1}：选择${side === 'ours' ? '当前分支' : '传入分支'}，剩余 ${remaining.length} 个`);
+  }, [diffView, mergeHunks]);
+
+  const finishMerge = useCallback(async () => {
+    if (!workspace || !diffView || diffView.source !== 'merge' || mergeResult === null) return;
+    if (hasGitConflictMarkers(mergeResult)) {
+      setStatus('Result 中仍有冲突标记，无法完成合并');
+      return;
+    }
+    const read = await window.electronAPI.workspace.readTextFile(workspace.path, diffView.path);
+    if (!read.success || !read.data) {
+      setStatus('无法读取文件以完成合并');
+      return;
+    }
+    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, mergeResult, {
+      encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt,
+    });
+    if (!write.success) {
+      setStatus(`写入合并结果失败：${displayError(write.error)}`);
+      return;
+    }
+    // Stage the resolved file
+    const stage = mergeConflictPaths
+      ? await window.electronAPI.workspace.gitOperation(workspace.path, 'stageConflictResult', { resultPath: diffView.path, obsoletePaths: [mergeConflictPaths.base, mergeConflictPaths.theirs].filter((item) => item !== diffView.path) })
+      : await window.electronAPI.workspace.gitStage(workspace.path, [diffView.path]);
+    if (!stage.success) {
+      await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, read.data.content, {
+        encoding: read.data.encoding,
+        lineEnding: read.data.lineEnding,
+        expectedModifiedAt: write.data?.modifiedAt,
+      });
+      setStatus(`暂存失败：${displayError(stage.error)}`);
+      return;
+    }
+    setDiffView(null);
+    setMergeHunks([]);
+    setMergeBase(null);
+    setMergeResult(null);
+    setMergeInitialResult(null);
+    setMergeConflictPaths(null);
+    await refreshGitStatus();
+    setDocuments((previous) => previous.map((d) => d.path === diffView.path ? { ...d, content: mergeResult, savedContent: mergeResult, modifiedAt: write.data?.modifiedAt } : d));
+    appendOutput(`合并完成：${diffView.name}`);
+    setStatus('合并冲突已解决并暂存');
+  }, [appendOutput, diffView, mergeConflictPaths, mergeResult, refreshGitStatus, workspace]);
+
+  const generateAiEdit = useCallback(async () => {
+    if (!activeDocument || !aiInstruction.trim()) return;
+    if (!aiApi.apiKey) {
+      setStatus('请先在设置中配置 AI API');
+      return;
+    }
+    const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
+    setAiEditing(true);
+    setStatus(`AI 正在修改 ${activeDocument.name}…`);
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      let conversation = aiMessages;
+      if (conversationNeedsSummary(conversation, aiTokenBudget) && conversation.length > 4) {
+        let summary = '';
+        const summaryPrompt = [...conversation.map(({ role, content }) => ({ role, content })), { role: 'user' as const, content: '请压缩以上代码编辑会话：保留用户目标、已决定的方案、修改过的文件、未解决问题和约束。只返回简洁摘要。' }];
+        for await (const chunk of provider.chat(summaryPrompt, { model: aiApi.model, temperature: 0.1, maxTokens: 2000 })) summary += chunk.delta;
+        conversation = applyConversationSummary(conversation, summary);
+        setAiMessages(conversation);
+        appendOutput(`AI 长会话已压缩为摘要，保留最近 ${Math.min(4, aiMessages.length)} 条消息`);
+      }
+      const conversationMessages = conversation.slice(-12).map(({ role, content }) => ({ role, content }));
+      if (aiMultiFile && workspace) {
+        const listed = await window.electronAPI.workspace.listFiles(workspace.path);
+        const terms = aiInstruction.toLocaleLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 2);
+        const candidates = (listed.data ?? []).filter((file) => /\.(?:[cm]?[jt]sx?|json|css|scss|html|md|py|go|rs|java|vue|svelte)$/i.test(file.name)).sort((a, b) => {
+          const score = (path: string) => terms.reduce((total, term) => total + (path.toLocaleLowerCase().includes(term) ? 1 : 0), 0);
+          return score(b.path) - score(a.path);
+        });
+        const contextPaths = [...new Set([activeDocument.path, ...documents.filter((item) => !item.standalone).map((item) => item.path), ...candidates.slice(0, 8).map((item) => item.path)])].slice(0, 10);
+        // Import-graph expansion: scan context files for import references
+        const importRegex = /(?:from\s+['"]|require\s*\(\s*['"]|import\s+['"])([./][^'"]+)/g;
+        const referencedPaths = new Set<string>();
+        for (const filePath of contextPaths) {
+          const opened = documents.find((item) => item.path === filePath);
+          const content = opened?.content;
+          if (!content) continue;
+          let match: RegExpExecArray | null;
+          while ((match = importRegex.exec(content)) !== null && referencedPaths.size < 10) {
+            const importPath = match[1];
+            if (importPath.startsWith('.')) {
+              const dir = filePath.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
+              const parts = importPath.split('/');
+              const resolvedParts = dir.split('/');
+              for (const part of parts) {
+                if (part === '..') resolvedParts.pop();
+                else if (part !== '.') resolvedParts.push(part);
+              }
+              const cleaned = resolvedParts.join('/');
+              if (candidates.some((c) => c.path === cleaned || c.path === `${cleaned}.ts` || c.path === `${cleaned}.tsx` || c.path === `${cleaned}.js`)) referencedPaths.add(cleaned);
+            }
+          }
+        }
+        for (const refPath of referencedPaths) contextPaths.push(refPath);
+        const contexts: AiFileProposal[] = [];
+        for (const filePath of contextPaths) {
+          const opened = documents.find((item) => item.path === filePath);
+          if (opened) contexts.push({ path: filePath, original: opened.content, modified: opened.content, language: opened.language, metadata: opened });
+          else {
+            const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
+            if (read.success && read.data && read.data.content.length <= 200_000) contexts.push({
+              path: filePath, original: read.data.content, modified: read.data.content, language: languageIdFromName(filePath),
+              metadata: { path: filePath, name: filePath.split(/[\\/]/).pop() ?? filePath, content: read.data.content, savedContent: read.data.content, language: languageIdFromName(filePath), encoding: read.data.encoding, lineEnding: read.data.lineEnding, mixedLineEndings: read.data.mixedLineEndings, modifiedAt: read.data.modifiedAt, readOnly: read.data.readOnly, pinned: true },
+            });
+          }
+        }
+        const fittedContext = fitContextToTokenBudget(contexts.map((item) => ({
+          path: item.path,
+          content: item.original,
+          priority: item.path === activeDocument.path ? 100 : documents.some((document) => document.path === item.path) ? 50 : 0,
+        })), aiTokenBudget);
+        if (fittedContext.omitted.length) appendOutput(`Token 预算压缩：省略 ${fittedContext.omitted.length} 个低优先级文件（约 ${fittedContext.estimatedTokens} tokens）`);
+        const messages = [
+          { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"目标相对路径","oldPath":"重命名前相对路径（仅重命名时）","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串。重命名：同时提供 oldPath、path 和重命名后的完整 content。只返回需要变更的文件，不得返回 Markdown。' },
+          ...conversationMessages,
+          { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fittedContext.files.map((item) => `--- ${item.path} ---\n${item.content}`).join('\n\n')}` },
+        ];
+        let response = '';
+        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))) })) response += chunk.delta;
+        const jsonText = response.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+        const parsed = JSON.parse(jsonText) as { files?: Array<{ path: string; oldPath?: string; content: string }> };
+        const allowed = new Map(contexts.map((item) => [item.path.replace(/\\/g, '/'), item]));
+        const proposals = (parsed.files ?? []).flatMap((file) => {
+          const normalizedPath = file.path.replace(/\\/g, '/');
+          const previousPath = file.oldPath?.replace(/\\/g, '/');
+          const context = allowed.get(previousPath ?? normalizedPath);
+          if (typeof file.content !== 'string') return [];
+          if (previousPath) {
+            if (!context || !file.content || previousPath === normalizedPath || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
+            return [{ ...context, path: normalizedPath, previousPath, modified: file.content, language: languageIdFromName(normalizedPath) }];
+          }
+          // New file: path not in existing contexts
+          if (!context) {
+            if (!file.content || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
+            const lang = languageIdFromName(file.path);
+            return [{ path: normalizedPath, original: '', modified: file.content, language: lang, metadata: undefined }];
+          }
+          // Delete: empty content means delete
+          if (file.content === '' && context.original !== '') {
+            return [{ ...context, modified: '', language: context.language }];
+          }
+          if (file.content === context.original) return [];
+          return [{ ...context, modified: file.content }];
+        });
+        if (proposals.length === 0) {
+          setAiPendingRequest(null);
+          setStatus('AI 未生成有效的多文件修改');
+          return;
+        }
+        setAiProposals(proposals);
+        setAiMessages((previous) => [...previous, { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() }, { role: 'assistant' as const, content: response, timestamp: Date.now() }].slice(-100));
+        setAiPendingRequest(null);
+        recordAiSession(proposals.length);
+        const first = proposals[0];
+        setDiffView({ path: first.path, name: first.path, original: first.original, modified: first.modified, language: first.language, source: 'ai' });
+        appendOutput(`AI 已生成 ${proposals.length} 个文件的修改候选`);
+        return;
+      }
+      const selection = editorRef.current?.getSelection();
+      const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
+      const messages = [
+        { role: 'system' as const, content: '你是代码编辑器中的修改助手。根据要求修改文件。只返回修改后的完整文件内容，不要解释，不要输出 diff。' },
+        ...conversationMessages,
+        { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selectedText ? `\n重点关注的选中代码：\n${selectedText}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
+      ];
+      let response = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))) })) response += chunk.delta;
+      const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
+      const modified = (fenced?.[1] ?? response).trimEnd();
+      if (!modified || modified === activeDocument.content.trimEnd()) {
+        setAiPendingRequest(null);
+        setStatus('AI 未生成有效修改');
+        return;
+      }
+      setDiffView({ path: activeDocument.path, name: activeDocument.name, original: activeDocument.content, modified, language: activeDocument.language, source: 'ai' });
+      setAiMessages((previous) => [...previous, { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() }, { role: 'assistant' as const, content: response, timestamp: Date.now() }].slice(-100));
+      setAiPendingRequest(null);
+      recordAiSession(1);
+      appendOutput(`AI 已生成 ${activeDocument.name} 的修改候选，等待确认`);
+    } catch (error) {
+      setAiPendingRequest((current) => current?.id === requestId ? { ...current, status: 'interrupted' } : current);
+      setStatus(`AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAiEditing(false);
+    }
+  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, workspace]);
+
+  const runInlineEdit = useCallback(async () => {
+    if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
+    setInlineEdit({ instruction: '', visible: false });
+    setAiEditing(true);
+    setStatus('AI 正在生成内联修改…');
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const selection = editorRef.current?.getSelection();
+      const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
+      const messages = [
+        { role: 'system' as const, content: '你是内联代码助手。在光标处或选中代码处进行修改。只返回要插入的代码片段，不要解释，不要 Markdown。如果选中了代码，返回替换该选区的代码。' },
+        { role: 'user' as const, content: `${selectedText ? `选中代码：\n${selectedText}\n\n` : ''}${activeDocument.name} (${activeDocument.language})\n修改指令：${inlineEdit.instruction.trim()}` },
+      ];
+      let response = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.1, maxTokens: 4000 })) response += chunk.delta;
+      const snippet = response.replace(/```[\s\S]*?\n?/g, '').trim();
+      if (!snippet) { setStatus('AI 未生成有效代码'); return; }
+      editorRef.current?.focus();
+      if (selection && !selection.isEmpty()) {
+        editorRef.current?.executeEdits('ai-inline', [{ range: selection, text: snippet }]);
+      } else {
+        const pos = editorRef.current?.getPosition();
+        if (pos) editorRef.current?.executeEdits('ai-inline', [{ range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column), text: snippet }]);
+      }
+      setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: editorRef.current?.getValue() ?? d.content, pinned: true } : d));
+      appendOutput(`AI 内联修改已应用：${activeDocument.name}`);
+      setStatus('AI 内联修改已应用');
+    } catch (error) {
+      setStatus(`内联修改失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setAiEditing(false);
+    }
+  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, appendOutput, inlineEdit.instruction]);
+
+  const acceptAiEdit = useCallback(() => {
+    if (!diffView || diffView.source !== 'ai') return;
+    const proposal = aiProposals.find((item) => item.path === diffView.path);
+    const isNew = !proposal?.metadata;
+    const isDelete = diffView.modified === '' && diffView.original !== '';
+
+    setDocuments((previous) => {
+      const exists = previous.some((document) => document.path === diffView.path);
+      if (isDelete) return previous.filter((d) => d.path !== diffView.path);
+      const updated = previous.map((document) => document.path === diffView.path ? { ...document, content: diffView.modified, pinned: true } : document);
+      if (exists) return updated;
+      return [...updated, {
+        path: diffView.path,
+        name: diffView.path.split(/[\\/]/).pop() ?? diffView.path,
+        content: diffView.modified,
+        savedContent: isNew ? '' : diffView.modified,
+        language: diffView.language,
+        encoding: 'utf8' as WorkspaceEncoding,
+        lineEnding: 'LF' as const,
+        pinned: true,
+      }];
+    });
+    setAiHistory((previous) => [...previous.slice(-49), { id: Date.now(), path: diffView.path, before: diffView.original, after: diffView.modified }]);
+    setActivePath(diffView.path);
+    appendOutput(`已接受 AI 对 ${diffView.name} 的修改（尚未保存）`);
+    setStatus('已接受 AI 修改，请检查后保存');
+    updateSessionAcceptCount();
+    const remaining = aiProposals.filter((item) => item.path !== diffView.path);
+    setAiProposals(remaining);
+    const next = remaining[0];
+    setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
+  }, [aiProposals, appendOutput, diffView]);
+
+  const rejectAiEdit = useCallback(() => {
+    if (!diffView || diffView.source !== 'ai') return;
+    const remaining = aiProposals.filter((item) => item.path !== diffView.path);
+    setAiProposals(remaining);
+    const next = remaining[0];
+    setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
+  }, [aiProposals, diffView]);
+
+  const acceptAllAiEdits = useCallback(async () => {
+    if (!workspace || aiProposals.length === 0) return;
+
+    // Preflight every proposal before mutating editor state. A conflict in one
+    // file rejects the whole group so the user never gets a half-accepted edit.
+    for (const proposal of aiProposals) {
+      const sourcePath = proposal.previousPath ?? proposal.path;
+      const opened = documents.find((document) => document.path === sourcePath);
+      if (opened && opened.content !== proposal.original) {
+        setStatus(`AI 候选已过期：${proposal.path} 在生成后被修改，未接受任何文件`);
+        return;
+      }
+      if (proposal.metadata && !opened) {
+        const current = await window.electronAPI.workspace.readTextFile(workspace.path, sourcePath);
+        if (!current.success || !current.data || current.data.modifiedAt !== proposal.metadata.modifiedAt) {
+          setStatus(`AI 候选已过期：${proposal.path} 的磁盘版本已变化，未接受任何文件`);
+          return;
+        }
+      }
+    }
+
+    const mutations = aiProposals.map((proposal) => {
+      if (!proposal.metadata) {
+        return { kind: 'create' as const, path: proposal.path, content: proposal.modified, encoding: 'utf8' as const, lineEnding: 'LF' as const };
+      }
+      if (proposal.modified === '') {
+        return { kind: 'delete' as const, path: proposal.path, expectedModifiedAt: proposal.metadata.modifiedAt };
+      }
+      if (proposal.previousPath) {
+        return {
+          kind: 'rename' as const,
+          path: proposal.previousPath,
+          targetPath: proposal.path,
+          content: proposal.modified,
+          encoding: proposal.metadata.encoding,
+          lineEnding: proposal.metadata.lineEnding,
+          expectedModifiedAt: proposal.metadata.modifiedAt,
+        };
+      }
+      return {
+        kind: 'write' as const,
+        path: proposal.path,
+        content: proposal.modified,
+        encoding: proposal.metadata.encoding,
+        lineEnding: proposal.metadata.lineEnding,
+        expectedModifiedAt: proposal.metadata.modifiedAt,
+      };
+    });
+    const diskResult = await window.electronAPI.workspace.mutateFiles(workspace.path, mutations);
+    if (!diskResult.success) {
+      setStatus(`AI 文件事务失败，工作区未产生部分修改：${displayError(diskResult.error)}`);
+      return;
+    }
+    const modifiedAtByPath = new Map((diskResult.data ?? []).map((item) => [item.path, item.modifiedAt]));
+
+    setDocuments((previous) => {
+      const updated = previous
+        .filter((document) => aiProposals.find((proposal) => (proposal.previousPath ?? proposal.path) === document.path)?.modified !== '')
+        .map((document) => {
+          const proposal = aiProposals.find((item) => (item.previousPath ?? item.path) === document.path);
+          return proposal ? {
+            ...document,
+            path: proposal.path,
+            name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
+            content: proposal.modified,
+            savedContent: proposal.modified,
+            language: proposal.language,
+            modifiedAt: modifiedAtByPath.get(proposal.path),
+            pinned: true,
+          } : document;
+        });
+      const existingPaths = new Set(updated.map((document) => document.path));
+      for (const proposal of aiProposals) {
+        if (proposal.modified === '' || existingPaths.has(proposal.path)) continue;
+        updated.push({
+          path: proposal.path,
+          name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
+          content: proposal.modified,
+          savedContent: proposal.modified,
+          language: proposal.language,
+          encoding: 'utf8',
+          lineEnding: 'LF',
+          modifiedAt: modifiedAtByPath.get(proposal.path),
+          pinned: true,
+        });
+      }
+      return updated;
+    });
+    const now = Date.now();
+    setAiHistory((previous) => [...previous, ...aiProposals.map((proposal, index) => ({
+      id: now + index,
+      path: proposal.path,
+      before: proposal.original,
+      after: proposal.modified,
+    }))].slice(-50));
+    setAiProposals([]);
+    setDiffView(null);
+    updateSessionAcceptCount();
+    appendOutput(`已原子应用 ${aiProposals.length} 个 AI 文件修改到磁盘`);
+    setStatus(`已原子应用 ${aiProposals.length} 个文件`);
+  }, [aiProposals, appendOutput, documents, workspace]);
+
+  const closeDiffView = useCallback(async () => {
+    if (!diffView) return;
+    if (diffView.source === 'ai') {
+      rejectAiEdit();
+      return;
+    }
+    if (diffView.source === 'search') {
+      rejectSearchReplace();
+      return;
+    }
+    if (diffView.source === 'merge') {
+      if (mergeResult !== mergeInitialResult && !await appConfirm('Result 有未保存的合并修改，确定关闭吗？')) return;
+      setMergeHunks([]);
+      setMergeBase(null);
+      setMergeResult(null);
+      setMergeInitialResult(null);
+    }
+    setDiffView(null);
+  }, [appConfirm, diffView, mergeInitialResult, mergeResult, rejectAiEdit, rejectSearchReplace]);
+
+  // Compute hunks whenever an AI or merge diff view is opened
+  useEffect(() => {
+    if (diffView?.source === 'ai') {
+      setAiHunks(computeDiffHunks(diffView.original, diffView.modified));
+    } else if (diffView?.source === 'merge') {
+      setMergeHunks(computeDiffHunks(diffView.original, diffView.modified));
+    }
+  }, [diffView]);
+
+  const applyAiHunk = useCallback((hunkIndex: number, accept: boolean) => {
+    if (!diffView || diffView.source !== 'ai') return;
+    const hunk = aiHunks.find((h) => h.index === hunkIndex);
+    if (!hunk) return;
+
+    const oLines = diffView.original.split('\n');
+    const mLines = diffView.modified.split('\n');
+
+    // Accept: apply modifiedLines into original at the hunk position
+    // Reject: apply originalLines into modified at the hunk position
+    const newOriginal = accept
+      ? [...oLines.slice(0, hunk.originalStart - 1), ...hunk.modifiedLines, ...oLines.slice(hunk.originalStart - 1 + hunk.originalLines.length)].join('\n')
+      : diffView.original;
+
+    const newModified = accept
+      ? diffView.modified
+      : [...mLines.slice(0, hunk.modifiedStart - 1), ...hunk.originalLines, ...mLines.slice(hunk.modifiedStart - 1 + hunk.modifiedLines.length)].join('\n');
+
+    // Recompute hunks for the remaining diff
+    const remaining = computeDiffHunks(newOriginal, newModified);
+
+    setAiHunks(remaining);
+    setDiffView({ ...diffView, original: newOriginal, modified: newModified });
+
+    // Update document content with accepted changes
+    setDocuments((previous) => previous.map((d) =>
+      d.path === diffView.path ? { ...d, content: newOriginal, pinned: true } : d,
+    ));
+
+    if (remaining.length === 0) {
+      // All hunks processed — advance to next proposal
+      const proposal = aiProposals.find((p) => p.path === diffView.path);
+      setAiHistory((previous) => [...previous.slice(-49), { id: Date.now(), path: diffView.path, before: proposal?.original ?? '', after: newModified }]);
+      appendOutput(`已审阅 AI 对 ${diffView.name} 的修改（尚未保存）`);
+      setStatus('AI 修改审阅完成，请检查后保存');
+      const remainingProposals = aiProposals.filter((p) => p.path !== diffView.path);
+      setAiProposals(remainingProposals);
+      const next = remainingProposals[0];
+      setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
+    } else {
+      setStatus(`${accept ? '接受' : '拒绝'} Hunk ${hunkIndex + 1}，剩余 ${remaining.length} 个`);
+    }
+  }, [aiHunks, aiProposals, appendOutput, diffView]);
+
+  const undoLastAiEdit = useCallback(() => {
+    const edit = aiHistory.at(-1);
+    if (!edit) return;
+    setDocuments((previous) => previous.map((document) => document.path === edit.path ? { ...document, content: edit.before, pinned: true } : document));
+    setAiHistory((previous) => previous.slice(0, -1));
+    setActivePath(edit.path);
+    setStatus(`已撤销 AI 对 ${edit.path} 的修改`);
+  }, [aiHistory]);
+
+  const updateGitStage = useCallback(async (entry: WorkspaceGitStatus, stage: boolean) => {
+    if (!workspace) return;
+    const result = stage
+      ? await window.electronAPI.workspace.gitStage(workspace.path, [entry.path])
+      : await window.electronAPI.workspace.gitUnstage(workspace.path, [entry.path]);
+    if (!result.success) setStatus(`Git 操作失败：${displayError(result.error)}`);
+    else await refreshGitStatus();
+  }, [refreshGitStatus, workspace]);
+
+  const commitGitChanges = useCallback(async () => {
+    if (!workspace || !commitMessage.trim()) return;
+    const result = await window.electronAPI.workspace.gitCommit(workspace.path, commitMessage);
+    if (!result.success) {
+      setStatus(`提交失败：${displayError(result.error)}`);
+      return;
+    }
+    appendOutput(result.data ?? 'Git 提交成功');
+    setCommitMessage('');
+    setStatus('Git 提交成功');
+    await refreshGitStatus();
+  }, [appendOutput, commitMessage, refreshGitStatus, workspace]);
+
+  useLayoutEffect(() => {
+    if (!activePath || !editorRef.current) return;
+    const pathForEffect = activePath;
+    const restoreTimer = window.setTimeout(() => {
+      const viewState = viewStatesRef.current[pathForEffect];
+      if (viewState && editorRef.current) editorRef.current.restoreViewState(viewState);
+    }, 0);
+    return () => {
+      window.clearTimeout(restoreTimer);
+      if (editorRef.current) {
+        viewStatesRef.current[pathForEffect] = editorRef.current.saveViewState();
+      }
+    };
+  }, [activePath]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    let disposed = false;
+    void window.electronAPI.workspace.watch(workspace.path)
+      .then((result) => {
+        if (!result.success && !disposed) setStatus(`文件监听不可用：${displayError(result.error)}`);
+      })
+      .catch((error) => {
+        if (!disposed) setStatus(`文件监听不可用：${String(error)}`);
+      });
+    const unsubscribe = window.electronAPI.workspace.onFileChanged((event) => {
+      if (disposed) return;
+      if (event.type === 'rename') void refreshWorkspaceTree();
+      const document = documentsRef.current.find((item) => item.path === event.path);
+      if (!document || document.standalone) return;
+      const savedAt = recentlySavedRef.current.get(event.path) ?? 0;
+      if (Date.now() - savedAt < 1500) return;
+      void window.electronAPI.workspace.readTextFile(workspace.path, event.path).then((result) => {
+        if (!result.success || !result.data) {
+          if (event.type === 'rename') {
+            setDocuments((previous) => previous.map((item) => item.path === event.path
+              ? { ...item, missing: true, readOnly: true }
+              : item));
+            setStatus(`${document.name} 已在外部删除或重命名`);
+          }
+          return;
+        }
+        const latest = documentsRef.current.find((item) => item.path === event.path);
+        if (latest && latest.content !== latest.savedContent) {
+          setDocuments((previous) => previous.map((item) => (
+            item.path === event.path ? { ...item, externalChanged: true } : item
+          )));
+          setStatus(`${document.name} 已在外部修改，请选择重新加载或覆盖保存`);
+          return;
+        }
+        setDocuments((previous) => previous.map((item) => item.path === event.path
+          ? {
+            ...item,
+            content: result.data!.content,
+            savedContent: result.data!.content,
+            encoding: result.data!.encoding,
+            lineEnding: result.data!.lineEnding,
+            mixedLineEndings: result.data!.mixedLineEndings,
+            modifiedAt: result.data!.modifiedAt,
+            externalChanged: false,
+            readOnly: result.data!.readOnly,
+            missing: false,
+          }
+          : item));
+        setStatus(`已自动刷新 ${document.name}`);
+      });
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+      void window.electronAPI.workspace.unwatch().catch(() => undefined);
+    };
+  }, [refreshWorkspaceTree, workspace]);
+
+  useEffect(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending || pending.path !== activePath || !editorRef.current) return;
+    const position = { lineNumber: pending.line, column: pending.column };
+    editorRef.current.setPosition(position);
+    editorRef.current.revealPositionInCenter(position);
+    editorRef.current.focus();
+    pendingRevealRef.current = null;
+  }, [activePath, activeDocument?.content]);
+
+  useEffect(() => {
+    if (!workspace || !activeDocument || activeDocument.standalone || !editorRef.current) {
+      gitDecorationsRef.current?.clear();
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      Promise.all([
+        window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: activeDocument.path }),
+        window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: activeDocument.path, staged: true }).catch(() => ({ success: false, data: '' }) as const),
+      ]).then(([unstaged, staged]) => {
+        if (cancelled || !editorRef.current) return;
+        const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+        const addHunk = (patch: string, prefix: string) => {
+          for (const line of patch.split('\n')) {
+            const match = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+            if (!match) continue;
+            const oldCount = Number(match[1] ?? 1);
+            const start = Number(match[2]);
+            const newCount = Number(match[3] ?? 1);
+            const kind = newCount === 0 ? 'deleted' : oldCount === 0 ? 'added' : 'modified';
+            const count = Math.max(1, newCount);
+            decorations.push({
+              range: new monaco.Range(Math.max(1, start), 1, Math.max(1, start + count - 1), 1),
+              options: {
+                isWholeLine: true,
+                className: `git-line-${prefix}-${kind}`,
+                linesDecorationsClassName: `git-gutter-${prefix}-${kind}`,
+                overviewRuler: { color: prefix === 'staged' ? '#a78bfa' : kind === 'added' ? '#22c55e' : kind === 'deleted' ? '#ef4444' : '#3b82f6', position: monaco.editor.OverviewRulerLane.Left },
+              },
+            });
+          }
+        };
+        if (unstaged.success) addHunk(unstaged.data ?? '', 'unstaged');
+        if (staged.success) addHunk(staged.data ?? '', 'staged');
+        gitDecorationsRef.current?.clear();
+        gitDecorationsRef.current = editorRef.current.createDecorationsCollection(decorations);
+      });
+    }, 300);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [activeDocument, workspace]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const command = event.ctrlKey || event.metaKey;
+      if (command && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (event.altKey) void saveAll();
+        else void saveActive();
+      }
+      if (command && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        void openStandaloneFile();
+      }
+      if (command && event.key.toLowerCase() === 'w' && activePath) {
+        event.preventDefault();
+        closeDocument(activePath);
+      }
+      if (command && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        setSidebarVisible((visible) => !visible);
+      }
+      if (command && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        void showQuickOpen();
+      }
+      if (command && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setSearchPanel((previous) => ({ ...previous, open: true }));
+      }
+      if (command && event.shiftKey && event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        setBottomPanel({ open: true, tab: 'problems', height: 220 });
+      }
+      if (event.ctrlKey && event.key === '`') {
+        event.preventDefault();
+        setBottomPanel((previous) => ({ ...previous, open: previous.tab !== 'terminal' || !previous.open, tab: 'terminal' }));
+      }
+      if (event.key === 'Escape') {
+        setQuickOpen((previous) => ({ ...previous, open: false }));
+        setSearchPanel((previous) => ({ ...previous, open: false }));
+        setInlineEdit({ instruction: '', visible: false });
+      }
+      if (command && event.key.toLowerCase() === 'k' && activeDocument && !activeDocument.readOnly) {
+        event.preventDefault();
+        const sel = editorRef.current?.getSelection();
+        const hasSelection = sel && !sel.isEmpty();
+        setInlineEdit({ instruction: '', visible: true });
+        if (hasSelection) setStatus('已选中代码，输入 AI 修改指令后回车');
+        else setStatus('输入 AI 生成指令后回车');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activePath, closeDocument, openStandaloneFile, saveActive, saveAll, showQuickOpen]);
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasDirtyDocuments) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [hasDirtyDocuments]);
+
+  const editorPath = useMemo(
+    () => activeDocument ? `file:///${activeDocument.path.replace(/\\/g, '/')}` : undefined,
+    [activeDocument],
+  );
+  const quickOpenResults = useMemo(() => {
+    const query = quickOpen.query.trim().toLowerCase();
+    if (!query) return quickOpen.files.slice(0, 100);
+    return quickOpen.files
+      .filter((file) => file.path.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const aNameMatch = a.name.toLowerCase().startsWith(query) ? 0 : 1;
+        const bNameMatch = b.name.toLowerCase().startsWith(query) ? 0 : 1;
+        return aNameMatch - bNameMatch || a.path.length - b.path.length;
+      })
+      .slice(0, 100);
+  }, [quickOpen.files, quickOpen.query]);
+
+  const runSemanticSearch = useCallback(async () => {
+    if (!workspace) return;
+    const model = editorRef.current?.getModel();
+    const cursor = editorRef.current?.getPosition();
+    const word = model && cursor ? model.getWordAtPosition(cursor)?.word ?? '' : '';
+    const languageServiceSupported = Boolean(activeDocument && cursor && /\.[cm]?[jt]sx?$/i.test(activeDocument.path) && word);
+    const symbol = languageServiceSupported ? word : await appPrompt('搜索符号、引用和 import 图', word);
+    if (!symbol) return;
+    setSearchPanel((previous) => ({ ...previous, open: true, query: symbol, loading: true, results: [] }));
+    const result = languageServiceSupported
+      ? await window.electronAPI.workspace.languageSemanticSearch(workspace.path, activeDocument!.path, cursor!.lineNumber, cursor!.column)
+      : await window.electronAPI.workspace.semanticSearch(workspace.path, symbol);
+    setSearchPanel((previous) => ({
+      ...previous,
+      loading: false,
+      results: (result.data ?? []).map((item) => ({ ...item, preview: `[${item.kind}${item.importedFrom ? ` ← ${item.importedFrom}` : ''}] ${item.preview}` })),
+    }));
+    setStatus(result.success ? `${languageServiceSupported ? 'Language Service' : '语义'} 搜索找到 ${result.data?.length ?? 0} 项` : `语义搜索失败：${displayError(result.error)}`);
+  }, [activeDocument, appPrompt, workspace]);
+
+  return (
+    <div className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
+      <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setSidebarVisible((value) => !value)} title="切换资源管理器 (Ctrl+B)">
+          <PanelLeft className="h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => void openWorkspace(false)}>
+          <FolderOpen className="h-4 w-4" /> 打开文件夹
+        </Button>
+        {workspace && <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => void openWorkspace(true)}>
+          <Plus className="h-3.5 w-3.5" /> 添加文件夹
+        </Button>}
+        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openStandaloneFile}>
+          <FileText className="h-4 w-4" /> 打开文件
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1.5 px-2 text-xs"
+          onClick={() => setSearchPanel((previous) => ({ ...previous, open: true }))}
+          disabled={!workspace}
+        >
+          <Search className="h-4 w-4" /> 全文搜索
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!workspace} onClick={() => void runSemanticSearch()} title="跨工作区搜索定义、引用和 import">语义搜索</Button>
+        <div className="flex-1" />
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.revealDefinition', '当前位置没有可跳转的定义')} title="转到定义 (F12)">定义</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.referenceSearch.trigger', '当前位置没有可查找的引用')} title="查找所有引用 (Shift+F12)">引用</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void formatActiveDocument()} title="格式化文档 (Shift+Alt+F)">
+          格式化
+        </Button>
+        <Button size="sm" variant={bottomPanel.open ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setBottomPanel((previous) => ({ ...previous, open: !previous.open }))}>
+          面板
+        </Button>
+        <Button size="sm" variant={autoSave ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setAutoSave((value) => !value)}>
+          自动保存
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument || activeDocument.content === activeDocument.savedContent} onClick={saveActive}>
+          保存
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!hasDirtyDocuments} onClick={saveAll}>
+          全部保存
+        </Button>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {sidebarVisible && (
+          <aside className="relative flex shrink-0 flex-col border-r bg-sidebar-bg outline-none" style={{ width: sidebarWidth }} tabIndex={0} onKeyDown={handleTreeKeyDown} aria-label="文件资源管理器">
+            <div className="flex h-9 items-center gap-0.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span className="flex-1 px-1">Explorer</span>
+              <button type="button" className="rounded px-1 text-[9px] hover:bg-accent" onClick={() => setExplorerSort((s) => s === 'name' ? 'type' : 'name')} title="排序方式">{explorerSort === 'name' ? 'A-Z' : 'Type'}</button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => beginCreate('file')} disabled={!workspace}>
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件夹" onClick={() => beginCreate('directory')} disabled={!workspace}>
+                <FolderOpen className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="重命名选中项" onClick={() => beginRename()} disabled={!selectedNode}>
+                <Edit3 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="删除选中项" onClick={() => void (selectedPaths.size > 1 ? deleteTreeSelection() : deleteSelected())} disabled={!selectedNode}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="快速打开 (Ctrl+P)" onClick={() => void showQuickOpen()} disabled={!workspace}>
+                <Search className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="刷新资源管理器" onClick={() => void refreshWorkspaceTree()} disabled={!workspace}>
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              <button type="button" className="rounded p-1 hover:bg-accent" title="折叠全部" onClick={() => {
+                setExpandedPaths(new Set());
+                setTree((previous) => previous.map((node) => ({ ...node, children: undefined })));
+              }} disabled={!workspace}>
+                <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+              </button>
+            </div>
+            {workspace ? (
+              <div className="min-h-0 flex-1 overflow-auto">
+                {workspaceFolders.length > 1 && <div className="flex gap-0.5 border-b px-1 py-1">{workspaceFolders.map((f) => <button key={f.id} type="button" className={`group flex items-center truncate rounded px-2 py-0.5 text-[10px] ${f.path === workspace.path ? 'bg-accent' : 'hover:bg-accent/50'}`} onClick={async () => { if (f.path === workspace.path) return; setStatus(`切换到 ${f.name}…`); const entries = await loadDirectory(f.path); setWorkspace({ path: f.path, name: f.name }); setTree(entries); setExpandedPaths(new Set()); setActiveFolderId(f.id); setStatus(`已切换至 ${f.name}`); }} title={f.path}>{f.name}<span className="ml-1 hidden group-hover:inline hover:text-destructive" onClick={async (e) => { e.stopPropagation(); if (f.path === workspace.path) { const next = workspaceFolders.find((x) => x.path !== f.path); if (next) { const entries = await loadDirectory(next.path); setWorkspace({ path: next.path, name: next.name }); setTree(entries); } else { setWorkspace(null); setTree([]); } } setWorkspaceFolders((prev) => prev.filter((x) => x.id !== f.id)); }}>×</span></button>)}</div>}
+                <div className="px-2 pb-1">
+                  <input value={explorerFilter} onChange={(e) => setExplorerFilter(e.target.value)} placeholder="过滤文件…" className="h-6 w-full rounded border bg-background px-2 text-[10px] outline-none" />
+                </div>
+                <div className="flex h-7 items-center gap-1 px-2 text-xs font-semibold">
+                  <ChevronDown className="h-3 w-3" />
+                  <span className="truncate uppercase">{workspace.name}</span>
+                </div>
+                {treeEdit && treeEdit.mode !== 'rename' && (
+                  <div className="flex h-7 items-center gap-1 px-2">
+                    {treeEdit.mode === 'create-directory'
+                      ? <FolderOpen className="h-3.5 w-3.5 text-primary" />
+                      : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <input
+                      autoFocus
+                      value={treeEdit.value}
+                      onChange={(event) => setTreeEdit((previous) => previous ? { ...previous, value: event.target.value } : previous)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') void commitTreeEdit();
+                        if (event.key === 'Escape') setTreeEdit(null);
+                      }}
+                      onBlur={() => void commitTreeEdit()}
+                      placeholder={selectedNode?.type === 'directory' ? `在 ${selectedNode.name} 中创建` : '输入名称'}
+                      className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                )}
+                {tree.map((node) => (
+                  <FileTreeRow
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    activePath={activePath}
+                    selectedPaths={selectedPaths}
+                    onOpen={openTreeFile}
+                    onToggle={toggleDirectory}
+                    onSelect={selectTreeNode}
+                    editing={treeEdit}
+                    onEditChange={(value: string) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
+                    onEditCommit={(): void => { void commitTreeEdit(); }}
+                    onEditCancel={() => setTreeEdit(null)}
+                    onContextMenu={(event: React.MouseEvent, current: TreeNode) => {
+                      event.preventDefault();
+                      if (!selectedPaths.has(current.path)) {
+                        setSelectedPaths(new Set([current.path]));
+                        setSelectedNode(current);
+                      }
+                      setTreeMenu({ x: event.clientX, y: event.clientY, node: current });
+                    }}
+                    onMove={(source: TreeNode, target: TreeNode): void => { void moveTreeEntry(source, target); }}
+                    decorations={treeDecorations}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="px-4 py-5 text-xs leading-5 text-muted-foreground">
+                尚未打开文件夹。打开工作区后可浏览和编辑其中的文件。
+              </div>
+            )}
+            <div className="absolute bottom-0 right-[-3px] top-0 z-20 w-1.5 cursor-col-resize" onMouseDown={(event) => {
+              const startX = event.clientX;
+              const startWidth = sidebarWidth;
+              const move = (moveEvent: MouseEvent) => setSidebarWidth(Math.max(180, Math.min(520, startWidth + moveEvent.clientX - startX)));
+              const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+              window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+            }} />
+          </aside>
+        )}
+
+        <main className="flex min-w-0 flex-1 flex-col">
+          {documents.length > 0 && (
+            <div className="flex h-9 shrink-0 overflow-x-auto border-b bg-muted/40">
+              {documents.map((document) => {
+                const dirty = document.content !== document.savedContent;
+                const active = document.path === activePath;
+                return (
+                  <button
+                    type="button"
+                    key={document.path}
+                    className={`group flex min-w-0 max-w-52 items-center gap-2 border-r px-3 text-xs ${
+                      active ? 'border-t-2 border-t-primary bg-background text-foreground' : 'text-muted-foreground hover:bg-accent/50'
+                    }`}
+                    onClick={() => setActivePath(document.path)}
+                    onDoubleClick={() => setDocuments((previous) => previous.map((item) => (
+                      item.path === document.path ? { ...item, pinned: true } : item
+                    )))}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setTabMenu({ x: event.clientX, y: event.clientY, path: document.path });
+                    }}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData('application/x-nwd-tab-path', document.path)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      moveTab(event.dataTransfer.getData('application/x-nwd-tab-path'), document.path);
+                    }}
+                    title={document.path}
+                  >
+                    <Code className="h-3.5 w-3.5 shrink-0" />
+                    <span className={`truncate ${document.pinned === false ? 'italic' : ''}`}>{document.name}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className={`shrink-0 rounded p-0.5 hover:bg-muted ${dirty ? '' : 'opacity-0 group-hover:opacity-100'}`}
+                      onClick={(event) => { event.stopPropagation(); closeDocument(document.path); }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') closeDocument(document.path);
+                      }}
+                      aria-label={`关闭 ${document.name}${dirty ? '，未保存' : ''}`}
+                    >
+                      {dirty
+                        ? <span className="block h-2 w-2 rounded-full bg-foreground/70 group-hover:hidden" />
+                        : null}
+                      <X className={`h-3 w-3 ${dirty ? 'hidden group-hover:block' : ''}`} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {activeDocument?.externalChanged && (
+            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 text-xs">
+              <span className="flex-1 truncate">该文件已在外部修改，本地编辑内容尚未保存。</span>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void reloadExternalDocument(activeDocument)}>
+                重新加载
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void compareExternalDocument(activeDocument)}>
+                比较
+              </Button>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void saveDocument(activeDocument, true)}>
+                覆盖保存
+              </Button>
+            </div>
+          )}
+
+          {activeDocument?.missing && (
+            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-3 text-xs">
+              <span className="flex-1 truncate">该文件已在外部删除或重命名，当前内容以只读方式保留。</span>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => closeDocument(activeDocument.path)}>
+                关闭标签
+              </Button>
+            </div>
+          )}
+
+          {activeDocument && (
+            <nav className="flex h-7 shrink-0 items-center gap-1 overflow-hidden border-b px-3 text-[11px] text-muted-foreground" aria-label="Breadcrumb">
+              {(workspace ? activeDocument.path.split(/[\\/]/) : [activeDocument.name]).map((part, index, parts) => (
+                <React.Fragment key={`${part}:${index}`}>
+                  {index > 0 && <span className="opacity-50">›</span>}
+                  <span className={index === parts.length - 1 ? 'text-foreground' : ''}>{part}</span>
+                </React.Fragment>
+              ))}
+            </nav>
+          )}
+
+          {activeDocument ? (
+            <div className="flex min-h-0 flex-1">
+              {inlineEdit.visible && (
+                <div className="absolute top-1 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border bg-popover px-3 py-2 shadow-lg">
+                  <input autoFocus value={inlineEdit.instruction} onChange={(e) => setInlineEdit((p) => ({ ...p, instruction: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') void runInlineEdit(); if (e.key === 'Escape') setInlineEdit({ instruction: '', visible: false }); }} placeholder="AI 内联修改指令…" className="h-7 w-64 rounded border bg-background px-2 text-xs outline-none" />
+                  <Button size="sm" className="h-7 px-3 text-xs" disabled={!inlineEdit.instruction.trim() || aiEditing} onClick={() => void runInlineEdit()}>{aiEditing ? '…' : '生成'}</Button>
+                  <kbd className="text-[10px] text-muted-foreground">Ctrl+K</kbd>
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <Editor
+                  path={editorPath}
+                  language={activeDocument.language}
+                  value={activeDocument.content}
+                  theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+                  onMount={handleMount}
+                  onChange={(value) => {
+                    setDocuments((previous) => previous.map((document) => (
+                      document.path === activeDocument.path
+                        ? { ...document, content: value ?? '', pinned: true }
+                        : document
+                    )));
+                  }}
+                  options={{
+                    automaticLayout: true,
+                    glyphMargin: true,
+                    fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
+                    fontSize: preferences.fontSize,
+                    lineHeight: Math.round(preferences.fontSize * 1.55),
+                    minimap: { enabled: preferences.minimap },
+                    padding: { top: 8 },
+                    scrollBeyondLastLine: false,
+                    smoothScrolling: true,
+                    tabSize: preferences.tabSize,
+                    wordWrap: preferences.wordWrap,
+                    readOnly: activeDocument.readOnly,
+                  }}
+                />
+              </div>
+              {secondaryDocument && (
+                <div className="relative min-w-0 flex-1 border-l">
+                  <div className="absolute right-2 top-1 z-10 flex items-center gap-1 rounded bg-background/90 px-1 text-[10px] shadow">
+                    <span className="max-w-36 truncate">{secondaryDocument.name}</span>
+                    <button type="button" className="rounded p-1 hover:bg-accent" title="关闭分栏" onClick={() => setSecondaryPath(null)}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <Editor
+                    path={`file:///${secondaryDocument.path.replace(/\\/g, '/')}`}
+                    language={secondaryDocument.language}
+                    value={secondaryDocument.content}
+                    theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+                    onChange={(value) => {
+                      setDocuments((previous) => previous.map((document) => (
+                        document.path === secondaryDocument.path
+                          ? { ...document, content: value ?? '', pinned: true }
+                          : document
+                      )));
+                    }}
+                    options={{
+                      automaticLayout: true,
+                      glyphMargin: true,
+                      fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
+                      fontSize: preferences.fontSize,
+                      lineHeight: Math.round(preferences.fontSize * 1.55),
+                      minimap: { enabled: preferences.minimap },
+                      padding: { top: 8 },
+                      scrollBeyondLastLine: false,
+                      tabSize: preferences.tabSize,
+                      wordWrap: preferences.wordWrap,
+                      readOnly: secondaryDocument.readOnly,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground">
+              <Code className="h-14 w-14 opacity-40" />
+              <div className="text-center">
+                <p className="text-sm font-medium text-foreground">代码编辑器</p>
+                <p className="mt-1 text-xs">打开文件夹开始浏览项目，或直接打开单个文本文件。</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => void openWorkspace(false)}>打开文件夹</Button>
+                <Button variant="outline" size="sm" onClick={openStandaloneFile}>打开文件</Button>
+              </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      <BottomPanel
+        bottomPanel={bottomPanel} setBottomPanel={setBottomPanel}
+        terminalTabs={terminalTabs} setTerminalTabs={setTerminalTabs}
+        activeTerminalId={activeTerminalId} setActiveTerminalId={setActiveTerminalId}
+        splitTerminalId={splitTerminalId} setSplitTerminalId={setSplitTerminalId}
+        terminalProfileName={terminalProfileName} setTerminalProfileName={setTerminalProfileName}
+        terminalProfiles={terminalProfiles}
+        addTerminalProfile={addTerminalProfile}
+        saveTerminalSecret={saveTerminalSecret}
+        workspaceTasks={workspaceTasks}
+        taskRun={taskRun}
+        taskHistory={taskHistory} cancelWorkspaceTask={cancelWorkspaceTask}
+        renamingTerminalId={renamingTerminalId} renamingTerminalTitle={renamingTerminalTitle}
+        setRenamingTerminalId={setRenamingTerminalId} setRenamingTerminalTitle={setRenamingTerminalTitle}
+        createTerminalTab={createTerminalTab} closeTerminalTab={closeTerminalTab}
+        restartTerminalTab={restartTerminalTab}
+        runWorkspaceTask={runWorkspaceTask} handleTerminalOutput={handleTerminalOutput}
+        appendOutput={appendOutput} workspacePath={workspace?.path} resolvedTheme={resolvedTheme}
+        allProblems={allProblems} documents={documents} pendingRevealRef={pendingRevealRef}
+        setActivePath={setActivePath} setStatus={setStatus} setAiInstruction={setAiInstruction}
+        symbols={symbols} editorRef={editorRef} outputLines={outputLines}
+        gitOverview={gitOverview} gitBusy={gitBusy}
+        pullStrategy={pullStrategy} setPullStrategy={setPullStrategy}
+        runGitOperation={runGitOperation} appPrompt={appPrompt} appConfirm={appConfirm}
+        cancelGitOp={() => { if (workspace && gitBusy) void window.electronAPI.workspace.cancelGitOperation(workspace.path, gitBusy.operationId); }}
+        gitView={gitView} setGitView={setGitView}
+        gitStatus={gitStatus} gitHistory={gitHistory}
+        loadGitHistory={loadGitHistory} compareGitCommits={compareGitCommits}
+        commitMessage={commitMessage} setCommitMessage={setCommitMessage}
+        commitGitChanges={commitGitChanges}
+        refreshGitStatus={refreshGitStatus} refreshGitOverview={refreshGitOverview}
+        showGitDiff={showGitDiff} updateGitStage={updateGitStage}
+        setDiffView={setDiffView}
+        aiMultiFile={aiMultiFile} setAiMultiFile={setAiMultiFile}
+        aiProposals={aiProposals} aiHistory={aiHistory} aiSessions={aiSessions}
+        aiTokenBudget={aiTokenBudget} setAiTokenBudget={setAiTokenBudget} aiEstimatedTokens={estimateTokens(`${aiInstruction}\n${activeDocument?.content ?? ''}`)}
+        aiMessages={aiMessages} aiPendingRequest={aiPendingRequest}
+        undoLastAiEdit={undoLastAiEdit}
+        aiInstruction={aiInstruction} aiEditing={aiEditing}
+        activeDocument={activeDocument} generateAiEdit={generateAiEdit}
+        preferences={preferences} setPreferences={setPreferences}
+        showEnvValues={showEnvValues} setShowEnvValues={setShowEnvValues}
+        terminalEnvText={terminalEnvText} setTerminalEnvText={setTerminalEnvText}
+      />
+
+      <footer className="flex h-7 shrink-0 items-center gap-3 border-t bg-primary px-3 text-[11px] text-primary-foreground">
+        <span className="max-w-48 truncate">{workspace?.name ?? '无工作区'}</span>
+        <span className="flex-1 truncate opacity-90">{status}</span>
+        {activeDocument && (
+          <>
+            <span>Ln {position.line}, Col {position.column}</span>
+            <button type="button" onClick={() => setBottomPanel({ open: true, tab: 'settings', height: 220 })}>Spaces: {preferences.tabSize}</button>
+            <span>{encodingLabel(activeDocument.encoding)}</span>
+            <span>{activeDocument.lineEnding}{activeDocument.mixedLineEndings ? ' (混合)' : ''}</span>
+            {activeDocument.readOnly && <span>只读</span>}
+            <span>{languageFromName(activeDocument.name)}</span>
+          </>
+        )}
+      </footer>
+
+      {treeMenu && (
+        <div className="fixed inset-0 z-50" onMouseDown={() => setTreeMenu(null)}>
+          <div
+            className="fixed min-w-44 rounded-md border bg-popover py-1 text-xs text-popover-foreground shadow-lg"
+            style={{ left: treeMenu.x, top: treeMenu.y }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => beginRename(treeMenu.node)}>重命名</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: false }); setTreeMenu(null); }}>复制{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: true }); setTreeMenu(null); }}>剪切{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={!treeClipboard} onClick={() => { void pasteTreeEntry(treeMenu.node); setTreeMenu(null); }}>粘贴</button>
+            {treeMenu.node.type === 'file' && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => void showGitDiff({ path: treeMenu.node.path, status: ' M' })}>与 HEAD 比较</button>}
+            {treeMenu.node.type === 'file' && activeDocument && treeMenu.node.path !== activeDocument.path && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={async () => {
+              if (!workspace) return;
+              const read = await window.electronAPI.workspace.readTextFile(workspace.path, treeMenu.node.path);
+              if (read.success && read.data) setDiffView({ path: treeMenu.node.path, name: `${activeDocument.name} ↔ ${treeMenu.node.name}`, original: activeDocument.content, modified: read.data.content, language: languageIdFromName(treeMenu.node.path), source: 'external' });
+              setTreeMenu(null);
+            }}>与活动文件比较</button>}
+            {treeMenu.node.type === 'file' && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => void showFileTimeline(treeMenu.node)}>文件时间线</button>}
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { if (workspace) void window.electronAPI.workspace.revealEntry(workspace.path, treeMenu.node.path); setTreeMenu(null); }}>在文件管理器中显示</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { if (workspace) void navigator.clipboard.writeText(`${workspace.path}\\${treeMenu.node.path}`); setTreeMenu(null); }}>复制路径</button>
+            <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { void navigator.clipboard.writeText(treeMenu.node.path); setTreeMenu(null); }}>复制相对路径</button>
+            <div className="my-1 border-t" />
+            <button type="button" className="w-full px-3 py-1.5 text-left text-destructive hover:bg-accent" onClick={() => { void (selectedPaths.size > 1 ? deleteTreeSelection() : deleteSelected(treeMenu.node)); setTreeMenu(null); }}>移到回收站{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
+          </div>
+        </div>
+      )}
+
+      {tabMenu && (() => {
+        const document = documents.find((item) => item.path === tabMenu.path);
+        const index = documents.findIndex((item) => item.path === tabMenu.path);
+        if (!document) return null;
+        return (
+          <div className="fixed inset-0 z-50" onMouseDown={() => setTabMenu(null)}>
+            <div
+              className="fixed min-w-44 rounded-md border bg-popover py-1 text-xs text-popover-foreground shadow-lg"
+              style={{ left: tabMenu.x, top: tabMenu.y }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => {
+                setDocuments((previous) => previous.map((item) => item.path === document.path ? { ...item, pinned: item.pinned === false } : item));
+                setTabMenu(null);
+              }}>
+                {document.pinned === false ? '固定标签' : '取消固定'}
+              </button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setSecondaryPath(document.path); setTabMenu(null); }}>
+                在右侧打开
+              </button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocument(document.path); setTabMenu(null); }}>关闭</button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.path !== document.path).map((item) => item.path)); setTabMenu(null); }}>关闭其他</button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={index === documents.length - 1} onClick={() => { closeDocumentSet(documents.slice(index + 1).map((item) => item.path)); setTabMenu(null); }}>关闭右侧</button>
+              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.content === item.savedContent).map((item) => item.path)); setTabMenu(null); }}>关闭已保存</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {diffView && <DiffViewPanel
+        diffView={diffView}
+        resolvedTheme={resolvedTheme}
+        gitHunks={gitHunks}
+        aiHunks={aiHunks}
+        mergeHunks={mergeHunks}
+        searchPreviews={searchPreviews}
+        aiProposals={aiProposals}
+        mergeBase={mergeBase}
+        mergeResult={mergeResult}
+        onMergeResultChange={setMergeResult}
+        canFinishMerge={mergeResult !== null && !hasGitConflictMarkers(mergeResult)}
+        onClose={() => void closeDiffView()}
+        onStageGitHunk={stageGitHunk}
+        onUnstageFile={unstageFile}
+        gitStatusHasStaged={gitStatus.some((e) => e.path === diffView.path && e.status[0] !== ' ' && e.status[0] !== '?')}
+        onResolveConflict={resolveGitConflict}
+        onAcceptAi={acceptAiEdit}
+        onAcceptAllAi={acceptAllAiEdits}
+        onRejectAi={rejectAiEdit}
+        onApplyAiHunk={applyAiHunk}
+        onApplyMergeHunk={applyMergeHunk}
+        onFinishMerge={finishMerge}
+        onAcceptSearch={acceptSearchReplace}
+        onRejectSearch={rejectSearchReplace}
+      />}
+
+      <SearchPanel
+        searchPanel={searchPanel}
+        setSearchPanel={setSearchPanel}
+        runSearch={runSearch}
+        replaceAllSearchResults={replaceAllSearchResults}
+        openSearchResult={openSearchResult}
+        replaceResults={replaceSearchResults}
+        undoReplace={undoSearchReplace}
+        canUndoReplace={replaceHistory.length > 0}
+        previewReplace={previewSearchReplace}
+        openSearchAsEditor={() => {
+          if (searchPanel.results.length === 0) return;
+          const content = searchPanel.results.map((r) => `${r.path}:${r.line}:${r.column}  ${r.preview}`).join('\n');
+          const name = `搜索结果: ${searchPanel.query.slice(0, 40)}`;
+          const path = `__search__/${Date.now()}`;
+          setDocuments((prev) => [...prev, { path, name, content, savedContent: content, language: 'plaintext', encoding: 'utf8', lineEnding: 'LF', pinned: true, readOnly: false, standalone: false }]);
+          setActivePath(path);
+          setSearchPanel((p) => ({ ...p, open: false }));
+          setStatus(`已打开搜索编辑器：${searchPanel.results.length} 条结果`);
+        }}
+      />
+
+      <QuickOpenPanel
+        quickOpen={quickOpen}
+        setQuickOpen={setQuickOpen}
+        quickOpenResults={quickOpenResults}
+        openTreeFile={openTreeFile}
+      />
+      <DialogOverlay dialog={dialog} onClose={() => setDialog(null)} />
+    </div>
+  );
+};
