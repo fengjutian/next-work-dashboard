@@ -46,6 +46,7 @@ import { estimateTokens, fitContextToTokenBudget } from './ai-context';
 import { parseProblemLine, resolveTaskOrder } from '../../main/workspace-tasks';
 import { classifyConflictStatus } from '../../main/git-conflicts';
 import { applyConversationSummary, conversationNeedsSummary, recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
+import { useTerminalTasks } from './useTerminalTasks';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -210,14 +211,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     open: false, tab: 'problems', height: 220,
   });
   const [problems, setProblems] = useState<EditorProblem[]>([]);
-  const [taskProblems, setTaskProblems] = useState<EditorProblem[]>([]);
-  const [workspaceTasks, setWorkspaceTasks] = useState<WorkspaceTask[]>([]);
-  const [taskRun, setTaskRun] = useState<{ runId: string; name: string; state: 'running' | 'background' | 'completed' | 'failed' | 'cancelled'; startedAt: number } | null>(null);
-  const [taskHistory, setTaskHistory] = useState<Array<{ runId: string; name: string; state: 'completed' | 'failed' | 'cancelled'; startedAt: number; endedAt: number }>>(() => {
-    try { return JSON.parse(localStorage.getItem('code-editor.task-history') ?? '[]'); } catch { return []; }
-  });
   const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
+  const [status, setStatus] = useState('就绪');
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
   const [gitOverview, setGitOverview] = useState<WorkspaceGitOverview | null>(null);
   const [gitHistory, setGitHistory] = useState<WorkspaceGitCommit[]>([]);
@@ -245,14 +241,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const [mergeResult, setMergeResult] = useState<string | null>(null);
   const [mergeInitialResult, setMergeInitialResult] = useState<string | null>(null);
   const [mergeConflictPaths, setMergeConflictPaths] = useState<{ base: string; ours: string; theirs: string } | null>(null);
-  const terminalCounterRef = useRef(1);
-  const [terminalProfiles, setTerminalProfiles] = useState<TerminalProfile[]>(() => {
-    try { return JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { return []; }
-  });
-  const [terminalProfileName, setTerminalProfileName] = useState(() => localStorage.getItem('code-editor.terminal-profile') ?? terminalProfiles[0]?.name ?? '');
-  const [terminalEnvText, setTerminalEnvText] = useState(() => localStorage.getItem('code-editor.terminal-env') ?? '');
-  const [renamingTerminalId, setRenamingTerminalId] = useState<string | null>(null);
-  const [renamingTerminalTitle, setRenamingTerminalTitle] = useState('');
   const [dialog, setDialog] = useState<{ type: 'prompt'; title: string; defaultValue?: string; resolve: (value: string | null) => void } | { type: 'confirm'; message: string; resolve: (ok: boolean) => void } | null>(null);
   const appPrompt = useCallback((title: string, defaultValue = ''): Promise<string | null> => new Promise((resolve) => {
     setDialog({ type: 'prompt', title, defaultValue, resolve });
@@ -261,48 +249,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const appConfirm = useCallback((message: string): Promise<boolean> => new Promise((resolve) => {
     setDialog({ type: 'confirm', message, resolve });
   }), []);
-  const refreshTerminalProfiles = useCallback(async () => {
-    let discovered: { data?: TerminalProfile[] } = {};
-    try { discovered = await window.electronAPI.terminal.profiles(); } catch { /* handler may not be registered yet */ }
-    let custom: TerminalProfile[] = [];
-    try { custom = JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { /* ignore invalid custom profiles */ }
-    const merged = [...(discovered.data ?? []), ...custom].filter((profile, index, all) => all.findIndex((item) => item.name === profile.name) === index);
-    setTerminalProfiles(merged);
-    setTerminalProfileName((current) => merged.some((profile) => profile.name === current) ? current : merged[0]?.name ?? '');
-  }, []);
-
-  const addTerminalProfile = useCallback(async () => {
-    const name = await appPrompt('自定义终端 Profile 名称');
-    const shell = name ? await appPrompt('Shell 可执行文件路径') : null;
-    if (!name || !shell) return;
-    const argsText = await appPrompt('启动参数（空格分隔，可留空）', '') ?? '';
-    let custom: TerminalProfile[] = [];
-    try { custom = JSON.parse(localStorage.getItem('code-editor.terminal-custom-profiles') ?? '[]'); } catch { /* ignore */ }
-    const profile = { name: name.trim(), shell: shell.trim(), args: argsText.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((arg) => arg.replace(/^"|"$/g, '')) ?? [] };
-    custom = [...custom.filter((item) => item.name !== profile.name), profile];
-    localStorage.setItem('code-editor.terminal-custom-profiles', JSON.stringify(custom));
-    await refreshTerminalProfiles();
-    setTerminalProfileName(profile.name);
-  }, [appPrompt, refreshTerminalProfiles]);
-  const saveTerminalSecret = useCallback(async () => {
-    const name = await appPrompt('Secret 名称（在环境变量中使用 ${secret:NAME}）');
-    if (!name || !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name)) return;
-    const value = await appPrompt(`输入 ${name} 的 Secret 值`);
-    if (!value) return;
-    const saved = await window.electronAPI.auth.saveToken(`terminal-env:${name}`, value, 'Terminal environment secret');
-    setStatus(saved ? `Secret ${name} 已安全保存` : 'Secret 保存失败：系统加密存储不可用');
-  }, [appPrompt]);
-  const [showEnvValues, setShowEnvValues] = useState(false);
-  const [terminalTabs, setTerminalTabs] = useState<EditorTerminalTab[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('code-editor.terminal-tabs') ?? '[]') as Array<Pick<EditorTerminalTab, 'title' | 'cwd' | 'profile'>>;
-      if (saved.length > 0) return saved.slice(0, 8).map((tab, index) => ({ ...tab, id: `code-editor-terminal-${Date.now()}-${index}`, alive: true }));
-    } catch { /* ignore invalid persisted terminal metadata */ }
-    return [{ id: `code-editor-terminal-${Date.now()}`, title: 'Terminal 1', alive: true }];
-  });
-  const [activeTerminalId, setActiveTerminalId] = useState(() => terminalTabs[0].id);
-  const [splitTerminalId, setSplitTerminalId] = useState<string | null>(null);
-  const [status, setStatus] = useState('就绪');
   const [position, setPosition] = useState({ line: 1, column: 1 });
   const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
     open: false, query: '', files: [],
@@ -329,13 +275,28 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const recentlySavedRef = useRef(new Map<string, number>());
   const openRequestRef = useRef(0);
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
-  const activeProblemMatcherRef = useRef<string | undefined>();
   const restoredAiDraftWorkspaceRef = useRef<string | null>(null);
 
   const appendOutput = useCallback((message: string) => {
     const line = `${new Date().toLocaleTimeString()}  ${message}`;
     setOutputLines((previous) => [...previous.slice(-199), line]);
   }, []);
+
+  const terminalTasks = useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus, setBottomPanel });
+  const {
+    taskProblems, workspaceTasks, taskRun, taskHistory,
+    terminalProfiles, terminalProfileName, setTerminalProfileName,
+    terminalEnvText, setTerminalEnvText,
+    renamingTerminalId, setRenamingTerminalId,
+    renamingTerminalTitle, setRenamingTerminalTitle,
+    showEnvValues, setShowEnvValues,
+    terminalTabs, setTerminalTabs,
+    activeTerminalId, setActiveTerminalId,
+    splitTerminalId, setSplitTerminalId,
+    addTerminalProfile, saveTerminalSecret,
+    createTerminalTab, closeTerminalTab, restartTerminalTab,
+    handleTerminalOutput, runWorkspaceTask, cancelWorkspaceTask,
+  } = terminalTasks;
 
   const refreshGitStatus = useCallback(async () => {
     if (!workspace) return;
@@ -384,90 +345,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     await Promise.all([refreshGitStatus(), refreshGitOverview()]);
     return true;
   }, [appendOutput, refreshGitOverview, refreshGitStatus, workspace]);
-
-  const createTerminalTab = useCallback((split = false) => {
-    terminalCounterRef.current += 1;
-    const id = `code-editor-terminal-${Date.now()}-${terminalCounterRef.current}`;
-    const profile = terminalProfiles.find((item) => item.name === terminalProfileName);
-    const env = Object.fromEntries(terminalEnvText.split(/\r?\n/).map((line) => line.split('=')).filter((parts) => parts.length >= 2).map(([key, ...value]) => [key.trim(), value.join('=').trim()]));
-    setTerminalTabs((previous) => [...previous, { id, title: profile?.name ?? `Terminal ${terminalCounterRef.current}`, cwd: workspace?.path, alive: true, profile: profile ? { ...profile, env } : undefined }]);
-    if (split) setSplitTerminalId(id); else setActiveTerminalId(id);
-  }, [terminalEnvText, terminalProfileName, terminalProfiles, workspace?.path]);
-
-  const closeTerminalTab = useCallback((id: string) => {
-    setTerminalTabs((previous) => {
-      const remaining = previous.filter((tab) => tab.id !== id);
-      if (remaining.length === 0) {
-        const nextId = `code-editor-terminal-${Date.now()}-${++terminalCounterRef.current}`;
-        setActiveTerminalId(nextId);
-        return [{ id: nextId, title: `Terminal ${terminalCounterRef.current}`, cwd: workspace?.path, alive: true }];
-      }
-      if (activeTerminalId === id) setActiveTerminalId(remaining[0].id);
-      if (splitTerminalId === id) setSplitTerminalId(null);
-      return remaining;
-    });
-  }, [activeTerminalId, splitTerminalId, workspace?.path]);
-
-  const restartTerminalTab = useCallback((id: string) => {
-    const nextId = `code-editor-terminal-${Date.now()}-${++terminalCounterRef.current}`;
-    setTerminalTabs((previous) => previous.map((tab) => tab.id === id ? {
-      ...tab, id: nextId, title: tab.title, alive: true, exitCode: undefined,
-    } : tab));
-    setActiveTerminalId(nextId);
-  }, []);
-
-  const handleTerminalOutput = useCallback((_id: string, data: string) => {
-    // ANSI CSI sequences necessarily start with the ESC control character.
-    // eslint-disable-next-line no-control-regex
-    const clean = data.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
-    const found: EditorProblem[] = [];
-    for (const line of clean.split(/\r?\n/)) {
-      const configured = parseProblemLine(line, activeProblemMatcherRef.current);
-      if (configured) {
-        found.push({ ...configured, severity: configured.severity === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error });
-        continue;
-      }
-      const match = /(.+?)(?:\((\d+),(\d+)\)|:(\d+):(\d+))(?:\s*-?\s*)(error|warning)?\s*(.*)/i.exec(line);
-      if (!match) continue;
-      found.push({ path: match[1].trim(), line: Number(match[2] ?? match[4]), column: Number(match[3] ?? match[5]), severity: match[6]?.toLowerCase() === 'warning' ? monaco.MarkerSeverity.Warning : monaco.MarkerSeverity.Error, message: (match[7] || line).trim() });
-    }
-    if (found.length > 0) setTaskProblems((previous) => [...previous.slice(-499), ...found]);
-  }, []);
-
-  const runWorkspaceTask = useCallback((taskName: string) => {
-    const task = workspaceTasks.find((item) => item.name === taskName);
-    if (!task || !workspace) return;
-    setTaskProblems([]);
-    try { resolveTaskOrder(workspaceTasks, task.name); } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); return; }
-    activeProblemMatcherRef.current = task.problemMatcher;
-    const runId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setTaskRun({ runId, name: task.name, state: task.isBackground ? 'background' : 'running', startedAt: Date.now() });
-    setBottomPanel((previous) => ({ ...previous, open: true, tab: 'terminal' }));
-    const env = Object.fromEntries(terminalEnvText.split(/\r?\n/).map((line) => line.split('=')).filter((parts) => parts.length >= 2).map(([key, ...value]) => [key.trim(), value.join('=').trim()]));
-    void window.electronAPI.workspace.runTask(workspace.path, task.name, runId, env).then((result) => {
-      if (!result.success) setStatus(`任务失败：${displayError(result.error)}`);
-    });
-    setStatus(`正在运行任务：${task.name}`);
-  }, [terminalEnvText, workspace, workspaceTasks]);
-
-  const cancelWorkspaceTask = useCallback(() => {
-    if (taskRun) void window.electronAPI.workspace.cancelTask(taskRun.runId);
-  }, [taskRun]);
-
-  useEffect(() => window.electronAPI.workspace.onTaskEvent((event: WorkspaceTaskEvent) => {
-    if (event.state === 'output' && event.output) {
-      appendOutput(`[${event.task}] ${event.output.trimEnd()}`);
-      handleTerminalOutput(event.runId, event.output);
-      return;
-    }
-    if (event.state === 'started') setTaskRun((current) => current?.runId === event.runId ? { ...current, state: current.state === 'background' ? 'background' : 'running' } : current);
-    if (event.state === 'completed' || event.state === 'failed' || event.state === 'cancelled') {
-      const state = event.state;
-      setTaskRun((current) => current?.runId === event.runId ? { ...current, state } : current);
-      setTaskHistory((previous) => [...previous.slice(-49), { runId: event.runId, name: event.task, state, startedAt: event.startedAt, endedAt: event.endedAt ?? Date.now() }]);
-      setStatus(state === 'completed' ? `任务完成：${event.task}` : state === 'cancelled' ? `任务已取消：${event.task}` : `任务失败：${event.task}`);
-    }
-  }), [appendOutput, handleTerminalOutput]);
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
@@ -1610,13 +1487,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   }, []);
 
   useEffect(() => localStorage.setItem('code-editor.sidebar-width', String(sidebarWidth)), [sidebarWidth]);
-  useEffect(() => localStorage.setItem('code-editor.task-history', JSON.stringify(taskHistory.slice(-50))), [taskHistory]);
-  useEffect(() => { void refreshTerminalProfiles(); }, [refreshTerminalProfiles]);
-  useEffect(() => {
-    localStorage.setItem('code-editor.terminal-profile', terminalProfileName);
-    localStorage.setItem('code-editor.terminal-env', terminalEnvText);
-    localStorage.setItem('code-editor.terminal-tabs', JSON.stringify(terminalTabs.map(({ title, cwd, profile }) => ({ title, cwd, profile }))));
-  }, [terminalEnvText, terminalProfileName, terminalTabs]);
   useEffect(() => {
     const disposable = monaco.editor.onDidChangeMarkers(() => refreshProblems());
     refreshProblems();
@@ -1632,11 +1502,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     if (!workspace || !bottomPanel.open || bottomPanel.tab !== 'sourceControl') return;
     void Promise.all([refreshGitStatus(), refreshGitOverview()]);
   }, [bottomPanel.open, bottomPanel.tab, refreshGitOverview, refreshGitStatus, workspace]);
-
-  useEffect(() => {
-    if (!workspace) { setWorkspaceTasks([]); return; }
-    void window.electronAPI.workspace.listTasks(workspace.path).then((result) => setWorkspaceTasks(result.data ?? [])).catch(() => undefined);
-  }, [workspace]);
 
   useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
     if (event.state === 'started') setGitBusy({ operation: event.operation, operationId: event.operationId });
