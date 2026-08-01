@@ -62,7 +62,10 @@ export interface ElectronAPI {
     trashEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     copyEntry: (rootPath: string, sourcePath: string, targetPath: string) => Promise<WorkspaceResult<void>>;
     revealEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
-    listTasks: (rootPath: string) => Promise<WorkspaceResult<Array<{ name: string; command: string; detail: string }>>>;
+    listTasks: (rootPath: string) => Promise<WorkspaceResult<WorkspaceTask[]>>;
+    runTask: (rootPath: string, taskName: string, runId: string, environment?: Record<string, string>) => Promise<WorkspaceResult<WorkspaceTaskRunResult>>;
+    cancelTask: (runId: string) => Promise<{ success: boolean }>;
+    onTaskEvent: (callback: (event: WorkspaceTaskEvent) => void) => () => void;
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
     semanticSearch: (rootPath: string, symbol: string) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
@@ -100,6 +103,7 @@ export interface ElectronAPI {
     clearAll: () => Promise<boolean>;
   };
   terminal: {
+    profiles: () => Promise<WorkspaceResult<Array<{ name: string; shell: string; args?: string[]; source: 'system' | 'environment' }>>>;
     create: (id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => Promise<{ success: boolean; error?: string }>;
     write: (id: string, data: string) => Promise<{ success: boolean; error?: string }>;
     resize: (id: string, cols: number, rows: number) => Promise<{ success: boolean; error?: string }>;
@@ -248,6 +252,29 @@ export interface WorkspaceSearchResult {
   line: number;
   column: number;
   preview: string;
+}
+
+export interface WorkspaceTask {
+  name: string;
+  command: string;
+  detail: string;
+  dependsOn: string[];
+  dependsOrder: 'sequence' | 'parallel';
+  isBackground: boolean;
+  problemMatcher?: string;
+  env?: Record<string, string>;
+  presentation?: { reveal?: string; panel?: string; focus?: boolean };
+}
+
+export interface WorkspaceTaskRunResult { runId: string; task: string; exitCode: number; startedAt: number; endedAt: number }
+export interface WorkspaceTaskEvent {
+  runId: string;
+  task: string;
+  state: 'started' | 'output' | 'completed' | 'failed' | 'cancelled';
+  output?: string;
+  exitCode?: number;
+  startedAt: number;
+  endedAt?: number;
 }
 
 export interface WorkspaceSemanticResult extends WorkspaceSearchResult {

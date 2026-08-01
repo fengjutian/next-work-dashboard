@@ -8,6 +8,8 @@ import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
+import { discoverShellProfiles } from '../terminal/shell-profiles';
+import { resolveSecretReferences } from '../terminal/environment';
 import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace-path';
 import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
 import {
@@ -21,6 +23,8 @@ import { parseGitLog } from './git-history';
 import { classifyGitError } from './git-diagnostics';
 import { parseGitBranches } from './git-overview';
 import { findSemanticMatches, type SemanticMatch } from './semantic-search';
+import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-tasks';
+import { WorkspaceTaskRunner } from './task-runner';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -35,6 +39,19 @@ const gitControllers = new Map<string, AbortController>();
 const GIT_NETWORK_TIMEOUT_MS = 120_000;
 const GIT_LOCAL_TIMEOUT_MS = 30_000;
 const networkOps = new Set(['fetch', 'pull', 'push', 'sync']);
+const workspaceTaskRunner = new WorkspaceTaskRunner();
+
+function loadWorkspaceTaskDefinitions(root: string): WorkspaceTaskDefinition[] {
+  const tasks: WorkspaceTaskDefinition[] = [];
+  const packagePath = path.join(root, 'package.json');
+  if (fs.existsSync(packagePath)) {
+    const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
+    for (const [name, command] of Object.entries(parsed.scripts ?? {})) tasks.push({ name: `npm: ${name}`, command: `npm run ${name}`, detail: command, dependsOn: [], dependsOrder: 'sequence', isBackground: false, problemMatcher: name === 'lint' ? '$eslint-stylish' : undefined });
+  }
+  const tasksPath = path.join(root, '.vscode', 'tasks.json');
+  if (fs.existsSync(tasksPath)) tasks.push(...parseWorkspaceTasks(JSON.parse(fs.readFileSync(tasksPath, 'utf8')) as Parameters<typeof parseWorkspaceTasks>[0]));
+  return tasks;
+}
 
 function enqueueGitOp(root: string, fn: () => Promise<unknown>): Promise<unknown> {
   const previous = gitQueues.get(root) ?? Promise.resolve();
@@ -775,26 +792,24 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('workspace:listTasks', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
-      const tasks: Array<{ name: string; command: string; detail: string }> = [];
-      // package.json scripts
-      const packagePath = path.join(root, 'package.json');
-      if (fs.existsSync(packagePath)) {
-        const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
-        for (const [name, command] of Object.entries(parsed.scripts ?? {})) tasks.push({ name: `npm: ${name}`, command: `npm run ${name}`, detail: command });
-      }
-      // .vscode/tasks.json
-      const tasksPath = path.join(root, '.vscode', 'tasks.json');
-      if (fs.existsSync(tasksPath)) {
-        const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf8')) as { tasks?: Array<{ label?: string; type?: string; command?: string; args?: string[] }> };
-        for (const task of parsed.tasks ?? []) {
-          if (task.label && task.command) tasks.push({ name: task.label, command: `${task.command} ${(task.args ?? []).join(' ')}`, detail: task.type ?? 'shell' });
-        }
-      }
-      return { success: true, data: tasks };
+      return { success: true, data: loadWorkspaceTaskDefinitions(root) };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  ipcMain.handle('workspace:runTask', async (event, rootPath: string, taskName: string, runId: string, environment?: Record<string, string>) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const resolvedEnv = resolveSecretReferences(environment ?? {}, (name) => getToken(`terminal-env:${name}`));
+      const result = await workspaceTaskRunner.run(runId, loadWorkspaceTaskDefinitions(root), taskName, root, { ...(process.env as Record<string, string>), ...resolvedEnv }, (payload) => event.sender.send('workspace:taskEvent', payload));
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:cancelTask', (_event, runId: string) => ({ success: workspaceTaskRunner.cancel(runId) }));
 
   ipcMain.handle('workspace:listFiles', async (_event, rootPath: string) => {
     try {
@@ -1289,9 +1304,12 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('auth:clear-all', async () => clearAll());
 
   // ── 终端 ──
+  ipcMain.handle('terminal:profiles', () => ({ success: true, data: discoverShellProfiles() }));
+
   ipcMain.handle('terminal:create', async (_event, id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => {
     try {
-      const session = createSession(id, cwd, profile);
+      const safeProfile = profile ? { ...profile, env: resolveSecretReferences(profile.env ?? {}, (name) => getToken(`terminal-env:${name}`)) } : undefined;
+      const session = createSession(id, cwd, safeProfile);
       session.pty.onData((data: string) => {
         mw.webContents.send(`terminal:data:${id}`, data);
       });

@@ -4,7 +4,7 @@ import { TerminalSingle } from '@/components/Terminal';
 import type { TerminalTab, TerminalProfile } from '@/components/Terminal';
 import { Code, X } from '@/components/icons';
 import type { BottomPanelTab, EditorPreferences, EditorProblem, EditorSymbol } from './editor-types';
-import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus } from '@/types/electron';
+import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus, WorkspaceTask } from '@/types/electron';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { classifyConflictStatus } from '../../main/git-conflicts';
 
@@ -23,7 +23,12 @@ interface BottomPanelProps {
   terminalProfileName: string;
   setTerminalProfileName: React.Dispatch<React.SetStateAction<string>>;
   terminalProfiles: TerminalProfile[];
-  workspaceTasks: Array<{ name: string; command: string; detail: string }>;
+  addTerminalProfile: () => Promise<void>;
+  saveTerminalSecret: () => Promise<void>;
+  workspaceTasks: WorkspaceTask[];
+  taskRun: { runId: string; name: string; state: 'running' | 'background' | 'completed' | 'failed' | 'cancelled'; startedAt: number } | null;
+  taskHistory: Array<{ runId: string; name: string; state: 'completed' | 'failed' | 'cancelled'; startedAt: number; endedAt: number }>;
+  cancelWorkspaceTask: () => void;
   renamingTerminalId: string | null;
   renamingTerminalTitle: string;
   setRenamingTerminalId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -31,7 +36,7 @@ interface BottomPanelProps {
   createTerminalTab: (split?: boolean) => void;
   closeTerminalTab: (id: string) => void;
   restartTerminalTab: (id: string) => void;
-  runWorkspaceTask: (command: string) => void;
+  runWorkspaceTask: (taskName: string) => void;
   handleTerminalOutput: (id: string, data: string) => void;
   appendOutput: (msg: string) => void;
   workspacePath?: string;
@@ -157,7 +162,10 @@ const TerminalTabContent: React.FC<BottomPanelProps> = (p) => (
         ))}
       </div>
       <select value={p.terminalProfileName} onChange={(e) => p.setTerminalProfileName(e.target.value)} className="h-7 max-w-28 rounded border bg-background px-1 text-[10px]">{p.terminalProfiles.map((pr) => <option key={pr.name}>{pr.name}</option>)}</select>
-      <select defaultValue="" onChange={(e) => { if (e.target.value) p.runWorkspaceTask(e.target.value); e.target.value = ''; }} className="h-7 max-w-36 rounded border bg-background px-1 text-[10px]"><option value="">运行任务…</option>{p.workspaceTasks.map((t) => <option key={t.name} value={t.command}>{t.name}</option>)}</select>
+      <select defaultValue="" onChange={(e) => { if (e.target.value) p.runWorkspaceTask(e.target.value); e.target.value = ''; }} className="h-7 max-w-44 rounded border bg-background px-1 text-[10px]"><option value="">运行任务…</option>{p.workspaceTasks.map((t) => <option key={t.name} value={t.name}>{t.name}{t.dependsOn.length ? ` ← ${t.dependsOn.length}` : ''}{t.isBackground ? ' • 后台' : ''}</option>)}</select>
+      {p.taskRun && <span className="text-[10px] text-muted-foreground">{p.taskRun.name}: {p.taskRun.state}</span>}
+      {p.taskRun && (p.taskRun.state === 'running' || p.taskRun.state === 'background') && <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-destructive" onClick={p.cancelWorkspaceTask}>取消任务</Button>}
+      {p.taskHistory.length > 0 && <span className="text-[10px] text-muted-foreground" title={p.taskHistory.slice(-5).map((item) => `${item.name}: ${item.state}`).join('\n')}>历史 {p.taskHistory.length}</span>}
       <button className="rounded px-2 py-1 text-sm hover:bg-accent" onClick={() => p.createTerminalTab(false)}>＋</button>
       <button className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => p.createTerminalTab(true)}>拆分</button>
       {p.splitTerminalId && <button className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => p.setSplitTerminalId(null)}>关闭分屏</button>}
@@ -324,8 +332,8 @@ const SettingsTabContent: React.FC<BottomPanelProps> = (p) => (
     <span>Minimap</span><input type="checkbox" checked={p.preferences.minimap} onChange={(e) => p.setPreferences((prev) => ({ ...prev, minimap: e.target.checked }))} />
     <span>保存时格式化</span><input type="checkbox" checked={p.preferences.formatOnSave} onChange={(e) => p.setPreferences((prev) => ({ ...prev, formatOnSave: e.target.checked }))} />
     <label htmlFor="terminal-profile">默认终端 Profile</label>
-    <select id="terminal-profile" value={p.terminalProfileName} onChange={(e) => p.setTerminalProfileName(e.target.value)} className="h-8 rounded border bg-background px-2">{p.terminalProfiles.map((pr) => <option key={pr.name}>{pr.name}</option>)}</select>
-    <label htmlFor="terminal-env">终端环境变量 <button type="button" className="ml-1 rounded px-1 text-[10px] hover:bg-accent" onClick={() => p.setShowEnvValues((v) => !v)}>{p.showEnvValues ? '隐藏值' : '显示值'}</button></label>
+    <div className="flex gap-2"><select id="terminal-profile" value={p.terminalProfileName} onChange={(e) => p.setTerminalProfileName(e.target.value)} className="h-8 min-w-0 flex-1 rounded border bg-background px-2">{p.terminalProfiles.map((pr) => <option key={pr.name}>{pr.name}</option>)}</select><Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void p.addTerminalProfile()}>添加 Profile</Button></div>
+    <label htmlFor="terminal-env">终端环境变量 <button type="button" className="ml-1 rounded px-1 text-[10px] hover:bg-accent" onClick={() => p.setShowEnvValues((v) => !v)}>{p.showEnvValues ? '隐藏值' : '显示值'}</button><button type="button" className="ml-1 rounded px-1 text-[10px] text-primary hover:bg-accent" onClick={() => void p.saveTerminalSecret()}>安全保存 Secret</button></label>
     <div className="flex flex-col gap-1">
       <textarea id="terminal-env" value={p.showEnvValues ? p.terminalEnvText : p.terminalEnvText.replace(/=.*/gm, '=••••')} onChange={(e) => p.setTerminalEnvText(e.target.value)} onFocus={() => !p.showEnvValues && p.setShowEnvValues(true)} placeholder="KEY=value\nANOTHER=${workspaceFolder}/bin" className="min-h-20 rounded border bg-background p-2 font-mono text-xs" spellCheck={false} />
       {p.terminalEnvText.split(/\r?\n/).some((l) => l.trim() && !/^[A-Z_][A-Z0-9_]*=.+$/i.test(l.trim())) && <span className="text-[10px] text-warning">格式：KEY=value（一行一个）</span>}

@@ -116,6 +116,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('workspace:copyEntry', rootPath, sourcePath, targetPath),
     revealEntry: (rootPath: string, relativePath: string) => ipcRenderer.invoke('workspace:revealEntry', rootPath, relativePath),
     listTasks: (rootPath: string) => ipcRenderer.invoke('workspace:listTasks', rootPath),
+    runTask: (rootPath: string, taskName: string, runId: string, environment?: Record<string, string>) => ipcRenderer.invoke('workspace:runTask', rootPath, taskName, runId, environment),
+    cancelTask: (runId: string) => ipcRenderer.invoke('workspace:cancelTask', runId),
+    onTaskEvent: (callback: (event: import('./types/electron').WorkspaceTaskEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: import('./types/electron').WorkspaceTaskEvent) => callback(payload);
+      ipcRenderer.on('workspace:taskEvent', handler);
+      return () => ipcRenderer.removeListener('workspace:taskEvent', handler);
+    },
     listFiles: (rootPath: string) =>
       ipcRenderer.invoke('workspace:listFiles', rootPath),
     search: (rootPath: string, query: string, options?: import('./types/electron').WorkspaceSearchOptions) =>
@@ -164,6 +171,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 终端 (Terminal) ──
   terminal: {
+    profiles: () => ipcRenderer.invoke('terminal:profiles'),
     create: (id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) =>
       ipcRenderer.invoke('terminal:create', id, cwd, profile),
     write: (id: string, data: string) => ipcRenderer.invoke('terminal:write', id, data),
