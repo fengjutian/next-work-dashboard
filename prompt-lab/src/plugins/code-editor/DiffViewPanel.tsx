@@ -1,5 +1,5 @@
 import React from 'react';
-import Editor, { DiffEditor } from '@monaco-editor/react';
+import { DiffEditor } from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
 import type { AiHunk } from './editor-types';
 
@@ -24,6 +24,7 @@ interface DiffViewProps {
   gitStatusHasStaged: boolean;
   onResolveConflict: (strategy: 'ours' | 'theirs') => void;
   onAcceptAi: () => void;
+  onAcceptAllAi: () => void;
   onRejectAi: () => void;
   onApplyAiHunk: (index: number, accept: boolean) => void;
   onApplyMergeHunk: (index: number, side: 'ours' | 'theirs') => void;
@@ -35,8 +36,8 @@ interface DiffViewProps {
 export const DiffViewPanel: React.FC<DiffViewProps> = ({
   diffView, resolvedTheme, gitHunks, aiHunks, mergeHunks, searchPreviews, aiProposals,
   onClose, onStageGitHunk, onUnstageFile, gitStatusHasStaged,
-  onResolveConflict, onAcceptAi, onRejectAi, onApplyAiHunk,
-  onApplyMergeHunk, onFinishMerge, onAcceptSearch, onRejectSearch,
+  onAcceptAi, onAcceptAllAi, onApplyAiHunk,
+  onApplyMergeHunk, onFinishMerge, onAcceptSearch,
 }) => (
   <div className="absolute inset-0 z-40 flex flex-col bg-background">
     <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
@@ -71,6 +72,7 @@ export const DiffViewPanel: React.FC<DiffViewProps> = ({
         </div>
       )}
       {diffView.source === 'ai' && aiHunks.length === 0 && <Button size="sm" className="h-7 px-3 text-xs" onClick={onAcceptAi}>接受全部</Button>}
+      {diffView.source === 'ai' && aiProposals.length > 1 && <Button size="sm" variant="outline" className="h-7 px-3 text-xs" onClick={onAcceptAllAi}>原子接受全部文件</Button>}
       {diffView.source === 'search' && (
         <>
           <span className="text-muted-foreground">{searchPreviews.findIndex((p) => p.path === diffView.path) + 1}/{searchPreviews.length}</span>

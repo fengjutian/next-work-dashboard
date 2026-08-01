@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Editor, { DiffEditor, loader, type OnMount } from '@monaco-editor/react';
+import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -21,7 +21,7 @@ import {
   X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { TerminalSingle, type TerminalTab, type TerminalProfile } from '@/components/Terminal';
+import type { TerminalTab, TerminalProfile } from '@/components/Terminal';
 import { useStore } from '@/store';
 import { createOpenAIProvider } from '@/core/llm';
 import type {
@@ -354,6 +354,8 @@ export const CodeEditorPanel: React.FC = () => {
   }, []);
 
   const handleTerminalOutput = useCallback((_id: string, data: string) => {
+    // ANSI CSI sequences necessarily start with the ESC control character.
+    // eslint-disable-next-line no-control-regex
     const clean = data.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
     const found: EditorProblem[] = [];
     for (const line of clean.split(/\r?\n/)) {
@@ -1191,6 +1193,7 @@ export const CodeEditorPanel: React.FC = () => {
     const grouped = new Map<string, WorkspaceSearchResult[]>();
     for (const result of results) grouped.set(result.path, [...(grouped.get(result.path) ?? []), result]);
     const snapshots: ReplaceSnapshot[] = [];
+    const edits: Array<{ path: string; content: string; encoding: WorkspaceEncoding; lineEnding: 'LF' | 'CRLF'; expectedModifiedAt: number }> = [];
     for (const [filePath, matches] of grouped) {
       const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
       if (!read.success || !read.data) continue;
@@ -1207,11 +1210,20 @@ export const CodeEditorPanel: React.FC = () => {
         matcher.lastIndex = 0;
         content = `${content.slice(0, start)}${tail.replace(matcher, searchPanel.replacement)}`;
       }
-      const write = await window.electronAPI.workspace.writeTextFile(workspace.path, filePath, content, { encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt });
-      if (!write.success) { setStatus(`替换失败：${filePath} — ${displayError(write.error)}`); return; }
-      recentlySavedRef.current.set(filePath, Date.now());
-      setDocuments((previous) => previous.map((document) => document.path === filePath ? { ...document, content, savedContent: content, modifiedAt: write.data?.modifiedAt } : document));
+      edits.push({ path: filePath, content, encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt });
     }
+    if (edits.length === 0) return;
+    const write = await window.electronAPI.workspace.writeTextFiles(workspace.path, edits);
+    if (!write.success) {
+      setStatus(`替换失败，未写入任何文件：${displayError(write.error)}`);
+      return;
+    }
+    const modifiedAtByPath = new Map((write.data ?? []).map((item) => [item.path, item.modifiedAt]));
+    for (const edit of edits) recentlySavedRef.current.set(edit.path, Date.now());
+    setDocuments((previous) => previous.map((document) => {
+      const edit = edits.find((item) => item.path === document.path);
+      return edit ? { ...document, content: edit.content, savedContent: edit.content, modifiedAt: modifiedAtByPath.get(edit.path) } : document;
+    }));
     if (snapshots.length > 0) setReplaceHistory((previous) => [...previous.slice(-19), snapshots]);
     await runSearch();
   }, [runSearch, searchPanel.caseSensitive, searchPanel.query, searchPanel.replacement, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
@@ -1590,7 +1602,7 @@ export const CodeEditorPanel: React.FC = () => {
       return;
     }
     const write = await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, diffView.original, {
-      encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt, force: true,
+      encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt,
     });
     if (!write.success) {
       setStatus(`写入合并结果失败：${displayError(write.error)}`);
@@ -1800,6 +1812,64 @@ export const CodeEditorPanel: React.FC = () => {
     const next = remaining[0];
     setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
   }, [aiProposals, diffView]);
+
+  const acceptAllAiEdits = useCallback(async () => {
+    if (!workspace || aiProposals.length === 0) return;
+
+    // Preflight every proposal before mutating editor state. A conflict in one
+    // file rejects the whole group so the user never gets a half-accepted edit.
+    for (const proposal of aiProposals) {
+      const opened = documents.find((document) => document.path === proposal.path);
+      if (opened && opened.content !== proposal.original) {
+        setStatus(`AI 候选已过期：${proposal.path} 在生成后被修改，未接受任何文件`);
+        return;
+      }
+      if (proposal.metadata && !opened) {
+        const current = await window.electronAPI.workspace.readTextFile(workspace.path, proposal.path);
+        if (!current.success || !current.data || current.data.modifiedAt !== proposal.metadata.modifiedAt) {
+          setStatus(`AI 候选已过期：${proposal.path} 的磁盘版本已变化，未接受任何文件`);
+          return;
+        }
+      }
+    }
+
+    setDocuments((previous) => {
+      const proposalByPath = new Map(aiProposals.map((proposal) => [proposal.path, proposal]));
+      const updated = previous
+        .filter((document) => proposalByPath.get(document.path)?.modified !== '')
+        .map((document) => {
+          const proposal = proposalByPath.get(document.path);
+          return proposal ? { ...document, content: proposal.modified, pinned: true } : document;
+        });
+      const existingPaths = new Set(updated.map((document) => document.path));
+      for (const proposal of aiProposals) {
+        if (proposal.modified === '' || existingPaths.has(proposal.path)) continue;
+        updated.push({
+          path: proposal.path,
+          name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
+          content: proposal.modified,
+          savedContent: '',
+          language: proposal.language,
+          encoding: 'utf8',
+          lineEnding: 'LF',
+          pinned: true,
+        });
+      }
+      return updated;
+    });
+    const now = Date.now();
+    setAiHistory((previous) => [...previous, ...aiProposals.map((proposal, index) => ({
+      id: now + index,
+      path: proposal.path,
+      before: proposal.original,
+      after: proposal.modified,
+    }))].slice(-50));
+    setAiProposals([]);
+    setDiffView(null);
+    updateSessionAcceptCount();
+    appendOutput(`已原子接受 ${aiProposals.length} 个 AI 文件候选（尚未保存）`);
+    setStatus(`已接受 ${aiProposals.length} 个文件，请检查后统一保存`);
+  }, [aiProposals, appendOutput, documents, workspace]);
 
   // Compute hunks whenever an AI or merge diff view is opened
   useEffect(() => {
@@ -2543,6 +2613,7 @@ export const CodeEditorPanel: React.FC = () => {
         gitStatusHasStaged={gitStatus.some((e) => e.path === diffView.path && e.status[0] !== ' ' && e.status[0] !== '?')}
         onResolveConflict={resolveGitConflict}
         onAcceptAi={acceptAiEdit}
+        onAcceptAllAi={acceptAllAiEdits}
         onRejectAi={rejectAiEdit}
         onApplyAiHunk={applyAiHunk}
         onApplyMergeHunk={applyMergeHunk}

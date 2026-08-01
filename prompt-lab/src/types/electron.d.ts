@@ -53,6 +53,7 @@ export interface ElectronAPI {
     listDirectory: (rootPath: string, relativePath?: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     readTextFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<WorkspaceTextFile>>;
     writeTextFile: (rootPath: string, relativePath: string, content: string, options?: WorkspaceWriteOptions) => Promise<WorkspaceResult<{ size: number; modifiedAt: number }>>;
+    writeTextFiles: (rootPath: string, edits: WorkspaceTextEdit[]) => Promise<WorkspaceResult<WorkspaceTextEditResult[]>>;
     createFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     createDirectory: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     renameEntry: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<void>>;
@@ -206,6 +207,17 @@ export interface WorkspaceWriteOptions {
   lineEnding?: 'LF' | 'CRLF';
   expectedModifiedAt?: number;
   force?: boolean;
+}
+
+export interface WorkspaceTextEdit extends WorkspaceWriteOptions {
+  path: string;
+  content: string;
+}
+
+export interface WorkspaceTextEditResult {
+  path: string;
+  size: number;
+  modifiedAt: number;
 }
 
 export type WorkspaceEncoding = 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk';

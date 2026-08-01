@@ -10,6 +10,8 @@ import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionA
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
 import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace-path';
 import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
+import { applyWorkspaceTextEdits, type WorkspaceTextEdit } from './workspace-transaction';
+import { redactGitSecrets } from './git-security';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -60,7 +62,7 @@ async function runGit(root: string, args: string[], maxBuffer = 10 * 1024 * 1024
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
     signal,
   });
-  return result.stdout.trim();
+  return redactGitSecrets(result.stdout.trim());
 }
 
 async function applyGitPatch(root: string, patchText: string): Promise<string> {
@@ -627,6 +629,18 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:writeTextFiles', async (
+    _event,
+    rootPath: string,
+    edits: WorkspaceTextEdit[],
+  ) => {
+    try {
+      return { success: true, data: applyWorkspaceTextEdits(rootPath, edits) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:createFile', async (
     _event,
     rootPath: string,
@@ -956,7 +970,11 @@ export function setupIPC(webviewPreloadPath: string) {
     const timeoutMs = networkOps.has(operation) ? GIT_NETWORK_TIMEOUT_MS : GIT_LOCAL_TIMEOUT_MS;
     const controller = new AbortController();
     gitControllers.set(operationId, controller);
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     return enqueueGitOp(root, async () => {
       const signal = controller.signal;
@@ -1072,7 +1090,11 @@ export function setupIPC(webviewPreloadPath: string) {
         progress('completed', `${operation} 执行完成`);
         return { success: true, data };
       } catch (error) {
-        const raw = error instanceof Error ? error.message : String(error);
+        const raw = redactGitSecrets(error instanceof Error ? error.message : String(error));
+        if (timedOut) {
+          progress('failed', '操作超时');
+          return { success: false, error: 'GIT_TIMEOUT' };
+        }
         if (raw === 'GIT_CANCELLED' || raw.includes('abort') || raw.includes('cancel')) {
           progress('cancelled', '操作已取消');
           return { success: false, error: 'GIT_CANCELLED' };

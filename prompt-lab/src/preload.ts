@@ -98,6 +98,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         force?: boolean;
       },
     ) => ipcRenderer.invoke('workspace:writeTextFile', rootPath, relativePath, content, options),
+    writeTextFiles: (rootPath: string, edits: import('./types/electron').WorkspaceTextEdit[]) =>
+      ipcRenderer.invoke('workspace:writeTextFiles', rootPath, edits),
     createFile: (rootPath: string, relativePath: string) =>
       ipcRenderer.invoke('workspace:createFile', rootPath, relativePath),
     createDirectory: (rootPath: string, relativePath: string) =>
