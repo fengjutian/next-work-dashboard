@@ -94,3 +94,11 @@ export function encodingLabel(encoding: WorkspaceEncoding): string {
   };
   return labels[encoding];
 }
+
+export interface AiHunk {
+  index: number;
+  originalStart: number;
+  originalLines: string[];
+  modifiedStart: number;
+  modifiedLines: string[];
+}

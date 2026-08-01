@@ -34,6 +34,9 @@ import type {
   WorkspaceSearchResult,
 } from '@/types/electron';
 import { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
+import { DialogOverlay } from './DialogOverlay';
+import { BottomPanel } from './BottomPanel';
+import { DiffViewPanel } from './DiffViewPanel';
 import { FileTreeRow } from './FileTreeRow';
 import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
@@ -45,6 +48,7 @@ import {
   type OpenDocument,
   type TreeNode,
   type TreeEditState,
+  type AiHunk,
   DEFAULT_PREFERENCES,
   displayError,
   encodingLabel,
@@ -79,14 +83,6 @@ function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode
 interface GitHunk { label: string; patch: string }
 interface AiFileProposal { path: string; original: string; modified: string; language: string; metadata?: OpenDocument }
 interface AiEditHistory { id: number; path: string; before: string; after: string }
-
-interface AiHunk {
-  index: number;
-  originalStart: number;
-  originalLines: string[];
-  modifiedStart: number;
-  modifiedLines: string[];
-}
 
 function computeDiffHunks(original: string, modified: string): AiHunk[] {
   const o = original.split('\n');
@@ -167,6 +163,8 @@ export const CodeEditorPanel: React.FC = () => {
     ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : theme;
   const [workspace, setWorkspace] = useState<{ path: string; name: string } | null>(null);
+  const [workspaceFolders, setWorkspaceFolders] = useState<Array<{ id: string; path: string; name: string }>>([]);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
@@ -237,6 +235,16 @@ export const CodeEditorPanel: React.FC = () => {
   ] : [{ name: 'zsh', shell: '/bin/zsh' }, { name: 'bash', shell: '/bin/bash' }, { name: 'fish', shell: '/usr/bin/fish' }], []);
   const [terminalProfileName, setTerminalProfileName] = useState(() => localStorage.getItem('code-editor.terminal-profile') ?? terminalProfiles[0]?.name ?? '');
   const [terminalEnvText, setTerminalEnvText] = useState(() => localStorage.getItem('code-editor.terminal-env') ?? '');
+  const [renamingTerminalId, setRenamingTerminalId] = useState<string | null>(null);
+  const [renamingTerminalTitle, setRenamingTerminalTitle] = useState('');
+  const [dialog, setDialog] = useState<{ type: 'prompt'; title: string; defaultValue?: string; resolve: (value: string | null) => void } | { type: 'confirm'; message: string; resolve: (ok: boolean) => void } | null>(null);
+  const appPrompt = useCallback((title: string, defaultValue = ''): Promise<string | null> => new Promise((resolve) => {
+    setDialog({ type: 'prompt', title, defaultValue, resolve });
+  }), []);
+
+  const appConfirm = useCallback((message: string): Promise<boolean> => new Promise((resolve) => {
+    setDialog({ type: 'confirm', message, resolve });
+  }), []);
   const [showEnvValues, setShowEnvValues] = useState(false);
   const [terminalTabs, setTerminalTabs] = useState<EditorTerminalTab[]>(() => {
     try {
@@ -481,20 +489,27 @@ export const CodeEditorPanel: React.FC = () => {
     setTree(await hydrateExpandedTree(workspace.path, entries, nextExpanded));
   }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
 
-  const openWorkspace = useCallback(async () => {
-    if (hasDirtyDocuments && !window.confirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
+  const openWorkspace = useCallback(async (addToExisting = false) => {
+    if (!addToExisting && hasDirtyDocuments && !await appConfirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
     try {
       const folder = await window.electronAPI.workspace.openFolder();
       if (!folder) return;
       setStatus('正在读取工作区…');
       const entries = await loadDirectory(folder.path);
-      setWorkspace(folder);
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      if (addToExisting && workspace) {
+        setWorkspaceFolders((prev) => [...prev, { id, path: folder.path, name: folder.name }]);
+      } else {
+        setWorkspace(folder);
+        setActiveFolderId(id);
+        setWorkspaceFolders([{ id, path: folder.path, name: folder.name }]);
+        setDocuments([]);
+        setActivePath(null);
+        setExpandedPaths(new Set());
+      }
       setTree(entries);
-      setDocuments([]);
-      setActivePath(null);
-      setExpandedPaths(new Set());
       setSelectedNode(null);
-      setStatus(`已打开 ${folder.name}`);
+      setStatus(`已${addToExisting ? '添加' : '打开'} ${folder.name}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(
@@ -571,7 +586,7 @@ export const CodeEditorPanel: React.FC = () => {
       setStatus('删除目标中包含未保存文件，请先保存或关闭');
       return;
     }
-    if (!window.confirm(`确定将“${node.name}”移到系统回收站吗？`)) return;
+    if (!await appConfirm(`确定将“${node.name}”移到系统回收站吗？`)) return;
     const result = await window.electronAPI.workspace.trashEntry(workspace.path, node.path);
     if (!result.success) {
       setStatus(`删除失败：${displayError(result.error)}`);
@@ -599,7 +614,7 @@ export const CodeEditorPanel: React.FC = () => {
       setStatus('所选项目中包含未保存文件，请先保存或关闭');
       return;
     }
-    if (!window.confirm(`确定将所选 ${paths.length} 个项目移到系统回收站吗？`)) return;
+    if (!await appConfirm(`确定将所选 ${paths.length} 个项目移到系统回收站吗？`)) return;
     for (const target of paths) {
       const result = await window.electronAPI.workspace.trashEntry(workspace.path, target);
       if (!result.success) {
@@ -894,10 +909,10 @@ export const CodeEditorPanel: React.FC = () => {
     }
   }, [documents, saveDocument]);
 
-  const closeDocument = useCallback((path: string) => {
+  const closeDocument = useCallback(async (path: string) => {
     const document = documents.find((item) => item.path === path);
     if (!document) return;
-    if (document.content !== document.savedContent && !window.confirm(`“${document.name}”尚未保存，仍要关闭吗？`)) return;
+    if (document.content !== document.savedContent && !await appConfirm(`“${document.name}”尚未保存，仍要关闭吗？`)) return;
     const index = documents.findIndex((item) => item.path === path);
     const remaining = documents.filter((item) => item.path !== path);
     setDocuments(remaining);
@@ -907,12 +922,12 @@ export const CodeEditorPanel: React.FC = () => {
     }
   }, [activePath, documents, secondaryPath]);
 
-  const closeDocumentSet = useCallback((paths: string[]) => {
+  const closeDocumentSet = useCallback(async (paths: string[]) => {
     const pathSet = new Set(paths);
     const dirty = documents.filter((document) => (
       pathSet.has(document.path) && document.content !== document.savedContent
     ));
-    if (dirty.length > 0 && !window.confirm(`${dirty.length} 个文件尚未保存，仍要关闭吗？`)) return;
+    if (dirty.length > 0 && !await appConfirm(`${dirty.length} 个文件尚未保存，仍要关闭吗？`)) return;
     const remaining = documents.filter((document) => !pathSet.has(document.path));
     setDocuments(remaining);
     if (secondaryPath && pathSet.has(secondaryPath)) setSecondaryPath(null);
@@ -993,20 +1008,15 @@ export const CodeEditorPanel: React.FC = () => {
       setPosition({ line: event.position.lineNumber, column: event.position.column });
     });
     // Gutter click → revert line/hunk
-    editor.onMouseDown((event) => {
+    editor.onMouseDown(async (event) => {
       if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && event.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) return;
       const line = event.target.position?.lineNumber;
       if (!line || !workspace || !activeDocument || activeDocument.readOnly) return;
-      if (!window.confirm(`回滚第 ${line} 行的更改？此操作将用 HEAD 版本覆盖该行所在 Hunk。`)) return;
-      void (async () => {
-        // Revert: git checkout HEAD -- <file> (entire file, simplest)
-        const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'resolveConflict', { path: activeDocument.path, strategy: 'ours' });
-        // Actually use git checkout HEAD -- <file>
-        const revert = await window.electronAPI.workspace.gitShowHead(workspace.path, activeDocument.path);
-        if (!revert.success) { setStatus(`回滚失败：${displayError(revert.error)}`); return; }
-        setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: revert.data ?? '', savedContent: revert.data ?? '', externalChanged: false } : d));
-        setStatus(`已回滚 ${activeDocument.name}`);
-      })();
+      if (!await appConfirm(`回滚第 ${line} 行的更改？此操作将用 HEAD 版本覆盖该行所在 Hunk。`)) return;
+      const revert = await window.electronAPI.workspace.gitShowHead(workspace.path, activeDocument.path);
+      if (!revert.success) { setStatus(`回滚失败：${displayError(revert.error)}`); return; }
+      setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: revert.data ?? '', savedContent: revert.data ?? '', externalChanged: false } : d));
+      setStatus(`已回滚 ${activeDocument.name}`);
     });
     refreshProblems();
     void refreshSymbols(editor);
@@ -1129,7 +1139,7 @@ export const CodeEditorPanel: React.FC = () => {
   const replaceAllSearchResults = useCallback(async () => {
     if (!workspace || searchPanel.results.length === 0) return;
     const paths = [...new Set(searchPanel.results.map((result) => result.path))];
-    if (!window.confirm(`将在 ${paths.length} 个文件中替换 ${searchPanel.results.length} 处匹配，是否继续？`)) return;
+    if (!await appConfirm(`将在 ${paths.length} 个文件中替换 ${searchPanel.results.length} 处匹配，是否继续？`)) return;
     let matcher: RegExp;
     try {
       const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1168,7 +1178,7 @@ export const CodeEditorPanel: React.FC = () => {
 
   const replaceSearchResults = useCallback(async (results: WorkspaceSearchResult[]) => {
     if (!workspace || results.length === 0) return;
-    if (results.length > 1 && !window.confirm(`将替换 ${results.length} 处匹配，是否继续？`)) return;
+    if (results.length > 1 && !await appConfirm(`将替换 ${results.length} 处匹配，是否继续？`)) return;
     let matcher: RegExp;
     try {
       const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1283,6 +1293,7 @@ export const CodeEditorPanel: React.FC = () => {
       try {
         const session = JSON.parse(raw) as {
           workspace?: { path: string; name: string };
+          folders?: Array<{ id: string; path: string; name: string }>;
           openPaths?: string[];
           activePath?: string | null;
           sidebarVisible?: boolean;
@@ -1291,6 +1302,9 @@ export const CodeEditorPanel: React.FC = () => {
           viewStates?: Record<string, monaco.editor.ICodeEditorViewState | null>;
           expandedPaths?: string[];
           autoSave?: boolean;
+          terminals?: Array<{ id: string; title: string; cwd?: string; profileName?: string; alive: boolean }>;
+          activeTerminalId?: string;
+          splitTerminalId?: string | null;
         };
         if (!session.workspace) return;
         const restoredExpandedPaths = new Set(session.expandedPaths ?? []);
@@ -1320,6 +1334,9 @@ export const CodeEditorPanel: React.FC = () => {
           });
         }
         setWorkspace(session.workspace);
+        if (session.folders) setWorkspaceFolders(session.folders);
+        else setWorkspaceFolders(session.workspace ? [{ id: `${Date.now()}`, path: session.workspace.path, name: session.workspace.name }] : []);
+        void window.electronAPI.workspace.reauthorize(session.workspace.path);
         setTree(entries);
         setExpandedPaths(restoredExpandedPaths);
         setDocuments(restoredDocuments);
@@ -1331,6 +1348,16 @@ export const CodeEditorPanel: React.FC = () => {
         setSidebarVisible(session.sidebarVisible ?? true);
         setAutoSave(session.autoSave ?? false);
         viewStatesRef.current = session.viewStates ?? {};
+        // Restore terminal tabs if session had them
+        if (session.terminals?.length) {
+          setTerminalTabs(session.terminals.map((t) => ({
+            ...t,
+            alive: false,
+            profile: t.profileName ? terminalProfiles.find((p) => p.name === t.profileName) ?? terminalProfiles[0] : undefined,
+          })));
+          setActiveTerminalId(session.activeTerminalId ?? session.terminals[0].id);
+          if (session.splitTerminalId) setSplitTerminalId(session.splitTerminalId);
+        }
         setStatus(`已恢复 ${session.workspace.name}`);
       } catch {
         localStorage.removeItem('code-editor.session.v1');
@@ -1362,6 +1389,7 @@ export const CodeEditorPanel: React.FC = () => {
       }
       localStorage.setItem('code-editor.session.v1', JSON.stringify({
         workspace,
+        folders: workspaceFolders,
         openPaths: documents.filter((document) => !document.standalone).map((document) => document.path),
         activePath: activeDocument?.standalone ? null : activePath,
         sidebarVisible,
@@ -1370,6 +1398,9 @@ export const CodeEditorPanel: React.FC = () => {
         viewStates: viewStatesRef.current,
         expandedPaths: [...expandedPaths],
         autoSave,
+        terminals: terminalTabs.map((t) => ({ id: t.id, title: t.title, cwd: t.cwd, profileName: t.profile?.name, alive: t.alive })),
+        activeTerminalId,
+        splitTerminalId,
       }));
     }, 250);
     return () => window.clearTimeout(timer);
@@ -1598,6 +1629,30 @@ export const CodeEditorPanel: React.FC = () => {
           return score(b.path) - score(a.path);
         });
         const contextPaths = [...new Set([activeDocument.path, ...documents.filter((item) => !item.standalone).map((item) => item.path), ...candidates.slice(0, 8).map((item) => item.path)])].slice(0, 10);
+        // Import-graph expansion: scan context files for import references
+        const importRegex = /(?:from\s+['"]|require\s*\(\s*['"]|import\s+['"])([./][^'"]+)/g;
+        const referencedPaths = new Set<string>();
+        for (const filePath of contextPaths) {
+          const opened = documents.find((item) => item.path === filePath);
+          const content = opened?.content;
+          if (!content) continue;
+          let match: RegExpExecArray | null;
+          while ((match = importRegex.exec(content)) !== null && referencedPaths.size < 10) {
+            const importPath = match[1];
+            if (importPath.startsWith('.')) {
+              const dir = filePath.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
+              const parts = importPath.split('/');
+              const resolvedParts = dir.split('/');
+              for (const part of parts) {
+                if (part === '..') resolvedParts.pop();
+                else if (part !== '.') resolvedParts.push(part);
+              }
+              const cleaned = resolvedParts.join('/');
+              if (candidates.some((c) => c.path === cleaned || c.path === `${cleaned}.ts` || c.path === `${cleaned}.tsx` || c.path === `${cleaned}.js`)) referencedPaths.add(cleaned);
+            }
+          }
+        }
+        for (const refPath of referencedPaths) contextPaths.push(refPath);
         const contexts: AiFileProposal[] = [];
         for (const filePath of contextPaths) {
           const opened = documents.find((item) => item.path === filePath);
@@ -2043,9 +2098,12 @@ export const CodeEditorPanel: React.FC = () => {
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setSidebarVisible((value) => !value)} title="切换资源管理器 (Ctrl+B)">
           <PanelLeft className="h-4 w-4" />
         </Button>
-        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openWorkspace}>
+        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => void openWorkspace(false)}>
           <FolderOpen className="h-4 w-4" /> 打开文件夹
         </Button>
+        {workspace && <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => void openWorkspace(true)}>
+          <Plus className="h-3.5 w-3.5" /> 添加文件夹
+        </Button>}
         <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openStandaloneFile}>
           <FileText className="h-4 w-4" /> 打开文件
         </Button>
@@ -2083,6 +2141,7 @@ export const CodeEditorPanel: React.FC = () => {
           <aside className="relative flex shrink-0 flex-col border-r bg-sidebar-bg outline-none" style={{ width: sidebarWidth }} tabIndex={0} onKeyDown={handleTreeKeyDown} aria-label="文件资源管理器">
             <div className="flex h-9 items-center gap-0.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               <span className="flex-1 px-1">Explorer</span>
+              <button type="button" className="rounded px-1 text-[9px] hover:bg-accent" onClick={() => setExplorerSort((s) => s === 'name' ? 'type' : 'name')} title="排序方式">{explorerSort === 'name' ? 'A-Z' : 'Type'}</button>
               <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => beginCreate('file')} disabled={!workspace}>
                 <Plus className="h-3.5 w-3.5" />
               </button>
@@ -2110,6 +2169,10 @@ export const CodeEditorPanel: React.FC = () => {
             </div>
             {workspace ? (
               <div className="min-h-0 flex-1 overflow-auto">
+                {workspaceFolders.length > 1 && <div className="flex gap-0.5 border-b px-1 py-1">{workspaceFolders.map((f) => <button key={f.id} type="button" className={`group flex items-center truncate rounded px-2 py-0.5 text-[10px] ${f.path === workspace.path ? 'bg-accent' : 'hover:bg-accent/50'}`} onClick={async () => { if (f.path === workspace.path) return; setStatus(`切换到 ${f.name}…`); const entries = await loadDirectory(f.path); setWorkspace({ path: f.path, name: f.name }); setTree(entries); setExpandedPaths(new Set()); setActiveFolderId(f.id); setStatus(`已切换至 ${f.name}`); }} title={f.path}>{f.name}<span className="ml-1 hidden group-hover:inline hover:text-destructive" onClick={async (e) => { e.stopPropagation(); if (f.path === workspace.path) { const next = workspaceFolders.find((x) => x.path !== f.path); if (next) { const entries = await loadDirectory(next.path); setWorkspace({ path: next.path, name: next.name }); setTree(entries); } else { setWorkspace(null); setTree([]); } } setWorkspaceFolders((prev) => prev.filter((x) => x.id !== f.id)); }}>×</span></button>)}</div>}
+                <div className="px-2 pb-1">
+                  <input value={explorerFilter} onChange={(e) => setExplorerFilter(e.target.value)} placeholder="过滤文件…" className="h-6 w-full rounded border bg-background px-2 text-[10px] outline-none" />
+                </div>
                 <div className="flex h-7 items-center gap-1 px-2 text-xs font-semibold">
                   <ChevronDown className="h-3 w-3" />
                   <span className="truncate uppercase">{workspace.name}</span>
@@ -2144,10 +2207,10 @@ export const CodeEditorPanel: React.FC = () => {
                     onToggle={toggleDirectory}
                     onSelect={selectTreeNode}
                     editing={treeEdit}
-                    onEditChange={(value) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
-                    onEditCommit={() => void commitTreeEdit()}
+                    onEditChange={(value: string) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
+                    onEditCommit={(): void => { void commitTreeEdit(); }}
                     onEditCancel={() => setTreeEdit(null)}
-                    onContextMenu={(event, current) => {
+                    onContextMenu={(event: React.MouseEvent, current: TreeNode) => {
                       event.preventDefault();
                       if (!selectedPaths.has(current.path)) {
                         setSelectedPaths(new Set([current.path]));
@@ -2155,7 +2218,7 @@ export const CodeEditorPanel: React.FC = () => {
                       }
                       setTreeMenu({ x: event.clientX, y: event.clientY, node: current });
                     }}
-                    onMove={(source, target) => void moveTreeEntry(source, target)}
+                    onMove={(source: TreeNode, target: TreeNode): void => { void moveTreeEntry(source, target); }}
                     decorations={treeDecorations}
                   />
                 ))}
@@ -2347,200 +2410,52 @@ export const CodeEditorPanel: React.FC = () => {
                 <p className="mt-1 text-xs">打开文件夹开始浏览项目，或直接打开单个文本文件。</p>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={openWorkspace}>打开文件夹</Button>
+                <Button variant="outline" size="sm" onClick={() => void openWorkspace(false)}>打开文件夹</Button>
                 <Button variant="outline" size="sm" onClick={openStandaloneFile}>打开文件</Button>
               </div>
             </div>
           )}
 
-          {bottomPanel.open && (
-            <section className="relative flex shrink-0 flex-col border-t bg-background" style={{ height: bottomPanel.height }}>
-              <div
-                className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize"
-                onMouseDown={(event) => {
-                  const startY = event.clientY;
-                  const startHeight = bottomPanel.height;
-                  const move = (moveEvent: MouseEvent) => setBottomPanel((previous) => ({
-                    ...previous, height: Math.max(120, Math.min(520, startHeight + startY - moveEvent.clientY)),
-                  }));
-                  const up = () => {
-                    window.removeEventListener('mousemove', move);
-                    window.removeEventListener('mouseup', up);
-                  };
-                  window.addEventListener('mousemove', move);
-                  window.addEventListener('mouseup', up);
-                }}
-              />
-              <div className="flex h-8 shrink-0 items-center gap-1 border-b px-2 text-[11px]">
-                {([
-                  ['problems', `问题 (${allProblems.length})`],
-                  ['output', '输出'],
-                  ['terminal', '终端'],
-                  ['outline', `大纲 (${symbols.length})`],
-                  ['sourceControl', `源代码管理 (${gitStatus.length})`],
-                  ['ai', 'AI 修改'],
-                  ['settings', '设置'],
-                ] as Array<[BottomPanelTab, string]>).map(([tab, label]) => (
-                  <button key={tab} type="button" className={`h-full border-b-2 px-2 ${bottomPanel.tab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`} onClick={() => setBottomPanel((previous) => ({ ...previous, tab }))}>
-                    {label}
-                  </button>
-                ))}
-                <div className="flex-1" />
-                <button type="button" className="rounded p-1 hover:bg-accent" onClick={() => setBottomPanel((previous) => ({ ...previous, open: false }))} aria-label="关闭底部面板"><X className="h-3.5 w-3.5" /></button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto">
-                {bottomPanel.tab === 'terminal' && (
-                  <div className="flex h-full min-h-0 flex-col">
-                    <div className="flex h-8 shrink-0 items-center border-b bg-muted/30 px-1">
-                      <div className="flex min-w-0 flex-1 overflow-x-auto">
-                        {terminalTabs.map((tab) => (
-                          <button key={tab.id} type="button" draggable onDragStart={(event) => event.dataTransfer.setData('application/x-terminal-tab', tab.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const sourceId = event.dataTransfer.getData('application/x-terminal-tab'); setTerminalTabs((previous) => { const source = previous.findIndex((item) => item.id === sourceId); const target = previous.findIndex((item) => item.id === tab.id); if (source < 0 || target < 0) return previous; const next = [...previous]; const [moved] = next.splice(source, 1); next.splice(target, 0, moved); return next; }); }} onDoubleClick={() => { const title = window.prompt('终端名称', tab.title); if (title) setTerminalTabs((previous) => previous.map((item) => item.id === tab.id ? { ...item, title } : item)); }} className={`group flex h-7 max-w-44 items-center gap-1.5 rounded px-2 text-xs ${tab.id === activeTerminalId ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-accent'}`} onClick={() => setActiveTerminalId(tab.id)}>
-                            <span className={tab.alive ? 'text-success' : 'text-destructive'}>●</span>
-                            <span className="truncate">{tab.title}</span>
-                            <span role="button" tabIndex={0} className="rounded px-1 opacity-0 hover:bg-accent group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); closeTerminalTab(tab.id); }}>×</span>
-                          </button>
-                        ))}
-                      </div>
-                      <select value={terminalProfileName} onChange={(event) => setTerminalProfileName(event.target.value)} className="h-7 max-w-28 rounded border bg-background px-1 text-[10px]">{terminalProfiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}</select>
-                      <select defaultValue="" onChange={(event) => { if (event.target.value) runWorkspaceTask(event.target.value); event.target.value = ''; }} className="h-7 max-w-36 rounded border bg-background px-1 text-[10px]"><option value="">运行任务…</option>{workspaceTasks.map((task) => <option key={task.name} value={task.command}>{task.name}</option>)}</select>
-                      <button type="button" className="rounded px-2 py-1 text-sm hover:bg-accent" onClick={() => createTerminalTab(false)} title="新建终端">＋</button>
-                      <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => createTerminalTab(true)} title="拆分终端">拆分</button>
-                      {splitTerminalId && <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => setSplitTerminalId(null)}>关闭分屏</button>}
-                      {!terminalTabs.find((tab) => tab.id === activeTerminalId)?.alive && <button type="button" className="rounded px-2 py-1 text-xs hover:bg-accent" onClick={() => restartTerminalTab(activeTerminalId)}>重启</button>}
-                    </div>
-                    <div className="relative flex min-h-0 flex-1">
-                      {terminalTabs.map((tab) => (
-                        <div key={tab.id} className={`${splitTerminalId ? 'relative w-1/2 border-r' : 'absolute inset-0'} min-h-0`} style={{ display: tab.id === activeTerminalId || tab.id === splitTerminalId ? 'flex' : 'none' }}>
-                          <TerminalSingle {...tab} profile={tab.profile} cwd={tab.cwd ?? workspace?.path} theme={resolvedTheme === 'dark' ? 'dark' : 'light'} onOutput={handleTerminalOutput} onTitleChange={(id, title) => setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, title } : item))} onExit={(id, code) => {
-                            setTerminalTabs((previous) => previous.map((item) => item.id === id ? { ...item, alive: false, exitCode: code } : item));
-                            appendOutput(`终端进程退出，代码 ${code}`);
-                          }} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {bottomPanel.tab === 'problems' && (
-                  <div className="py-1">
-                    {allProblems.map((problem, index) => (
-                      <div key={`${problem.path}:${problem.line}:${problem.column}:${index}`} className="group flex min-h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => {
-                        const relativePath = problem.path.replace(/^.*?file:\/\//, '').replace(/^\//, '');
-                        const document = documents.find((item) => problem.path.endsWith(item.path.replace(/\\/g, '/')));
-                        if (document) {
-                          pendingRevealRef.current = { path: document.path, line: problem.line, column: problem.column };
-                          setActivePath(document.path);
-                        } else setStatus(`问题位置：${relativePath}:${problem.line}:${problem.column}`);
-                      }}>
-                        <span className={problem.severity === monaco.MarkerSeverity.Error ? 'text-destructive' : 'text-warning'}>{problem.severity === monaco.MarkerSeverity.Error ? '●' : '▲'}</span>
-                        <span className="min-w-0 flex-1 truncate">{problem.message}</span>
-                        <span className="shrink-0 text-muted-foreground">{problem.path.split('/').pop()} [{problem.line}, {problem.column}]</span>
-                      </button><button type="button" className="rounded px-1.5 py-0.5 text-[10px] opacity-0 hover:bg-background group-hover:opacity-100" onClick={() => { setAiInstruction(`修复以下问题：${problem.message}（${problem.path}:${problem.line}:${problem.column}）`); setBottomPanel((previous) => ({ ...previous, tab: 'ai' })); }}>AI 修复</button></div>
-                    ))}
-                    {allProblems.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">未发现问题</div>}
-                  </div>
-                )}
-                {bottomPanel.tab === 'outline' && (
-                  <div className="py-1">
-                    {symbols.map((symbol) => (
-                      <button key={`${symbol.name}:${symbol.line}`} type="button" className="flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" style={{ paddingLeft: 12 + symbol.depth * 14 }} onClick={() => {
-                        editorRef.current?.setPosition({ lineNumber: symbol.line, column: symbol.column });
-                        editorRef.current?.revealLineInCenter(symbol.line);
-                        editorRef.current?.focus();
-                      }}>
-                        <Code className="h-3.5 w-3.5 text-primary" />
-                        <span className="truncate">{symbol.name}</span>
-                        <span className="text-muted-foreground">{symbol.detail}</span>
-                        <span className="ml-auto text-muted-foreground">:{symbol.line}</span>
-                      </button>
-                    ))}
-                    {symbols.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">当前文档没有可显示的符号</div>}
-                  </div>
-                )}
-                {bottomPanel.tab === 'output' && <pre className="min-h-full whitespace-pre-wrap p-3 font-mono text-xs text-muted-foreground">{outputLines.join('\n')}</pre>}
-                {bottomPanel.tab === 'sourceControl' && (
-                  <div className="flex min-h-full flex-col py-1">
-                    <div className="flex flex-wrap items-center gap-1 border-b p-2 text-xs">
-                      <select value={gitOverview?.branch ?? ''} disabled={!!gitBusy} onChange={(event) => void runGitOperation('switchBranch', { name: event.target.value })} className="h-8 max-w-48 rounded border bg-background px-2">
-                        {(gitOverview?.branches ?? []).map((branch) => <option key={branch.name} value={branch.name}>{branch.current ? '✓ ' : ''}{branch.name}</option>)}
-                      </select>
-                      <Button size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('新分支名称'); if (name) void runGitOperation('createBranch', { name }); }}>新建分支</Button>
-                      <select value={pullStrategy} disabled={!!gitBusy} onChange={(e) => setPullStrategy(e.target.value as 'ff-only' | 'merge' | 'rebase')} className="h-8 rounded border bg-background px-1 text-[10px]" title="拉取策略">{[{v:'ff-only',l:'FF'},{v:'merge',l:'Merge'},{v:'rebase',l:'Rebase'}]?.map(({v,l}) => <option key={v} value={v}>{l}</option>)}</select>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('fetch')}>Fetch</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('pull', { strategy: pullStrategy })}>拉取</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('push', gitOverview?.branch && !gitOverview.remotes?.some((r) => r.includes('(push)')) ? { setUpstream: true } : undefined)}>推送</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => void runGitOperation('sync', { strategy: pullStrategy })}>同步</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const message = window.prompt('Stash 说明（可选）') ?? ''; void runGitOperation('stashPush', { message }); }}>Stash</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('Tag 名称'); if (name) void runGitOperation('createTag', { name }); }}>新建 Tag</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!!gitBusy} onClick={() => { const name = window.prompt('Remote 名称', 'origin'); const url = name && window.prompt('Remote URL'); if (name && url) void runGitOperation('addRemote', { name, url }); }}>添加 Remote</Button>
-                      {gitBusy && <span className="ml-auto text-muted-foreground">正在执行 {gitBusy.operation}…</span>}
-                      {gitBusy && <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-destructive" onClick={() => { if (workspace) void window.electronAPI.workspace.cancelGitOperation(workspace.path, gitBusy.operationId); }}>取消</Button>}
-                    </div>
-                    <div className="flex h-8 items-center gap-1 border-b px-2 text-xs">
-                      {(['changes', 'history', 'stash'] as const).map((view) => <button key={view} type="button" className={`h-full border-b-2 px-2 ${gitView === view ? 'border-primary' : 'border-transparent text-muted-foreground'}`} onClick={() => setGitView(view)}>{view === 'changes' ? `更改 (${gitStatus.length})` : view === 'history' ? `历史 (${gitHistory.length})` : 'Stash / Tags / Remotes'}</button>)}
-                    </div>
-                    {gitView === 'changes' && <>
-                    <div className="flex gap-2 border-b p-2">
-                      <input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void commitGitChanges(); }} placeholder="提交消息（Ctrl+Enter 提交）" className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none" />
-                      <Button size="sm" className="h-8 px-3 text-xs" disabled={!commitMessage.trim() || !gitStatus.some((entry) => entry.status[0] !== ' ' && entry.status[0] !== '?')} onClick={() => void commitGitChanges()}>提交</Button>
-                      <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void Promise.all([refreshGitStatus(), refreshGitOverview()])}>刷新</Button>
-                    </div>
-                    {gitStatus.map((entry) => (
-                      <div key={`${entry.status}:${entry.path}`} className="group flex h-7 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent">
-                        <span className="w-5 shrink-0 font-mono text-primary">{entry.status.trim() || '?'}</span>
-                        <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => void showGitDiff(entry)} title="查看相对 HEAD 的 Diff">{entry.path}</button>
-                        <button type="button" className="rounded px-1.5 py-0.5 opacity-0 hover:bg-background group-hover:opacity-100" onClick={() => void updateGitStage(entry, entry.status[0] === ' ' || entry.status === '??')}>
-                          {entry.status[0] !== ' ' && entry.status[0] !== '?' ? '取消暂存' : '暂存'}
-                        </button>
-                      </div>
-                    ))}
-                    {gitStatus.length === 0 && <div className="px-3 py-6 text-center text-xs text-muted-foreground">工作区干净，或当前目录不是 Git 仓库</div>}
-                    </>}
-                    {gitView === 'history' && <div className="min-h-0 flex-1 overflow-auto py-1">{gitHistory.map((commit) => <button key={commit.hash} type="button" className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent" onClick={async () => {
-                      if (!workspace) return;
-                      const result = await window.electronAPI.workspace.gitOperation<string>(workspace.path, 'showCommit', { hash: commit.hash });
-                      if (result.success) { setOutputLines((previous) => [...previous, `\n=== ${commit.shortHash} ${commit.subject} ===\n${result.data ?? ''}`]); setBottomPanel((previous) => ({ ...previous, tab: 'output' })); }
-                    }}><code className="text-primary">{commit.shortHash}</code><span className="min-w-0 flex-1 truncate">{commit.subject}</span><span className="text-muted-foreground">{commit.author} · {new Date(commit.date).toLocaleString()}</span></button>)}</div>}
-                    {gitView === 'stash' && <div className="grid grid-cols-[100px_1fr] gap-2 p-3 text-xs">
-                      <span>Tags</span><div className="flex items-start gap-2"><span className="flex-1 break-all text-muted-foreground">{gitOverview?.tags.join(', ') || '无'}</span><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const name = window.prompt('要删除的 Tag'); if (name) void runGitOperation('deleteTag', { name }); }}>删除</Button></div>
-                      <span>Remotes</span><div className="flex items-start gap-2"><pre className="flex-1 whitespace-pre-wrap text-muted-foreground">{gitOverview?.remotes.join('\n') || '无'}</pre><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const name = window.prompt('要删除的 Remote'); if (name) void runGitOperation('removeRemote', { name }); }}>删除</Button></div>
-                      <span>Stash</span><div className="flex gap-1"><Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => { if (!workspace) return; const result = await window.electronAPI.workspace.gitOperation<Array<{ ref: string; subject: string }>>(workspace.path, 'stashList'); setOutputLines((previous) => [...previous, ...(result.data ?? []).map((item) => `${item.ref} ${item.subject}`)]); setBottomPanel((previous) => ({ ...previous, tab: 'output' })); }}>查看列表</Button><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const ref = window.prompt('Stash 引用', 'stash@{0}'); if (ref) void runGitOperation('stashApply', { ref }); }}>应用</Button><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { const ref = window.prompt('Stash 引用', 'stash@{0}'); if (ref) void runGitOperation('stashPop', { ref }); }}>Pop</Button><Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => { const ref = window.prompt('要删除的 Stash', 'stash@{0}'); if (ref) void runGitOperation('stashDrop', { ref }); }}>删除</Button></div>
-                    </div>}
-                  </div>
-                )}
-                {bottomPanel.tab === 'ai' && (
-                  <div className="flex h-full min-h-0 flex-col gap-2 p-3">
-                    <div className="text-xs text-muted-foreground">描述希望对当前文件执行的修改。AI 结果会先进入 Diff，不会自动保存。</div>
-                    <div className="flex items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={aiMultiFile} onChange={(event) => setAiMultiFile(event.target.checked)} />多文件 Agent（自动筛选相关文件）</label><span className="text-muted-foreground">待审阅 {aiProposals.length}</span><span className="text-muted-foreground">已接受 {aiHistory.length}</span><span className="text-muted-foreground">会话 {aiSessions.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={aiHistory.length === 0} onClick={undoLastAiEdit}>撤销上次 AI 修改</Button></div>
-                    {aiSessions.length > 0 && <div className="max-h-24 overflow-auto border-t px-3 py-1"><div className="text-[10px] font-semibold text-muted-foreground">最近会话</div>{aiSessions.slice(-5).reverse().map((s) => <div key={s.id} className="flex items-center gap-2 py-0.5 text-[10px] text-muted-foreground"><span className="max-w-32 truncate">{s.instruction}</span><span>{s.filesChanged} 文件</span><span>{new Date(s.timestamp).toLocaleTimeString()}</span></div>)}</div>}
-                    <textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
-                    <div className="flex justify-end">
-                      <Button size="sm" variant="ghost" className="mr-2" disabled={!activeDocument} onClick={() => { setAiMultiFile(true); setAiInstruction(`为 ${activeDocument?.path ?? '当前模块'} 生成或完善单元测试，复用项目现有测试框架和约定`); }}>生成测试</Button>
-                      <Button size="sm" disabled={!activeDocument || !aiInstruction.trim() || aiEditing} onClick={() => void generateAiEdit()}>{aiEditing ? '生成中…' : '生成修改并预览'}</Button>
-                    </div>
-                  </div>
-                )}
-                {bottomPanel.tab === 'settings' && (
-                  <div className="grid max-w-2xl grid-cols-[180px_1fr] items-center gap-x-4 gap-y-3 p-4 text-xs">
-                    <label htmlFor="editor-font-size">字体大小</label>
-                    <input id="editor-font-size" type="number" min={10} max={32} value={preferences.fontSize} onChange={(event) => setPreferences((previous) => ({ ...previous, fontSize: Number(event.target.value) || 13 }))} className="h-8 rounded border bg-background px-2" />
-                    <label htmlFor="editor-tab-size">Tab Size</label>
-                    <select id="editor-tab-size" value={preferences.tabSize} onChange={(event) => setPreferences((previous) => ({ ...previous, tabSize: Number(event.target.value) }))} className="h-8 rounded border bg-background px-2"><option value={2}>2</option><option value={4}>4</option><option value={8}>8</option></select>
-                    <span>自动换行</span><input type="checkbox" checked={preferences.wordWrap === 'on'} onChange={(event) => setPreferences((previous) => ({ ...previous, wordWrap: event.target.checked ? 'on' : 'off' }))} />
-                    <span>Minimap</span><input type="checkbox" checked={preferences.minimap} onChange={(event) => setPreferences((previous) => ({ ...previous, minimap: event.target.checked }))} />
-                    <span>保存时格式化</span><input type="checkbox" checked={preferences.formatOnSave} onChange={(event) => setPreferences((previous) => ({ ...previous, formatOnSave: event.target.checked }))} />
-                    <label htmlFor="terminal-profile">默认终端 Profile</label><select id="terminal-profile" value={terminalProfileName} onChange={(event) => setTerminalProfileName(event.target.value)} className="h-8 rounded border bg-background px-2">{terminalProfiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}</select>
-                    <label htmlFor="terminal-env">终端环境变量 <button type="button" className="ml-1 rounded px-1 text-[10px] hover:bg-accent" onClick={() => setShowEnvValues((v) => !v)}>{showEnvValues ? '隐藏值' : '显示值'}</button></label>
-                    <div className="flex flex-col gap-1">
-                      <textarea id="terminal-env" value={showEnvValues ? terminalEnvText : terminalEnvText.replace(/=.*/gm, '=••••')} onChange={(event) => setTerminalEnvText(event.target.value)} onFocus={() => !showEnvValues && setShowEnvValues(true)} placeholder={'KEY=value\nANOTHER=${workspaceFolder}/bin'} className="min-h-20 rounded border bg-background p-2 font-mono text-xs" spellCheck={false} />
-                      {terminalEnvText.split(/\r?\n/).some((line) => line.trim() && !/^[A-Z_][A-Z0-9_]*=.+$/i.test(line.trim())) && <span className="text-[10px] text-warning">格式：KEY=value（一行一个）</span>}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
         </main>
       </div>
+
+      <BottomPanel
+        bottomPanel={bottomPanel} setBottomPanel={setBottomPanel}
+        terminalTabs={terminalTabs} setTerminalTabs={setTerminalTabs}
+        activeTerminalId={activeTerminalId} setActiveTerminalId={setActiveTerminalId}
+        splitTerminalId={splitTerminalId} setSplitTerminalId={setSplitTerminalId}
+        terminalProfileName={terminalProfileName} setTerminalProfileName={setTerminalProfileName}
+        terminalProfiles={terminalProfiles}
+        workspaceTasks={workspaceTasks}
+        renamingTerminalId={renamingTerminalId} renamingTerminalTitle={renamingTerminalTitle}
+        setRenamingTerminalId={setRenamingTerminalId} setRenamingTerminalTitle={setRenamingTerminalTitle}
+        createTerminalTab={createTerminalTab} closeTerminalTab={closeTerminalTab}
+        restartTerminalTab={restartTerminalTab}
+        runWorkspaceTask={runWorkspaceTask} handleTerminalOutput={handleTerminalOutput}
+        appendOutput={appendOutput} workspacePath={workspace?.path} resolvedTheme={resolvedTheme}
+        allProblems={allProblems} documents={documents} pendingRevealRef={pendingRevealRef}
+        setActivePath={setActivePath} setStatus={setStatus} setAiInstruction={setAiInstruction}
+        symbols={symbols} editorRef={editorRef} outputLines={outputLines}
+        gitOverview={gitOverview} gitBusy={gitBusy}
+        pullStrategy={pullStrategy} setPullStrategy={setPullStrategy}
+        runGitOperation={runGitOperation} appPrompt={appPrompt} appConfirm={appConfirm}
+        cancelGitOp={() => { if (workspace && gitBusy) void window.electronAPI.workspace.cancelGitOperation(workspace.path, gitBusy.operationId); }}
+        gitView={gitView} setGitView={setGitView}
+        gitStatus={gitStatus} gitHistory={gitHistory}
+        commitMessage={commitMessage} setCommitMessage={setCommitMessage}
+        commitGitChanges={commitGitChanges}
+        refreshGitStatus={refreshGitStatus} refreshGitOverview={refreshGitOverview}
+        showGitDiff={showGitDiff} updateGitStage={updateGitStage}
+        setDiffView={setDiffView}
+        aiMultiFile={aiMultiFile} setAiMultiFile={setAiMultiFile}
+        aiProposals={aiProposals} aiHistory={aiHistory} aiSessions={aiSessions}
+        undoLastAiEdit={undoLastAiEdit}
+        aiInstruction={aiInstruction} aiEditing={aiEditing}
+        activeDocument={activeDocument} generateAiEdit={generateAiEdit}
+        preferences={preferences} setPreferences={setPreferences}
+        showEnvValues={showEnvValues} setShowEnvValues={setShowEnvValues}
+        terminalEnvText={terminalEnvText} setTerminalEnvText={setTerminalEnvText}
+      />
 
       <footer className="flex h-7 shrink-0 items-center gap-3 border-t bg-primary px-3 text-[11px] text-primary-foreground">
         <span className="max-w-48 truncate">{workspace?.name ?? '无工作区'}</span>
@@ -2569,6 +2484,12 @@ export const CodeEditorPanel: React.FC = () => {
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: true }); setTreeMenu(null); }}>剪切{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={!treeClipboard} onClick={() => { void pasteTreeEntry(treeMenu.node); setTreeMenu(null); }}>粘贴</button>
             {treeMenu.node.type === 'file' && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => void showGitDiff({ path: treeMenu.node.path, status: ' M' })}>与 HEAD 比较</button>}
+            {treeMenu.node.type === 'file' && activeDocument && treeMenu.node.path !== activeDocument.path && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={async () => {
+              if (!workspace) return;
+              const read = await window.electronAPI.workspace.readTextFile(workspace.path, treeMenu.node.path);
+              if (read.success && read.data) setDiffView({ path: treeMenu.node.path, name: `${activeDocument.name} ↔ ${treeMenu.node.name}`, original: activeDocument.content, modified: read.data.content, language: languageIdFromName(treeMenu.node.path), source: 'external' });
+              setTreeMenu(null);
+            }}>与活动文件比较</button>}
             {treeMenu.node.type === 'file' && <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => void showFileTimeline(treeMenu.node)}>文件时间线</button>}
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { if (workspace) void window.electronAPI.workspace.revealEntry(workspace.path, treeMenu.node.path); setTreeMenu(null); }}>在文件管理器中显示</button>
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { if (workspace) void navigator.clipboard.writeText(`${workspace.path}\\${treeMenu.node.path}`); setTreeMenu(null); }}>复制路径</button>
@@ -2608,72 +2529,27 @@ export const CodeEditorPanel: React.FC = () => {
         );
       })()}
 
-      {diffView && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-background">
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
-            <span className="font-semibold">{diffView.name}</span>
-            <span className="text-muted-foreground">{diffView.source === 'ai' ? '修改前 ↔ AI 候选' : diffView.source === 'git' ? 'HEAD ↔ 工作区' : diffView.source === 'merge' ? '当前分支 ↔ 传入分支' : diffView.source === 'search' ? '替换前 ↔ 替换后' : '磁盘版本 ↔ 本地版本'}</span>
-            <div className="flex-1" />
-            {diffView.source === 'git' && gitHunks.slice(0, 8).map((hunk, index) => <Button key={hunk.label} size="sm" variant="outline" className="h-7 max-w-32 truncate px-2 text-xs" title={hunk.label} onClick={() => void stageGitHunk(hunk)}>暂存块 {index + 1}</Button>)}
-            {diffView.source === 'git' && gitStatus.some((e) => e.path === diffView.path && e.status[0] !== ' ' && e.status[0] !== '?') && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-destructive" onClick={() => void unstageFile()}>取消暂存全部</Button>}
-            {diffView.source === 'merge' && mergeHunks.length > 0 && (
-              <div className="flex items-center gap-1 overflow-x-auto">
-                {mergeHunks.slice(0, 12).map((hunk) => (
-                  <span key={hunk.index} className="inline-flex items-center gap-0.5 rounded border bg-background px-1.5 py-0.5 text-[10px]">
-                    <button type="button" className="rounded px-1 hover:bg-success/20 hover:text-success" title="接受当前分支版本" onClick={() => applyMergeHunk(hunk.index, 'ours')}>我的</button>
-                    <span className="max-w-32 truncate text-muted-foreground">{hunk.originalLines[0]?.slice(0, 16) || '⋯'} ↔ {hunk.modifiedLines[0]?.slice(0, 16) || '⋯'}</span>
-                    <button type="button" className="rounded px-1 hover:bg-primary/20 hover:text-primary" title="接受传入分支版本" onClick={() => applyMergeHunk(hunk.index, 'theirs')}>传入</button>
-                  </span>
-                ))}
-                {mergeHunks.length > 12 && <span className="text-muted-foreground">+{mergeHunks.length - 12}</span>}
-              </div>
-            )}
-            {diffView.source === 'merge' && mergeHunks.length === 0 && (
-              <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void finishMerge()}>完成合并</Button>
-            )}
-            {diffView.source === 'ai' && aiHunks.length > 0 && (
-              <div className="flex items-center gap-1 overflow-x-auto">
-                {aiHunks.slice(0, 12).map((hunk) => (
-                  <span key={hunk.index} className="inline-flex items-center gap-0.5 rounded border bg-background px-1.5 py-0.5 text-[10px]">
-                    <button type="button" className="rounded px-1 hover:bg-success/20 hover:text-success" title={`接受：${hunk.modifiedLines.slice(0, 2).join(' / ')}`} onClick={() => applyAiHunk(hunk.index, true)}>✓</button>
-                    <span className="max-w-32 truncate text-muted-foreground">{hunk.modifiedLines[0]?.slice(0, 40) || '(空)'}{hunk.modifiedLines.length > 1 ? ` +${hunk.modifiedLines.length - 1}` : ''}</span>
-                    <button type="button" className="rounded px-1 hover:bg-destructive/20 hover:text-destructive" title="拒绝" onClick={() => applyAiHunk(hunk.index, false)}>✗</button>
-                  </span>
-                ))}
-                {aiHunks.length > 12 && <span className="text-muted-foreground">+{aiHunks.length - 12}</span>}
-              </div>
-            )}
-            {diffView.source === 'ai' && aiHunks.length === 0 && (
-              <Button size="sm" className="h-7 px-3 text-xs" onClick={acceptAiEdit}>接受全部</Button>
-            )}
-            {diffView.source === 'search' && (
-              <>
-                <span className="text-muted-foreground">{searchPreviews.findIndex((p) => p.path === diffView.path) + 1}/{searchPreviews.length}</span>
-                <Button size="sm" className="h-7 px-3 text-xs" onClick={() => void acceptSearchReplace()}>接受替换</Button>
-              </>
-            )}
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => diffView.source === 'ai' ? rejectAiEdit() : diffView.source === 'merge' ? (mergeHunks.length === 0 ? setDiffView(null) : resolveGitConflict('ours')) : diffView.source === 'search' ? rejectSearchReplace() : setDiffView(null)}>
-              {diffView.source === 'ai' ? (aiHunks.length > 0 ? '拒绝全部' : '关闭') : diffView.source === 'merge' ? (mergeHunks.length === 0 ? '关闭' : '全部接受当前分支') : diffView.source === 'search' ? '跳过' : '关闭比较'}
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <DiffEditor
-              original={diffView.original}
-              modified={diffView.modified}
-              language={diffView.language}
-              originalModelPath={`file:///${diffView.path.replace(/\\/g, '/')}?disk`}
-              modifiedModelPath={`file:///${diffView.path.replace(/\\/g, '/')}?local`}
-              theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
-              options={{
-                automaticLayout: true,
-                readOnly: true,
-                renderSideBySide: true,
-                minimap: { enabled: false },
-              }}
-            />
-          </div>
-        </div>
-      )}
+      {diffView && <DiffViewPanel
+        diffView={diffView}
+        resolvedTheme={resolvedTheme}
+        gitHunks={gitHunks}
+        aiHunks={aiHunks}
+        mergeHunks={mergeHunks}
+        searchPreviews={searchPreviews}
+        aiProposals={aiProposals}
+        onClose={() => diffView.source === 'ai' ? rejectAiEdit() : diffView.source === 'merge' ? (mergeHunks.length === 0 ? setDiffView(null) : resolveGitConflict('ours')) : diffView.source === 'search' ? rejectSearchReplace() : setDiffView(null)}
+        onStageGitHunk={stageGitHunk}
+        onUnstageFile={unstageFile}
+        gitStatusHasStaged={gitStatus.some((e) => e.path === diffView.path && e.status[0] !== ' ' && e.status[0] !== '?')}
+        onResolveConflict={resolveGitConflict}
+        onAcceptAi={acceptAiEdit}
+        onRejectAi={rejectAiEdit}
+        onApplyAiHunk={applyAiHunk}
+        onApplyMergeHunk={applyMergeHunk}
+        onFinishMerge={finishMerge}
+        onAcceptSearch={acceptSearchReplace}
+        onRejectSearch={rejectSearchReplace}
+      />}
 
       <SearchPanel
         searchPanel={searchPanel}
@@ -2703,6 +2579,7 @@ export const CodeEditorPanel: React.FC = () => {
         quickOpenResults={quickOpenResults}
         openTreeFile={openTreeFile}
       />
+      <DialogOverlay dialog={dialog} onClose={() => setDialog(null)} />
     </div>
   );
 };

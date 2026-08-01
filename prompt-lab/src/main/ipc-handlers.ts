@@ -8,7 +8,7 @@ import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
-import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
+import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace-path';
 import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
@@ -525,7 +525,13 @@ export function setupIPC(webviewPreloadPath: string) {
     const result = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
     if (result.canceled || result.filePaths.length === 0) return null;
     const rootPath = path.resolve(result.filePaths[0]);
+    authorizeWorkspace(rootPath);
     return { path: rootPath, name: path.basename(rootPath) };
+  });
+
+  ipcMain.handle('workspace:reauthorize', async (_event, rootPath: string) => {
+    authorizeWorkspace(rootPath);
+    return { success: true };
   });
 
   ipcMain.handle('workspace:listDirectory', async (
@@ -734,10 +740,22 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('workspace:listTasks', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
+      const tasks: Array<{ name: string; command: string; detail: string }> = [];
+      // package.json scripts
       const packagePath = path.join(root, 'package.json');
-      if (!fs.existsSync(packagePath)) return { success: true, data: [] };
-      const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
-      return { success: true, data: Object.entries(parsed.scripts ?? {}).map(([name, command]) => ({ name, command: `npm run ${name}`, detail: command })) };
+      if (fs.existsSync(packagePath)) {
+        const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
+        for (const [name, command] of Object.entries(parsed.scripts ?? {})) tasks.push({ name: `npm: ${name}`, command: `npm run ${name}`, detail: command });
+      }
+      // .vscode/tasks.json
+      const tasksPath = path.join(root, '.vscode', 'tasks.json');
+      if (fs.existsSync(tasksPath)) {
+        const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf8')) as { tasks?: Array<{ label?: string; type?: string; command?: string; args?: string[] }> };
+        for (const task of parsed.tasks ?? []) {
+          if (task.label && task.command) tasks.push({ name: task.label, command: `${task.command} ${(task.args ?? []).join(' ')}`, detail: task.type ?? 'shell' });
+        }
+      }
+      return { success: true, data: tasks };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -799,17 +817,28 @@ export function setupIPC(webviewPreloadPath: string) {
         if (!fs.existsSync(file)) return [];
         return fs.readFileSync(file, 'utf8').split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#') && !line.startsWith('!'));
       });
-      const isIgnored = (relativePath: string) => ignorePatterns.some((pattern) => globMatches(relativePath, pattern));
+      const isIgnored = (relativePath: string, extraPatterns: string[] = []) =>
+        [...ignorePatterns, ...extraPatterns].some((pattern) => globMatches(relativePath, pattern));
       const results: Array<{ path: string; line: number; column: number; preview: string }> = [];
-      const visit = (directory: string) => {
+      const visit = (directory: string, parentPatterns: string[] = []) => {
         if (results.length >= 500) return;
+        // Load .gitignore from current directory
+        const dirPatterns: string[] = [];
+        for (const name of ['.gitignore', '.ignore']) {
+          const file = path.join(directory, name);
+          if (directory === root) continue; // already loaded
+          if (fs.existsSync(file)) {
+            dirPatterns.push(...fs.readFileSync(file, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#') && !l.startsWith('!')));
+          }
+        }
+        const mergedPatterns = [...parentPatterns, ...dirPatterns];
         for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
           if (WORKSPACE_IGNORED_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
           const fullPath = path.join(directory, entry.name);
           const relativePath = path.relative(root, fullPath);
-          if (isIgnored(relativePath)) continue;
+          if (isIgnored(relativePath, mergedPatterns)) continue;
           if (entry.isDirectory()) {
-            visit(fullPath);
+            visit(fullPath, mergedPatterns);
           } else if (entry.isFile()) {
             if (!pathMatches(relativePath, options?.include) || (options?.exclude && pathMatches(relativePath, options.exclude))) continue;
             const stat = fs.statSync(fullPath);
@@ -936,14 +965,19 @@ export function setupIPC(webviewPreloadPath: string) {
         if (signal.aborted) throw new Error('GIT_CANCELLED');
         let data: unknown;
         if (operation === 'overview') {
-          const [branch, branches, remotes, tags] = await Promise.all([
+          const [branchResult, branches, remotes, tags, ab] = await Promise.all([
             runGit(root, ['branch', '--show-current'], 2 * 1024 * 1024, signal),
             runGit(root, ['branch', '--format=%(refname:short)%09%(HEAD)'], 2 * 1024 * 1024, signal).catch(() => ''),
             runGit(root, ['remote', '-v'], 2 * 1024 * 1024, signal).catch(() => ''),
             runGit(root, ['tag', '--sort=-creatordate'], 2 * 1024 * 1024, signal).catch(() => ''),
+            runGit(root, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], 2 * 1024 * 1024, signal).catch(() => ''),
           ]);
+          const branch = branchResult;
+          const [ahead, behind] = ab.split('\t').map(Number);
           data = {
             branch,
+            ahead: Number.isFinite(ahead) ? ahead : 0,
+            behind: Number.isFinite(behind) ? behind : 0,
             branches: branches.split(/\r?\n/).filter(Boolean).map((line) => {
               const [name, head] = line.split('\t'); return { name, current: head === '*' };
             }),
@@ -952,6 +986,13 @@ export function setupIPC(webviewPreloadPath: string) {
           };
         } else if (operation === 'createBranch') {
           data = await runGit(root, ['switch', '-c', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
+        } else if (operation === 'deleteBranch') {
+          const name = validateGitRef(String(payload.name ?? ''));
+          data = await runGit(root, ['branch', '-d', name], 2 * 1024 * 1024, signal);
+        } else if (operation === 'renameBranch') {
+          const from = validateGitRef(String(payload.from ?? ''));
+          const to = validateGitRef(String(payload.to ?? ''));
+          data = await runGit(root, ['branch', '-m', from, to], 2 * 1024 * 1024, signal);
         } else if (operation === 'switchBranch') {
           data = await runGit(root, ['switch', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
         } else if (operation === 'fetch') {
@@ -1002,6 +1043,9 @@ export function setupIPC(webviewPreloadPath: string) {
           data = output.split(/\r?\n/).filter(Boolean).map((line) => {
             const [ref, hash, date, subject] = line.split('\x1f'); return { ref, hash, date, subject };
           });
+        } else if (operation === 'stashShow') {
+          const ref = String(payload.ref ?? 'stash@{0}').trim();
+          data = await runGit(root, ['stash', 'show', '-p', ref], 20 * 1024 * 1024, signal);
         } else if (operation === 'stashPush') {
           const message = String(payload.message ?? '').trim();
           data = await runGit(root, message ? ['stash', 'push', '-u', '-m', message] : ['stash', 'push', '-u'], 2 * 1024 * 1024, signal);

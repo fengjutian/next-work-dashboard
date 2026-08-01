@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   workspace: {
     openFolder: () => ipcRenderer.invoke('workspace:openFolder'),
+    reauthorize: (rootPath: string) => ipcRenderer.invoke('workspace:reauthorize', rootPath),
     listDirectory: (rootPath: string, relativePath = '') =>
       ipcRenderer.invoke('workspace:listDirectory', rootPath, relativePath),
     readTextFile: (rootPath: string, relativePath: string) =>

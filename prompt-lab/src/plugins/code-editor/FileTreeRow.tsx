@@ -2,17 +2,14 @@ import React from 'react';
 import { ChevronDown, FileText, FolderOpen, RefreshCw } from '@/components/icons';
 import type { TreeNode, TreeEditState } from './editor-types';
 
-function fileIconColor(name: string): string {
-  const extension = name.split('.').pop()?.toLowerCase();
-  if (['ts', 'tsx'].includes(extension ?? '')) return 'text-blue-500';
-  if (['js', 'jsx'].includes(extension ?? '')) return 'text-yellow-500';
-  if (extension === 'json') return 'text-amber-500';
-  if (['css', 'scss', 'less'].includes(extension ?? '')) return 'text-purple-500';
-  if (['html', 'vue', 'svelte'].includes(extension ?? '')) return 'text-orange-500';
-  if (['md', 'mdx'].includes(extension ?? '')) return 'text-cyan-500';
-  if (extension === 'py') return 'text-emerald-500';
-  return 'text-muted-foreground';
-}
+const iconColors: Record<string, string> = {
+  ts: 'text-blue-400', tsx: 'text-cyan-400', js: 'text-yellow-400', jsx: 'text-cyan-400',
+  css: 'text-blue-300', scss: 'text-pink-400', html: 'text-orange-400',
+  json: 'text-yellow-300', md: 'text-blue-200', py: 'text-green-400',
+  go: 'text-cyan-300', rs: 'text-orange-300', java: 'text-red-400',
+};
+const fileIconColor = (name: string) => iconColors[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'text-muted-foreground';
+
 
 export const FileTreeRow: React.FC<{
   node: TreeNode;
@@ -98,7 +95,7 @@ export const FileTreeRow: React.FC<{
             className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
           />
         ) : (
-          <span className="truncate">{node.name}</span>
+          <span className="truncate">{(isDirectory && node.children?.length === 1 && node.children[0].type === 'directory') ? `${node.name}/${node.children[0].name}` : node.name}</span>
         )}
         {node.loading && <RefreshCw className="ml-auto h-3 w-3 animate-spin" />}
         {decorations?.get(node.path)?.errors ? <span className="ml-auto text-[10px] font-semibold text-destructive">{decorations.get(node.path)?.errors}</span> : decorations?.get(node.path)?.warnings ? <span className="ml-auto text-[10px] font-semibold text-warning">{decorations.get(node.path)?.warnings}</span> : decorations?.get(node.path)?.git ? <span className="ml-auto text-[10px] font-semibold text-primary">{decorations.get(node.path)?.git?.trim()}</span> : null}

@@ -42,6 +42,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({
   openSearchAsEditor,
 }) => {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [allCollapsed, setAllCollapsed] = useState(false);
   const [history, setHistory] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('code-editor.search-history') ?? '[]'); } catch { return []; }
   });
@@ -103,6 +104,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({
           <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={searchPanel.loading || searchPanel.results.length === 0 || !searchPanel.replacement} onClick={() => void previewReplace(searchPanel.results)}>预览变更</Button>
           <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={!canUndoReplace || searchPanel.loading} onClick={() => void undoReplace()}>撤销替换</Button>
           <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={searchPanel.results.length === 0} onClick={openSearchAsEditor}>在编辑器中打开</Button>
+        </div>
+        <div className="flex items-center border-b px-3 py-1 text-[10px] text-muted-foreground">
+          <button type="button" className="hover:text-foreground" onClick={() => { setAllCollapsed((v) => { if (!v) setCollapsed(new Set(groupedResults.map(([p]) => p))); else setCollapsed(new Set()); return !v; }); }}>{allCollapsed ? '展开全部' : '折叠全部'}</button>
+          <span className="ml-auto">{searchPanel.results.length} 个结果，{groupedResults.length} 个文件</span>
         </div>
         <div className="max-h-[420px] overflow-auto py-1">
           {groupedResults.map(([path, results]) => <div key={path}>

@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveNewWorkspacePath, resolveWorkspacePath } from '../src/main/workspace-path';
+import {
+  authorizeWorkspace,
+  resolveNewWorkspacePath,
+  resolveWorkspacePath,
+} from '../src/main/workspace-path';
 
 const temporaryDirectories: string[] = [];
 
@@ -11,6 +15,7 @@ function createWorkspace(): string {
   temporaryDirectories.push(directory);
   fs.mkdirSync(path.join(directory, 'src'));
   fs.writeFileSync(path.join(directory, 'src', 'index.ts'), 'export {};', 'utf-8');
+  authorizeWorkspace(directory);
   return directory;
 }
 

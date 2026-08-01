@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from '../src/store/index';
-import type { Prompt } from '../src/store/types';
+import { CATEGORIES, type Prompt } from '../src/store/types';
 
 // ── 辅助 ──
 
@@ -72,7 +72,6 @@ function recentPrompts(state: ReturnType<typeof useStore.getState>, limit = 5) {
 
 /** 模拟 useAllCategories 的 selector 逻辑 */
 function allCategories(state: ReturnType<typeof useStore.getState>) {
-  const { CATEGORIES } = require('../src/store/types');
   const all = [...CATEGORIES];
   state.userCategories.forEach((c) => {
     if (!all.includes(c)) all.push(c);
@@ -185,9 +184,9 @@ describe('useFilteredPrompts', () => {
       filterCategory: '编程',
       filterTag: 'react',
     });
-    // 只有 a 同时满足：标题含 react + 分类 编程 + 标签 react
+    // 搜索同时匹配标题、正文和标签，因此 a、d 都满足三个过滤条件。
     const result = filteredPrompts(useStore.getState());
-    expect(result.map((p) => p.id)).toEqual(['a']);
+    expect(result.map((p) => p.id)).toEqual(['a', 'd']);
   });
 });
 
