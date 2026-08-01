@@ -26,6 +26,7 @@ import { findSemanticMatches, type SemanticMatch } from './semantic-search';
 import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-tasks';
 import { WorkspaceTaskRunner } from './task-runner';
 import { detectRenameRename, parseUnmergedIndex } from './git-rename-conflict';
+import { createTypeScriptSemanticIndex } from './typescript-language-service';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -947,6 +948,33 @@ export function setupIPC(webviewPreloadPath: string) {
       const order = { definition: 0, import: 1, reference: 2 } as const;
       results.sort((a, b) => order[a.kind] - order[b.kind] || a.path.localeCompare(b.path) || a.line - b.line);
       return { success: true, data: results.slice(0, 1_000) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:languageSemanticSearch', async (_event, rootPath: string, relativePath: string, line: number, column: number) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const target = resolveWorkspacePath(rootPath, relativePath);
+      if (!/\.[cm]?[jt]sx?$/i.test(target)) return { success: false, error: 'LANGUAGE_SERVICE_UNSUPPORTED' };
+      const files: Record<string, string> = {};
+      const visit = (directory: string) => {
+        if (Object.keys(files).length >= 2_000) return;
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+          if (WORKSPACE_IGNORED_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
+          const fullPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) visit(fullPath);
+          else if (entry.isFile() && /\.[cm]?[jt]sx?$/i.test(entry.name) && fs.statSync(fullPath).size <= 1024 * 1024) {
+            try { files[fullPath.replace(/\\/g, '/')] = decodeWorkspaceText(fs.readFileSync(fullPath)).content; } catch { /* skip unreadable source */ }
+          }
+        }
+      };
+      visit(root);
+      const index = createTypeScriptSemanticIndex(files);
+      const data = index.search(target.replace(/\\/g, '/'), Number(line) || 1, Number(column) || 1).map((item) => ({ ...item, path: path.relative(root, item.path).replace(/\\/g, '/') }));
+      index.dispose();
+      return { success: true, data };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

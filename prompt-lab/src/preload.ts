@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     search: (rootPath: string, query: string, options?: import('./types/electron').WorkspaceSearchOptions) =>
       ipcRenderer.invoke('workspace:search', rootPath, query, options),
     semanticSearch: (rootPath: string, symbol: string) => ipcRenderer.invoke('workspace:semanticSearch', rootPath, symbol),
+    languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => ipcRenderer.invoke('workspace:languageSemanticSearch', rootPath, relativePath, line, column),
     gitStatus: (rootPath: string) => ipcRenderer.invoke('workspace:gitStatus', rootPath),
     gitShowHead: (rootPath: string, relativePath: string) => ipcRenderer.invoke('workspace:gitShowHead', rootPath, relativePath),
     gitStage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitStage', rootPath, relativePaths),

@@ -45,6 +45,7 @@ import { QuickOpenPanel } from './QuickOpenPanel';
 import { estimateTokens, fitContextToTokenBudget } from './ai-context';
 import { parseProblemLine, resolveTaskOrder } from '../../main/workspace-tasks';
 import { classifyConflictStatus } from '../../main/git-conflicts';
+import { applyConversationSummary, conversationNeedsSummary, recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -237,6 +238,8 @@ export const CodeEditorPanel: React.FC = () => {
     try { return JSON.parse(localStorage.getItem('code-editor.ai-history') ?? '[]'); } catch { return []; }
   });
   const [aiHunks, setAiHunks] = useState<AiHunk[]>([]);
+  const [aiMessages, setAiMessages] = useState<AiConversationMessage[]>([]);
+  const [aiPendingRequest, setAiPendingRequest] = useState<AiPendingRequest | null>(null);
   const [mergeHunks, setMergeHunks] = useState<AiHunk[]>([]);
   const [mergeBase, setMergeBase] = useState<string | null>(null);
   const [mergeResult, setMergeResult] = useState<string | null>(null);
@@ -1550,6 +1553,36 @@ export const CodeEditorPanel: React.FC = () => {
   }, [appendOutput, workspace]);
 
   useEffect(() => {
+    if (!workspace) { setAiMessages([]); setAiPendingRequest(null); return; }
+    try {
+      const conversations = JSON.parse(localStorage.getItem('code-editor.ai-conversations.v1') ?? '{}') as Record<string, AiConversationMessage[]>;
+      const pending = JSON.parse(localStorage.getItem('code-editor.ai-pending.v1') ?? '{}') as Record<string, AiPendingRequest>;
+      setAiMessages(conversations[workspace.path] ?? []);
+      const recovered = recoverInterruptedRequest(pending[workspace.path]);
+      setAiPendingRequest(recovered ?? null);
+      if (recovered) {
+        setAiInstruction(recovered.instruction);
+        appendOutput(`已恢复中断的 AI 请求：${recovered.instruction.slice(0, 80)}`);
+      }
+    } catch { setAiMessages([]); setAiPendingRequest(null); }
+  }, [appendOutput, workspace]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    const conversations = JSON.parse(localStorage.getItem('code-editor.ai-conversations.v1') ?? '{}') as Record<string, AiConversationMessage[]>;
+    conversations[workspace.path] = aiMessages.slice(-100);
+    localStorage.setItem('code-editor.ai-conversations.v1', JSON.stringify(conversations));
+  }, [aiMessages, workspace]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    const pending = JSON.parse(localStorage.getItem('code-editor.ai-pending.v1') ?? '{}') as Record<string, AiPendingRequest>;
+    if (aiPendingRequest) pending[workspace.path] = aiPendingRequest;
+    else delete pending[workspace.path];
+    localStorage.setItem('code-editor.ai-pending.v1', JSON.stringify(pending));
+  }, [aiPendingRequest, workspace]);
+
+  useEffect(() => {
     if (!workspace || restoredAiDraftWorkspaceRef.current !== workspace.path) return;
     try {
       const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string; savedAt?: number }>;
@@ -1784,10 +1817,22 @@ export const CodeEditorPanel: React.FC = () => {
       setStatus('请先在设置中配置 AI API');
       return;
     }
+    const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
     setAiEditing(true);
     setStatus(`AI 正在修改 ${activeDocument.name}…`);
     try {
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      let conversation = aiMessages;
+      if (conversationNeedsSummary(conversation, aiTokenBudget) && conversation.length > 4) {
+        let summary = '';
+        const summaryPrompt = [...conversation.map(({ role, content }) => ({ role, content })), { role: 'user' as const, content: '请压缩以上代码编辑会话：保留用户目标、已决定的方案、修改过的文件、未解决问题和约束。只返回简洁摘要。' }];
+        for await (const chunk of provider.chat(summaryPrompt, { model: aiApi.model, temperature: 0.1, maxTokens: 2000 })) summary += chunk.delta;
+        conversation = applyConversationSummary(conversation, summary);
+        setAiMessages(conversation);
+        appendOutput(`AI 长会话已压缩为摘要，保留最近 ${Math.min(4, aiMessages.length)} 条消息`);
+      }
+      const conversationMessages = conversation.slice(-12).map(({ role, content }) => ({ role, content }));
       if (aiMultiFile && workspace) {
         const listed = await window.electronAPI.workspace.listFiles(workspace.path);
         const terms = aiInstruction.toLocaleLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 2);
@@ -1840,6 +1885,7 @@ export const CodeEditorPanel: React.FC = () => {
         if (fittedContext.omitted.length) appendOutput(`Token 预算压缩：省略 ${fittedContext.omitted.length} 个低优先级文件（约 ${fittedContext.estimatedTokens} tokens）`);
         const messages = [
           { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"目标相对路径","oldPath":"重命名前相对路径（仅重命名时）","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串。重命名：同时提供 oldPath、path 和重命名后的完整 content。只返回需要变更的文件，不得返回 Markdown。' },
+          ...conversationMessages,
           { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fittedContext.files.map((item) => `--- ${item.path} ---\n${item.content}`).join('\n\n')}` },
         ];
         let response = '';
@@ -1870,10 +1916,13 @@ export const CodeEditorPanel: React.FC = () => {
           return [{ ...context, modified: file.content }];
         });
         if (proposals.length === 0) {
+          setAiPendingRequest(null);
           setStatus('AI 未生成有效的多文件修改');
           return;
         }
         setAiProposals(proposals);
+        setAiMessages((previous) => [...previous, { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() }, { role: 'assistant' as const, content: response, timestamp: Date.now() }].slice(-100));
+        setAiPendingRequest(null);
         recordAiSession(proposals.length);
         const first = proposals[0];
         setDiffView({ path: first.path, name: first.path, original: first.original, modified: first.modified, language: first.language, source: 'ai' });
@@ -1884,6 +1933,7 @@ export const CodeEditorPanel: React.FC = () => {
       const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
       const messages = [
         { role: 'system' as const, content: '你是代码编辑器中的修改助手。根据要求修改文件。只返回修改后的完整文件内容，不要解释，不要输出 diff。' },
+        ...conversationMessages,
         { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selectedText ? `\n重点关注的选中代码：\n${selectedText}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
       ];
       let response = '';
@@ -1891,18 +1941,22 @@ export const CodeEditorPanel: React.FC = () => {
       const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
       const modified = (fenced?.[1] ?? response).trimEnd();
       if (!modified || modified === activeDocument.content.trimEnd()) {
+        setAiPendingRequest(null);
         setStatus('AI 未生成有效修改');
         return;
       }
       setDiffView({ path: activeDocument.path, name: activeDocument.name, original: activeDocument.content, modified, language: activeDocument.language, source: 'ai' });
+      setAiMessages((previous) => [...previous, { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() }, { role: 'assistant' as const, content: response, timestamp: Date.now() }].slice(-100));
+      setAiPendingRequest(null);
       recordAiSession(1);
       appendOutput(`AI 已生成 ${activeDocument.name} 的修改候选，等待确认`);
     } catch (error) {
+      setAiPendingRequest((current) => current?.id === requestId ? { ...current, status: 'interrupted' } : current);
       setStatus(`AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setAiEditing(false);
     }
-  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMultiFile, aiTokenBudget, appendOutput, documents, workspace]);
+  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, workspace]);
 
   const runInlineEdit = useCallback(async () => {
     if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
@@ -2397,17 +2451,20 @@ export const CodeEditorPanel: React.FC = () => {
     const model = editorRef.current?.getModel();
     const cursor = editorRef.current?.getPosition();
     const word = model && cursor ? model.getWordAtPosition(cursor)?.word ?? '' : '';
-    const symbol = await appPrompt('搜索符号、引用和 import 图', word);
+    const languageServiceSupported = Boolean(activeDocument && cursor && /\.[cm]?[jt]sx?$/i.test(activeDocument.path) && word);
+    const symbol = languageServiceSupported ? word : await appPrompt('搜索符号、引用和 import 图', word);
     if (!symbol) return;
     setSearchPanel((previous) => ({ ...previous, open: true, query: symbol, loading: true, results: [] }));
-    const result = await window.electronAPI.workspace.semanticSearch(workspace.path, symbol);
+    const result = languageServiceSupported
+      ? await window.electronAPI.workspace.languageSemanticSearch(workspace.path, activeDocument!.path, cursor!.lineNumber, cursor!.column)
+      : await window.electronAPI.workspace.semanticSearch(workspace.path, symbol);
     setSearchPanel((previous) => ({
       ...previous,
       loading: false,
       results: (result.data ?? []).map((item) => ({ ...item, preview: `[${item.kind}${item.importedFrom ? ` ← ${item.importedFrom}` : ''}] ${item.preview}` })),
     }));
-    setStatus(result.success ? `语义搜索找到 ${result.data?.length ?? 0} 项` : `语义搜索失败：${displayError(result.error)}`);
-  }, [appPrompt, workspace]);
+    setStatus(result.success ? `${languageServiceSupported ? 'Language Service' : '语义'} 搜索找到 ${result.data?.length ?? 0} 项` : `语义搜索失败：${displayError(result.error)}`);
+  }, [activeDocument, appPrompt, workspace]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -2773,6 +2830,7 @@ export const CodeEditorPanel: React.FC = () => {
         aiMultiFile={aiMultiFile} setAiMultiFile={setAiMultiFile}
         aiProposals={aiProposals} aiHistory={aiHistory} aiSessions={aiSessions}
         aiTokenBudget={aiTokenBudget} setAiTokenBudget={setAiTokenBudget} aiEstimatedTokens={estimateTokens(`${aiInstruction}\n${activeDocument?.content ?? ''}`)}
+        aiMessages={aiMessages} aiPendingRequest={aiPendingRequest}
         undoLastAiEdit={undoLastAiEdit}
         aiInstruction={aiInstruction} aiEditing={aiEditing}
         activeDocument={activeDocument} generateAiEdit={generateAiEdit}

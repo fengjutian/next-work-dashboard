@@ -69,6 +69,7 @@ export interface ElectronAPI {
     listFiles: (rootPath: string) => Promise<WorkspaceResult<WorkspaceEntry[]>>;
     search: (rootPath: string, query: string, options?: WorkspaceSearchOptions) => Promise<WorkspaceResult<WorkspaceSearchResult[]>>;
     semanticSearch: (rootPath: string, symbol: string) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
+    languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
     gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
     gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
