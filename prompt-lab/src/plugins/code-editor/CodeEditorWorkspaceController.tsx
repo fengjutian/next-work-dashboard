@@ -47,6 +47,7 @@ import { parseProblemLine, resolveTaskOrder } from '../../main/workspace-tasks';
 import { classifyConflictStatus } from '../../main/git-conflicts';
 import { applyConversationSummary, conversationNeedsSummary, recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
 import { useTerminalTasks } from './useTerminalTasks';
+import { useGitRepository } from './useGitRepository';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -214,13 +215,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [status, setStatus] = useState('就绪');
-  const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus[]>([]);
-  const [gitOverview, setGitOverview] = useState<WorkspaceGitOverview | null>(null);
-  const [gitHistory, setGitHistory] = useState<WorkspaceGitCommit[]>([]);
-  const [gitView, setGitView] = useState<'changes' | 'history' | 'stash'>('changes');
-  const [gitBusy, setGitBusy] = useState<{ operation: string; operationId: string } | null>(null);
-  const [pullStrategy, setPullStrategy] = useState<'ff-only' | 'merge' | 'rebase'>('ff-only');
-  const [commitMessage, setCommitMessage] = useState('');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiEditing, setAiEditing] = useState(false);
   const [inlineEdit, setInlineEdit] = useState<{ instruction: string; visible: boolean }>({ instruction: '', visible: false });
@@ -282,6 +276,23 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setOutputLines((previous) => [...previous.slice(-199), line]);
   }, []);
 
+  const openExternalDiff = useCallback((value: { path: string; name: string; modified: string }) => {
+    setDiffView({ ...value, original: '', language: 'diff', source: 'external' });
+  }, []);
+  const git = useGitRepository({
+    workspace,
+    sourceControlVisible: bottomPanel.open && bottomPanel.tab === 'sourceControl',
+    appendOutput,
+    setStatus,
+    openExternalDiff,
+  });
+  const {
+    gitStatus, gitOverview, gitHistory, setGitHistory, gitView, setGitView, gitBusy,
+    pullStrategy, setPullStrategy, commitMessage, setCommitMessage,
+    refreshGitStatus, refreshGitOverview, runGitOperation,
+    loadGitHistory, compareGitCommits, cancelGitOp,
+  } = git;
+
   const terminalTasks = useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus, setBottomPanel });
   const {
     taskProblems, workspaceTasks, taskRun, taskHistory,
@@ -298,53 +309,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     handleTerminalOutput, runWorkspaceTask, cancelWorkspaceTask,
   } = terminalTasks;
 
-  const refreshGitStatus = useCallback(async () => {
-    if (!workspace) return;
-    const result = await window.electronAPI.workspace.gitStatus(workspace.path);
-    if (result.success) setGitStatus(result.data ?? []);
-    else {
-      setGitStatus([]);
-      appendOutput(`Git 状态读取失败：${displayError(result.error)}`);
-    }
-  }, [appendOutput, workspace]);
-
-  const refreshGitOverview = useCallback(async () => {
-    if (!workspace) return;
-    try {
-      const [overview, history] = await Promise.all([
-        window.electronAPI.workspace.gitOperation<WorkspaceGitOverview>(workspace.path, 'overview'),
-        window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100 }),
-      ]);
-      if (overview.success) setGitOverview(overview.data ?? null);
-      if (history.success) setGitHistory(history.data ?? []);
-    } catch { /* IPC handlers may not be registered yet */ }
-  }, [workspace]);
-
-  const runGitOperation = useCallback(async (operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => {
-    if (!workspace) return false;
-    const result = await window.electronAPI.workspace.gitOperation(workspace.path, operation, payload);
-    if (!result.success) {
-      const gitErrors: Record<string, string> = {
-        GIT_AUTH_REQUIRED: 'Git 凭据不可用，请检查 Git Credential Manager 或重新登录。',
-        GIT_CERTIFICATE_ERROR: 'TLS 证书验证失败，请检查证书链、系统时间或企业 CA 配置。',
-        GIT_PROXY_ERROR: 'Git 代理连接失败，请检查 http.proxy/https.proxy 和代理凭据。',
-        GIT_NETWORK_ERROR: '网络连接失败，请检查 DNS、网络和远端服务状态。',
-        GIT_REPOSITORY_NOT_FOUND: '远端仓库不存在，或当前账号无权查看。',
-        GIT_SSH_AGENT_ERROR: 'SSH Agent 不可用，请启动 Agent 并加载私钥。',
-        GIT_PERMISSION_DENIED: 'Git 权限被拒绝，请检查 SSH Key、仓库权限或访问令牌。',
-        GIT_INDEX_LOCKED: 'Git 索引被锁定，请确认没有其他 Git 进程正在运行。',
-        GIT_SAFE_DIRECTORY: 'Git 拒绝了仓库所有权，请核对目录所有者和 safe.directory 配置。',
-        GIT_CONFLICT: '操作产生冲突，请在冲突列表中解决后继续。',
-      };
-      const message = gitErrors[result.error ?? ''] ?? displayError(result.error);
-      setStatus(message);
-      appendOutput(`${operation} 失败：${message}`);
-      return false;
-    }
-    if (typeof result.data === 'string' && result.data) appendOutput(result.data);
-    await Promise.all([refreshGitStatus(), refreshGitOverview()]);
-    return true;
-  }, [appendOutput, refreshGitOverview, refreshGitStatus, workspace]);
 
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
@@ -1498,17 +1462,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [activePath, activeDocument?.content, refreshSymbols]);
 
-  useEffect(() => {
-    if (!workspace || !bottomPanel.open || bottomPanel.tab !== 'sourceControl') return;
-    void Promise.all([refreshGitStatus(), refreshGitOverview()]);
-  }, [bottomPanel.open, bottomPanel.tab, refreshGitOverview, refreshGitStatus, workspace]);
-
-  useEffect(() => window.electronAPI.workspace.onGitProgress((event) => {
-    if (event.state === 'started') setGitBusy({ operation: event.operation, operationId: event.operationId });
-    else setGitBusy(null);
-    setStatus(event.message);
-  }), []);
-
   const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
     if (!workspace) return;
     if (classifyConflictStatus(entry.status)) {
@@ -1557,20 +1510,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setGitView('history');
     setBottomPanel((previous) => ({ ...previous, open: true, tab: 'sourceControl' }));
     setTreeMenu(null);
-  }, [workspace]);
-
-  const loadGitHistory = useCallback(async (filters: { query?: string; author?: string; since?: string; until?: string }, append = false) => {
-    if (!workspace) return;
-    const result = await window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 50, skip: append ? gitHistory.length : 0, ...filters });
-    if (!result.success) { setStatus(`历史加载失败：${displayError(result.error)}`); return; }
-    setGitHistory((previous) => append ? [...previous, ...(result.data ?? [])] : (result.data ?? []));
-  }, [gitHistory.length, workspace]);
-
-  const compareGitCommits = useCallback(async (from: string, to: string) => {
-    if (!workspace) return;
-    const result = await window.electronAPI.workspace.gitOperation<string>(workspace.path, 'compareCommits', { from, to });
-    if (!result.success) { setStatus(`Commit 比较失败：${displayError(result.error)}`); return; }
-    setDiffView({ path: `${from}..${to}`, name: `${from.slice(0, 7)} ↔ ${to.slice(0, 7)}`, original: '', modified: result.data ?? '', language: 'diff', source: 'external' });
   }, [workspace]);
 
   const stageGitHunk = useCallback(async (hunk: GitHunk) => {
