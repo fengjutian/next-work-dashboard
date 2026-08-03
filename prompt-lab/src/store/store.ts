@@ -105,6 +105,8 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   provider: 'local', contextBudget: 6000, recallCount: 6, minScore: 0.08,
   maxPerDocument: 2, autoIndex: true, embeddingBaseUrl: '', embeddingApiKey: '',
   embeddingModel: 'text-embedding-3-small',
+  tencentDbEnabled: false, tencentDbBaseUrl: 'http://localhost:8420',
+  tencentDbServiceId: '', tencentDbUserKey: '',
 };
 
 function normalizeMemoryConfig(value: Partial<MemoryConfig>): MemoryConfig {
@@ -119,6 +121,7 @@ function normalizeMemoryConfig(value: Partial<MemoryConfig>): MemoryConfig {
     minScore: number(value.minScore, 0.08, 0, 1),
     maxPerDocument: Math.floor(number(value.maxPerDocument, 2, 1, 6)),
     autoIndex: typeof value.autoIndex === 'boolean' ? value.autoIndex : true,
+    tencentDbEnabled: typeof value.tencentDbEnabled === 'boolean' ? value.tencentDbEnabled : false,
   };
 }
 
@@ -319,7 +322,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = normalizeMemoryConfig({ ...state.memoryConfig, ...patch });
       if (isDbReady()) {
-        try { dbSetSetting('memoryConfig', JSON.stringify({ ...next, embeddingApiKey: '' })); } catch { /* ignore */ }
+        try { dbSetSetting('memoryConfig', JSON.stringify({ ...next, embeddingApiKey: '', tencentDbUserKey: '' })); } catch { /* ignore */ }
         flushDbToDisk();
       }
       return { memoryConfig: next };
@@ -410,6 +413,12 @@ export const useStore = create<AppState>((set, get) => ({
         if (saved.embeddingApiKey) {
           void window.electronAPI.auth.saveToken('memory-embedding', saved.embeddingApiKey, '历史知识库 Embedding');
           saved.embeddingApiKey = '';
+          dbSetSetting('memoryConfig', JSON.stringify(saved));
+          void flushDbToDisk();
+        }
+        if (saved.tencentDbUserKey) {
+          void window.electronAPI.auth.saveToken('memory-tencentdb', saved.tencentDbUserKey, 'TencentDB Agent Memory');
+          saved.tencentDbUserKey = '';
           dbSetSetting('memoryConfig', JSON.stringify(saved));
           void flushDbToDisk();
         }

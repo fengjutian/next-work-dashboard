@@ -258,6 +258,8 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     minScore: 0.08,
     maxPerDocument: 2,
     autoIndex: true, embeddingBaseUrl: '', embeddingApiKey: '', embeddingModel: 'text-embedding-3-small',
+    tencentDbEnabled: false, tencentDbBaseUrl: 'http://localhost:8420',
+    tencentDbServiceId: '', tencentDbUserKey: '',
   };
 
   configure(config: MemoryConfig): void {

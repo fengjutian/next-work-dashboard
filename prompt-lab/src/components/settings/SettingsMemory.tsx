@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { useStore } from '@/store';
 import { conversationMemory } from '@/core/conversation-memory';
 import type { MemorySyncProgress } from '@/core/conversation-memory';
+import { TencentDbMemoryAdapter } from '@/core/tencentdb-memory-adapter';
 
 export const SettingsMemory: React.FC = () => {
   const config = useStore((state) => state.memoryConfig);
@@ -11,15 +12,22 @@ export const SettingsMemory: React.FC = () => {
   const [status, setStatus] = React.useState('');
   const [indexing, setIndexing] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
+  const [testingTencentDb, setTestingTencentDb] = React.useState(false);
   const [progress, setProgress] = React.useState<MemorySyncProgress | null>(null);
   const [failedFiles, setFailedFiles] = React.useState<string[]>([]);
   const indexController = React.useRef<AbortController | null>(null);
 
   React.useEffect(() => {
-    void window.electronAPI.auth.getToken('memory-embedding').then((key) => {
-      if (key && key !== config.embeddingApiKey) setConfig({ embeddingApiKey: key });
+    void Promise.all([
+      window.electronAPI.auth.getToken('memory-embedding'),
+      window.electronAPI.auth.getToken('memory-tencentdb'),
+    ]).then(([embeddingKey, tencentDbUserKey]) => {
+      const patch: Partial<typeof config> = {};
+      if (embeddingKey && embeddingKey !== config.embeddingApiKey) patch.embeddingApiKey = embeddingKey;
+      if (tencentDbUserKey && tencentDbUserKey !== config.tencentDbUserKey) patch.tencentDbUserKey = tencentDbUserKey;
+      if (Object.keys(patch).length) setConfig(patch);
     });
-  }, [config.embeddingApiKey, setConfig]);
+  }, [config.embeddingApiKey, config.tencentDbUserKey, setConfig]);
 
   const numberSetting = (key: 'contextBudget' | 'recallCount' | 'minScore' | 'maxPerDocument', min: number, max: number) =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,6 +70,20 @@ export const SettingsMemory: React.FC = () => {
     setTesting(false);
   };
 
+  const testTencentDb = async () => {
+    setTestingTencentDb(true);
+    const adapter = new TencentDbMemoryAdapter(conversationMemory, {
+      baseUrl: config.tencentDbBaseUrl,
+      userKey: config.tencentDbUserKey,
+      serviceId: config.tencentDbServiceId,
+    });
+    const capabilities = await adapter.getCapabilities();
+    setStatus(capabilities.reachable
+      ? `TencentDB 服务可访问（HTTP ${capabilities.status ?? 200}）；远端检索接口未配置，当前继续使用本地索引`
+      : `TencentDB 连接失败：${capabilities.message ?? `HTTP ${capabilities.status ?? 0}`}`);
+    setTestingTencentDb(false);
+  };
+
   return (
     <section>
       <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">历史知识库</h4>
@@ -92,6 +114,30 @@ export const SettingsMemory: React.FC = () => {
           <Button variant="outline" size="sm" className="h-7 text-xs" disabled={testing || !config.embeddingBaseUrl || !config.embeddingModel}
             onClick={() => void testEmbedding()}>{testing ? '测试中…' : '测试 Embedding'}</Button>
         </div>}
+
+        <div className="space-y-3 rounded-md border p-3">
+          <label className="flex items-center justify-between">
+            <span><span className="block text-xs font-medium">TencentDB Agent Memory</span><span className="text-[10px] text-muted-foreground">兼容连接与能力探测；远端 OpenAPI 未配置时自动使用本地索引</span></span>
+            <input type="checkbox" checked={config.tencentDbEnabled} onChange={(event) => setConfig({ tencentDbEnabled: event.target.checked })} />
+          </label>
+          {config.tencentDbEnabled && <div className="space-y-3">
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">Memory Core URL</label>
+              <Input value={config.tencentDbBaseUrl} onChange={(event) => setConfig({ tencentDbBaseUrl: event.target.value })}
+                placeholder="http://localhost:8420" className="h-8 text-xs" /></div>
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">Service ID（可选）</label>
+              <Input value={config.tencentDbServiceId} onChange={(event) => setConfig({ tencentDbServiceId: event.target.value })}
+                placeholder="memory-service" className="h-8 text-xs" /></div>
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">User Key</label>
+              <Input type="password" value={config.tencentDbUserKey} onChange={(event) => setConfig({ tencentDbUserKey: event.target.value })}
+                onBlur={() => void (config.tencentDbUserKey
+                  ? window.electronAPI.auth.saveToken('memory-tencentdb', config.tencentDbUserKey, 'TencentDB Agent Memory')
+                  : window.electronAPI.auth.deleteToken('memory-tencentdb'))}
+                className="h-8 text-xs" /></div>
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              disabled={testingTencentDb || !config.tencentDbBaseUrl || !config.tencentDbUserKey}
+              onClick={() => void testTencentDb()}>{testingTencentDb ? '检测中…' : '检测 TencentDB 连接'}</Button>
+          </div>}
+        </div>
 
         <SettingNumber label="上下文字符预算" description="每次最多注入模型的历史正文字符数" value={config.contextBudget}
           min={1000} max={30000} step={500} onChange={numberSetting('contextBudget', 1000, 30000)} />

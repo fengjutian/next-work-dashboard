@@ -155,6 +155,10 @@ export interface MemoryConfig {
   embeddingBaseUrl: string;
   embeddingApiKey: string;
   embeddingModel: string;
+  tencentDbEnabled: boolean;
+  tencentDbBaseUrl: string;
+  tencentDbServiceId: string;
+  tencentDbUserKey: string;
 }
 
 /**
