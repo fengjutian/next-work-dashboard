@@ -15,6 +15,8 @@ import { filterAndSortPrompts } from '@/features/prompts/domain';
 import { PromptFilters } from '@/features/prompts/PromptFilters';
 import { PromptEditorDialog } from '@/features/prompts/PromptEditorDialog';
 import { PromptCardContent } from '@/features/prompts/PromptCardContent';
+import { usePromptCopy } from '@/features/prompts/usePromptCopy';
+import { VariableFillDialog } from '@/components/VariableFillDialog';
 
 // ── 提示词卡片 ──
 
@@ -24,10 +26,10 @@ const PromptCard: React.FC<{
   selected?: boolean;
   onToggleSelect?: () => void;
   onEdit?: (prompt: Prompt) => void;
-}> = ({ prompt, batchMode, selected, onToggleSelect, onEdit }) => {
+  onCopy: (prompt: Prompt) => void;
+}> = ({ prompt, batchMode, selected, onToggleSelect, onEdit, onCopy }) => {
   const { selectedPromptId, selectPrompt, deletePrompt, updatePrompt } = useStore();
   const isSelected = selectedPromptId === prompt.id;
-  const { toast } = useToast();
 
   const handleClick = () => {
     if (batchMode) {
@@ -35,16 +37,6 @@ const PromptCard: React.FC<{
     } else {
       selectPrompt(prompt.id);
     }
-  };
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.electronAPI?.copyText) {
-      window.electronAPI.copyText(prompt.content);
-    } else {
-      navigator.clipboard.writeText(prompt.content);
-    }
-    toast('已复制到剪贴板', 'success');
   };
 
   const toggleFavorite = (e: React.MouseEvent) => {
@@ -103,7 +95,7 @@ const PromptCard: React.FC<{
           </button>
           <button
             className="rounded p-1 opacity-0 transition-all hover:bg-accent group-hover:opacity-100"
-            onClick={handleCopy}
+            onClick={(event) => { event.stopPropagation(); onCopy(prompt); }}
             title="复制内容"
           >
             <Copy className="h-3.5 w-3.5 text-muted-foreground" />
@@ -157,6 +149,11 @@ export const PromptSidebar: React.FC = () => {
   const [editingPrompt, setEditingPrompt] = useState<Prompt | undefined>();
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { toast } = useToast();
+  const copy = usePromptCopy({
+    onCopied: () => toast('已复制填写后的提示词', 'success'),
+    onBlocked: () => toast('该提示词已停用，无法复制', 'error'),
+  });
 
 
   return (
@@ -265,6 +262,7 @@ export const PromptSidebar: React.FC = () => {
                     setEditingPrompt(prompt);
                     setEditorOpen(true);
                   }}
+                  onCopy={(prompt) => void copy.requestCopy(prompt)}
                 />
               ))}
             </div>
@@ -291,6 +289,14 @@ export const PromptSidebar: React.FC = () => {
         <PromptEditorDialog
           prompt={editingPrompt}
           onClose={() => setEditorOpen(false)}
+        />
+      )}
+      {copy.promptToFill && (
+        <VariableFillDialog
+          content={copy.promptToFill.content}
+          variables={copy.promptToFill.variables}
+          onConfirm={(_content, values) => void copy.confirmCopy(values)}
+          onCancel={copy.cancelCopy}
         />
       )}
     </div>

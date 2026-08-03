@@ -13,6 +13,7 @@ import { setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './chat/ToolManagerDialog';
 import { PromptManagerDialog } from './chat/PromptManagerDialog';
 import { RoleManagerDialog } from './chat/RoleManagerDialog';
+import { VariableFillDialog } from './VariableFillDialog';
 import { buildAttachmentContext, parseAttachment } from './chat/attachment-parser';
 import type { MemoryCitation } from '@/core/conversation-memory';
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './chat/MemorySourceView';
@@ -105,6 +106,7 @@ export const ChatPanel: React.FC = () => {
     messages, systemPrompt, currentModel, compareModels, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, error,
     sysPromptOpen, setSysPromptOpen,
+    pendingInputPrompt, setPendingInputPrompt, confirmInputPrompt,
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
     handleSend, handleRegenerate, handleStop, handleClear, handleRetry,
     handleEditConfirm,
@@ -638,6 +640,14 @@ export const ChatPanel: React.FC = () => {
           <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)}
             boundPromptIds={boundPromptIds} onToggleBound={toggleBoundPrompt} />
           <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />
+          {pendingInputPrompt && (
+            <VariableFillDialog
+              content={pendingInputPrompt.content}
+              variables={pendingInputPrompt.variables}
+              onConfirm={(_content, values) => confirmInputPrompt(values)}
+              onCancel={() => setPendingInputPrompt(null)}
+            />
+          )}
         </div>
 
         {/* URL 预览弹层 */}

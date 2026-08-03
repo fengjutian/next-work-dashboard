@@ -7,13 +7,16 @@ import type { Prompt } from '@/store';
 import { filterAndSortPrompts } from '@/features/prompts/domain';
 import { PromptFilters } from '@/features/prompts/PromptFilters';
 import { PromptCardContent } from '@/features/prompts/PromptCardContent';
+import { usePromptCopy } from '@/features/prompts/usePromptCopy';
+import { VariableFillDialog } from '@/components/VariableFillDialog';
 
 // ── 抽屉中的提示词卡片 ──
 
 const DrawerCard: React.FC<{
   prompt: Prompt;
   onSelect: (prompt: Prompt) => void;
-}> = ({ prompt, onSelect }) => {
+  onCopy: (prompt: Prompt) => void;
+}> = ({ prompt, onSelect, onCopy }) => {
   const { triggerInjection, tabs, activeTabId } = useStore();
   const { toast } = useToast();
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -24,16 +27,6 @@ const DrawerCard: React.FC<{
       toast(`已选择「${prompt.title}」`, 'success');
     }
     onSelect(prompt);
-  };
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.electronAPI?.copyText) {
-      window.electronAPI.copyText(prompt.content);
-    } else {
-      navigator.clipboard.writeText(prompt.content);
-    }
-    toast('已复制到剪贴板', 'success');
   };
 
   return (
@@ -50,7 +43,7 @@ const DrawerCard: React.FC<{
           {prompt.isFavorite && <Star className="h-3 w-3 text-warning fill-amber-500" />}
             <button
               className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
-              onClick={handleCopy}
+              onClick={(event) => { event.stopPropagation(); onCopy(prompt); }}
               title="复制"
             >
               <Copy className="h-3 w-3 text-muted-foreground" />
@@ -71,6 +64,11 @@ export const PromptDrawer: React.FC = () => {
   const [filterTag, setFilterTag] = useState<string | null>(null);
   const allTags = useAllTags();
   const categories = useAllCategories();
+  const { toast } = useToast();
+  const copy = usePromptCopy({
+    onCopied: () => toast('已复制填写后的提示词', 'success'),
+    onBlocked: () => toast('该提示词已停用，无法复制', 'error'),
+  });
   const prompts = useMemo(() => filterAndSortPrompts(allPrompts, {
     search, category: filterCategory, tag: filterTag, enabledOnly: true,
   }), [allPrompts, search, filterCategory, filterTag]);
@@ -125,11 +123,20 @@ export const PromptDrawer: React.FC = () => {
                   key={p.id}
                   prompt={p}
                   onSelect={() => setPromptDrawerOpen(false)}
+                  onCopy={(prompt) => void copy.requestCopy(prompt)}
                 />
               ))
             )}
           </div>
         </ScrollArea>
+        {copy.promptToFill && (
+          <VariableFillDialog
+            content={copy.promptToFill.content}
+            variables={copy.promptToFill.variables}
+            onConfirm={(_content, values) => void copy.confirmCopy(values)}
+            onCancel={copy.cancelCopy}
+          />
+        )}
       </div>
     </>
   );

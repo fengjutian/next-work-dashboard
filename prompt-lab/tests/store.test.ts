@@ -85,25 +85,6 @@ describe('提示词 CRUD', () => {
   });
 });
 
-// ── 搜索 & 过滤 ──
-
-describe('搜索 & 过滤', () => {
-  it('setSearch / setFilterCategory / setFilterTag', () => {
-    useStore.getState().setSearch('hello');
-    expect(useStore.getState().searchQuery).toBe('hello');
-
-    useStore.getState().setFilterCategory('编程');
-    expect(useStore.getState().filterCategory).toBe('编程');
-    useStore.getState().setFilterCategory(null);
-    expect(useStore.getState().filterCategory).toBeNull();
-
-    useStore.getState().setFilterTag('react');
-    expect(useStore.getState().filterTag).toBe('react');
-    useStore.getState().setFilterTag(null);
-    expect(useStore.getState().filterTag).toBeNull();
-  });
-});
-
 // ── incrementUsage ──
 
 describe('incrementUsage', () => {

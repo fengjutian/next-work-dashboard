@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { MessageSquare, Pin, X } from '@/components/icons';
 import { useStore } from '@/store';
 import type { Prompt } from '@/store/types';
+import { useAllCategories, useAllTags } from '@/store';
+import { filterAndSortPrompts } from '@/features/prompts/domain';
+import { PromptFilters } from '@/features/prompts/PromptFilters';
 
 /** 检查提示词是否启用（默认 true） */
 export function isPromptEnabled(prompt: Prompt): boolean {
@@ -23,6 +26,14 @@ export const PromptManagerDialog: React.FC<{
 }> = ({ open, onClose, boundPromptIds = [], onToggleBound }) => {
   const prompts = useStore((s) => s.prompts);
   const updatePrompt = useStore((s) => s.updatePrompt);
+  const categories = useAllCategories();
+  const tags = useAllTags();
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState<string | null>(null);
+  const [tag, setTag] = useState<string | null>(null);
+  const visiblePrompts = useMemo(() => filterAndSortPrompts(prompts, {
+    search, category, tag,
+  }), [prompts, search, category, tag]);
 
   if (!open) return null;
 
@@ -33,7 +44,7 @@ export const PromptManagerDialog: React.FC<{
   };
 
   // 按分类分组
-  const grouped = prompts.reduce<Record<string, Prompt[]>>((acc, p) => {
+  const grouped = visiblePrompts.reduce<Record<string, Prompt[]>>((acc, p) => {
     const cat = p.category || '未分类';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(p);
@@ -82,12 +93,24 @@ export const PromptManagerDialog: React.FC<{
           </button>
         </div>
 
+        <PromptFilters
+          compact
+          search={search}
+          category={category}
+          tag={tag}
+          categories={categories}
+          tags={tags}
+          onSearchChange={setSearch}
+          onCategoryChange={setCategory}
+          onTagChange={setTag}
+        />
+
         {/* 提示词列表 */}
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4">
-          {prompts.length === 0 ? (
+          {visiblePrompts.length === 0 ? (
             <div className="text-center py-8">
               <MessageSquare className="h-10 w-10 text-foreground text-muted-foreground mx-auto mb-2" />
-              <p className="text-xs text-muted-foreground">暂无提示词</p>
+              <p className="text-xs text-muted-foreground">没有符合条件的提示词</p>
             </div>
           ) : (
             sortedCategories.map((category) => (
@@ -146,18 +169,20 @@ export const PromptManagerDialog: React.FC<{
                           {onToggleBound && enabled && (
                             <button
                               onClick={() => onToggleBound(prompt.id)}
-                              className={`p-1.5 rounded-lg transition-colors ${
+                              className={`flex h-7 items-center gap-1 rounded-md px-2 text-[10px] transition-colors ${
                                 isBound
-                                  ? 'text-warning hover:bg-warning/10 dark:hover:bg-warning/10'
-                                  : 'text-foreground text-muted-foreground hover:text-muted-foreground hover:bg-accent'
+                                  ? 'bg-warning/10 text-warning hover:bg-warning/20'
+                                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
                               }`}
                               title={isBound ? '取消绑定对话' : '绑定到当前对话（自动注入到 system prompt）'}
                             >
-                              <Pin className="h-3.5 w-3.5" />
+                              <Pin className="h-3 w-3" />
+                              {isBound ? '已加入系统提示词' : '加入系统提示词'}
                             </button>
                           )}
 
                           {/* 启用/禁用 */}
+                          <span className="text-[10px] text-muted-foreground">{enabled ? '可使用' : '已停用'}</span>
                           <button
                             onClick={() => togglePrompt(prompt)}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${

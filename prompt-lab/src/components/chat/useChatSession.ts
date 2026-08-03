@@ -10,7 +10,8 @@ import type { Message } from './MessageBubble';
 import { useConversationMemory } from './useConversationMemory';
 import { toMemoryCitation } from '@/core/conversation-memory';
 import type { MemoryCitation } from '@/core/conversation-memory';
-import { buildBoundPromptContent, canExecutePrompt } from '@/features/prompts/execution';
+import type { Prompt } from '@/store/types';
+import { buildBoundPromptContent, preparePromptExecution } from '@/features/prompts/execution';
 
 // ── Bubble.List 兼容的消息状态 ──
 export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'error' | 'abort';
@@ -171,6 +172,7 @@ export function useChatSession() {
   const [error, setError] = useState<string | null>(null);
   const [sysPromptOpen, setSysPromptOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [pendingInputPrompt, setPendingInputPrompt] = useState<Prompt | null>(null);
   const abortRef = useRef<AbortController[]>([]);
   const providerRef = useRef<LLMProvider | null>(null);
 
@@ -187,9 +189,21 @@ export function useChatSession() {
   useEffect(() => {
     if (selectedPromptId && promptDrawerOpen === false) {
       const p = prompts.find((pp) => pp.id === selectedPromptId);
-      if (canExecutePrompt(p) && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); }
+      if (!p || streaming) return;
+      const execution = preparePromptExecution(p, 'chat');
+      if (execution.status === 'requires-input') setPendingInputPrompt(p);
+      if (execution.status === 'ready') setInput((prev) => (prev ? `${prev}\n${execution.content}` : execution.content));
     }
   }, [selectedPromptId, promptDrawerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const confirmInputPrompt = useCallback((values: Record<string, string>) => {
+    if (!pendingInputPrompt) return;
+    const execution = preparePromptExecution(pendingInputPrompt, 'chat', values);
+    if (execution.status === 'ready') {
+      setInput((previous) => previous ? `${previous}\n${execution.content}` : execution.content);
+    }
+    setPendingInputPrompt(null);
+  }, [pendingInputPrompt]);
 
   // ── 更新会话 ──
   const updateSession = useCallback((fn: (msgs: Message[]) => Message[]) => {
@@ -535,6 +549,7 @@ export function useChatSession() {
     messages, systemPrompt, currentModel, compareModels, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, error,
     sysPromptOpen, setSysPromptOpen,
+    pendingInputPrompt, setPendingInputPrompt, confirmInputPrompt,
     // handlers
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
     handleSend, handleRegenerate, handleStop, handleClear, handleRetry,

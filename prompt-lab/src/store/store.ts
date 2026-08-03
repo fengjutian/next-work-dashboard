@@ -1,39 +1,19 @@
 import { create } from 'zustand';
-import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, MemoryConfig, Role } from './types';
+import type { SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, MemoryConfig, Role } from './types';
 import { DEFAULT_SITES } from './types';
-import { DEFAULT_PROMPTS } from './defaultPrompts';
 import { DEFAULT_ROLES } from './defaultRoles';
+import { createPromptSlice, type PromptSlice } from './prompt-slice';
 import {
   isDbReady,
   dbLoadPrompts, dbLoadSites,
-  dbInsertPrompt, dbUpdatePrompt, dbDeletePrompt, dbBatchDeletePrompts,
+  dbInsertPrompt,
   dbInsertSite, dbUpdateSite,
-  dbInsertInjectHistory,
   dbGetSetting, dbSetSetting, flushDbToDisk,
 } from '@/db';
 
 // ── Store 类型 ──
 
-interface AppState {
-  // ── 提示词 ──
-  prompts: Prompt[];
-  selectedPromptId: string | null;
-  searchQuery: string;
-  filterCategory: string | null;
-  filterTag: string | null;
-  addPrompt: (p: Prompt) => void;
-  updatePrompt: (id: string, patch: Partial<Prompt>) => void;
-  deletePrompt: (id: string) => void;
-  batchDeletePrompts: (ids: string[]) => void;
-  selectPrompt: (id: string | null) => void;
-  setSearch: (q: string) => void;
-  setFilterCategory: (c: string | null) => void;
-  setFilterTag: (t: string | null) => void;
-  incrementUsage: (id: string) => void;
-
-  // ── 注入历史 ──
-  injectHistory: { promptId: string; siteId: string; timestamp: number }[];
-  recordInject: (promptId: string, siteId: string) => void;
+interface AppState extends PromptSlice {
 
   // ── 站点 ──
   sites: SiteConfig[];
@@ -132,78 +112,7 @@ function normalizeMemoryConfig(value: Partial<MemoryConfig>): MemoryConfig {
 
 
 export const useStore = create<AppState>((set, get) => ({
-  // ── 提示词（初始用默认值，DB 有数据时覆盖）──
-  prompts: DEFAULT_PROMPTS,
-  selectedPromptId: null,
-  searchQuery: '',
-  filterCategory: null,
-  filterTag: null,
-
-  addPrompt: (p) => {
-    if (isDbReady()) dbInsertPrompt(p);
-    set((s) => ({ prompts: [...s.prompts, p] }));
-  },
-
-  updatePrompt: (id, patch) => {
-    if (isDbReady()) dbUpdatePrompt(id, patch);
-    set((s) => ({
-      prompts: s.prompts.map((p) =>
-        p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p
-      ),
-    }));
-  },
-
-  deletePrompt: (id) => {
-    if (isDbReady()) dbDeletePrompt(id);
-    set((s) => ({
-      prompts: s.prompts.filter((p) => p.id !== id),
-      selectedPromptId: s.selectedPromptId === id ? null : s.selectedPromptId,
-    }));
-  },
-
-  batchDeletePrompts: (ids) => {
-    if (isDbReady()) dbBatchDeletePrompts(ids);
-    set((s) => ({
-      prompts: s.prompts.filter((p) => !ids.includes(p.id)),
-      selectedPromptId: ids.includes(s.selectedPromptId ?? '') ? null : s.selectedPromptId,
-    }));
-  },
-
-  selectPrompt: (id) => set({ selectedPromptId: id }),
-
-  setSearch: (q) => set({ searchQuery: q }),
-  setFilterCategory: (c) => set({ filterCategory: c }),
-  setFilterTag: (t) => set({ filterTag: t }),
-
-  incrementUsage: (id) => {
-    set((s) => {
-      const updated = s.prompts.map((p) =>
-        p.id === id ? { ...p, usageCount: p.usageCount + 1 } : p
-      );
-      // DB 写入也从最新 state 取值，避免闭包快照滞后
-      if (isDbReady()) {
-        const target = updated.find((p) => p.id === id);
-        if (target) {
-          dbUpdatePrompt(id, { usageCount: target.usageCount, updatedAt: Date.now() });
-        }
-      }
-      return { prompts: updated };
-    });
-  },
-
-  // ── 注入历史 ──
-  injectHistory: [],
-  recordInject: (promptId, siteId) => {
-    if (isDbReady()) {
-      dbInsertInjectHistory({ promptId, siteId, success: true, timestamp: Date.now() });
-    }
-    set((s) => ({
-      injectHistory: [
-        { promptId, siteId, timestamp: Date.now() },
-        ...s.injectHistory,
-      ].slice(0, 100),
-    }));
-  },
+  ...createPromptSlice<AppState>(set),
 
   // ── 站点（初始用默认值，DB 有数据时覆盖）──
   sites: DEFAULT_SITES,

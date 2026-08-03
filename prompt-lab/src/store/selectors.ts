@@ -2,17 +2,8 @@ import { useStore } from './store';
 import { useShallow } from 'zustand/shallow';
 import { CATEGORIES } from './types';
 import type { Prompt } from './types';
-import { filterAndSortPrompts } from '@/features/prompts/domain';
 
 // ── 派生选择器 ──
-
-export function useFilteredPrompts() {
-  return useStore(useShallow((s) => filterAndSortPrompts(s.prompts, {
-    search: s.searchQuery,
-    category: s.filterCategory,
-    tag: s.filterTag,
-  })));
-}
 
 export function useAllTags() {
   return useStore(useShallow((s) => {

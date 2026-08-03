@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from '../src/store/index';
 import { CATEGORIES, type Prompt } from '../src/store/types';
+import { filterAndSortPrompts, type PromptQuery } from '../src/features/prompts/domain';
 
 // ── 辅助 ──
 
@@ -20,33 +21,9 @@ function prompt(overrides: Partial<Prompt> & { id: string }): Prompt {
   };
 }
 
-/** 模拟 useFilteredPrompts 的 selector 逻辑 */
-function filteredPrompts(state: ReturnType<typeof useStore.getState>) {
-  let list = state.prompts;
-
-  if (state.searchQuery) {
-    const q = state.searchQuery.toLowerCase();
-    list = list.filter(
-      (p) =>
-        p.title.toLowerCase().includes(q) ||
-        p.content.toLowerCase().includes(q) ||
-        p.tags.some((t) => t.toLowerCase().includes(q))
-    );
-  }
-
-  if (state.filterCategory) {
-    list = list.filter((p) => p.category === state.filterCategory);
-  }
-
-  if (state.filterTag) {
-    list = list.filter((p) => p.tags.includes(state.filterTag));
-  }
-
-  return [...list].sort((a, b) => {
-    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-    return b.usageCount - a.usageCount;
-  });
+/** 领域查询逻辑 */
+function filteredPrompts(state: ReturnType<typeof useStore.getState>, query: PromptQuery = {}) {
+  return filterAndSortPrompts(state.prompts, query);
 }
 
 /** 模拟 useAllTags 的 selector 逻辑 */
@@ -84,9 +61,9 @@ beforeEach(() => {
   useStore.setState(useStore.getInitialState());
 });
 
-// ── useFilteredPrompts ──
+// ── filterAndSortPrompts ──
 
-describe('useFilteredPrompts', () => {
+describe('filterAndSortPrompts', () => {
   it('无搜索/过滤时返回全部，按 pinned > favorite > usageCount 排序', () => {
     useStore.setState({
       prompts: [
@@ -108,9 +85,8 @@ describe('useFilteredPrompts', () => {
         prompt({ id: 'b', title: 'Vue 指南', content: '...' }),
         prompt({ id: 'c', title: 'React 进阶', content: '...' }),
       ],
-      searchQuery: 'react',
     });
-    const result = filteredPrompts(useStore.getState());
+    const result = filteredPrompts(useStore.getState(), { search: 'react' });
     expect(result.map((p) => p.id)).toEqual(['a', 'c']);
   });
 
@@ -120,9 +96,8 @@ describe('useFilteredPrompts', () => {
         prompt({ id: 'a', title: 'A', content: '包含 react 关键词' }),
         prompt({ id: 'b', title: 'B', content: '无关内容' }),
       ],
-      searchQuery: 'react',
     });
-    const result = filteredPrompts(useStore.getState());
+    const result = filteredPrompts(useStore.getState(), { search: 'react' });
     expect(result.map((p) => p.id)).toEqual(['a']);
   });
 
@@ -132,18 +107,16 @@ describe('useFilteredPrompts', () => {
         prompt({ id: 'a', tags: ['typescript'] }),
         prompt({ id: 'b', tags: ['javascript'] }),
       ],
-      searchQuery: 'type',
     });
-    const result = filteredPrompts(useStore.getState());
+    const result = filteredPrompts(useStore.getState(), { search: 'type' });
     expect(result.map((p) => p.id)).toEqual(['a']);
   });
 
   it('搜索：大小写不敏感', () => {
     useStore.setState({
       prompts: [prompt({ id: 'a', title: 'REACT HOOKS' })],
-      searchQuery: 'react',
     });
-    expect(filteredPrompts(useStore.getState()).length).toBe(1);
+    expect(filteredPrompts(useStore.getState(), { search: 'react' }).length).toBe(1);
   });
 
   it('分类过滤：精确匹配', () => {
@@ -153,9 +126,8 @@ describe('useFilteredPrompts', () => {
         prompt({ id: 'b', category: '写作' }),
         prompt({ id: 'c', category: '编程' }),
       ],
-      filterCategory: '编程',
     });
-    const result = filteredPrompts(useStore.getState());
+    const result = filteredPrompts(useStore.getState(), { category: '编程' });
     expect(result.map((p) => p.id)).toEqual(['a', 'c']);
   });
 
@@ -166,9 +138,8 @@ describe('useFilteredPrompts', () => {
         prompt({ id: 'b', tags: ['vue'] }),
         prompt({ id: 'c', tags: ['react'] }),
       ],
-      filterTag: 'react',
     });
-    const result = filteredPrompts(useStore.getState());
+    const result = filteredPrompts(useStore.getState(), { tag: 'react' });
     expect(result.map((p) => p.id)).toEqual(['a', 'c']);
   });
 
@@ -180,12 +151,9 @@ describe('useFilteredPrompts', () => {
         prompt({ id: 'c', title: 'React Hook', category: '编程', tags: ['vue'] }),
         prompt({ id: 'd', title: 'Vue Guide', category: '编程', tags: ['react'] }),
       ],
-      searchQuery: 'react',
-      filterCategory: '编程',
-      filterTag: 'react',
     });
     // 搜索同时匹配标题、正文和标签，因此 a、d 都满足三个过滤条件。
-    const result = filteredPrompts(useStore.getState());
+    const result = filteredPrompts(useStore.getState(), { search: 'react', category: '编程', tag: 'react' });
     expect(result.map((p) => p.id)).toEqual(['a', 'd']);
   });
 });
