@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, Globe, MessageSquare, Plus, Puzzle, Send, Settings } from '@/components/icons';
+import { Database, Edit3, MessageSquare, Plus, Puzzle, Send, Settings } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { TitleBar } from '@/components/TitleBar';
@@ -9,6 +9,7 @@ import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
 import { CommandPalette } from '@/components/CommandPalette';
 import { PluginStatusBar } from '@/components/PluginStatusBar';
+import { AISiteWelcome } from '@/components/AISiteWelcome';
 import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useDbPersistence } from '@/hooks/useDbPersistence';
@@ -70,46 +71,6 @@ function ToolbarSegment<T extends string>({
 
 // ── 空状态（无标签页时，仅 AI 模式显示） ──
 
-const EmptyState: React.FC = () => {
-  const { sites, openTab } = useStore();
-  const enabledSites = sites.filter((s) => s.enabled);
-
-  return (
-    <div className="flex-1 flex items-center justify-center bg-background">
-      <div className="text-center space-y-6 max-w-md">
-        <Globe className="h-12 w-12 text-foreground mx-auto" />
-        <div>
-          <h1 className="text-xl font-bold text-foreground mb-2">
-            选择 AI 站点
-          </h1>
-          {enabledSites.length > 0 ? (
-            <p className="text-sm text-muted-foreground">
-              选择一个 AI 站点开始对话
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              请在设置中启用 AI 站点
-            </p>
-          )}
-        </div>
-        {enabledSites.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            {enabledSites.map((site) => (
-              <button
-                key={site.id}
-                className="px-4 py-3 rounded-lg border bg-card hover:border-primary hover:shadow-sm transition-all text-sm text-foreground"
-                onClick={() => openTab(site.id)}
-              >
-                + {site.name}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // ── 根布局 ──
 
 export default function App() {
@@ -141,6 +102,7 @@ export default function App() {
   const isAI = activeActivity === 'ai' || activeActivity === null;
   const isSettings = activeActivity === 'settings';
   const isPluginManager = activeActivity === 'plugin-manager';
+  const isDatabase = activeActivity === 'database';
 
   // 根据 activeActivity 找到对应的插件（非 AI/非 settings 时）
   const activePlugin =
@@ -200,7 +162,7 @@ export default function App() {
                 <MessageSquare className="h-4 w-4" />
               </Button>
             </div>
-            {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
+            {tabs.length > 0 ? <WebViewContainer /> : <AISiteWelcome />}
           </div>
 
           {/* 动态插件面板 — 由 pluginRegistry 驱动的常驻面板 */}
@@ -238,6 +200,18 @@ export default function App() {
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
       <div className="h-7 flex items-center px-2 border-t border-[#61245b] bg-[#61245b] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(97_36_91_/_0.16)]">
         <PluginStatusBar />
+        <button
+          className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
+            isDatabase
+              ? 'bg-white/20 text-white'
+              : 'text-white/80 hover:bg-white/15 hover:text-white'
+          }`}
+          onClick={() => setActiveActivity(isDatabase ? null : 'database')}
+          title="数据库浏览器"
+          aria-label="数据库浏览器"
+        >
+          <Database className="h-4 w-4" />
+        </button>
         <button
           className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
             isPluginManager

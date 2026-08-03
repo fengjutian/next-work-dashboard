@@ -10,7 +10,8 @@ export const ActivityBar: React.FC = () => {
   React.useEffect(() => pluginRegistry.subscribe(() => setTick((t) => t + 1)), []);
 
   // 从插件注册中心获取已启用的插件（按 order 排序）
-  const plugins = pluginRegistry.getEnabled().filter((plugin) => plugin.id !== 'plugin-manager');
+  const bottomNavigationPluginIds = new Set(['plugin-manager', 'database']);
+  const plugins = pluginRegistry.getEnabled().filter((plugin) => !bottomNavigationPluginIds.has(plugin.id));
 
   return (
     <div className="w-12 flex-shrink-0 border-r bg-muted flex flex-col items-center py-3 gap-1 select-none">
