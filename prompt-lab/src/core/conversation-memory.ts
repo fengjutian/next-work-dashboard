@@ -31,14 +31,37 @@ export function toMemoryCitation(source: MemorySource | MemoryCitation): MemoryC
 
 export interface ConversationMemoryProvider {
   readonly id: string;
-  sync(): Promise<{ documents: number; chunks: number }>;
+  sync(options?: MemorySyncOptions): Promise<MemoryIndexStats>;
   search(query: string, limit?: number): Promise<MemorySource[]>;
   removeDocument(filePath: string): Promise<void>;
+}
+
+export interface MemoryIndexStats {
+  documents: number;
+  chunks: number;
+  failedFiles: string[];
+  durationMs: number;
+  embeddingFallback: boolean;
+}
+
+export interface MemorySyncProgress {
+  phase: 'reading' | 'embedding' | 'saving';
+  completed: number;
+  total: number;
+  fileName?: string;
+}
+
+export interface MemorySyncOptions {
+  force?: boolean;
+  signal?: AbortSignal;
+  onProgress?: (progress: MemorySyncProgress) => void;
 }
 
 interface IndexedChunk extends Omit<MemorySource, 'score'> {
   vector: Record<string, number>;
   norm: number;
+  denseVector?: number[];
+  denseNorm?: number;
 }
 
 interface PersistedMemoryIndex {
@@ -51,7 +74,7 @@ const MAX_CHUNK_CHARS = 800;
 const CHUNK_OVERLAP = 100;
 const INDEX_DB_NAME = 'next-work-dashboard-memory';
 const INDEX_STORE_NAME = 'indexes';
-const INDEX_CACHE_KEY = 'conversation-history-v2';
+const INDEX_CACHE_KEY = 'conversation-history-v3';
 export const DEFAULT_MEMORY_CONTEXT_BUDGET = 6000;
 
 export function hashMemoryText(text: string): string {
@@ -98,6 +121,17 @@ async function writePersistedIndex(index: PersistedMemoryIndex): Promise<void> {
   });
 }
 
+async function clearPersistedIndex(): Promise<void> {
+  const db = await openIndexDb();
+  if (!db) return;
+  await new Promise<void>((resolve) => {
+    const transaction = db.transaction(INDEX_STORE_NAME, 'readwrite');
+    transaction.objectStore(INDEX_STORE_NAME).delete(INDEX_CACHE_KEY);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+  });
+}
+
 function tokens(text: string): string[] {
   const normalized = text.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
   const words = normalized.match(/[a-z0-9_\-.]{2,}/g) ?? [];
@@ -118,6 +152,17 @@ function similarity(a: Record<string, number>, aNorm: number, b: Record<string, 
   const [small, large] = Object.keys(a).length < Object.keys(b).length ? [a, b] : [b, a];
   let dot = 0;
   for (const [key, value] of Object.entries(small)) dot += value * (large[key] ?? 0);
+  return dot / (aNorm * bNorm);
+}
+
+function denseNorm(vector: number[]): number {
+  return Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+}
+
+function denseSimilarity(a: number[], aNorm: number, b: number[], bNorm: number): number {
+  if (!aNorm || !bNorm || a.length !== b.length) return 0;
+  let dot = 0;
+  for (let index = 0; index < a.length; index += 1) dot += a[index] * b[index];
   return dot / (aNorm * bNorm);
 }
 
@@ -168,16 +213,46 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   private signature = '';
   private documentSignatures: Record<string, string> = {};
   private cacheLoaded = false;
-  private searchConfig: Pick<MemoryConfig, 'minScore' | 'maxPerDocument'> = {
+  private searchConfig: MemoryConfig = {
+    provider: 'local', contextBudget: 6000, recallCount: 6,
     minScore: 0.08,
     maxPerDocument: 2,
+    autoIndex: true, embeddingBaseUrl: '', embeddingApiKey: '', embeddingModel: 'text-embedding-3-small',
   };
 
-  configure(config: Pick<MemoryConfig, 'minScore' | 'maxPerDocument'>): void {
-    this.searchConfig = {
+  configure(config: MemoryConfig): void {
+    this.searchConfig = { ...config,
       minScore: Math.max(0, Math.min(1, config.minScore)),
-      maxPerDocument: Math.max(1, Math.min(10, Math.floor(config.maxPerDocument))),
-    };
+      maxPerDocument: Math.max(1, Math.min(10, Math.floor(config.maxPerDocument))) };
+  }
+
+  private embeddingIdentity(): string {
+    return this.searchConfig.provider === 'openai'
+      ? `openai:${this.searchConfig.embeddingBaseUrl}:${this.searchConfig.embeddingModel}`
+      : 'local-sparse';
+  }
+
+  private async embedChunks(chunks: IndexedChunk[], options?: MemorySyncOptions): Promise<boolean> {
+    if (this.searchConfig.provider !== 'openai' || chunks.length === 0) return true;
+    if (!this.searchConfig.embeddingBaseUrl || !this.searchConfig.embeddingApiKey || !this.searchConfig.embeddingModel) return false;
+    for (let offset = 0; offset < chunks.length; offset += 32) {
+      if (options?.signal?.aborted) throw new Error('INDEX_CANCELLED');
+      const batch = chunks.slice(offset, offset + 32);
+      options?.onProgress?.({ phase: 'embedding', completed: offset, total: chunks.length });
+      const result = await window.electronAPI.createEmbeddings({
+        baseUrl: this.searchConfig.embeddingBaseUrl,
+        apiKey: this.searchConfig.embeddingApiKey,
+        model: this.searchConfig.embeddingModel,
+        inputs: batch.map((chunk) => chunk.content),
+      });
+      if (!result.success || result.embeddings?.length !== batch.length) return false;
+      result.embeddings.forEach((embedding, index) => {
+        batch[index].denseVector = embedding;
+        batch[index].denseNorm = denseNorm(embedding);
+      });
+    }
+    options?.onProgress?.({ phase: 'embedding', completed: chunks.length, total: chunks.length });
+    return true;
   }
 
   private async loadCache(): Promise<void> {
@@ -191,41 +266,92 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     }
   }
 
-  async sync(): Promise<{ documents: number; chunks: number }> {
+  async sync(options: MemorySyncOptions = {}): Promise<MemoryIndexStats> {
+    const startedAt = Date.now();
     await this.loadCache();
+    if (options.force) {
+      this.signature = '';
+      this.documentSignatures = {};
+      this.chunks = [];
+    }
     const files = await window.electronAPI.listConversations();
-    const currentSignatures = Object.fromEntries(files.map((file) => [file.path, `${file.modifiedAt}:${file.size}`]));
+    const identity = this.embeddingIdentity();
+    const currentSignatures = Object.fromEntries(files.map((file) => [file.path, `${file.modifiedAt}:${file.size}:${identity}`]));
     let signature = files.map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
-    if (signature === this.signature) return { documents: files.length, chunks: this.chunks.length };
+    if (signature === this.signature) return {
+      documents: files.length, chunks: this.chunks.length, failedFiles: [], durationMs: Date.now() - startedAt,
+      embeddingFallback: false,
+    };
     const changedFiles = files.filter((file) => this.documentSignatures[file.path] !== currentSignatures[file.path]);
     const currentPaths = new Set(files.map((file) => file.path));
     const retainedChunks = this.chunks.filter((chunk) =>
       currentPaths.has(chunk.filePath) && this.documentSignatures[chunk.filePath] === currentSignatures[chunk.filePath]
     );
-    const documents = await Promise.all(changedFiles.map(async (file) => {
+    const documents: Array<{ path: string; chunks: IndexedChunk[] } | null> = [];
+    for (let index = 0; index < changedFiles.length; index += 1) {
+      if (options.signal?.aborted) throw new Error('INDEX_CANCELLED');
+      const file = changedFiles[index];
+      options.onProgress?.({ phase: 'reading', completed: index, total: changedFiles.length, fileName: file.fileName });
+      if (options.signal?.aborted) throw new Error('INDEX_CANCELLED');
       const result = await window.electronAPI.readConversation(file.path);
-      return result.success ? { path: file.path, chunks: splitConversationDocument(file, result.content ?? '') } : null;
-    }));
-    for (const failed of changedFiles.filter((file) => !documents.some((document) => document?.path === file.path))) {
+      documents.push(result.success ? { path: file.path, chunks: splitConversationDocument(file, result.content ?? '') } : null);
+    }
+    options.onProgress?.({ phase: 'reading', completed: changedFiles.length, total: changedFiles.length });
+    const failedFiles = changedFiles.filter((file) => !documents.some((document) => document?.path === file.path));
+    for (const failed of failedFiles) {
       delete currentSignatures[failed.path];
     }
     signature = files.filter((file) => currentSignatures[file.path]).map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
-    this.chunks = [...retainedChunks, ...documents.flatMap((document) => document?.chunks ?? [])];
+    const newChunks = documents.flatMap((document) => document?.chunks ?? []);
+    const embeddingReady = await this.embedChunks(newChunks, options);
+    if (!embeddingReady && this.searchConfig.provider === 'openai') {
+      for (const file of changedFiles) delete currentSignatures[file.path];
+      signature = files.filter((file) => currentSignatures[file.path]).map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
+    }
+    this.chunks = [...retainedChunks, ...newChunks];
     this.signature = signature;
     this.documentSignatures = currentSignatures;
+    if (options.signal?.aborted) throw new Error('INDEX_CANCELLED');
+    options.onProgress?.({ phase: 'saving', completed: 0, total: 1 });
     await writePersistedIndex({ signature, chunks: this.chunks, documentSignatures: currentSignatures });
-    return { documents: files.length, chunks: this.chunks.length };
+    options.onProgress?.({ phase: 'saving', completed: 1, total: 1 });
+    return { documents: files.length, chunks: this.chunks.length,
+      failedFiles: failedFiles.map((file) => file.fileName), durationMs: Date.now() - startedAt,
+      embeddingFallback: this.searchConfig.provider === 'openai' && !embeddingReady };
+  }
+
+  async clear(): Promise<void> {
+    this.signature = '';
+    this.documentSignatures = {};
+    this.chunks = [];
+    this.cacheLoaded = true;
+    await clearPersistedIndex();
   }
 
   async search(query: string, limit = 6): Promise<MemorySource[]> {
     await this.sync();
     const encoded = vectorize(query);
+    let queryDense: number[] | undefined;
+    if (this.searchConfig.provider === 'openai' && this.searchConfig.embeddingBaseUrl && this.searchConfig.embeddingApiKey) {
+      const result = await window.electronAPI.createEmbeddings({
+        baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
+        model: this.searchConfig.embeddingModel, inputs: [query],
+      });
+      queryDense = result.success ? result.embeddings?.[0] : undefined;
+    }
+    const queryDenseNorm = queryDense ? denseNorm(queryDense) : 0;
     const normalizedQuery = query.toLocaleLowerCase();
     const ranked = this.chunks
       .map((chunk) => {
-        const cosine = similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm);
+        const sparse = similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm);
+        const dense = queryDense && chunk.denseVector
+          ? denseSimilarity(queryDense, queryDenseNorm, chunk.denseVector, chunk.denseNorm ?? denseNorm(chunk.denseVector))
+          : 0;
         const keyword = chunk.content.toLocaleLowerCase().includes(normalizedQuery) ? 1 : 0;
-        return { ...chunk, score: cosine * 0.75 + keyword * 0.25 };
+        const score = queryDense && chunk.denseVector
+          ? dense * 0.75 + sparse * 0.15 + keyword * 0.10
+          : sparse * 0.75 + keyword * 0.25;
+        return { ...chunk, score };
       })
       .filter((chunk) => chunk.score >= this.searchConfig.minScore)
       .sort((a, b) => b.score - a.score);
@@ -236,7 +362,9 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       perDocument.set(chunk.documentId, count + 1);
       return true;
     });
-    return diversified.slice(0, limit).map(({ vector: _vector, norm: _norm, ...source }) => source);
+    return diversified.slice(0, limit).map(({
+      vector: _vector, norm: _norm, denseVector: _denseVector, denseNorm: _denseNorm, ...source
+    }) => source);
   }
 
   async removeDocument(filePath: string): Promise<void> {

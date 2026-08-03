@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // favicon 获取（主进程 HTTP，绕过浏览器限制）
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
+  createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>
+    ipcRenderer.invoke('embedding:create', payload),
   // 通用 HTTP fetch（主进程，绕过 CORS）
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) =>
     ipcRenderer.invoke('fetch-url', url, options),

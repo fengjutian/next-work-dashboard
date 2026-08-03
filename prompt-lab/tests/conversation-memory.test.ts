@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashMemoryText, LocalConversationMemoryProvider, selectMemorySourcesForBudget, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
 import type { ConversationFile } from '../src/types/electron';
+import type { MemoryConfig } from '../src/store/types';
 
 const file: ConversationFile = {
   site: 'deepseek',
@@ -10,6 +11,12 @@ const file: ConversationFile = {
   size: 100,
   modifiedAt: 1,
   title: '项目架构讨论',
+};
+
+const embeddingConfig: MemoryConfig = {
+  provider: 'openai', contextBudget: 6000, recallCount: 6, minScore: 0.01,
+  maxPerDocument: 2, autoIndex: true, embeddingBaseUrl: 'https://embedding.example/v1',
+  embeddingApiKey: 'test-key', embeddingModel: 'test-embedding',
 };
 
 describe('conversation memory chunking', () => {
@@ -101,5 +108,45 @@ describe('local conversation memory index', () => {
     const results = await new LocalConversationMemoryProvider().search('向量知识库');
     expect(results[0]).toMatchObject({ filePath: file.path, fileName: file.fileName });
     expect(results[0].content).toContain('原始文件');
+  });
+
+  it('uses dense embeddings when the remote provider is configured', async () => {
+    const createEmbeddings = vi.fn(async (payload: { inputs: string[] }) => ({
+      success: true,
+      embeddings: payload.inputs.map((input) => input.includes('向量') ? [1, 0] : [0, 1]),
+    }));
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        listConversations: vi.fn(async () => [file]),
+        readConversation: vi.fn(async () => ({ success: true, content: '向量语义检索方案' })),
+        createEmbeddings,
+      },
+    });
+    const provider = new LocalConversationMemoryProvider();
+    provider.configure(embeddingConfig);
+    const results = await provider.search('向量检索');
+    expect(results).toHaveLength(1);
+    expect(createEmbeddings).toHaveBeenCalledTimes(2);
+    expect(results[0].score).toBeGreaterThan(0.7);
+  });
+
+  it('supports force rebuilding and cancellation progress', async () => {
+    const readConversation = vi.fn(async () => ({ success: true, content: '索引内容' }));
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: { listConversations: vi.fn(async () => [file]), readConversation },
+    });
+    const provider = new LocalConversationMemoryProvider();
+    await provider.sync();
+    await provider.sync({ force: true });
+    expect(readConversation).toHaveBeenCalledTimes(2);
+
+    const controller = new AbortController();
+    await expect(provider.sync({
+      force: true,
+      signal: controller.signal,
+      onProgress: () => controller.abort(),
+    })).rejects.toThrow('INDEX_CANCELLED');
   });
 });

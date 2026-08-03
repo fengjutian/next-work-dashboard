@@ -301,6 +301,9 @@ export const useStore = create<AppState>((set, get) => ({
     minScore: 0.08,
     maxPerDocument: 2,
     autoIndex: true,
+    embeddingBaseUrl: '',
+    embeddingApiKey: '',
+    embeddingModel: 'text-embedding-3-small',
   },
   setMemoryConfig: (patch) => {
     set((state) => {

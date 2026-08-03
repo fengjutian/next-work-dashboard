@@ -220,6 +220,33 @@ export function setupIPC(webviewPreloadPath: string) {
     return await fetchSiteFavicon(siteUrl);
   });
 
+  ipcMain.handle('embedding:create', async (_event, payload: {
+    baseUrl: string; apiKey: string; model: string; inputs: string[];
+  }) => {
+    try {
+      const baseUrl = String(payload.baseUrl || '').replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(baseUrl)) return { success: false, error: 'INVALID_BASE_URL' };
+      const inputs = Array.isArray(payload.inputs)
+        ? payload.inputs.slice(0, 64).map((input) => String(input).slice(0, 12000))
+        : [];
+      if (!inputs.length || !payload.model) return { success: false, error: 'INVALID_REQUEST' };
+      const response = await fetch(`${baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${payload.apiKey}` },
+        body: JSON.stringify({ model: payload.model, input: inputs }),
+      });
+      if (!response.ok) return { success: false, error: `HTTP_${response.status}: ${(await response.text()).slice(0, 300)}` };
+      const body = await response.json() as { data?: Array<{ index: number; embedding: number[] }> };
+      const ordered = [...(body.data ?? [])].sort((a, b) => a.index - b.index).map((item) => item.embedding);
+      if (ordered.length !== inputs.length || ordered.some((embedding) => !Array.isArray(embedding))) {
+        return { success: false, error: 'INVALID_EMBEDDING_RESPONSE' };
+      }
+      return { success: true, embeddings: ordered };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
   // ── 通用 HTTP fetch（绕过 CORS，供 AI 工具使用） ──
   ipcMain.handle('fetch-url', async (_event, url: string, options?: { headers?: Record<string, string> }) => {
     try {

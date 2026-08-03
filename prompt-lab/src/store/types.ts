@@ -146,12 +146,15 @@ export interface AiApiConfig {
 }
 
 export interface MemoryConfig {
-  provider: 'local';
+  provider: 'local' | 'openai';
   contextBudget: number;
   recallCount: number;
   minScore: number;
   maxPerDocument: number;
   autoIndex: boolean;
+  embeddingBaseUrl: string;
+  embeddingApiKey: string;
+  embeddingModel: string;
 }
 
 /**
