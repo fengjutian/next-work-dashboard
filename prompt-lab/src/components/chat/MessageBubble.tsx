@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Robot, Copy, Check, Wrench, RotateCcw, Edit3 } from '@/components/icons';
 import type { ToolCall, ToolResult } from '@/core';
+import type { MemoryCitation } from '@/core/conversation-memory';
 
 // ── 消息/会话类型 ──
 
@@ -17,6 +18,8 @@ export interface Message {
   comparisonId?: string;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
+  /** 本次回答使用的历史知识库原始来源。 */
+  memorySources?: MemoryCitation[];
 }
 
 // ── 代码块 ──

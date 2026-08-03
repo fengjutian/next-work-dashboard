@@ -14,6 +14,8 @@ import { ToolManagerDialog } from './chat/ToolManagerDialog';
 import { PromptManagerDialog } from './chat/PromptManagerDialog';
 import { RoleManagerDialog } from './chat/RoleManagerDialog';
 import { buildAttachmentContext, parseAttachment } from './chat/attachment-parser';
+import type { MemoryCitation } from '@/core/conversation-memory';
+import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './chat/MemorySourceView';
 
 interface ChatAttachment {
   key: string;
@@ -68,6 +70,7 @@ export const ChatPanel: React.FC = () => {
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [memoryPreview, setMemoryPreview] = useState<MemoryDocumentPreview | null>(null);
   const senderRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notifApi, contextHolder] = notification.useNotification();
@@ -98,7 +101,7 @@ export const ChatPanel: React.FC = () => {
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
     messages, systemPrompt, currentModel, compareModels, hasKey,
-    input, setInput, streaming, agentMode, setAgentMode, error,
+    input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, error,
     sysPromptOpen, setSysPromptOpen,
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
     handleSend, handleRegenerate, handleStop, handleClear, handleRetry,
@@ -269,6 +272,15 @@ export const ChatPanel: React.FC = () => {
     return last?.role === 'assistant' && last.content.trim().length > 0;
   }, [messages, streaming]);
 
+  const openMemorySource = useCallback(async (source: MemoryCitation) => {
+    const result = await window.electronAPI.readConversation(source.filePath);
+    if (!result.success) {
+      notifApi.error({ message: '无法读取历史原文件', description: result.error });
+      return;
+    }
+    setMemoryPreview({ source, content: result.content ?? '' });
+  }, [notifApi]);
+
   // ── Sources 数据（Agent 工具结果中的搜索引用） ──
   const sourcesItems = useMemo(() => {
     if (!agentMode) return [];
@@ -306,6 +318,7 @@ export const ChatPanel: React.FC = () => {
     const origRole = extra?.originalRole as string | undefined;
     const toolCalls = extra?.toolCalls;
     const toolResults = extra?.toolResults;
+    const memorySources = extra?.memorySources as MemoryCitation[] | undefined;
     const text = typeof content === 'string' ? content : String(content ?? '');
 
     if (origRole === 'tool') {
@@ -325,6 +338,7 @@ export const ChatPanel: React.FC = () => {
         <div>
           {toolCalls && toolCalls.length > 0 && <ToolCallCard calls={toolCalls} results={toolResults} />}
           {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="text-sm" />}
+          {!!memorySources?.length && !streaming && <MemorySourceList sources={memorySources} onOpen={(source) => void openMemorySource(source)} />}
         </div>
       );
     }
@@ -403,6 +417,10 @@ export const ChatPanel: React.FC = () => {
               </div>
               <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-warning/10 bg-warning/10 text-warning text-warning' : 'bg-muted text-muted-foreground'}`}
                 onClick={() => setAgentMode((v) => !v)}>{agentMode ? 'Agent ✓' : 'Agent'}</button>
+              <button className={`h-6 rounded-full px-1.5 text-[10px] font-medium transition-colors ${memoryEnabled ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}`}
+                onClick={() => setMemoryEnabled((value) => !value)} title="检索已保存的历史对话并附带原文来源">
+                {memoryEnabled ? '历史知识库 ✓' : '历史知识库'}
+              </button>
               <button onClick={() => setRoleManagerOpen(true)}
                 className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">
                 <Bot className="h-3 w-3" /><span>{activeRole ? activeRole.name : '角色'}</span></button>
@@ -505,7 +523,10 @@ export const ChatPanel: React.FC = () => {
                           </button>
                         </div>
                         {message.content ? (
-                          <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="text-sm" />
+                          <div>
+                            <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="text-sm" />
+                            {!!message.memorySources?.length && !streaming && <MemorySourceList sources={message.memorySources} onOpen={(source) => void openMemorySource(source)} />}
+                          </div>
                         ) : (
                           <div className="py-6 text-center text-xs text-muted-foreground">
                             {streaming ? '生成中…' : '暂无回答'}
@@ -634,6 +655,7 @@ export const ChatPanel: React.FC = () => {
             </div>
           </div>
         )}
+        <MemoryDocumentDialog preview={memoryPreview} onClose={() => setMemoryPreview(null)} />
       </XProvider>
     </ConfigProvider>
   );

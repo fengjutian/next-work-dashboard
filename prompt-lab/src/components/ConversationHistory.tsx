@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile, ConversationSearchResult } from '@/types/electron';
+import { conversationMemory } from '@/core/conversation-memory';
 
 function Highlight({ text, query }: { text: string; query: string }) {
   if (!query) return <>{text}</>;
@@ -59,6 +60,8 @@ export const ConversationHistory: React.FC = () => {
   const [activeFile, setActiveFile] = useState<ConversationFile | null>(null);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [indexStats, setIndexStats] = useState<{ documents: number; chunks: number } | null>(null);
   const { toast } = useToast();
   const conversationSavedAt = useStore((state) => state.conversationSavedAt);
 
@@ -68,6 +71,14 @@ export const ConversationHistory: React.FC = () => {
   }, [toast]);
 
   useEffect(() => { void loadList(); }, [loadList, conversationSavedAt]);
+
+  useEffect(() => {
+    let active = true;
+    void conversationMemory.sync().then((stats) => {
+      if (active) setIndexStats(stats);
+    }).catch(() => { /* The manual retry button remains available. */ });
+    return () => { active = false; };
+  }, [conversationSavedAt]);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -99,6 +110,7 @@ export const ConversationHistory: React.FC = () => {
     const result = await window.electronAPI.deleteConversation(file.path);
     if (!result.success) { toast('删除失败', 'error'); return; }
     if (activeFile?.path === file.path) { setActiveFile(null); setContent(''); }
+    await conversationMemory.removeDocument(file.path);
     toast('已删除', 'success');
     await loadList();
     if (query.trim().length >= 2) setResults(await window.electronAPI.searchConversations(query.trim()));
@@ -117,6 +129,16 @@ export const ConversationHistory: React.FC = () => {
   }, [activeFile, toast]);
 
   const totalMatches = results.reduce((sum, result) => sum + result.matchCount, 0);
+
+  const rebuildIndex = useCallback(async () => {
+    setIndexing(true);
+    try {
+      const stats = await conversationMemory.sync();
+      setIndexStats(stats);
+      toast(`已索引 ${stats.documents} 个文件、${stats.chunks} 个片段`, 'success');
+    } catch { toast('历史知识库索引失败', 'error'); }
+    finally { setIndexing(false); }
+  }, [toast]);
 
   return (
     <div className="flex h-full">
@@ -137,6 +159,12 @@ export const ConversationHistory: React.FC = () => {
           </div>
           {query.trim().length === 1 && <p className="mt-1 text-[10px] text-muted-foreground">再输入 1 个字符开始搜索</p>}
           {query.trim().length >= 2 && !searching && <p className="mt-1 text-[10px] text-muted-foreground">找到 {totalMatches} 处结果 / {results.length} 个文件</p>}
+          <div className="mt-2 flex items-center justify-between rounded bg-muted/50 px-2 py-1.5 text-[10px] text-muted-foreground">
+            <span>{indexStats ? `知识库：${indexStats.documents} 文件 / ${indexStats.chunks} 片段` : '历史知识库尚未索引'}</span>
+            <button className="text-primary disabled:opacity-50" disabled={indexing} onClick={() => void rebuildIndex()}>
+              {indexing ? '索引中…' : indexStats ? '更新索引' : '构建索引'}
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {!searching && displayed.length === 0 ? (

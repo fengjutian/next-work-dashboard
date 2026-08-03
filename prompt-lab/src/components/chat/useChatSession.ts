@@ -7,6 +7,8 @@ import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 import type { Prompt } from '@/store/types';
+import { useConversationMemory } from './useConversationMemory';
+import { toMemoryCitation, type MemorySource } from '@/core/conversation-memory';
 
 // ── Bubble.List 兼容的消息状态 ──
 export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'error' | 'abort';
@@ -48,6 +50,7 @@ export function toBubbleItems(messages: Message[], streaming: boolean, error: st
         timestamp: msg.timestamp,
         model: msg.model,
         comparisonId: msg.comparisonId,
+        memorySources: msg.memorySources,
         originalRole: msg.role,
         isLastAi: msg.role === 'assistant' && isLastAi,
       },
@@ -97,7 +100,13 @@ export function useChatSession() {
     try {
       const saved = dbLoadChatSessions<Session[]>();
       if (saved && saved.length > 0) {
-        setSessions(saved);
+        setSessions(saved.map((session) => ({
+          ...session,
+          messages: session.messages.map((message) => ({
+            ...message,
+            memorySources: message.memorySources?.map((source) => toMemoryCitation(source as MemorySource)),
+          })),
+        })));
         setActiveSessionId(saved[0].id);
         sessionsLoaded.current = true;
         return;
@@ -141,6 +150,7 @@ export function useChatSession() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [agentMode, setAgentMode] = useState(false);
+  const { memoryEnabled, setMemoryEnabled, enrichUserMessage } = useConversationMemory();
   const [error, setError] = useState<string | null>(null);
   const [sysPromptOpen, setSysPromptOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -332,11 +342,12 @@ export function useChatSession() {
     if (!text || streaming) return;
     if (!directText) setInput('');
     setError(null);
+    const memory = await enrichUserMessage(text, contextText);
     const userMsg: Message = {
       id: `u-${Date.now()}`,
       role: 'user',
       content: text,
-      contextContent: contextText?.trim() || undefined,
+      contextContent: memory.contextContent,
       timestamp: Date.now(),
     };
     const comparisonId = `cmp-${Date.now()}`;
@@ -348,6 +359,7 @@ export function useChatSession() {
       timestamp: Date.now(),
       model,
       comparisonId: models.length > 1 ? comparisonId : undefined,
+      memorySources: memory.sources,
     }));
     const newHistory = [...messages, userMsg];
     updateSession(() => [...newHistory, ...assistantMsgs]);
@@ -399,7 +411,7 @@ export function useChatSession() {
         ));
       }
     } finally { setStreaming(false); }
-  }, [input, streaming, messages, agentMode, currentModel, compareModels, runChat, runAgentChat, updateSession]);
+  }, [input, streaming, messages, agentMode, enrichUserMessage, currentModel, compareModels, runChat, runAgentChat, updateSession]);
 
   // ── 重新生成 / 编辑 ──
   const handleRegenerate = useCallback(async () => {
@@ -492,7 +504,7 @@ export function useChatSession() {
     // state
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
     messages, systemPrompt, currentModel, compareModels, hasKey,
-    input, setInput, streaming, agentMode, setAgentMode, error,
+    input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, error,
     sysPromptOpen, setSysPromptOpen,
     // handlers
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
