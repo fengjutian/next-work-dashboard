@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, Role } from './types';
+import type { Prompt, PromptVariable, SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, MemoryConfig, Role } from './types';
 import { DEFAULT_SITES } from './types';
 import { DEFAULT_PROMPTS } from './defaultPrompts';
 import { DEFAULT_ROLES } from './defaultRoles';
@@ -77,6 +77,9 @@ interface AppState {
   // AI API
   aiApi: AiApiConfig;
   setAiApi: (patch: Partial<AiApiConfig>) => void;
+
+  memoryConfig: MemoryConfig;
+  setMemoryConfig: (patch: Partial<MemoryConfig>) => void;
 
   // 对话保存信号
   conversationSavedAt: number;
@@ -291,6 +294,25 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
+  memoryConfig: {
+    provider: 'local',
+    contextBudget: 6000,
+    recallCount: 6,
+    minScore: 0.08,
+    maxPerDocument: 2,
+    autoIndex: true,
+  },
+  setMemoryConfig: (patch) => {
+    set((state) => {
+      const next = { ...state.memoryConfig, ...patch };
+      if (isDbReady()) {
+        try { dbSetSetting('memoryConfig', JSON.stringify(next)); } catch { /* ignore */ }
+        flushDbToDisk();
+      }
+      return { memoryConfig: next };
+    });
+  },
+
   conversationSavedAt: 0,
   notifyConversationSaved: () => set({ conversationSavedAt: Date.now() }),
 
@@ -366,6 +388,13 @@ export const useStore = create<AppState>((set, get) => ({
       }
     } catch (err) {
       console.warn('[store] Failed to load aiApi from DB:', err);
+    }
+
+    try {
+      const raw = dbGetSetting('memoryConfig');
+      if (raw) set({ memoryConfig: { ...get().memoryConfig, ...JSON.parse(raw) } });
+    } catch (err) {
+      console.warn('[store] Failed to load memoryConfig from DB:', err);
     }
 
     // 加载角色

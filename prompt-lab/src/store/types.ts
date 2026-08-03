@@ -145,6 +145,15 @@ export interface AiApiConfig {
   baseUrl: string;
 }
 
+export interface MemoryConfig {
+  provider: 'local';
+  contextBudget: number;
+  recallCount: number;
+  minScore: number;
+  maxPerDocument: number;
+  autoIndex: boolean;
+}
+
 /**
  * 角色 Agent 定义 — 预定义人物设定和工具权限
  */

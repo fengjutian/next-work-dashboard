@@ -64,6 +64,7 @@ export const ConversationHistory: React.FC = () => {
   const [indexStats, setIndexStats] = useState<{ documents: number; chunks: number } | null>(null);
   const { toast } = useToast();
   const conversationSavedAt = useStore((state) => state.conversationSavedAt);
+  const memoryConfig = useStore((state) => state.memoryConfig);
 
   const loadList = useCallback(async () => {
     try { setFiles(await window.electronAPI.listConversations()); }
@@ -74,11 +75,13 @@ export const ConversationHistory: React.FC = () => {
 
   useEffect(() => {
     let active = true;
+    if (!memoryConfig.autoIndex) return () => { active = false; };
+    conversationMemory.configure(memoryConfig);
     void conversationMemory.sync().then((stats) => {
       if (active) setIndexStats(stats);
     }).catch(() => { /* The manual retry button remains available. */ });
     return () => { active = false; };
-  }, [conversationSavedAt]);
+  }, [conversationSavedAt, memoryConfig]);
 
   useEffect(() => {
     const normalized = query.trim();

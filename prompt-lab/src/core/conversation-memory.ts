@@ -1,4 +1,5 @@
 import type { ConversationFile } from '@/types/electron';
+import type { MemoryConfig } from '@/store/types';
 
 export interface MemorySource {
   documentId: string;
@@ -167,6 +168,17 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   private signature = '';
   private documentSignatures: Record<string, string> = {};
   private cacheLoaded = false;
+  private searchConfig: Pick<MemoryConfig, 'minScore' | 'maxPerDocument'> = {
+    minScore: 0.08,
+    maxPerDocument: 2,
+  };
+
+  configure(config: Pick<MemoryConfig, 'minScore' | 'maxPerDocument'>): void {
+    this.searchConfig = {
+      minScore: Math.max(0, Math.min(1, config.minScore)),
+      maxPerDocument: Math.max(1, Math.min(10, Math.floor(config.maxPerDocument))),
+    };
+  }
 
   private async loadCache(): Promise<void> {
     if (this.cacheLoaded) return;
@@ -215,12 +227,12 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
         const keyword = chunk.content.toLocaleLowerCase().includes(normalizedQuery) ? 1 : 0;
         return { ...chunk, score: cosine * 0.75 + keyword * 0.25 };
       })
-      .filter((chunk) => chunk.score >= 0.08)
+      .filter((chunk) => chunk.score >= this.searchConfig.minScore)
       .sort((a, b) => b.score - a.score);
     const perDocument = new Map<string, number>();
     const diversified = ranked.filter((chunk) => {
       const count = perDocument.get(chunk.documentId) ?? 0;
-      if (count >= 2) return false;
+      if (count >= this.searchConfig.maxPerDocument) return false;
       perDocument.set(chunk.documentId, count + 1);
       return true;
     });
