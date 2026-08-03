@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Sparkles, Loader2 } from '../icons';
+import { Sparkles, Loader2 } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import { quickExtract } from '@/core';

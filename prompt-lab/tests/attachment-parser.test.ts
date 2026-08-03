@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAttachmentContext } from '../src/components/chat/attachment-parser';
+import { buildAttachmentContext } from '../src/plugins/chat/attachment-parser';
 
 describe('聊天附件上下文', () => {
   it('把解析后的文件内容包装成模型可识别的附件区块', () => {

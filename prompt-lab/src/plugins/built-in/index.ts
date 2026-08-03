@@ -3,10 +3,10 @@
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
 import { Sparkles, MessageSquare, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code } from '@/components/icons';
-import { AIPanel } from '@/components/AIPanel';
-import { PromptSidebar } from '@/components/PromptSidebar';
-import { ConversationHistory } from '@/components/ConversationHistory';
-import { KnowledgeGraph } from '@/components/KnowledgeGraph';
+import { AIPanel } from '../ai/AIPanel';
+import { PromptSidebar } from '../prompts/PromptSidebar';
+import { ConversationHistory } from '../history/ConversationHistory';
+import { KnowledgeGraph } from '../knowledge-graph/KnowledgeGraph';
 import { NotesPanel } from '../notes';
 import { WordPreviewPanel } from '../word-preview';
 import { ExcelPreviewPanel } from '../excel-preview';
@@ -18,8 +18,8 @@ import { WereadPanel } from '../weread';
 import { TranslationPanel } from '../translation';
 import { WindyPanel } from '../windy';
 import { TerminalPluginPanel } from '../terminal';
-import { DatabaseBrowser } from '@/components/DatabaseBrowser';
-import { ChatPanel } from '@/components/ChatPanel';
+import { DatabaseBrowser } from '../database/DatabaseBrowser';
+import { ChatPanel } from '../chat/ChatPanel';
 import { CodeEditorPanel } from '../code-editor';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';

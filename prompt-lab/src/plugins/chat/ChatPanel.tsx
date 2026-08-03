@@ -11,16 +11,16 @@ import {
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import { useChatSession, MODELS, toBubbleItems } from './chat/useChatSession';
-import { ToolCallCard } from './chat/MessageBubble';
+import { useChatSession, MODELS, toBubbleItems } from './useChatSession';
+import { ToolCallCard } from './MessageBubble';
 import { setToolEnabled } from '@/core/tools';
-import { ToolManagerDialog } from './chat/ToolManagerDialog';
-import { PromptManagerDialog } from './chat/PromptManagerDialog';
-import { RoleManagerDialog } from './chat/RoleManagerDialog';
-import { VariableFillDialog } from './VariableFillDialog';
-import { buildAttachmentContext, parseAttachment } from './chat/attachment-parser';
+import { ToolManagerDialog } from './ToolManagerDialog';
+import { PromptManagerDialog } from './PromptManagerDialog';
+import { RoleManagerDialog } from './RoleManagerDialog';
+import { VariableFillDialog } from '@/components/VariableFillDialog';
+import { buildAttachmentContext, parseAttachment } from './attachment-parser';
 import type { MemoryCitation } from '@/core/conversation-memory';
-import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './chat/MemorySourceView';
+import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
 
 interface ChatAttachment {
   key: string;

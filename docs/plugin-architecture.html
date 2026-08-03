@@ -1,195 +1,81 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>插件架构设计 — next-work-dashboard</title>
-<style>
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#fff;color:#111827;line-height:1.7;margin:0}
-  .wrap{max-width:840px;margin:0 auto;padding:48px 24px 80px}
-  a{color:#2563eb;text-decoration:none} a:hover{text-decoration:underline}
-  h1{font-size:2rem;margin-bottom:8px;color:#111827}
-  h2{font-size:1.3rem;margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;color:#111827}
-  h3{font-size:1.05rem;margin:24px 0 10px;color:#1f2937}
-  table{width:100%;border-collapse:collapse;margin:12px 0}
-  th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:.88rem}
-  th{color:#6b7280}
-  td{color:#374151}
-  code{background:#f3f4f6;color:#1f2937;padding:1px 6px;border-radius:4px;font-size:.85em}
-  pre{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;overflow-x:auto;font-size:.83rem;line-height:1.5;color:#1f2937}
-  .back{margin-bottom:24px;font-size:.85rem}
-  .card{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin:12px 0}
-  pre.diagram{background:transparent;border:none;padding:0;font-size:.82rem;line-height:1.4}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>插件系统 — next-work-dashboard</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;line-height:1.7;background:#fff}.page{max-width:980px;margin:auto;padding:48px 24px 96px}h1{font-size:2.25rem;margin:0 0 8px;color:#111827}h2{margin-top:42px;color:#111827;border-bottom:1px solid #e5e7eb;padding-bottom:8px}h3{margin-top:28px;color:#111827}.muted{color:#6b7280}.notice{padding:14px 18px;border-left:4px solid #7c3aed;background:#f5f3ff;border-radius:6px}pre{padding:18px;overflow:auto;background:#111827;color:#e5e7eb;border-radius:10px}code{font-family:"SFMono-Regular",Consolas,monospace}p code,li code,td code{padding:2px 5px;background:#f3f4f6;color:#374151;border-radius:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;vertical-align:top}th{color:#4b5563;background:#f9fafb}a{color:#2563eb}.risk{color:#991b1b;background:#fef2f2;border-left-color:#dc2626}ul{padding-left:22px}@media(max-width:640px){.page{padding:28px 16px}h1{font-size:1.8rem}table{font-size:.88rem}}
+  </style>
 </head>
-<body>
-<div class="wrap">
+<body><main class="page">
+  <h1>插件系统</h1>
+  <p class="muted">当前实现摘要 · 2026-08-03</p>
+  <p class="notice">完整接口、SDK 示例、Manifest 格式、关键文件和路线图请查看 <a href="plugin-architecture.md">Markdown 主文档</a>。</p>
 
-<div class="back"><a href="index.html">← 返回首页</a></div>
+  <h2>架构</h2>
+  <pre><code>内置 React 插件 ───────────────────┐
+用户 Kernel 插件 ── DynamicPlugin ─┼─&gt; PluginRegistry
+用户 Sandbox 插件 ─ iframe/Bridge ─┘        │
+                                             ├─ ActivityBar / TitleBar
+                                             ├─ App 主面板
+                                             ├─ CommandPalette
+                                             └─ PluginStatusBar</code></pre>
 
-<h1>插件架构设计文档</h1>
+  <table>
+    <tr><th>模式</th><th>运行位置</th><th>安全边界</th></tr>
+    <tr><td>内置插件</td><td>宿主 React 树</td><td>随应用编译，完全信任</td></tr>
+    <tr><td>Sandbox</td><td><code>sandbox="allow-scripts"</code> iframe</td><td>CSP、权限和 postMessage Bridge</td></tr>
+    <tr><td>Kernel</td><td>Renderer 宿主上下文</td><td>无可靠隔离，仅限可信来源</td></tr>
+  </table>
 
-<h2>1. 概述</h2>
-<p>插件系统采用<strong>双层架构</strong>：内核 React 插件 + 用户沙箱插件，统一通过 <code>PluginRegistry</code>（全局单例）管理生命周期。ActivityBar 渲染所有已启用插件的图标按钮，点击后主内容区渲染对应面板。</p>
+  <h2>Registry 与生命周期</h2>
+  <p><code>PluginRegistry</code> 统一负责注册、启用状态、命令、生命周期和资源回收。React 组件通过基于 <code>useSyncExternalStore</code> 的 <code>usePluginRegistryVersion()</code> 订阅变化。</p>
+  <pre><code>inactive → activating → active
+    ↑                       │
+    └──── deactivating ─────┘
 
-<pre class="diagram">
-用户操作 → ActivityBar → PluginRegistry.getEnabled()
-                            │
-            ┌───────────────┼───────────────┐
-            ▼               ▼               ▼
-       内置 Plugin      用户 Plugin     用户 Plugin
-       (React 组件)     (旧版 Markdown)  (新版 iframe)
-                            │               │
-                            └───────┬───────┘
-                                    ▼
-                            DynamicPlugin
-                                    │
-                            PluginSandbox (iframe)
-                                    │
-                            postMessage ◄──► usePluginBridge</pre>
+激活异常 → error</code></pre>
+  <p>插件可以实现异步 <code>activate(context)</code> 和 <code>deactivate()</code>。通过 <code>context.subscriptions.add()</code> 与 <code>context.commands.register()</code> 注册的资源，会在禁用、覆盖或卸载时自动清理。</p>
 
-<h2>2. 内核插件层（Plugin 接口）</h2>
+  <h2>当前内置插件</h2>
+  <p>共 18 个：AI、AI 对话、提示词、知识库、知识图谱、便签、微信读书、Windy、插件管理、终端、数据库、百度翻译、Word、Excel、PPT、Excalidraw、PDF 和代码编辑器。</p>
 
-<h3>接口定义</h3>
-<pre><code>// src/plugins/types.ts
-interface Plugin {
-  id: string;                                    // 唯一标识
-  name: string;                                  // 显示名
-  icon: ComponentType&lt;{ className?: string }&gt;;   // 图标组件
-  component: FC;                                 // 主面板 React 组件
-  enabled: boolean;                              // 启用/禁用
-  order: number;                                 // 排序权重
+  <h2>Sandbox 安全约束</h2>
+  <ul>
+    <li>iframe 不启用 <code>allow-same-origin</code>，不能直接读取宿主 DOM 和存储。</li>
+    <li>Host 校验消息来源、协议结构、参数数量和 256 KB 消息上限。</li>
+    <li>SDK 请求具有 30 秒超时。</li>
+    <li>8 类权限控制 Store、剪贴板、注入、外链、数据、预览和文件操作。</li>
+    <li>私有存储按插件 ID 隔离，单插件限制 512 KB。</li>
+    <li>外链只允许 HTTP、HTTPS 和 mailto，禁止 URL 内嵌凭据。</li>
+  </ul>
+
+  <h2>.nwd v1</h2>
+  <pre><code>{
+  "format": "nwd-v1",
+  "manifest": {
+    "id": "example.dashboard",
+    "name": "Example Dashboard",
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "runtime": "sandbox",
+    "permissions": ["store.read", "data"]
+  },
+  "script": "PluginSDK.ui.setContent('&lt;h1&gt;Hello&lt;/h1&gt;')"
 }</code></pre>
+  <p>导入器会校验 2 MB 文件上限、格式、语义版本、API 版本、ID、权限、运行时和代码字段。Kernel 包还需要显式高风险确认。</p>
 
-<h3>PluginRegistry API</h3>
-<table>
-<tr><th>方法</th><th>说明</th></tr>
-<tr><td><code>register(plugin)</code></td><td>注册插件，id 重复则覆盖</td></tr>
-<tr><td><code>registerAll(plugins)</code></td><td>批量注册</td></tr>
-<tr><td><code>unregister(id)</code></td><td>卸载插件</td></tr>
-<tr><td><code>get(id)</code></td><td>获取单个插件</td></tr>
-<tr><td><code>getAll()</code></td><td>按 order 排序返回全部</td></tr>
-<tr><td><code>getEnabled()</code></td><td>返回已启用的插件</td></tr>
-<tr><td><code>setEnabled(id, enabled)</code></td><td>切换启用状态</td></tr>
-<tr><td><code>subscribe(fn)</code></td><td>订阅变更，返回取消函数</td></tr>
-</table>
+  <h2>Kernel 风险</h2>
+  <p class="notice risk">Kernel 仍通过 <code>new Function()</code> 在 Renderer 中执行。注入 API 白名单不能构成恶意代码隔离；真正的隔离需要 Electron Utility Process。在此之前只能安装完全可信的 Kernel 插件。</p>
 
-<h3>7 个内置插件</h3>
-<table>
-<tr><th>id</th><th>名称</th><th>组件</th><th>order</th></tr>
-<tr><td>ai</td><td>AI</td><td>AIPanel — WebView 多标签浏览器</td><td>0</td></tr>
-<tr><td>prompts</td><td>提示词</td><td>PromptSidebar — 提示词 CRUD</td><td>1</td></tr>
-<tr><td>history</td><td>历史</td><td>ConversationHistory — 对话记录</td><td>2</td></tr>
-<tr><td>graph</td><td>知识图谱</td><td>KnowledgeGraph — G6 图谱</td><td>3</td></tr>
-<tr><td>notes</td><td>便签</td><td>NotesPanel</td><td>4</td></tr>
-<tr><td>weread</td><td>微信读书</td><td>WereadPanel</td><td>5</td></tr>
-<tr><td>plugin-manager</td><td>插件管理</td><td>PluginManagerPanel</td><td>6</td></tr>
-</table>
-
-<h2>3. 用户沙箱插件层</h2>
-<p>用户编写的 JavaScript 脚本运行在<strong>隔离 iframe</strong> 中，通过 <code>postMessage</code> 与 Host 通信。</p>
-
-<h3>架构图</h3>
-<pre class="diagram">
-┌──────────────────────────────────────────┐
-│  Host (React Renderer)                   │
-│  usePluginBridge                         │
-│  ├─ store    → 读取 Zustand 状态快照      │
-│  ├─ actions  → 剪贴板 / 注入 / 打开URL    │
-│  ├─ data     → localStorage 私有存储      │
-│  ├─ ui       → Toast / 主题令牌 / 容器    │
-│  ├─ preview  → Markdown / 图片 / PDF      │
-│  └─ file     → Electron 文件对话框        │
-│         ▲                                │
-│         │ postMessage                    │
-│         ▼                                │
-│  ┌──────────────────────────────────┐    │
-│  │ iframe (sandbox="allow-scripts") │    │
-│  │ CSP: default-src 'none'          │    │
-│  │ &lt;script&gt; SDK 运行时 &lt;/script&gt;    │    │
-│  │ &lt;script&gt; 用户脚本  &lt;/script&gt;     │    │
-│  └──────────────────────────────────┘    │
-└──────────────────────────────────────────┘</pre>
-
-<h3>postMessage 协议</h3>
-<pre><code>interface SandboxMessage {
-  requestId: string;   // UUID，响应时原样返回
-  channel: 'store' | 'ui' | 'actions' | 'data' | 'preview' | 'file';
-  method: string;      // 方法名
-  args?: unknown[];    // 参数数组
-  ok?: boolean;        // 响应：是否成功
-  result?: unknown;    // 响应：返回值
-  error?: string;      // 响应：错误信息
-  event?: string;      // 事件名
-  payload?: unknown;   // 事件数据
-}</code></pre>
-
-<h3>权限模型</h3>
-<table>
-<tr><th>权限</th><th>对应能力</th></tr>
-<tr><td><code>store.read</code></td><td>读取提示词、站点、标签页、对话历史、主题</td></tr>
-<tr><td><code>clipboard</code></td><td>读写系统剪贴板</td></tr>
-<tr><td><code>inject</code></td><td>向 AI 站点 webview 注入提示词</td></tr>
-<tr><td><code>external.open</code></td><td>在外部浏览器打开 URL</td></tr>
-<tr><td><code>data</code></td><td>插件私有键值存储（localStorage 隔离）</td></tr>
-<tr><td><code>preview</code></td><td>渲染 Markdown / 图片 / PDF / 代码</td></tr>
-<tr><td><code>file.read</code></td><td>Electron 文件打开对话框</td></tr>
-<tr><td><code>file.write</code></td><td>Electron 文件保存对话框</td></tr>
-</table>
-
-<h3>SDK API 参考</h3>
-<div class="card">
-<pre><code>// ── store ──
-await PluginSDK.store.getPrompts()
-await PluginSDK.store.getSites()
-await PluginSDK.store.getTabs()
-await PluginSDK.store.getActiveTab()
-PluginSDK.store.subscribe('prompts-changed', fn)
-
-// ── ui ──
-await PluginSDK.ui.setContent('&lt;h1&gt;Hello&lt;/h1&gt;')
-await PluginSDK.ui.showToast('操作成功', 'success')
-
-// ── actions ──
-await PluginSDK.actions.injectPrompt('deepseek', '你好', true)
-await PluginSDK.actions.copyToClipboard('text')
-await PluginSDK.actions.openUrl('https://...')
-
-// ── data (私有存储) ──
-await PluginSDK.data.set('key', { foo: 'bar' })
-await PluginSDK.data.get('key')
-
-// ── preview ──
-await PluginSDK.preview.markdown('# 标题')
-await PluginSDK.preview.code('const x = 1;', 'javascript')
-
-// ── file ──
-await PluginSDK.file.pickOpen({ accept: '.json' })
-await PluginSDK.file.pickSave(data, 'export.json')</code></pre>
-</div>
-
-<h2>4. 关键文件索引</h2>
-<table>
-<tr><th>文件</th><th>职责</th></tr>
-<tr><td><code>src/plugins/types.ts</code></td><td>Plugin 接口定义</td></tr>
-<tr><td><code>src/plugins/registry.ts</code></td><td>PluginRegistry 单例</td></tr>
-<tr><td><code>src/plugins/built-in/index.ts</code></td><td>7 个内置插件注册</td></tr>
-<tr><td><code>src/plugins/built-in/dynamic.plugin.tsx</code></td><td>用户插件通用渲染组件</td></tr>
-<tr><td><code>src/plugins/sandbox/PluginSandbox.tsx</code></td><td>iframe 容器（srcdoc 注入）</td></tr>
-<tr><td><code>src/plugins/sandbox/plugin-sdk.ts</code></td><td>SDK 运行时类型定义</td></tr>
-<tr><td><code>src/plugins/sandbox/usePluginBridge.ts</code></td><td>Host 侧 postMessage 桥接器</td></tr>
-</table>
-
-<h2>5. 设计要点</h2>
-<ol>
-  <li><strong>安全隔离</strong> — iframe <code>sandbox="allow-scripts"</code> + CSP <code>default-src 'none'</code></li>
-  <li><strong>权限最小化</strong> — 每个 API 调用前校验 <code>permissions</code> 数组</li>
-  <li><strong>私有存储隔离</strong> — <code>localStorage</code> key 前缀 <code>pksdk:data:&lt;pluginId&gt;</code></li>
-  <li><strong>向后兼容</strong> — 同时支持旧版 Markdown <code>content</code> 和新版 <code>script</code> 沙箱</li>
-  <li><strong>响应式注册</strong> — <code>subscribe()</code> 支持 React 组件重渲染</li>
-  <li><strong>事件推送</strong> — Host 可主动推送状态变更事件到 iframe</li>
-</ol>
-
-</div>
-</body>
+  <h2>下一步</h2>
+  <ol>
+    <li>隔离或关闭用户 Kernel 插件。</li>
+    <li>统一插件定义、配置、授权和私有数据存储。</li>
+    <li>增加动态 import、按需挂载与 keepAlive。</li>
+    <li>完善 views、menus、settings、fileEditors 扩展点。</li>
+    <li>增加更新、回滚、日志、崩溃熔断和安全模式。</li>
+  </ol>
+</main></body>
 </html>

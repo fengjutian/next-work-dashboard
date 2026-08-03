@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { toBubbleItems } from '../src/components/chat/useChatSession';
-import type { Message } from '../src/components/chat/MessageBubble';
+import { toBubbleItems } from '../src/plugins/chat/useChatSession';
+import type { Message } from '../src/plugins/chat/MessageBubble';
 
 describe('多模型回答', () => {
   it('把模型和对比标识传给消息渲染层', () => {

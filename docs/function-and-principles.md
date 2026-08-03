@@ -51,7 +51,7 @@
 | 一键注入 | 点击提示词 → 自动填入 AI 输入框，支持填充后自动发送 |
 | 对话保存 | 提取 WebView 中的对话历史，保存为 Markdown |
 | 知识图谱 | G6 可视化提示词与对话之间的关联 |
-| 插件系统 | 双层架构：7 个内置面板 + 用户自定义 JS 沙箱插件 |
+| 插件系统 | 统一 Registry：18 个内置插件 + Sandbox / Kernel 用户插件 |
 | 浮动面板 | 全局 Ctrl+K 唤出 Spotlight 风格搜索面板 |
 | 主题切换 | 亮色 / 暗色 / 跟随系统 |
 | 代码编辑器 | 工作区文件树 + Monaco 编辑器 + Git 集成 |
@@ -87,7 +87,7 @@
 │  src/renderer.tsx → App.tsx             │
 │  · React UI (ActivityBar + 面板)         │
 │  · WebView 标签页容器                     │
-│  · 插件系统 (内置 + 用户沙箱)             │
+│  · 插件系统 (内置 + Sandbox + Kernel)     │
 │  · Zustand 状态管理                      │
 │  · SQL.js 数据库                         │
 └──────────────┬──────────────────────────┘
@@ -292,7 +292,7 @@ AI 网站在 Electron webview 中会检测到异常浏览器指纹（如 `naviga
 
 > 详细架构见 [plugin-architecture.md](./plugin-architecture.md)。此处仅提炼核心原理。
 
-### 6.1 双层架构
+### 6.1 统一注册、三种运行模式
 
 ```
 ┌─────────────────────────────────────┐
@@ -302,30 +302,34 @@ AI 网站在 Electron webview 中会检测到异常浏览器指纹（如 `naviga
                │
     ┌──────────┼──────────┐
     ▼          ▼          ▼
- 内置插件   用户插件    用户插件
-(React FC)  (iframe)   (iframe)
+ 内置插件   Sandbox    Kernel
+(React FC)  (iframe)  (React bundle)
 ```
 
 | 层级 | 说明 | 安全隔离 |
 |------|------|----------|
-| **内核层** | 19 个内置 React 组件插件 | 完全信任，直接访问 React 上下文 |
-| **沙箱层** | 用户编写的 JS 脚本 | iframe + postMessage，零 Node.js 权限 |
+| **内置层** | 18 个随应用编译的 React 插件 | 完全信任，直接访问 React 上下文 |
+| **Sandbox 层** | 用户编写或导入的 JS 脚本 | iframe + CSP + postMessage，不直接暴露 Node.js |
+| **Kernel 层** | 用户导入的 React bundle | Renderer 宿主上下文，无可靠安全隔离，仅可信来源 |
 
 ### 6.2 PluginRegistry — 发布-订阅单例
 
 ```typescript
 class PluginRegistry {
   private plugins = new Map<string, Plugin>();
-  private subscribers = new Set<(p: Plugin[]) => void>();
+  private listeners = new Set<() => void>();
+  private version = 0;
 
-  register(plugin: Plugin): void        // 注册，id 重复则覆盖
+  register(plugin: Plugin): void        // 注册，id 重复则停用并覆盖
   getEnabled(): Plugin[]                // 按 order 排序返回已启用
-  setEnabled(id: string, enabled: boolean): void  // 切换并通知订阅者
-  subscribe(fn: (p: Plugin[]) => void): () => void  // 订阅变更
+  setEnabled(id: string, enabled: boolean): void  // 不可变更新并触发生命周期
+  getLifecycleState(id: string): PluginLifecycleState
+  subscribe(fn: () => void): () => void
+  getVersion(): number                  // useSyncExternalStore 快照
 }
 ```
 
-**原理**：不是 React Context / Redux，而是一个独立的发布-订阅单例。任何组件都可以 `subscribe` 来响应插件列表变化。`setEnabled` 会通知所有订阅者，触发相关组件重渲染。
+**原理**：Registry 是独立单例，React 侧通过 `usePluginRegistryVersion()` 和 `useSyncExternalStore` 订阅稳定版本快照。插件支持异步 `activate/deactivate`，禁用、覆盖和卸载时会自动清理命令与订阅资源，并通过生命周期 token 防止延迟激活产生泄漏。
 
 ### 6.3 沙箱插件 SDK
 
@@ -343,8 +347,11 @@ class PluginRegistry {
 
 **核心安全约束**：
 - 每个请求带 `requestId` 用于 Promise 解析
-- 不允许对象引用跨越边界
-- SDK 暴露的 channel：`store`（只读状态）、`actions`（注入/复制/打开）、`data`（KV 存储）、`file`（文件对话框）、`preview`（Markdown/代码渲染）
+- Host 校验消息来源、结构、参数数量和 256 KB 大小上限
+- SDK 请求具有 30 秒超时
+- 插件私有存储按 ID 隔离，单插件上限 512 KB
+- 外链仅允许 `https:`、`http:`、`mailto:`，且禁止内嵌凭据
+- SDK 暴露 7 个 channel：`store`、`ui`、`actions`、`data`、`preview`、`file`、`config`
 
 ---
 
@@ -794,7 +801,7 @@ prompt-lab/
 │   ├── plugins/                   # 插件系统
 │   │   ├── types.ts               # Plugin 接口
 │   │   ├── registry.ts            # 发布-订阅注册中心
-│   │   ├── built-in/index.ts      # 19 个内置插件注册
+│   │   ├── built-in/index.ts      # 18 个内置插件注册
 │   │   ├── code-editor/           # 代码编辑器 (145K+)
 │   │   ├── terminal/              # 终端面板
 │   │   ├── excel-preview/         # Excel 预览

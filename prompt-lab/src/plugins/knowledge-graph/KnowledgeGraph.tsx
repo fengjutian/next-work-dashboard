@@ -3,11 +3,11 @@ import { Search } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile } from '@/types/electron';
-import type { GraphNode, GraphData } from './KnowledgeGraph/graph-types';
-import { GraphCanvas } from './KnowledgeGraph/GraphCanvas';
-import { FileSelector } from './KnowledgeGraph/FileSelector';
-import { NodePanel } from './KnowledgeGraph/NodePanel';
-import { ExtractControls } from './KnowledgeGraph/ExtractControls';
+import type { GraphNode, GraphData } from './graph-types';
+import { GraphCanvas } from './GraphCanvas';
+import { FileSelector } from './FileSelector';
+import { NodePanel } from './NodePanel';
+import { ExtractControls } from './ExtractControls';
 
 // ── 常量 ──
 

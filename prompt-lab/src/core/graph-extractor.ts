@@ -3,7 +3,7 @@
 
 import { createOpenAIProvider } from '@/core/llm';
 import type { LLMProvider, ChatMessage } from '@/core/llm';
-import type { ExtractedEntity, ExtractedRelation, ExtractResult, ExtractOptions } from '@/components/KnowledgeGraph/graph-types';
+import type { ExtractedEntity, ExtractedRelation, ExtractResult, ExtractOptions } from '@/plugins/knowledge-graph/graph-types';
 
 // ── 策略对应的 System Prompt ──
 

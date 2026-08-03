@@ -15,7 +15,7 @@
 | 一键注入 | 点击提示词 → 自动填入 AI 输入框，支持填充后自动发送 |
 | 对话保存 | 提取 WebView 中的对话历史，保存为 Markdown |
 | 知识图谱 | G6 可视化提示词与对话之间的关联 |
-| 插件系统 | 双层架构：7 个内置面板 + 用户自定义 JS 沙箱插件 |
+| 插件系统 | 统一 Registry：18 个内置插件 + Sandbox / Kernel 用户插件 |
 | 浮动面板 | 全局 Ctrl+K 唤出 Spotlight 风格搜索面板 |
 | 主题切换 | 亮色 / 暗色 / 跟随系统 |
 
@@ -70,7 +70,7 @@
 │  src/renderer.tsx → App.tsx         │
 │  · React UI (ActivityBar + 面板)     │
 │  · WebView 标签页容器                │
-│  · 插件系统 (内置 + 用户沙箱)         │
+│  · 插件系统 (内置 + Sandbox + Kernel) │
 └─────────────────────────────────────┘
            │
 ┌──────────▼──────────────────────────┐
@@ -88,22 +88,25 @@
 - Token 存储使用 `safeStorage` + OS 原生加密
 - 打包时启用 Fuse 保护：`RunAsNode: false`、`OnlyLoadAppFromAsar: true`
 
-### 2.4 插件系统（双层架构）
+### 2.4 插件系统（统一注册、三种运行模式）
 
 详见 `docs/plugin-architecture.md`。
 
 ```
 ┌──────────────────────────────────────────┐
-│  内核插件层 (Plugin 接口)                  │
-│  7 个内置 React 组件 → PluginRegistry     │
-│  ai | prompts | history | graph | notes  │
-│  | weread | plugin-manager               │
+│  内置插件层 (Plugin 接口)                  │
+│  18 个 React 组件 → PluginRegistry        │
 ├──────────────────────────────────────────┤
-│  用户沙箱层 (UserPluginDef)               │
+│  用户 Sandbox 层 (UserPluginDef)          │
 │  iframe 隔离 → postMessage → usePluginBridge │
-│  6 通道 / 8 权限 / private localStorage   │
+│  7 通道 / 8 权限 / private localStorage   │
+├──────────────────────────────────────────┤
+│  用户 Kernel 层（高风险、仅可信来源）      │
+│  React bundle → Renderer 宿主上下文       │
 └──────────────────────────────────────────┘
 ```
+
+`PluginRegistry` 同时负责启用状态、命令贡献、生命周期和资源回收。React 组件通过基于 `useSyncExternalStore` 的 `usePluginRegistryVersion()` 订阅变化。Sandbox 插件具备 iframe、CSP、权限、消息大小和存储配额限制；Kernel 插件不具备可靠安全隔离。
 
 ---
 
@@ -168,21 +171,20 @@ prompt-lab/
 │   │       ├── scroll-area.tsx
 │   │       └── separator.tsx
 │   ├── plugins/                        # 插件系统
-│   │   ├── types.ts                    # Plugin 接口
-│   │   ├── registry.ts                 # PluginRegistry 单例
-│   │   ├── index.ts
-│   │   ├── built-in/                   # 内置插件
-│   │   │   ├── index.ts                # 注册入口
-│   │   │   ├── dynamic.plugin.tsx      # 用户插件渲染器
-│   │   │   ├── plugin-manager.plugin.tsx
-│   │   │   ├── notes.plugin.tsx
-│   │   │   └── weread.plugin.tsx
-│   │   └── sandbox/                    # 沙箱运行时
+│   │   ├── types.ts                    # Plugin / 生命周期接口
+│   │   ├── registry.ts                 # 注册、命令、生命周期
+│   │   ├── usePluginRegistry.ts        # React 外部 Store 适配
+│   │   ├── built-in/index.ts           # 18 个内置插件
+│   │   ├── dynamic/DynamicPlugin.tsx   # 用户插件运行模式分发
+│   │   ├── plugin-manager/             # 创建、导入、导出、管理
+│   │   ├── code-editor/                # 代码编辑器插件
+│   │   ├── terminal/                   # 终端插件
+│   │   ├── excel-preview/              # Excel 插件
+│   │   └── sandbox/                    # iframe 沙箱运行时
 │   │       ├── types.ts                # 协议/权限类型
 │   │       ├── PluginSandbox.tsx        # iframe 容器
-│   │       ├── plugin-sdk.ts           # SDK 定义
-│   │       ├── usePluginBridge.ts      # Host 桥接器
-│   │       └── plugin-frame.html       # iframe 模板
+│   │       ├── plugin-sdk.ts           # SDK 类型与唯一运行时
+│   │       └── usePluginBridge.ts      # Host 桥接与安全校验
 │   ├── hooks/
 │   │   └── usePersistence.ts           # 持久化 Hook
 │   ├── auth/

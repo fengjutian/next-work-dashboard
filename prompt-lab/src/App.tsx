@@ -3,7 +3,7 @@ import { Database, Edit3, MessageSquare, Plus, Puzzle, Send, Settings } from '@/
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { TitleBar } from '@/components/TitleBar';
-import { AIPanel } from '@/components/AIPanel';
+import { AIPanel } from '@/plugins/ai/AIPanel';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
 import { PromptDrawer } from '@/components/PromptDrawer';
 import { WebViewContainer } from '@/components/WebViewContainer';
