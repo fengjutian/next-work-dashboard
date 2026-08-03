@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2 } from '@/components/icons';
+import { createPortal } from 'react-dom';
+import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2, Edit3, Check } from '@/components/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import MonacoEditor from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
@@ -59,6 +61,14 @@ export const ConversationHistory: React.FC = () => {
   const [searching, setSearching] = useState(false);
   const [activeFile, setActiveFile] = useState<ConversationFile | null>(null);
   const [content, setContent] = useState('');
+  const [draftContent, setDraftContent] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ConversationFile | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [fileNameDraft, setFileNameDraft] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [indexStats, setIndexStats] = useState<{ documents: number; chunks: number } | null>(null);
@@ -100,23 +110,136 @@ export const ConversationHistory: React.FC = () => {
     : files.map((file) => ({ file, result: undefined })), [files, query, results]);
 
   const selectFile = useCallback(async (file: ConversationFile) => {
+    if (editing && draftContent !== content && !window.confirm('当前修改尚未保存，确定放弃吗？')) return;
     setActiveFile(file); setLoading(true);
+    setEditing(false);
+    setRenaming(false);
     try {
       const result = await window.electronAPI.readConversation(file.path);
       if (!result.success) throw new Error(result.error);
       setContent(result.content || '');
+      setDraftContent(result.content || '');
     } catch { setContent(''); toast('读取原文件失败', 'error'); }
     finally { setLoading(false); }
-  }, [toast]);
+  }, [content, draftContent, editing, toast]);
+
+  const saveContent = useCallback(async () => {
+    if (!activeFile || saving) return;
+    setSaving(true);
+    try {
+      let result: { success: boolean; error?: string };
+      try {
+        result = await window.electronAPI.writeConversation(activeFile.path, draftContent);
+      } catch (error) {
+        // During Electron Forge hot reload the renderer/preload can be newer than
+        // the still-running main process. Reuse the established text writer until restart.
+        if (!String(error).includes("No handler registered for 'write-conversation'")) throw error;
+        result = await window.electronAPI.writeTextFile(activeFile.path, draftContent);
+      }
+      if (!result.success) throw new Error(result.error || '保存失败');
+      setContent(draftContent);
+      setEditing(false);
+      await conversationMemory.removeDocument(activeFile.path);
+      const stats = await conversationMemory.sync();
+      setIndexStats(stats);
+      useStore.getState().notifyConversationSaved();
+      await loadList();
+      toast('原文已保存，知识库索引已更新', 'success');
+    } catch (error) {
+      toast(`保存失败: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  }, [activeFile, draftContent, loadList, saving, toast]);
+
+  const cancelEditing = useCallback(() => {
+    setDraftContent(content);
+    setEditing(false);
+  }, [content]);
+
+  const beginRename = useCallback(() => {
+    if (!activeFile) return;
+    setFileNameDraft(activeFile.fileName.replace(/\.md$/i, ''));
+    setRenaming(true);
+  }, [activeFile]);
+
+  const saveFileName = useCallback(async () => {
+    if (!activeFile || renameSaving || !fileNameDraft.trim()) return;
+    const oldPath = activeFile.path;
+    setRenameSaving(true);
+    try {
+      let requestedName = fileNameDraft.trim();
+      if (!requestedName.toLowerCase().endsWith('.md')) requestedName += '.md';
+      const stem = requestedName.slice(0, -3);
+      if (!stem || requestedName.length > 180 || /[<>:"/\\|?*\u0000-\u001f]/.test(requestedName)
+        || /[. ]\.md$/i.test(requestedName)
+        || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(requestedName)) {
+        throw new Error('文件名包含非法字符或格式不正确');
+      }
+      let result: { success: boolean; filePath?: string; error?: string };
+      try {
+        result = await window.electronAPI.renameConversation(oldPath, requestedName);
+      } catch (error) {
+        if (!String(error).includes("No handler registered for 'rename-conversation'")) throw error;
+        const separator = Math.max(oldPath.lastIndexOf('\\'), oldPath.lastIndexOf('/'));
+        const targetPath = `${oldPath.slice(0, separator + 1)}${requestedName}`;
+        const existingFiles = await window.electronAPI.listConversations();
+        const collision = existingFiles.some((file) => file.path.toLocaleLowerCase() === targetPath.toLocaleLowerCase()
+          && file.path.toLocaleLowerCase() !== oldPath.toLocaleLowerCase());
+        if (collision) {
+          result = { success: false, error: 'ALREADY_EXISTS' };
+        } else if (targetPath.toLocaleLowerCase() === oldPath.toLocaleLowerCase()) {
+          result = { success: false, error: '主进程重启后才能修改文件名大小写' };
+        } else {
+          const write = await window.electronAPI.writeTextFile(targetPath, content);
+          if (!write.success) {
+            result = { success: false, error: write.error || 'WRITE_FAILED' };
+          } else {
+            const remove = await window.electronAPI.deleteConversation(oldPath);
+            result = remove.success
+              ? { success: true, filePath: targetPath }
+              : { success: false, error: `新文件已创建，但旧文件删除失败：${remove.error || '未知错误'}` };
+          }
+        }
+      }
+      if (!result.success || !result.filePath) {
+        const message = result.error === 'ALREADY_EXISTS' ? '同名文件已经存在'
+          : result.error === 'INVALID_NAME' ? '文件名包含非法字符或格式不正确'
+            : result.error || '重命名失败';
+        throw new Error(message);
+      }
+      await conversationMemory.removeDocument(oldPath);
+      const nextFiles = await window.electronAPI.listConversations();
+      setFiles(nextFiles);
+      const renamed = nextFiles.find((file) => file.path === result.filePath);
+      if (renamed) setActiveFile(renamed);
+      setRenaming(false);
+      const stats = await conversationMemory.sync();
+      setIndexStats(stats);
+      useStore.getState().notifyConversationSaved();
+      if (query.trim().length >= 2) setResults(await window.electronAPI.searchConversations(query.trim()));
+      toast('文件名已修改，知识库索引已更新', 'success');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      setRenameSaving(false);
+    }
+  }, [activeFile, content, fileNameDraft, query, renameSaving, toast]);
 
   const deleteFile = useCallback(async (file: ConversationFile) => {
-    const result = await window.electronAPI.deleteConversation(file.path);
-    if (!result.success) { toast('删除失败', 'error'); return; }
-    if (activeFile?.path === file.path) { setActiveFile(null); setContent(''); }
-    await conversationMemory.removeDocument(file.path);
-    toast('已删除', 'success');
-    await loadList();
-    if (query.trim().length >= 2) setResults(await window.electronAPI.searchConversations(query.trim()));
+    setDeleting(true);
+    try {
+      const result = await window.electronAPI.deleteConversation(file.path);
+      if (!result.success) { toast('删除失败', 'error'); return; }
+      if (activeFile?.path === file.path) { setActiveFile(null); setContent(''); setEditing(false); }
+      await conversationMemory.removeDocument(file.path);
+      setDeleteTarget(null);
+      toast('知识库文件已删除', 'success');
+      await loadList();
+      if (query.trim().length >= 2) setResults(await window.electronAPI.searchConversations(query.trim()));
+    } finally {
+      setDeleting(false);
+    }
   }, [activeFile, loadList, query, toast]);
 
   const revealFile = useCallback(async () => {
@@ -175,23 +298,106 @@ export const ConversationHistory: React.FC = () => {
               <FileText className="h-8 w-8" /><p className="text-xs">{query.trim().length >= 2 ? '没有匹配的知识库文件' : '知识库暂无文件'}</p>
             </div>
           ) : displayed.map(({ file, result }) => <FileItem key={file.path} file={file} result={result} query={query.trim()}
-            isActive={activeFile?.path === file.path} onClick={() => void selectFile(file)} onDelete={() => void deleteFile(file)} />)}
+            isActive={activeFile?.path === file.path} onClick={() => void selectFile(file)} onDelete={() => setDeleteTarget(file)} />)}
         </div>
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col bg-card">
         {activeFile && <div className="flex items-center gap-2 border-b px-4 py-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium">{activeFile.title || activeFile.fileName}</div>
+            {renaming ? <div className="flex max-w-md items-center gap-1.5">
+              <input value={fileNameDraft} onChange={(event) => setFileNameDraft(event.target.value)} autoFocus
+                onKeyDown={(event) => { if (event.key === 'Enter') void saveFileName(); if (event.key === 'Escape') setRenaming(false); }}
+                className="h-7 min-w-0 flex-1 rounded border bg-background px-2 text-xs outline-none focus:border-primary" />
+              <span className="text-xs text-muted-foreground">.md</span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={renameSaving} onClick={() => setRenaming(false)} title="取消"><X className="h-3.5 w-3.5" /></Button>
+              <Button size="icon" className="h-7 w-7" disabled={renameSaving || !fileNameDraft.trim()} onClick={() => void saveFileName()} title="保存文件名">
+                {renameSaving ? <Loader2 className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+              </Button>
+            </div> : <div className="flex min-w-0 items-center gap-1">
+              <div className="truncate text-xs font-medium">{activeFile.fileName}</div>
+              <button className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={beginRename} title="修改文件名"><Edit3 className="h-3 w-3" /></button>
+            </div>}
             <div className="truncate text-[10px] text-muted-foreground" title={activeFile.path}>{activeFile.path}</div>
           </div>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={copyPath}><Copy className="mr-1 h-3.5 w-3.5" />复制路径</Button>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void revealFile()}><FolderOpen className="mr-1 h-3.5 w-3.5" />显示原文件</Button>
+          {editing ? <>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={saving} onClick={cancelEditing}><X className="mr-1 h-3.5 w-3.5" />取消</Button>
+            <Button size="sm" className="h-7 px-2 text-xs" disabled={saving || draftContent === content} onClick={() => void saveContent()}>
+              {saving ? <Loader2 className="mr-1 h-3.5 w-3.5" /> : <Check className="mr-1 h-3.5 w-3.5" />}保存
+            </Button>
+          </> : <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEditing(true)}><Edit3 className="mr-1 h-3.5 w-3.5" />编辑</Button>}
         </div>}
         {activeFile ? loading ? <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground"><Loader2 className="mr-2 h-4 w-4" />加载中</div>
-          : <div className="flex-1 overflow-y-auto p-4"><div className="prose prose-sm max-w-none dark:prose-invert"><Markdown remarkPlugins={[remarkGfm]}>{content || '_(空)_'}</Markdown></div></div>
+          : editing
+            ? <div className="flex min-h-0 flex-1 flex-col">
+              <div className="grid min-h-0 flex-1 grid-cols-2 divide-x">
+                <div className="flex min-h-0 flex-col">
+                  <div className="border-b px-3 py-1.5 text-[10px] font-medium text-muted-foreground">Markdown 源码</div>
+                  <div className="min-h-0 flex-1">
+                    <MonacoEditor
+                      path={`knowledge://${activeFile.path.replace(/\\/g, '/')}`}
+                      language="markdown"
+                      value={draftContent}
+                      theme={document.documentElement.classList.contains('dark') ? 'vs-dark' : 'light'}
+                      onChange={(value) => setDraftContent(value ?? '')}
+                      options={{
+                        automaticLayout: true,
+                        minimap: { enabled: false },
+                        wordWrap: 'on',
+                        lineNumbers: 'on',
+                        fontSize: 13,
+                        lineHeight: 21,
+                        padding: { top: 10, bottom: 10 },
+                        scrollBeyondLastLine: false,
+                        renderWhitespace: 'selection',
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex min-h-0 flex-col">
+                  <div className="border-b px-3 py-1.5 text-[10px] font-medium text-muted-foreground">实时预览</div>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <Markdown remarkPlugins={[remarkGfm]}>{draftContent || '_(空)_'}</Markdown>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="border-t px-3 py-1 text-right text-[10px] text-muted-foreground">{draftContent.length} 字符 · Markdown</div>
+            </div>
+            : <div className="flex-1 overflow-y-auto p-4"><div className="prose prose-sm max-w-none dark:prose-invert"><Markdown remarkPlugins={[remarkGfm]}>{content || '_(空)_'}</Markdown></div></div>
           : <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">选择左侧文件查看完整原文</div>}
       </div>
+      {deleteTarget && createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]"
+          onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) setDeleteTarget(null); }}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="delete-knowledge-title"
+            className="w-full max-w-md overflow-hidden rounded-xl border bg-card shadow-2xl">
+            <div className="flex gap-3 p-5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 id="delete-knowledge-title" className="text-sm font-semibold text-foreground">删除知识库文件？</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">文件及其知识库索引将被永久移除，此操作无法撤销。</p>
+                <div className="mt-3 break-all rounded-md border bg-muted/50 px-3 py-2 text-xs font-medium text-foreground">
+                  {deleteTarget.title || deleteTarget.fileName}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t bg-muted/30 px-5 py-3">
+              <Button variant="outline" size="sm" disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button>
+              <Button variant="destructive" size="sm" disabled={deleting} onClick={() => void deleteFile(deleteTarget)}>
+                {deleting ? <Loader2 className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                {deleting ? '删除中…' : '确认删除'}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 };

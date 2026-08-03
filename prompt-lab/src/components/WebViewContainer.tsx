@@ -111,6 +111,8 @@ declare global {
 
 const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
+  const submittedPromptsRef = useRef<string[]>([]);
+  const [webviewPreloadPath, setWebviewPreloadPath] = useState('');
   const tab = useStore((s) => s.tabs.find((t) => t.id === tabId));
   const injectMode = useStore((s) => s.injectMode);
   const injectStrategy = useStore((s) => s.injectStrategy);
@@ -126,6 +128,38 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const sites = useStore((s) => s.sites);
   const notifyConversationSaved = useStore((s) => s.notifyConversationSaved);
 
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI.getWebviewPreloadPath()
+      .then((filePath) => {
+        if (cancelled || !filePath) return;
+        const normalized = filePath.replace(/\\/g, '/');
+        setWebviewPreloadPath(
+          normalized.startsWith('file://') ? normalized : `file:///${normalized}`,
+        );
+      })
+      .catch((error) => {
+        console.error('[WebViewPanel] unable to resolve webview preload:', error);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview || !webviewPreloadPath) return;
+    const handleIpcMessage = (event: Electron.IpcMessageEvent) => {
+      if (event.channel !== 'conversation-prompt-submitted') return;
+      const prompt = typeof event.args[0] === 'string' ? event.args[0].trim() : '';
+      if (!prompt) return;
+      const prompts = submittedPromptsRef.current;
+      if (prompts[prompts.length - 1] !== prompt) prompts.push(prompt);
+    };
+    webview.addEventListener('ipc-message', handleIpcMessage);
+    return () => {
+      webview.removeEventListener('ipc-message', handleIpcMessage);
+    };
+  }, [webviewPreloadPath]);
+
   const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
   const site = sites.find((s) => s.id === tab?.siteId);
 
@@ -135,7 +169,9 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     if (!webview || !site) return;
 
     try {
-      const result = await webview.executeJavaScript(buildConversationExtractScript());
+      const result = await webview.executeJavaScript(
+        buildConversationExtractScript(submittedPromptsRef.current),
+      );
       const parsed = parseExtractResult(result);
       if (parsed.success && parsed.content) {
         const saveResult = await (window as any).electronAPI?.saveConversation?.({
@@ -169,7 +205,9 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     const webview = webviewRef.current;
     if (!webview) throw new Error('webview not ready');
 
-    const result = await webview.executeJavaScript(buildConversationExtractScript());
+    const result = await webview.executeJavaScript(
+      buildConversationExtractScript(submittedPromptsRef.current),
+    );
     const parsed = parseExtractResult(result);
     if (parsed.success && parsed.content) {
       return parsed.content;
@@ -341,16 +379,22 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
 
       {/* WebView + 侧边栏 */}
       <div className="flex-1 flex overflow-hidden">
-        <webview
-          ref={webviewRef}
-          src={tab.url}
-          partition={`persist:site-${tab.siteId}`}
-          preload={(window as any).__WEBVIEW_PRELOAD_PATH__ ?? ''}
-          useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-          style={{ flex: 1 }}
-          // @ts-expect-error webview-specific attribute
-          allowpopups="true"
-        />
+        {webviewPreloadPath ? (
+          <webview
+            ref={webviewRef}
+            src={tab.url}
+            partition={`persist:site-${tab.siteId}`}
+            preload={webviewPreloadPath}
+            useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+            style={{ flex: 1 }}
+            // @ts-expect-error webview-specific attribute
+            allowpopups="true"
+          />
+        ) : (
+          <div className="flex-1 grid place-items-center text-xs text-muted-foreground">
+            正在加载网页组件…
+          </div>
+        )}
 
         <SaveConversationPanel
           open={savePanelOpen}

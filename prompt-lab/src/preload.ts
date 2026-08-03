@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listConversations: () => ipcRenderer.invoke('list-conversations'),
   searchConversations: (query: string) => ipcRenderer.invoke('search-conversations', query),
   readConversation: (filePath: string) => ipcRenderer.invoke('read-conversation', filePath),
+  writeConversation: (filePath: string, content: string) => ipcRenderer.invoke('write-conversation', filePath, content),
+  renameConversation: (filePath: string, fileName: string) => ipcRenderer.invoke('rename-conversation', filePath, fileName),
   deleteConversation: (filePath: string) => ipcRenderer.invoke('delete-conversation', filePath),
   revealConversation: (filePath: string) => ipcRenderer.invoke('reveal-conversation', filePath),
   openConversationFolder: () => ipcRenderer.invoke('open-conversation-folder'),

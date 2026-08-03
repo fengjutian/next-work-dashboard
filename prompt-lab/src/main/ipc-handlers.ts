@@ -495,6 +495,48 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('write-conversation', async (_event, filePath: string, content: string) => {
+    try {
+      const resolved = resolveConversationPath(filePath);
+      if (!resolved || path.extname(resolved).toLowerCase() !== '.md') {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      if (!fs.existsSync(resolved)) {
+        return { success: false, error: 'NOT_FOUND' };
+      }
+      if (typeof content !== 'string') {
+        return { success: false, error: 'INVALID_CONTENT' };
+      }
+      fs.writeFileSync(resolved, content, 'utf-8');
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle('rename-conversation', async (_event, filePath: string, requestedName: string) => {
+    try {
+      const resolved = resolveConversationPath(filePath);
+      if (!resolved || !fs.existsSync(resolved)) return { success: false, error: resolved ? 'NOT_FOUND' : 'ACCESS_DENIED' };
+      if (typeof requestedName !== 'string') return { success: false, error: 'INVALID_NAME' };
+      let fileName = requestedName.trim();
+      if (!fileName.toLowerCase().endsWith('.md')) fileName += '.md';
+      const stem = fileName.slice(0, -3);
+      if (!fileName || fileName.length > 180 || fileName !== path.basename(fileName)
+        || !stem || /[<>:"/\\|?*\u0000-\u001f]/.test(fileName) || /[. ]\.md$/i.test(fileName)
+        || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(fileName)) {
+        return { success: false, error: 'INVALID_NAME' };
+      }
+      const target = path.join(path.dirname(resolved), fileName);
+      if (target.toLocaleLowerCase() === resolved.toLocaleLowerCase()) return { success: true, filePath: resolved };
+      if (fs.existsSync(target)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.renameSync(resolved, target);
+      return { success: true, filePath: target };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle('delete-conversation', async (_event, filePath: string) => {
     try {
       const resolved = resolveConversationPath(filePath);

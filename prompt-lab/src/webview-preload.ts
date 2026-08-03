@@ -1,3 +1,5 @@
+import { ipcRenderer } from 'electron';
+
 // webview preload — runs inside <webview> pages BEFORE any page script
 // Overrides browser fingerprint APIs to prevent anti-bot detection
 // (e.g. DeepSeek "使用环境异常" warning)
@@ -6,22 +8,73 @@ console.log('[next-work-dashboard] webview preload loaded');
 
 // Keep the last submitted prompt on the shared DOM so the knowledge-base
 // extractor can pair it with sites whose message nodes have obfuscated classes.
-const rememberSubmittedPrompt = (target: EventTarget | null) => {
+let currentPromptDraft = '';
+
+const rememberPromptDraft = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) return;
   const input = target.closest('textarea, input, [contenteditable="true"]') as HTMLElement | null;
   if (!input) return;
   const text = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
     ? input.value.trim()
     : (input.innerText || input.textContent || '').trim();
-  if (text.length >= 1) document.documentElement.dataset.nextWorkLastPrompt = text.slice(0, 20000);
+  if (text.length >= 1) {
+    const prompt = text.slice(0, 20000);
+    currentPromptDraft = prompt;
+    if (document.documentElement) document.documentElement.dataset.nextWorkLastPrompt = prompt;
+    try { sessionStorage.setItem('next-work-last-prompt', prompt); } catch { /* unavailable on restricted pages */ }
+    ipcRenderer.sendToHost('conversation-prompt-draft', prompt);
+  }
 };
 
+const submitRememberedPrompt = () => {
+  if (!currentPromptDraft) return;
+  try {
+    const raw = sessionStorage.getItem('next-work-submitted-prompts');
+    const prompts = raw ? JSON.parse(raw) as string[] : [];
+    if (prompts[prompts.length - 1] !== currentPromptDraft) prompts.push(currentPromptDraft);
+    sessionStorage.setItem('next-work-submitted-prompts', JSON.stringify(prompts.slice(-200)));
+  } catch { /* unavailable or malformed storage */ }
+  ipcRenderer.sendToHost('conversation-prompt-submitted', currentPromptDraft);
+};
+
+window.addEventListener('DOMContentLoaded', () => {
+  try {
+    const prompts = JSON.parse(sessionStorage.getItem('next-work-submitted-prompts') || '[]') as unknown;
+    if (Array.isArray(prompts)) {
+      prompts.filter((prompt): prompt is string => typeof prompt === 'string')
+        .forEach((prompt) => ipcRenderer.sendToHost('conversation-prompt-submitted', prompt));
+    }
+  } catch { /* ignore malformed storage */ }
+});
+
+document.addEventListener('input', (event) => rememberPromptDraft(event.target), true);
+
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) rememberSubmittedPrompt(event.target);
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    rememberPromptDraft(event.target);
+    submitRememberedPrompt();
+  }
 }, true);
 
-document.addEventListener('click', () => {
-  rememberSubmittedPrompt(document.activeElement);
+document.addEventListener('click', (event) => {
+  const control = event.target instanceof Element
+    ? event.target.closest('button, [role="button"]')
+    : null;
+  if (!control || !currentPromptDraft) return;
+  const label = [control.textContent, control.getAttribute('aria-label'), control.getAttribute('title')]
+    .filter(Boolean).join(' ');
+  if (/(发送|提交|send|submit)/i.test(label)) {
+    submitRememberedPrompt();
+    return;
+  }
+  const draftAtClick = currentPromptDraft;
+  window.setTimeout(() => {
+    const input = document.querySelector('textarea, input, [contenteditable="true"]');
+    const value = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+      ? input.value.trim()
+      : ((input as HTMLElement | null)?.innerText || '').trim();
+    if (currentPromptDraft === draftAtClick && !value) submitRememberedPrompt();
+  }, 300);
 }, true);
 
 // ── Standard Chrome 134 (Electron 35) UA on Windows ──

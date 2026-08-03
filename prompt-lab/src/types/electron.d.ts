@@ -53,6 +53,8 @@ export interface ElectronAPI {
   listConversations: () => Promise<ConversationFile[]>;
   searchConversations: (query: string) => Promise<ConversationSearchResult[]>;
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  writeConversation: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+  renameConversation: (filePath: string, fileName: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   revealConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openConversationFolder: () => Promise<{ success: boolean; error?: string }>;

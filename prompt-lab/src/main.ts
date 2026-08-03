@@ -15,7 +15,7 @@ app.whenReady().then(() => {
   const preloadPath = path.join(__dirname, 'preload.js');
   const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
 
-  createWindow(preloadPath, webviewPreloadPath);
+  createWindow(preloadPath);
   // createWindow synchronously publishes the BrowserWindow through globals;
   // setupIPC depends on that window and must run afterwards.
   setupIPC(webviewPreloadPath);
@@ -31,7 +31,7 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     const preloadPath = path.join(__dirname, 'preload.js');
     const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
-    createWindow(preloadPath, webviewPreloadPath);
+    createWindow(preloadPath);
   } else {
     const win = BrowserWindow.getAllWindows()[0];
     win.show();

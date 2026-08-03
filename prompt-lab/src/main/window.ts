@@ -2,7 +2,7 @@ import { BrowserWindow, app } from 'electron';
 import path from 'node:path';
 import { setMainWindow, getTray } from './globals';
 
-export function createWindow(preloadPath: string, webviewPreloadPath: string) {
+export function createWindow(preloadPath: string) {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -19,11 +19,6 @@ export function createWindow(preloadPath: string, webviewPreloadPath: string) {
   });
 
   setMainWindow(win);
-
-  // 注入 webview preload 路径到渲染进程
-  win.webContents.executeJavaScript(`
-    window.__WEBVIEW_PRELOAD_PATH__ = ${JSON.stringify(`file://${webviewPreloadPath}`)};
-  `);
 
   // 加载页面 — Vite/Forge 注入的全局常量
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
