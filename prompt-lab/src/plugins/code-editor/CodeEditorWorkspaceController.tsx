@@ -22,7 +22,6 @@ import {
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import { createOpenAIProvider } from '@/core/llm';
 import type {
   FilePickResult,
   WorkspaceEncoding,
@@ -36,14 +35,15 @@ import { DiffViewPanel } from './DiffViewPanel';
 import { FileTreeRow } from './FileTreeRow';
 import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
-import { estimateTokens, fitContextToTokenBudget } from './ai-context';
-import { classifyConflictStatus } from '../../main/git-conflicts';
-import { applyConversationSummary, conversationNeedsSummary } from './ai-conversation';
+import { estimateTokens } from './ai-context';
 import { useTerminalTasks } from './useTerminalTasks';
 import { useGitRepository } from './useGitRepository';
 import { useWorkspaceSearch } from './useWorkspaceSearch';
 import { useEditorIntelligence } from './useEditorIntelligence';
 import { useAiSessionState, type AiFileProposal } from './useAiSessionState';
+import { useGitDiffMerge } from './useGitDiffMerge';
+import { useAiProposalReview } from './useAiProposalReview';
+import { useAiEditGeneration } from './useAiEditGeneration';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -84,7 +84,6 @@ function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode
   });
 }
 
-interface GitHunk { label: string; patch: string }
 function computeDiffHunks(original: string, modified: string): AiHunk[] {
   const o = original.split('\n');
   const m = modified.split('\n');
@@ -127,23 +126,6 @@ function computeDiffHunks(original: string, modified: string): AiHunk[] {
   }
   return hunks;
 }
-function extractGitHunks(patchText: string): GitHunk[] {
-  const lines = patchText.split('\n');
-  const firstHunk = lines.findIndex((line) => line.startsWith('@@'));
-  if (firstHunk < 0) return [];
-  const header = lines.slice(0, firstHunk).join('\n');
-  const hunks: GitHunk[] = [];
-  let start = firstHunk;
-  for (let index = firstHunk + 1; index <= lines.length; index += 1) {
-    if (index === lines.length || lines[index].startsWith('@@')) {
-      const hunkLines = lines.slice(start, index);
-      hunks.push({ label: hunkLines[0], patch: `${header}\n${hunkLines.join('\n')}\n` });
-      start = index;
-    }
-  }
-  return hunks;
-}
-
 export const CodeEditorWorkspaceController: React.FC = () => {
   const { theme, aiApi } = useStore();
   const resolvedTheme = theme === 'system'
@@ -171,7 +153,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     language: string;
     source?: 'external' | 'git' | 'merge' | 'ai' | 'search';
   } | null>(null);
-  const [gitHunks, setGitHunks] = useState<GitHunk[]>([]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
   const [explorerFilter, setExplorerFilter] = useState('');
@@ -192,11 +173,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   });
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [status, setStatus] = useState('就绪');
-  const [mergeHunks, setMergeHunks] = useState<AiHunk[]>([]);
-  const [mergeBase, setMergeBase] = useState<string | null>(null);
-  const [mergeResult, setMergeResult] = useState<string | null>(null);
-  const [mergeInitialResult, setMergeInitialResult] = useState<string | null>(null);
-  const [mergeConflictPaths, setMergeConflictPaths] = useState<{ base: string; ours: string; theirs: string } | null>(null);
   const [dialog, setDialog] = useState<{ type: 'prompt'; title: string; defaultValue?: string; resolve: (value: string | null) => void } | { type: 'confirm'; message: string; resolve: (ok: boolean) => void } | null>(null);
   const appPrompt = useCallback((title: string, defaultValue = ''): Promise<string | null> => new Promise((resolve) => {
     setDialog({ type: 'prompt', title, defaultValue, resolve });
@@ -246,6 +222,66 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     refreshGitStatus, refreshGitOverview, runGitOperation,
     loadGitHistory, compareGitCommits, cancelGitOp,
   } = git;
+
+  const {
+    gitHunks, mergeHunks, setMergeHunks, mergeBase, setMergeBase,
+    mergeResult, setMergeResult, mergeInitialResult, setMergeInitialResult,
+    mergeConflictPaths, showGitDiff, stageGitHunk, unstageFile,
+    resolveGitConflict, applyMergeHunk, finishMerge,
+  } = useGitDiffMerge({
+    workspace,
+    diffView,
+    setDiffView,
+    setDocuments,
+    setStatus,
+    appendOutput,
+    refreshGitStatus,
+    computeDiffHunks,
+  });
+
+  const {
+    acceptAiEdit, rejectAiEdit, acceptAllAiEdits, applyAiHunk, undoLastAiEdit,
+  } = useAiProposalReview({
+    workspace,
+    documents,
+    setDocuments,
+    setActivePath,
+    diffView,
+    setDiffView,
+    aiProposals,
+    setAiProposals,
+    aiHistory,
+    setAiHistory,
+    aiHunks,
+    setAiHunks,
+    computeDiffHunks,
+    updateSessionAcceptCount,
+    appendOutput,
+    setStatus,
+  });
+
+  const { generateAiEdit, runInlineEdit } = useAiEditGeneration({
+    aiApi,
+    workspace,
+    documents,
+    activeDocument: documents.find((document) => document.path === activePath) ?? null,
+    editorRef,
+    aiInstruction,
+    aiMessages,
+    setAiMessages,
+    aiMultiFile,
+    aiTokenBudget,
+    inlineEdit,
+    setInlineEdit,
+    setAiEditing,
+    setAiPendingRequest,
+    setAiProposals,
+    setDiffView,
+    setDocuments,
+    recordAiSession,
+    appendOutput,
+    setStatus,
+  });
 
   const terminalTasks = useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus, setBottomPanel });
   const {
@@ -1055,43 +1091,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   }, [preferences]);
 
   useEffect(() => localStorage.setItem('code-editor.sidebar-width', String(sidebarWidth)), [sidebarWidth]);
-  const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
-    if (!workspace) return;
-    if (classifyConflictStatus(entry.status)) {
-      const versions = await window.electronAPI.workspace.gitOperation<{ base: string; ours: string; theirs: string; conflictType?: string; paths: { base: string; ours: string; theirs: string } }>(workspace.path, 'conflictVersions', { path: entry.path });
-      if (!versions.success || !versions.data) {
-        setStatus(`冲突版本读取失败：${displayError(versions.error)}`);
-        return;
-      }
-      setGitHunks([]);
-      setMergeBase(versions.data.base);
-      setMergeResult(versions.data.ours);
-      setMergeInitialResult(versions.data.ours);
-      setMergeConflictPaths(versions.data.conflictType === 'rename/rename' ? versions.data.paths : null);
-      const name = versions.data.conflictType === 'rename/rename' ? `rename/rename: ${versions.data.paths.base} → ${versions.data.paths.ours} | ${versions.data.paths.theirs}` : entry.path;
-      setDiffView({ path: versions.data.paths.ours, name, original: versions.data.ours, modified: versions.data.theirs, language: languageIdFromName(versions.data.paths.ours), source: 'merge' });
-      return;
-    }
-    const current = await window.electronAPI.workspace.readTextFile(workspace.path, entry.path);
-    if (!current.success || !current.data) {
-      setStatus(`Diff 读取失败：${displayError(current.error)}`);
-      return;
-    }
-    const [head, patch] = await Promise.all([
-      window.electronAPI.workspace.gitShowHead(workspace.path, entry.path),
-      window.electronAPI.workspace.gitOperation<string>(workspace.path, 'fileDiff', { path: entry.path }),
-    ]);
-    setGitHunks(patch.success ? extractGitHunks(patch.data ?? '') : []);
-    setDiffView({
-      path: entry.path,
-      name: entry.path,
-      original: head.success ? head.data ?? '' : '',
-      modified: current.data.content,
-      language: languageIdFromName(entry.path),
-      source: 'git',
-    });
-  }, [workspace]);
-
   const showFileTimeline = useCallback(async (node: TreeNode) => {
     if (!workspace || node.type !== 'file') return;
     const result = await window.electronAPI.workspace.gitOperation<WorkspaceGitCommit[]>(workspace.path, 'log', { limit: 100, path: node.path });
@@ -1104,433 +1103,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setBottomPanel((previous) => ({ ...previous, open: true, tab: 'sourceControl' }));
     setTreeMenu(null);
   }, [workspace]);
-
-  const stageGitHunk = useCallback(async (hunk: GitHunk) => {
-    if (!workspace) return;
-    const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'stagePatch', { patch: hunk.patch });
-    if (!result.success) {
-      setStatus(`Hunk 暂存失败：${displayError(result.error)}`);
-      return;
-    }
-    setGitHunks((previous) => previous.filter((item) => item.patch !== hunk.patch));
-    await refreshGitStatus();
-    setStatus(`已暂存 ${hunk.label}`);
-  }, [refreshGitStatus, workspace]);
-
-  const unstageFile = useCallback(async () => {
-    if (!workspace || !diffView) return;
-    const result = await window.electronAPI.workspace.gitUnstage(workspace.path, [diffView.path]);
-    if (!result.success) {
-      setStatus(`取消暂存失败：${displayError(result.error)}`);
-      return;
-    }
-    await refreshGitStatus();
-    setStatus('已取消暂存全部更改');
-  }, [diffView, refreshGitStatus, workspace]);
-
-  const resolveGitConflict = useCallback(async (strategy: 'ours' | 'theirs') => {
-    if (!workspace || !diffView || diffView.source !== 'merge') return;
-    const result = await window.electronAPI.workspace.gitOperation(workspace.path, 'resolveConflict', { path: diffView.path, strategy });
-    if (!result.success) {
-      setStatus(`冲突解决失败：${displayError(result.error)}`);
-      return;
-    }
-    setDiffView(null);
-    await refreshGitStatus();
-    setStatus(`已使用${strategy === 'ours' ? '当前分支' : '传入分支'}版本并暂存`);
-  }, [diffView, refreshGitStatus, workspace]);
-
-  const applyMergeHunk = useCallback((hunkIndex: number, side: 'ours' | 'theirs') => {
-    if (!diffView || diffView.source !== 'merge') return;
-    const hunk = mergeHunks.find((h) => h.index === hunkIndex);
-    if (!hunk) return;
-
-    const oLines = diffView.original.split('\n');
-    const mLines = diffView.modified.split('\n');
-
-    // ours: keep original lines → apply originalLines into modified (like reject in AI)
-    // theirs: use modified lines → apply modifiedLines into original (like accept in AI)
-    const newOriginal = side === 'theirs'
-      ? [...oLines.slice(0, hunk.originalStart - 1), ...hunk.modifiedLines, ...oLines.slice(hunk.originalStart - 1 + hunk.originalLines.length)].join('\n')
-      : diffView.original;
-
-    const newModified = side === 'ours'
-      ? [...mLines.slice(0, hunk.modifiedStart - 1), ...hunk.originalLines, ...mLines.slice(hunk.modifiedStart - 1 + hunk.modifiedLines.length)].join('\n')
-      : diffView.modified;
-
-    const remaining = computeDiffHunks(newOriginal, newModified);
-    setMergeHunks(remaining);
-    setDiffView({ ...diffView, original: newOriginal, modified: newModified });
-    setMergeResult(newOriginal);
-    setStatus(`冲突块 ${hunkIndex + 1}：选择${side === 'ours' ? '当前分支' : '传入分支'}，剩余 ${remaining.length} 个`);
-  }, [diffView, mergeHunks]);
-
-  const finishMerge = useCallback(async () => {
-    if (!workspace || !diffView || diffView.source !== 'merge' || mergeResult === null) return;
-    if (hasGitConflictMarkers(mergeResult)) {
-      setStatus('Result 中仍有冲突标记，无法完成合并');
-      return;
-    }
-    const read = await window.electronAPI.workspace.readTextFile(workspace.path, diffView.path);
-    if (!read.success || !read.data) {
-      setStatus('无法读取文件以完成合并');
-      return;
-    }
-    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, mergeResult, {
-      encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt,
-    });
-    if (!write.success) {
-      setStatus(`写入合并结果失败：${displayError(write.error)}`);
-      return;
-    }
-    // Stage the resolved file
-    const stage = mergeConflictPaths
-      ? await window.electronAPI.workspace.gitOperation(workspace.path, 'stageConflictResult', { resultPath: diffView.path, obsoletePaths: [mergeConflictPaths.base, mergeConflictPaths.theirs].filter((item) => item !== diffView.path) })
-      : await window.electronAPI.workspace.gitStage(workspace.path, [diffView.path]);
-    if (!stage.success) {
-      await window.electronAPI.workspace.writeTextFile(workspace.path, diffView.path, read.data.content, {
-        encoding: read.data.encoding,
-        lineEnding: read.data.lineEnding,
-        expectedModifiedAt: write.data?.modifiedAt,
-      });
-      setStatus(`暂存失败：${displayError(stage.error)}`);
-      return;
-    }
-    setDiffView(null);
-    setMergeHunks([]);
-    setMergeBase(null);
-    setMergeResult(null);
-    setMergeInitialResult(null);
-    setMergeConflictPaths(null);
-    await refreshGitStatus();
-    setDocuments((previous) => previous.map((d) => d.path === diffView.path ? { ...d, content: mergeResult, savedContent: mergeResult, modifiedAt: write.data?.modifiedAt } : d));
-    appendOutput(`合并完成：${diffView.name}`);
-    setStatus('合并冲突已解决并暂存');
-  }, [appendOutput, diffView, mergeConflictPaths, mergeResult, refreshGitStatus, workspace]);
-
-  const generateAiEdit = useCallback(async () => {
-    if (!activeDocument || !aiInstruction.trim()) return;
-    if (!aiApi.apiKey) {
-      setStatus('请先在设置中配置 AI API');
-      return;
-    }
-    const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
-    setAiEditing(true);
-    setStatus(`AI 正在修改 ${activeDocument.name}…`);
-    try {
-      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
-      let conversation = aiMessages;
-      if (conversationNeedsSummary(conversation, aiTokenBudget) && conversation.length > 4) {
-        let summary = '';
-        const summaryPrompt = [...conversation.map(({ role, content }) => ({ role, content })), { role: 'user' as const, content: '请压缩以上代码编辑会话：保留用户目标、已决定的方案、修改过的文件、未解决问题和约束。只返回简洁摘要。' }];
-        for await (const chunk of provider.chat(summaryPrompt, { model: aiApi.model, temperature: 0.1, maxTokens: 2000 })) summary += chunk.delta;
-        conversation = applyConversationSummary(conversation, summary);
-        setAiMessages(conversation);
-        appendOutput(`AI 长会话已压缩为摘要，保留最近 ${Math.min(4, aiMessages.length)} 条消息`);
-      }
-      const conversationMessages = conversation.slice(-12).map(({ role, content }) => ({ role, content }));
-      if (aiMultiFile && workspace) {
-        const listed = await window.electronAPI.workspace.listFiles(workspace.path);
-        const terms = aiInstruction.toLocaleLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 2);
-        const candidates = (listed.data ?? []).filter((file) => /\.(?:[cm]?[jt]sx?|json|css|scss|html|md|py|go|rs|java|vue|svelte)$/i.test(file.name)).sort((a, b) => {
-          const score = (path: string) => terms.reduce((total, term) => total + (path.toLocaleLowerCase().includes(term) ? 1 : 0), 0);
-          return score(b.path) - score(a.path);
-        });
-        const contextPaths = [...new Set([activeDocument.path, ...documents.filter((item) => !item.standalone).map((item) => item.path), ...candidates.slice(0, 8).map((item) => item.path)])].slice(0, 10);
-        // Import-graph expansion: scan context files for import references
-        const importRegex = /(?:from\s+['"]|require\s*\(\s*['"]|import\s+['"])([./][^'"]+)/g;
-        const referencedPaths = new Set<string>();
-        for (const filePath of contextPaths) {
-          const opened = documents.find((item) => item.path === filePath);
-          const content = opened?.content;
-          if (!content) continue;
-          let match: RegExpExecArray | null;
-          while ((match = importRegex.exec(content)) !== null && referencedPaths.size < 10) {
-            const importPath = match[1];
-            if (importPath.startsWith('.')) {
-              const dir = filePath.replace(/\\/g, '/').replace(/\/[^/]+$/, '');
-              const parts = importPath.split('/');
-              const resolvedParts = dir.split('/');
-              for (const part of parts) {
-                if (part === '..') resolvedParts.pop();
-                else if (part !== '.') resolvedParts.push(part);
-              }
-              const cleaned = resolvedParts.join('/');
-              if (candidates.some((c) => c.path === cleaned || c.path === `${cleaned}.ts` || c.path === `${cleaned}.tsx` || c.path === `${cleaned}.js`)) referencedPaths.add(cleaned);
-            }
-          }
-        }
-        for (const refPath of referencedPaths) contextPaths.push(refPath);
-        const contexts: AiFileProposal[] = [];
-        for (const filePath of contextPaths) {
-          const opened = documents.find((item) => item.path === filePath);
-          if (opened) contexts.push({ path: filePath, original: opened.content, modified: opened.content, language: opened.language, metadata: opened });
-          else {
-            const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
-            if (read.success && read.data && read.data.content.length <= 200_000) contexts.push({
-              path: filePath, original: read.data.content, modified: read.data.content, language: languageIdFromName(filePath),
-              metadata: { path: filePath, name: filePath.split(/[\\/]/).pop() ?? filePath, content: read.data.content, savedContent: read.data.content, language: languageIdFromName(filePath), encoding: read.data.encoding, lineEnding: read.data.lineEnding, mixedLineEndings: read.data.mixedLineEndings, modifiedAt: read.data.modifiedAt, readOnly: read.data.readOnly, pinned: true },
-            });
-          }
-        }
-        const fittedContext = fitContextToTokenBudget(contexts.map((item) => ({
-          path: item.path,
-          content: item.original,
-          priority: item.path === activeDocument.path ? 100 : documents.some((document) => document.path === item.path) ? 50 : 0,
-        })), aiTokenBudget);
-        if (fittedContext.omitted.length) appendOutput(`Token 预算压缩：省略 ${fittedContext.omitted.length} 个低优先级文件（约 ${fittedContext.estimatedTokens} tokens）`);
-        const messages = [
-          { role: 'system' as const, content: '你是多文件代码修改助手。返回严格 JSON：{"files":[{"path":"目标相对路径","oldPath":"重命名前相对路径（仅重命名时）","content":"修改后的完整文件内容"}]}。新建文件：提供 path 和 content。删除文件：content 设为空字符串。重命名：同时提供 oldPath、path 和重命名后的完整 content。只返回需要变更的文件，不得返回 Markdown。' },
-          ...conversationMessages,
-          { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fittedContext.files.map((item) => `--- ${item.path} ---\n${item.content}`).join('\n\n')}` },
-        ];
-        let response = '';
-        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))) })) response += chunk.delta;
-        const jsonText = response.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-        const parsed = JSON.parse(jsonText) as { files?: Array<{ path: string; oldPath?: string; content: string }> };
-        const allowed = new Map(contexts.map((item) => [item.path.replace(/\\/g, '/'), item]));
-        const proposals = (parsed.files ?? []).flatMap((file) => {
-          const normalizedPath = file.path.replace(/\\/g, '/');
-          const previousPath = file.oldPath?.replace(/\\/g, '/');
-          const context = allowed.get(previousPath ?? normalizedPath);
-          if (typeof file.content !== 'string') return [];
-          if (previousPath) {
-            if (!context || !file.content || previousPath === normalizedPath || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
-            return [{ ...context, path: normalizedPath, previousPath, modified: file.content, language: languageIdFromName(normalizedPath) }];
-          }
-          // New file: path not in existing contexts
-          if (!context) {
-            if (!file.content || !/^[\w./-]+$/.test(file.path) || file.path.includes('..')) return [];
-            const lang = languageIdFromName(file.path);
-            return [{ path: normalizedPath, original: '', modified: file.content, language: lang, metadata: undefined }];
-          }
-          // Delete: empty content means delete
-          if (file.content === '' && context.original !== '') {
-            return [{ ...context, modified: '', language: context.language }];
-          }
-          if (file.content === context.original) return [];
-          return [{ ...context, modified: file.content }];
-        });
-        if (proposals.length === 0) {
-          setAiPendingRequest(null);
-          setStatus('AI 未生成有效的多文件修改');
-          return;
-        }
-        setAiProposals(proposals);
-        setAiMessages((previous) => [...previous, { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() }, { role: 'assistant' as const, content: response, timestamp: Date.now() }].slice(-100));
-        setAiPendingRequest(null);
-        recordAiSession(proposals.length);
-        const first = proposals[0];
-        setDiffView({ path: first.path, name: first.path, original: first.original, modified: first.modified, language: first.language, source: 'ai' });
-        appendOutput(`AI 已生成 ${proposals.length} 个文件的修改候选`);
-        return;
-      }
-      const selection = editorRef.current?.getSelection();
-      const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
-      const messages = [
-        { role: 'system' as const, content: '你是代码编辑器中的修改助手。根据要求修改文件。只返回修改后的完整文件内容，不要解释，不要输出 diff。' },
-        ...conversationMessages,
-        { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selectedText ? `\n重点关注的选中代码：\n${selectedText}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
-      ];
-      let response = '';
-      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))) })) response += chunk.delta;
-      const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
-      const modified = (fenced?.[1] ?? response).trimEnd();
-      if (!modified || modified === activeDocument.content.trimEnd()) {
-        setAiPendingRequest(null);
-        setStatus('AI 未生成有效修改');
-        return;
-      }
-      setDiffView({ path: activeDocument.path, name: activeDocument.name, original: activeDocument.content, modified, language: activeDocument.language, source: 'ai' });
-      setAiMessages((previous) => [...previous, { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() }, { role: 'assistant' as const, content: response, timestamp: Date.now() }].slice(-100));
-      setAiPendingRequest(null);
-      recordAiSession(1);
-      appendOutput(`AI 已生成 ${activeDocument.name} 的修改候选，等待确认`);
-    } catch (error) {
-      setAiPendingRequest((current) => current?.id === requestId ? { ...current, status: 'interrupted' } : current);
-      setStatus(`AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setAiEditing(false);
-    }
-  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, workspace]);
-
-  const runInlineEdit = useCallback(async () => {
-    if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
-    setInlineEdit({ instruction: '', visible: false });
-    setAiEditing(true);
-    setStatus('AI 正在生成内联修改…');
-    try {
-      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
-      const selection = editorRef.current?.getSelection();
-      const selectedText = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
-      const messages = [
-        { role: 'system' as const, content: '你是内联代码助手。在光标处或选中代码处进行修改。只返回要插入的代码片段，不要解释，不要 Markdown。如果选中了代码，返回替换该选区的代码。' },
-        { role: 'user' as const, content: `${selectedText ? `选中代码：\n${selectedText}\n\n` : ''}${activeDocument.name} (${activeDocument.language})\n修改指令：${inlineEdit.instruction.trim()}` },
-      ];
-      let response = '';
-      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.1, maxTokens: 4000 })) response += chunk.delta;
-      const snippet = response.replace(/```[\s\S]*?\n?/g, '').trim();
-      if (!snippet) { setStatus('AI 未生成有效代码'); return; }
-      editorRef.current?.focus();
-      if (selection && !selection.isEmpty()) {
-        editorRef.current?.executeEdits('ai-inline', [{ range: selection, text: snippet }]);
-      } else {
-        const pos = editorRef.current?.getPosition();
-        if (pos) editorRef.current?.executeEdits('ai-inline', [{ range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column), text: snippet }]);
-      }
-      setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: editorRef.current?.getValue() ?? d.content, pinned: true } : d));
-      appendOutput(`AI 内联修改已应用：${activeDocument.name}`);
-      setStatus('AI 内联修改已应用');
-    } catch (error) {
-      setStatus(`内联修改失败：${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setAiEditing(false);
-    }
-  }, [activeDocument, aiApi.apiKey, aiApi.baseUrl, aiApi.model, appendOutput, inlineEdit.instruction]);
-
-  const acceptAiEdit = useCallback(() => {
-    if (!diffView || diffView.source !== 'ai') return;
-    const proposal = aiProposals.find((item) => item.path === diffView.path);
-    const isNew = !proposal?.metadata;
-    const isDelete = diffView.modified === '' && diffView.original !== '';
-
-    setDocuments((previous) => {
-      const exists = previous.some((document) => document.path === diffView.path);
-      if (isDelete) return previous.filter((d) => d.path !== diffView.path);
-      const updated = previous.map((document) => document.path === diffView.path ? { ...document, content: diffView.modified, pinned: true } : document);
-      if (exists) return updated;
-      return [...updated, {
-        path: diffView.path,
-        name: diffView.path.split(/[\\/]/).pop() ?? diffView.path,
-        content: diffView.modified,
-        savedContent: isNew ? '' : diffView.modified,
-        language: diffView.language,
-        encoding: 'utf8' as WorkspaceEncoding,
-        lineEnding: 'LF' as const,
-        pinned: true,
-      }];
-    });
-    setAiHistory((previous) => [...previous.slice(-49), { id: Date.now(), path: diffView.path, before: diffView.original, after: diffView.modified }]);
-    setActivePath(diffView.path);
-    appendOutput(`已接受 AI 对 ${diffView.name} 的修改（尚未保存）`);
-    setStatus('已接受 AI 修改，请检查后保存');
-    updateSessionAcceptCount();
-    const remaining = aiProposals.filter((item) => item.path !== diffView.path);
-    setAiProposals(remaining);
-    const next = remaining[0];
-    setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
-  }, [aiProposals, appendOutput, diffView]);
-
-  const rejectAiEdit = useCallback(() => {
-    if (!diffView || diffView.source !== 'ai') return;
-    const remaining = aiProposals.filter((item) => item.path !== diffView.path);
-    setAiProposals(remaining);
-    const next = remaining[0];
-    setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
-  }, [aiProposals, diffView]);
-
-  const acceptAllAiEdits = useCallback(async () => {
-    if (!workspace || aiProposals.length === 0) return;
-
-    // Preflight every proposal before mutating editor state. A conflict in one
-    // file rejects the whole group so the user never gets a half-accepted edit.
-    for (const proposal of aiProposals) {
-      const sourcePath = proposal.previousPath ?? proposal.path;
-      const opened = documents.find((document) => document.path === sourcePath);
-      if (opened && opened.content !== proposal.original) {
-        setStatus(`AI 候选已过期：${proposal.path} 在生成后被修改，未接受任何文件`);
-        return;
-      }
-      if (proposal.metadata && !opened) {
-        const current = await window.electronAPI.workspace.readTextFile(workspace.path, sourcePath);
-        if (!current.success || !current.data || current.data.modifiedAt !== proposal.metadata.modifiedAt) {
-          setStatus(`AI 候选已过期：${proposal.path} 的磁盘版本已变化，未接受任何文件`);
-          return;
-        }
-      }
-    }
-
-    const mutations = aiProposals.map((proposal) => {
-      if (!proposal.metadata) {
-        return { kind: 'create' as const, path: proposal.path, content: proposal.modified, encoding: 'utf8' as const, lineEnding: 'LF' as const };
-      }
-      if (proposal.modified === '') {
-        return { kind: 'delete' as const, path: proposal.path, expectedModifiedAt: proposal.metadata.modifiedAt };
-      }
-      if (proposal.previousPath) {
-        return {
-          kind: 'rename' as const,
-          path: proposal.previousPath,
-          targetPath: proposal.path,
-          content: proposal.modified,
-          encoding: proposal.metadata.encoding,
-          lineEnding: proposal.metadata.lineEnding,
-          expectedModifiedAt: proposal.metadata.modifiedAt,
-        };
-      }
-      return {
-        kind: 'write' as const,
-        path: proposal.path,
-        content: proposal.modified,
-        encoding: proposal.metadata.encoding,
-        lineEnding: proposal.metadata.lineEnding,
-        expectedModifiedAt: proposal.metadata.modifiedAt,
-      };
-    });
-    const diskResult = await window.electronAPI.workspace.mutateFiles(workspace.path, mutations);
-    if (!diskResult.success) {
-      setStatus(`AI 文件事务失败，工作区未产生部分修改：${displayError(diskResult.error)}`);
-      return;
-    }
-    const modifiedAtByPath = new Map((diskResult.data ?? []).map((item) => [item.path, item.modifiedAt]));
-
-    setDocuments((previous) => {
-      const updated = previous
-        .filter((document) => aiProposals.find((proposal) => (proposal.previousPath ?? proposal.path) === document.path)?.modified !== '')
-        .map((document) => {
-          const proposal = aiProposals.find((item) => (item.previousPath ?? item.path) === document.path);
-          return proposal ? {
-            ...document,
-            path: proposal.path,
-            name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
-            content: proposal.modified,
-            savedContent: proposal.modified,
-            language: proposal.language,
-            modifiedAt: modifiedAtByPath.get(proposal.path),
-            pinned: true,
-          } : document;
-        });
-      const existingPaths = new Set(updated.map((document) => document.path));
-      for (const proposal of aiProposals) {
-        if (proposal.modified === '' || existingPaths.has(proposal.path)) continue;
-        updated.push({
-          path: proposal.path,
-          name: proposal.path.split(/[\\/]/).pop() ?? proposal.path,
-          content: proposal.modified,
-          savedContent: proposal.modified,
-          language: proposal.language,
-          encoding: 'utf8',
-          lineEnding: 'LF',
-          modifiedAt: modifiedAtByPath.get(proposal.path),
-          pinned: true,
-        });
-      }
-      return updated;
-    });
-    const now = Date.now();
-    setAiHistory((previous) => [...previous, ...aiProposals.map((proposal, index) => ({
-      id: now + index,
-      path: proposal.path,
-      before: proposal.original,
-      after: proposal.modified,
-    }))].slice(-50));
-    setAiProposals([]);
-    setDiffView(null);
-    updateSessionAcceptCount();
-    appendOutput(`已原子应用 ${aiProposals.length} 个 AI 文件修改到磁盘`);
-    setStatus(`已原子应用 ${aiProposals.length} 个文件`);
-  }, [aiProposals, appendOutput, documents, workspace]);
 
   const closeDiffView = useCallback(async () => {
     if (!diffView) return;
@@ -1560,59 +1132,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
       setMergeHunks(computeDiffHunks(diffView.original, diffView.modified));
     }
   }, [diffView]);
-
-  const applyAiHunk = useCallback((hunkIndex: number, accept: boolean) => {
-    if (!diffView || diffView.source !== 'ai') return;
-    const hunk = aiHunks.find((h) => h.index === hunkIndex);
-    if (!hunk) return;
-
-    const oLines = diffView.original.split('\n');
-    const mLines = diffView.modified.split('\n');
-
-    // Accept: apply modifiedLines into original at the hunk position
-    // Reject: apply originalLines into modified at the hunk position
-    const newOriginal = accept
-      ? [...oLines.slice(0, hunk.originalStart - 1), ...hunk.modifiedLines, ...oLines.slice(hunk.originalStart - 1 + hunk.originalLines.length)].join('\n')
-      : diffView.original;
-
-    const newModified = accept
-      ? diffView.modified
-      : [...mLines.slice(0, hunk.modifiedStart - 1), ...hunk.originalLines, ...mLines.slice(hunk.modifiedStart - 1 + hunk.modifiedLines.length)].join('\n');
-
-    // Recompute hunks for the remaining diff
-    const remaining = computeDiffHunks(newOriginal, newModified);
-
-    setAiHunks(remaining);
-    setDiffView({ ...diffView, original: newOriginal, modified: newModified });
-
-    // Update document content with accepted changes
-    setDocuments((previous) => previous.map((d) =>
-      d.path === diffView.path ? { ...d, content: newOriginal, pinned: true } : d,
-    ));
-
-    if (remaining.length === 0) {
-      // All hunks processed — advance to next proposal
-      const proposal = aiProposals.find((p) => p.path === diffView.path);
-      setAiHistory((previous) => [...previous.slice(-49), { id: Date.now(), path: diffView.path, before: proposal?.original ?? '', after: newModified }]);
-      appendOutput(`已审阅 AI 对 ${diffView.name} 的修改（尚未保存）`);
-      setStatus('AI 修改审阅完成，请检查后保存');
-      const remainingProposals = aiProposals.filter((p) => p.path !== diffView.path);
-      setAiProposals(remainingProposals);
-      const next = remainingProposals[0];
-      setDiffView(next ? { path: next.path, name: next.path, original: next.original, modified: next.modified, language: next.language, source: 'ai' } : null);
-    } else {
-      setStatus(`${accept ? '接受' : '拒绝'} Hunk ${hunkIndex + 1}，剩余 ${remaining.length} 个`);
-    }
-  }, [aiHunks, aiProposals, appendOutput, diffView]);
-
-  const undoLastAiEdit = useCallback(() => {
-    const edit = aiHistory.at(-1);
-    if (!edit) return;
-    setDocuments((previous) => previous.map((document) => document.path === edit.path ? { ...document, content: edit.before, pinned: true } : document));
-    setAiHistory((previous) => previous.slice(0, -1));
-    setActivePath(edit.path);
-    setStatus(`已撤销 AI 对 ${edit.path} 的修改`);
-  }, [aiHistory]);
 
   const updateGitStage = useCallback(async (entry: WorkspaceGitStatus, stage: boolean) => {
     if (!workspace) return;
