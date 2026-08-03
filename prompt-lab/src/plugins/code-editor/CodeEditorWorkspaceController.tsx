@@ -44,6 +44,8 @@ import { useAiSessionState, type AiFileProposal } from './useAiSessionState';
 import { useGitDiffMerge } from './useGitDiffMerge';
 import { useAiProposalReview } from './useAiProposalReview';
 import { useAiEditGeneration } from './useAiEditGeneration';
+import { updateTreeNode, useExplorerTree } from './useExplorerTree';
+import { useExplorerMutations } from './useExplorerMutations';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -74,14 +76,6 @@ if (typeof self !== 'undefined') {
       return new EditorWorker();
     },
   };
-}
-
-function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode) => TreeNode): TreeNode[] {
-  return nodes.map((node) => {
-    if (node.path === path) return update(node);
-    if (node.children) return { ...node, children: updateTreeNode(node.children, path, update) };
-    return node;
-  });
 }
 
 function computeDiffHunks(original: string, modified: string): AiHunk[] {
@@ -353,11 +347,17 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     documentsRef.current = documents;
   }, [documents]);
 
-  const loadDirectory = useCallback(async (rootPath: string, relativePath = '') => {
-    const result = await window.electronAPI.workspace.listDirectory(rootPath, relativePath);
-    if (!result.success) throw new Error(displayError(result.error));
-    return (result.data ?? []) as TreeNode[];
-  }, []);
+  const {
+    loadDirectory, hydrateExpandedTree, refreshWorkspaceTree,
+    remapOpenPaths, revealWorkspacePath,
+  } = useExplorerTree({
+    workspace,
+    expandedPaths,
+    setExpandedPaths,
+    setTree,
+    setDocuments,
+    setActivePath,
+  });
 
   const selectTreeNode = useCallback((node: TreeNode, event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
     if (event?.shiftKey && selectedNode) {
@@ -373,62 +373,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
         return next;
       });
-    } else {
-      setSelectedPaths(new Set([node.path]));
-    }
+    } else setSelectedPaths(new Set([node.path]));
     setSelectedNode(node);
   }, [selectedNode, visibleTreeNodes]);
-
-  const hydrateExpandedTree = useCallback(async (
-    rootPath: string,
-    nodes: TreeNode[],
-    paths: Set<string>,
-  ): Promise<TreeNode[]> => Promise.all(nodes.map(async (node) => {
-    if (node.type !== 'directory' || !paths.has(node.path)) return node;
-    const children = await loadDirectory(rootPath, node.path);
-    return { ...node, children: await hydrateExpandedTree(rootPath, children, paths) };
-  })), [loadDirectory]);
-
-  const refreshWorkspaceTree = useCallback(async () => {
-    if (!workspace) return;
-    const entries = await loadDirectory(workspace.path);
-    setTree(await hydrateExpandedTree(workspace.path, entries, expandedPaths));
-  }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
-
-  const remapOpenPaths = useCallback((oldPath: string, nextPath: string) => {
-    setDocuments((previous) => previous.map((document) => {
-      if (
-        document.path !== oldPath
-        && !document.path.startsWith(`${oldPath}\\`)
-        && !document.path.startsWith(`${oldPath}/`)
-      ) return document;
-      const path = `${nextPath}${document.path.slice(oldPath.length)}`;
-      return { ...document, path, name: path.split(/[\\/]/).pop() ?? document.name };
-    }));
-    setActivePath((current) => {
-      if (!current) return current;
-      if (current !== oldPath && !current.startsWith(`${oldPath}\\`) && !current.startsWith(`${oldPath}/`)) {
-        return current;
-      }
-      return `${nextPath}${current.slice(oldPath.length)}`;
-    });
-  }, []);
-
-  const revealWorkspacePath = useCallback(async (relativePath: string) => {
-    if (!workspace) return;
-    const parts = relativePath.split(/[\\/]/);
-    const separator = relativePath.includes('\\') ? '\\' : '/';
-    const nextExpanded = new Set(expandedPaths);
-    let current = '';
-    for (const part of parts.slice(0, -1)) {
-      current = current ? `${current}${separator}${part}` : part;
-      nextExpanded.add(current);
-    }
-    setExpandedPaths(nextExpanded);
-    const entries = await loadDirectory(workspace.path);
-    setTree(await hydrateExpandedTree(workspace.path, entries, nextExpanded));
-  }, [expandedPaths, hydrateExpandedTree, loadDirectory, workspace]);
-
   const openWorkspace = useCallback(async (addToExisting = false) => {
     if (!addToExisting && hasDirtyDocuments && !await appConfirm('当前工作区有未保存的修改，仍要打开其他文件夹吗？')) return;
     try {
@@ -460,171 +407,16 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     }
   }, [hasDirtyDocuments, loadDirectory]);
 
-  const beginCreate = useCallback((type: 'file' | 'directory') => {
-    if (!workspace) return;
-    setTreeEdit({ mode: type === 'file' ? 'create-file' : 'create-directory', value: '' });
-  }, [workspace]);
-
-  const beginRename = useCallback((node = selectedNode) => {
-    if (!node) return;
-    setSelectedNode(node);
-    setTreeEdit({ mode: 'rename', value: node.name, target: node });
-    setTreeMenu(null);
-  }, [selectedNode]);
-
-  const commitTreeEdit = useCallback(async () => {
-    if (!workspace || !treeEdit?.value.trim()) {
-      setTreeEdit(null);
-      return;
-    }
-    if (treeEdit.mode !== 'rename') {
-      const parent = selectedNode?.type === 'directory' ? selectedNode.path : '';
-      const relativePath = parent ? `${parent}/${treeEdit.value.trim()}` : treeEdit.value.trim();
-      const result = treeEdit.mode === 'create-file'
-        ? await window.electronAPI.workspace.createFile(workspace.path, relativePath)
-        : await window.electronAPI.workspace.createDirectory(workspace.path, relativePath);
-      if (!result.success) {
-        setStatus(`新建失败：${displayError(result.error)}`);
-        return;
-      }
-      setTreeEdit(null);
-      await refreshWorkspaceTree();
-      setStatus(`已新建 ${relativePath}`);
-      return;
-    }
-    const target = treeEdit.target;
-    if (!target || treeEdit.value.trim() === target.name) {
-      setTreeEdit(null);
-      return;
-    }
-    const parent = target.path.replace(/[\\/][^\\/]+$/, '');
-    const nextName = treeEdit.value.trim();
-    const nextPath = parent ? `${parent}/${nextName}` : nextName;
-    const result = await window.electronAPI.workspace.renameEntry(
-      workspace.path, target.path, nextPath,
-    );
-    if (!result.success) {
-      setStatus(`重命名失败：${displayError(result.error)}`);
-      return;
-    }
-    const oldPath = target.path;
-    remapOpenPaths(oldPath, nextPath);
-    setSelectedNode(null);
-    setTreeEdit(null);
-    await refreshWorkspaceTree();
-    setStatus(`已重命名为 ${nextName}`);
-  }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeEdit, workspace]);
-
-  const deleteSelected = useCallback(async (node = selectedNode) => {
-    if (!workspace || !node) return;
-    const affectedDocuments = documents.filter((document) => (
-      document.path === node.path
-      || document.path.startsWith(`${node.path}\\`)
-      || document.path.startsWith(`${node.path}/`)
-    ));
-    if (affectedDocuments.some((document) => document.content !== document.savedContent)) {
-      setStatus('删除目标中包含未保存文件，请先保存或关闭');
-      return;
-    }
-    if (!await appConfirm(`确定将“${node.name}”移到系统回收站吗？`)) return;
-    const result = await window.electronAPI.workspace.trashEntry(workspace.path, node.path);
-    if (!result.success) {
-      setStatus(`删除失败：${displayError(result.error)}`);
-      return;
-    }
-    const affectedPaths = new Set(affectedDocuments.map((document) => document.path));
-    const remaining = documents.filter((document) => !affectedPaths.has(document.path));
-    setDocuments(remaining);
-    if (secondaryPath && affectedPaths.has(secondaryPath)) setSecondaryPath(null);
-    if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
-    setSelectedNode(null);
-    await refreshWorkspaceTree();
-    setStatus(`已将 ${node.name} 移到回收站`);
-  }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedNode, workspace]);
-
-  const deleteTreeSelection = useCallback(async () => {
-    if (!workspace || selectedPaths.size === 0) return;
-    const paths = [...selectedPaths].filter((candidate) => ![...selectedPaths].some((parent) => (
-      parent !== candidate && (candidate.startsWith(`${parent}/`) || candidate.startsWith(`${parent}\\`))
-    )));
-    const affected = documents.filter((document) => paths.some((target) => (
-      document.path === target || document.path.startsWith(`${target}/`) || document.path.startsWith(`${target}\\`)
-    )));
-    if (affected.some((document) => document.content !== document.savedContent)) {
-      setStatus('所选项目中包含未保存文件，请先保存或关闭');
-      return;
-    }
-    if (!await appConfirm(`确定将所选 ${paths.length} 个项目移到系统回收站吗？`)) return;
-    for (const target of paths) {
-      const result = await window.electronAPI.workspace.trashEntry(workspace.path, target);
-      if (!result.success) {
-        setStatus(`删除失败：${target} — ${displayError(result.error)}`);
-        return;
-      }
-    }
-    const affectedPaths = new Set(affected.map((document) => document.path));
-    const remaining = documents.filter((document) => !affectedPaths.has(document.path));
-    setDocuments(remaining);
-    if (activePath && affectedPaths.has(activePath)) setActivePath(remaining[0]?.path ?? null);
-    if (secondaryPath && affectedPaths.has(secondaryPath)) setSecondaryPath(null);
-    setSelectedNode(null);
-    setSelectedPaths(new Set());
-    await refreshWorkspaceTree();
-    setStatus(`已将 ${paths.length} 个项目移到回收站`);
-  }, [activePath, documents, refreshWorkspaceTree, secondaryPath, selectedPaths, workspace]);
-
-  const pasteTreeEntry = useCallback(async (target = selectedNode) => {
-    if (!workspace || !treeClipboard) return;
-    const parent = target?.type === 'directory'
-      ? target.path
-      : target?.path.replace(/[\\/][^\\/]+$/, '') ?? '';
-    let completed = 0;
-    let skipped = 0;
-    for (const node of treeClipboard.nodes) {
-      let nextPath = parent ? `${parent}/${node.name}` : node.name;
-      if (nextPath === node.path || nextPath.startsWith(`${node.path}/`) || nextPath.startsWith(`${node.path}\\`)) { skipped += 1; continue; }
-      let result = treeClipboard.cut ? await window.electronAPI.workspace.renameEntry(workspace.path, node.path, nextPath) : await window.electronAPI.workspace.copyEntry(workspace.path, node.path, nextPath);
-      // Auto-rename on conflict: append " - Copy" counter
-      if (!result.success && result.error === 'ALREADY_EXISTS') {
-        let counter = 1;
-        const ext = node.name.includes('.') ? node.name.slice(node.name.lastIndexOf('.')) : '';
-        const base = ext ? node.name.slice(0, node.name.lastIndexOf('.')) : node.name;
-        while (counter < 100) {
-          const renamed = `${base} - Copy${counter > 1 ? ` (${counter})` : ''}${ext}`;
-          const renamedPath = parent ? `${parent}/${renamed}` : renamed;
-          result = treeClipboard.cut ? await window.electronAPI.workspace.renameEntry(workspace.path, node.path, renamedPath) : await window.electronAPI.workspace.copyEntry(workspace.path, node.path, renamedPath);
-          if (result.success) { nextPath = renamedPath; break; }
-          if (result.error !== 'ALREADY_EXISTS') break;
-          counter += 1;
-        }
-      }
-      if (!result.success) { setStatus(`粘贴失败：${node.name} — ${displayError(result.error)}`); return; }
-      if (treeClipboard.cut) remapOpenPaths(node.path, nextPath);
-      completed += 1;
-    }
-    if (treeClipboard.cut) setTreeClipboard(null);
-    await refreshWorkspaceTree();
-    setStatus(`已${treeClipboard.cut ? '移动' : '复制'} ${completed} 个项目${skipped > 0 ? `，跳过 ${skipped} 个` : ''}`);
-  }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, treeClipboard, workspace]);
-
-  const moveTreeEntry = useCallback(async (source: TreeNode, target: TreeNode) => {
-    if (!workspace || target.type !== 'directory') return;
-    const sourceName = source.path.split(/[\\/]/).pop() ?? source.name;
-    const nextPath = `${target.path}/${sourceName}`;
-    if (source.path === target.path || nextPath.startsWith(`${source.path}/`) || nextPath.startsWith(`${source.path}\\`)) {
-      setStatus('不能将文件夹移动到自身内部');
-      return;
-    }
-    const result = await window.electronAPI.workspace.renameEntry(workspace.path, source.path, nextPath);
-    if (!result.success) {
-      setStatus(`移动失败：${displayError(result.error)}`);
-      return;
-    }
-    remapOpenPaths(source.path, nextPath);
-    await refreshWorkspaceTree();
-    setStatus(`已移动到 ${target.path}`);
-  }, [refreshWorkspaceTree, remapOpenPaths, workspace]);
-
+  const {
+    beginCreate, beginRename, commitTreeEdit, deleteSelected, deleteTreeSelection,
+    pasteTreeEntry, moveTreeEntry,
+  } = useExplorerMutations({
+    workspace, documents, setDocuments, activePath, setActivePath,
+    secondaryPath, setSecondaryPath, selectedNode, setSelectedNode,
+    selectedPaths, setSelectedPaths, treeEdit, setTreeEdit, setTreeMenu,
+    treeClipboard, setTreeClipboard,
+    refreshWorkspaceTree, remapOpenPaths, appConfirm, setStatus,
+  });
   const showQuickOpen = useCallback(async () => {
     if (!workspace) {
       setStatus('请先打开工作区');
