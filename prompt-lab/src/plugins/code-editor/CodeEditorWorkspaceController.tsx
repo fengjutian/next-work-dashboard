@@ -38,11 +38,12 @@ import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
 import { estimateTokens, fitContextToTokenBudget } from './ai-context';
 import { classifyConflictStatus } from '../../main/git-conflicts';
-import { applyConversationSummary, conversationNeedsSummary, recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
+import { applyConversationSummary, conversationNeedsSummary } from './ai-conversation';
 import { useTerminalTasks } from './useTerminalTasks';
 import { useGitRepository } from './useGitRepository';
 import { useWorkspaceSearch } from './useWorkspaceSearch';
 import { useEditorIntelligence } from './useEditorIntelligence';
+import { useAiSessionState, type AiFileProposal } from './useAiSessionState';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -84,9 +85,6 @@ function updateTreeNode(nodes: TreeNode[], path: string, update: (node: TreeNode
 }
 
 interface GitHunk { label: string; patch: string }
-interface AiFileProposal { path: string; previousPath?: string; original: string; modified: string; language: string; metadata?: OpenDocument }
-interface AiEditHistory { id: number; path: string; before: string; after: string }
-
 function computeDiffHunks(original: string, modified: string): AiHunk[] {
   const o = original.split('\n');
   const m = modified.split('\n');
@@ -194,21 +192,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   });
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [status, setStatus] = useState('就绪');
-  const [aiInstruction, setAiInstruction] = useState('');
-  const [aiEditing, setAiEditing] = useState(false);
-  const [inlineEdit, setInlineEdit] = useState<{ instruction: string; visible: boolean }>({ instruction: '', visible: false });
-  const [aiSessions, setAiSessions] = useState<Array<{ id: number; workspace: string; instruction: string; timestamp: number; filesChanged: number; accepted: number }>>(() => {
-    try { return JSON.parse(localStorage.getItem('code-editor.ai-sessions') ?? '[]'); } catch { return []; }
-  });
-  const [aiMultiFile, setAiMultiFile] = useState(false);
-  const [aiProposals, setAiProposals] = useState<AiFileProposal[]>([]);
-  const [aiTokenBudget, setAiTokenBudget] = useState(() => Math.max(4_000, Math.min(64_000, Number(localStorage.getItem('code-editor.ai-token-budget')) || 24_000)));
-  const [aiHistory, setAiHistory] = useState<AiEditHistory[]>(() => {
-    try { return JSON.parse(localStorage.getItem('code-editor.ai-history') ?? '[]'); } catch { return []; }
-  });
-  const [aiHunks, setAiHunks] = useState<AiHunk[]>([]);
-  const [aiMessages, setAiMessages] = useState<AiConversationMessage[]>([]);
-  const [aiPendingRequest, setAiPendingRequest] = useState<AiPendingRequest | null>(null);
   const [mergeHunks, setMergeHunks] = useState<AiHunk[]>([]);
   const [mergeBase, setMergeBase] = useState<string | null>(null);
   const [mergeResult, setMergeResult] = useState<string | null>(null);
@@ -233,12 +216,19 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const recentlySavedRef = useRef(new Map<string, number>());
   const openRequestRef = useRef(0);
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
-  const restoredAiDraftWorkspaceRef = useRef<string | null>(null);
 
   const appendOutput = useCallback((message: string) => {
     const line = `${new Date().toLocaleTimeString()}  ${message}`;
     setOutputLines((previous) => [...previous.slice(-199), line]);
   }, []);
+
+  const {
+    aiInstruction, setAiInstruction, aiEditing, setAiEditing, inlineEdit, setInlineEdit,
+    aiSessions, aiMultiFile, setAiMultiFile, aiProposals, setAiProposals,
+    aiTokenBudget, setAiTokenBudget, aiHistory, setAiHistory, aiHunks, setAiHunks,
+    aiMessages, setAiMessages, aiPendingRequest, setAiPendingRequest,
+    recordAiSession, updateSessionAcceptCount,
+  } = useAiSessionState({ workspace, appendOutput });
 
   const openExternalDiff = useCallback((value: { path: string; name: string; modified: string }) => {
     setDiffView({ ...value, original: '', language: 'diff', source: 'external' });
@@ -1063,85 +1053,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('code-editor.preferences.v1', JSON.stringify(preferences));
   }, [preferences]);
-
-  useEffect(() => {
-    localStorage.setItem('code-editor.ai-history', JSON.stringify(aiHistory.slice(-50)));
-  }, [aiHistory]);
-
-  useEffect(() => {
-    localStorage.setItem('code-editor.ai-sessions', JSON.stringify(aiSessions.slice(-100)));
-  }, [aiSessions]);
-
-  useEffect(() => {
-    if (!workspace) return;
-    try {
-      const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string }>;
-      const draft = drafts[workspace.path];
-      setAiProposals(draft?.proposals ?? []);
-      if (draft?.instruction) setAiInstruction(draft.instruction);
-      restoredAiDraftWorkspaceRef.current = workspace.path;
-      if (draft?.proposals.length) appendOutput(`已恢复 ${draft.proposals.length} 个待审 AI 修改候选`);
-    } catch {
-      restoredAiDraftWorkspaceRef.current = workspace.path;
-    }
-  }, [appendOutput, workspace]);
-
-  useEffect(() => {
-    if (!workspace) { setAiMessages([]); setAiPendingRequest(null); return; }
-    try {
-      const conversations = JSON.parse(localStorage.getItem('code-editor.ai-conversations.v1') ?? '{}') as Record<string, AiConversationMessage[]>;
-      const pending = JSON.parse(localStorage.getItem('code-editor.ai-pending.v1') ?? '{}') as Record<string, AiPendingRequest>;
-      setAiMessages(conversations[workspace.path] ?? []);
-      const recovered = recoverInterruptedRequest(pending[workspace.path]);
-      setAiPendingRequest(recovered ?? null);
-      if (recovered) {
-        setAiInstruction(recovered.instruction);
-        appendOutput(`已恢复中断的 AI 请求：${recovered.instruction.slice(0, 80)}`);
-      }
-    } catch { setAiMessages([]); setAiPendingRequest(null); }
-  }, [appendOutput, workspace]);
-
-  useEffect(() => {
-    if (!workspace) return;
-    const conversations = JSON.parse(localStorage.getItem('code-editor.ai-conversations.v1') ?? '{}') as Record<string, AiConversationMessage[]>;
-    conversations[workspace.path] = aiMessages.slice(-100);
-    localStorage.setItem('code-editor.ai-conversations.v1', JSON.stringify(conversations));
-  }, [aiMessages, workspace]);
-
-  useEffect(() => {
-    if (!workspace) return;
-    const pending = JSON.parse(localStorage.getItem('code-editor.ai-pending.v1') ?? '{}') as Record<string, AiPendingRequest>;
-    if (aiPendingRequest) pending[workspace.path] = aiPendingRequest;
-    else delete pending[workspace.path];
-    localStorage.setItem('code-editor.ai-pending.v1', JSON.stringify(pending));
-  }, [aiPendingRequest, workspace]);
-
-  useEffect(() => {
-    if (!workspace || restoredAiDraftWorkspaceRef.current !== workspace.path) return;
-    try {
-      const drafts = JSON.parse(localStorage.getItem('code-editor.ai-drafts.v1') ?? '{}') as Record<string, { proposals: AiFileProposal[]; instruction: string; savedAt?: number }>;
-      if (aiProposals.length) drafts[workspace.path] = { proposals: aiProposals, instruction: aiInstruction, savedAt: Date.now() };
-      else delete drafts[workspace.path];
-      localStorage.setItem('code-editor.ai-drafts.v1', JSON.stringify(drafts));
-    } catch (error) {
-      appendOutput(`AI 待审候选持久化失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [aiInstruction, aiProposals, appendOutput, workspace]);
-
-  useEffect(() => localStorage.setItem('code-editor.ai-token-budget', String(aiTokenBudget)), [aiTokenBudget]);
-
-  const recordAiSession = useCallback((fileCount: number) => {
-    if (!workspace) return;
-    setAiSessions((prev) => [...prev, { id: Date.now(), workspace: workspace.name, instruction: aiInstruction.trim().slice(0, 80), timestamp: Date.now(), filesChanged: fileCount, accepted: 0 }]);
-  }, [aiInstruction, workspace]);
-
-  const updateSessionAcceptCount = useCallback(() => {
-    setAiSessions((prev) => {
-      const last = prev.at(-1);
-      if (!last) return prev;
-      return [...prev.slice(0, -1), { ...last, accepted: last.accepted + 1 }];
-    });
-  }, []);
 
   useEffect(() => localStorage.setItem('code-editor.sidebar-width', String(sidebarWidth)), [sidebarWidth]);
   const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
