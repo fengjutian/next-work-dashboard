@@ -235,10 +235,10 @@ export default function App() {
       <PromptDrawer />
 
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
-      <div className="h-8 flex items-center px-2 border-t border-[#431876] bg-[#51208f] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(59_23_109_/_0.16)]">
+      <div className="h-7 flex items-center px-2 border-t border-[#61245b] bg-[#61245b] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(97_36_91_/_0.16)]">
         <PluginStatusBar />
         <button
-          className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
+          className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
             isSettings
               ? 'bg-white/20 text-white'
               : 'text-white/80 hover:bg-white/15 hover:text-white'

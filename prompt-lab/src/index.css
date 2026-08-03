@@ -6,12 +6,9 @@
   -webkit-app-region: drag;
 }
 
-/* 紫气东来：西侧沉稳帝王紫，向东侧渐亮为霞紫。 */
 .titlebar-auspicious-purple {
-  border-color: rgb(76 29 149 / 0.72);
-  background:
-    radial-gradient(circle at 88% -90%, rgb(126 34 206 / 0.28), transparent 40%),
-    linear-gradient(100deg, #3b176d 0%, #51208f 40%, #6826a8 72%, #7633a6 100%);
+  border-color: #61245b;
+  background-color: #61245b;
 }
 
 .titlebar-no-drag,

@@ -50,7 +50,7 @@ export const TitleBar: React.FC = () => {
   };
 
   return (
-    <div ref={barRef} className="titlebar-drag titlebar-auspicious-purple relative z-[100] flex h-9 flex-shrink-0 items-center border-b text-xs text-white shadow-sm select-none">
+    <div ref={barRef} className="titlebar-drag titlebar-auspicious-purple relative z-[100] flex h-8 flex-shrink-0 items-center border-b text-xs text-white shadow-sm select-none">
       <nav className="titlebar-no-drag flex h-full items-center px-1" aria-label="应用菜单">
         <MenuButton label="文件" open={openMenu === 'file'} onClick={() => toggleMenu('file')}>
           <MenuItem label="AI 工作台" shortcut="Ctrl+1" onClick={() => run(() => setActiveActivity('ai'))} />

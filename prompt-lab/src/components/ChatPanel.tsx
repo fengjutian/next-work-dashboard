@@ -4,7 +4,7 @@ import { XProvider } from '@ant-design/x';
 import type { BubbleProps } from '@ant-design/x';
 import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
-import { Wrench, MessageSquare, Trash2, Plus, Download, ArrowLeft, ArrowRight, Bot, Robot } from '@/components/icons';
+import { Wrench, MessageSquare, Trash2, Plus, Download, PanelLeft, Bot, Robot } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { useChatSession, MODELS, toBubbleItems } from './chat/useChatSession';
@@ -386,7 +386,7 @@ export const ChatPanel: React.FC = () => {
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${showHistory ? 'text-primary' : ''}`}
                 onClick={() => setShowHistory((visible) => !visible)} title="对话历史"
                 aria-label={showHistory ? '收起对话历史' : '展开对话历史'}>
-                {showHistory ? <ArrowLeft className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
+                <PanelLeft className="h-4 w-4" />
               </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNewSession} title="新建对话"><Plus className="h-4 w-4" /></Button>
               <span className="text-xs font-medium text-muted-foreground truncate max-w-[120px]">{activeSession?.title || '新对话'}</span>
