@@ -2,6 +2,7 @@ import React from 'react';
 import { XMarkdown } from '@ant-design/x-markdown';
 import { FileText, FolderOpen } from '@/components/icons';
 import type { MemoryCitation } from '@/core/conversation-memory';
+import { hashMemoryText } from '@/core/conversation-memory';
 
 export function MemorySourceList({ sources, onOpen }: {
   sources: MemoryCitation[];
@@ -38,6 +39,8 @@ export function MemoryDocumentDialog({ preview, onClose }: {
   const excerpt = preview.content.split(/\r?\n/)
     .slice(Math.max(0, preview.source.startLine - 1), preview.source.endLine)
     .join('\n');
+  const isStale = Boolean(preview.source.excerptHash)
+    && hashMemoryText(excerpt.trim()) !== preview.source.excerptHash;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div className="flex h-[85vh] w-[86vw] flex-col overflow-hidden rounded-lg bg-card shadow-2xl" onClick={(event) => event.stopPropagation()}>
@@ -55,8 +58,12 @@ export function MemoryDocumentDialog({ preview, onClose }: {
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="mb-4 rounded-md border border-primary/30 bg-primary-light/40 p-3">
-            <div className="mb-1 text-[10px] font-semibold text-primary">本次召回片段 · 第 {preview.source.startLine}-{preview.source.endLine} 行</div>
-            <pre className="whitespace-pre-wrap break-words text-xs text-foreground">{excerpt || '（原文件对应行已不存在，文件可能已被修改）'}</pre>
+            <div className="mb-1 flex items-center justify-between text-[10px] font-semibold text-primary">
+              <span>本次召回片段 · 第 {preview.source.startLine}-{preview.source.endLine} 行</span>
+              {isStale && <span className="rounded bg-warning/15 px-1.5 py-0.5 text-warning">原文件已变化</span>}
+            </div>
+            {isStale && <div className="mb-2 text-[10px] text-warning">当前行内容与回答时的引用不一致，请以完整原始文档为准。</div>}
+            <pre className="whitespace-pre-wrap break-words text-xs text-foreground">{excerpt || '（原文件对应行已不存在）'}</pre>
           </div>
           <div className="mb-2 text-xs font-semibold text-muted-foreground">完整原始文档</div>
           <XMarkdown content={preview.content || '_(空)_'} className="text-sm" />

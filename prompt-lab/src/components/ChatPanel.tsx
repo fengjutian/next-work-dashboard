@@ -33,6 +33,7 @@ const ALL_TOOLS = [
   'clipboard_read', 'fetch_url', 'write_file', 'list_files',
   'read_file_content', 'read_pdf_document', 'read_word_document',
   'read_excel_spreadsheet', 'read_ppt_presentation', 'open_image',
+  'search_conversation_history', 'read_conversation_document',
 ];
 
 const WELCOME_PROMPTS = [

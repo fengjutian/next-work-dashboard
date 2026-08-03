@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { buildMemoryContext, conversationMemory, toMemoryCitation, type MemoryCitation } from '@/core/conversation-memory';
+import { buildMemoryContext, conversationMemory, selectMemorySourcesForBudget, toMemoryCitation, type MemoryCitation } from '@/core/conversation-memory';
 
 const MEMORY_ENABLED_KEY = 'chat.memory.enabled';
 
@@ -19,10 +19,11 @@ export function useConversationMemory() {
       try { retrieved = await conversationMemory.search(text); }
       catch { /* Retrieval failures must not block the conversation. */ }
     }
-    const memoryContext = buildMemoryContext(retrieved);
+    const selected = selectMemorySourcesForBudget(retrieved);
+    const memoryContext = buildMemoryContext(selected);
     const context = [memoryContext, additionalContext?.trim()].filter(Boolean).join('\n\n---\n\n');
     return {
-      sources: retrieved.map(toMemoryCitation),
+      sources: selected.map(toMemoryCitation),
       contextContent: context ? `${context}\n\n[用户问题]\n${text}` : undefined,
     };
   }, [memoryEnabled]);

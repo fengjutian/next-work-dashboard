@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LocalConversationMemoryProvider, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
+import { hashMemoryText, LocalConversationMemoryProvider, selectMemorySourcesForBudget, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
 import type { ConversationFile } from '../src/types/electron';
 
 const file: ConversationFile = {
@@ -18,9 +18,28 @@ describe('conversation memory chunking', () => {
       documentId: file.path, filePath: file.path, fileName: file.fileName,
       title: file.title, site: file.site, startLine: 1, endLine: 2,
       content: '这段正文只用于模型上下文，不应写入聊天会话。', score: 0.9,
+      documentModifiedAt: file.modifiedAt, excerptHash: '12345678',
     });
     expect(citation).not.toHaveProperty('content');
     expect(citation.filePath).toBe(file.path);
+  });
+
+  it('limits retrieved content to the configured context budget', () => {
+    const source = {
+      documentId: file.path, filePath: file.path, fileName: file.fileName,
+      title: file.title, site: file.site, startLine: 1, endLine: 20,
+      content: '历史知识'.repeat(500), score: 0.9,
+      documentModifiedAt: file.modifiedAt, excerptHash: '12345678',
+    };
+    const selected = selectMemorySourcesForBudget([source], 500);
+    expect(selected).toHaveLength(1);
+    expect(selected[0].content.length).toBeLessThan(source.content.length);
+    expect(selected[0].content).toContain('片段已按上下文预算截断');
+  });
+
+  it('creates stable excerpt fingerprints', () => {
+    expect(hashMemoryText('同一段内容')).toBe(hashMemoryText('同一段内容'));
+    expect(hashMemoryText('同一段内容')).not.toBe(hashMemoryText('不同内容'));
   });
 
   it('preserves original document references and line ranges', () => {

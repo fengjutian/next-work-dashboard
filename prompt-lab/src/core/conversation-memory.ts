@@ -10,14 +10,22 @@ export interface MemorySource {
   endLine: number;
   content: string;
   score: number;
+  documentModifiedAt: number;
+  excerptHash: string;
 }
 
 /** Lightweight citation persisted with chat messages; content remains in the original Markdown file. */
 export type MemoryCitation = Omit<MemorySource, 'content'>;
 
-export function toMemoryCitation(source: MemorySource): MemoryCitation {
-  const { content: _content, ...citation } = source;
-  return citation;
+export function toMemoryCitation(source: MemorySource | MemoryCitation): MemoryCitation {
+  const citation = 'content' in source
+    ? (({ content: _content, ...rest }) => rest)(source)
+    : source;
+  return {
+    ...citation,
+    documentModifiedAt: citation.documentModifiedAt ?? 0,
+    excerptHash: citation.excerptHash ?? '',
+  };
 }
 
 export interface ConversationMemoryProvider {
@@ -42,7 +50,17 @@ const MAX_CHUNK_CHARS = 800;
 const CHUNK_OVERLAP = 100;
 const INDEX_DB_NAME = 'next-work-dashboard-memory';
 const INDEX_STORE_NAME = 'indexes';
-const INDEX_CACHE_KEY = 'conversation-history-v1';
+const INDEX_CACHE_KEY = 'conversation-history-v2';
+export const DEFAULT_MEMORY_CONTEXT_BUDGET = 6000;
+
+export function hashMemoryText(text: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
 
 function openIndexDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -126,6 +144,8 @@ export function splitConversationDocument(file: ConversationFile, content: strin
         startLine: start + 1,
         endLine: end,
         content: chunkContent,
+        documentModifiedAt: file.modifiedAt,
+        excerptHash: hashMemoryText(chunkContent),
         ...encoded,
       });
     }
@@ -217,9 +237,29 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
 
 export const conversationMemory = new LocalConversationMemoryProvider();
 
-export function buildMemoryContext(sources: MemorySource[]): string {
+export function selectMemorySourcesForBudget(
+  sources: MemorySource[],
+  budget = DEFAULT_MEMORY_CONTEXT_BUDGET,
+): MemorySource[] {
+  const selected: MemorySource[] = [];
+  let used = 0;
+  for (const source of sources) {
+    const overhead = source.fileName.length + 100;
+    if (selected.length > 0 && used + overhead + source.content.length > budget) continue;
+    const available = Math.max(200, budget - used - overhead);
+    selected.push(source.content.length > available
+      ? { ...source, content: `${source.content.slice(0, available)}\n[片段已按上下文预算截断]` }
+      : source);
+    used += overhead + Math.min(source.content.length, available);
+    if (used >= budget) break;
+  }
+  return selected;
+}
+
+export function buildMemoryContext(sources: MemorySource[], budget = DEFAULT_MEMORY_CONTEXT_BUDGET): string {
   if (!sources.length) return '';
+  const selected = selectMemorySourcesForBudget(sources, budget);
   return ['[历史知识库上下文]', '请基于以下原始历史片段回答；引用事实时使用 [S1]、[S2]。上下文不足时请明确说明。',
-    ...sources.map((source, index) => `[S${index + 1}] 文件：${source.fileName}；位置：第 ${source.startLine}-${source.endLine} 行\n${source.content}`),
+    ...selected.map((source, index) => `[S${index + 1}] 文件：${source.fileName}；位置：第 ${source.startLine}-${source.endLine} 行\n${source.content}`),
   ].join('\n\n');
 }

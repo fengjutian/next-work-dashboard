@@ -3,12 +3,14 @@ import { useStore } from '@/store';
 import { createOpenAIProvider, registerTools, runAgent } from '@/core';
 import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
+import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools';
 import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 import type { Prompt } from '@/store/types';
 import { useConversationMemory } from './useConversationMemory';
-import { toMemoryCitation, type MemorySource } from '@/core/conversation-memory';
+import { toMemoryCitation } from '@/core/conversation-memory';
+import type { MemoryCitation } from '@/core/conversation-memory';
 
 // ── Bubble.List 兼容的消息状态 ──
 export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'error' | 'abort';
@@ -60,7 +62,22 @@ export function toBubbleItems(messages: Message[], streaming: boolean, error: st
 
 // ── 一次性工具注册 ──
 let toolsRegistered = false;
-if (!toolsRegistered) { registerTools(builtInTools); registerTools(pluginTools); toolsRegistered = true; }
+if (!toolsRegistered) {
+  registerTools(builtInTools);
+  registerTools(pluginTools);
+  registerTools(conversationMemoryTools);
+  toolsRegistered = true;
+}
+
+function memoryCitationsFromToolResults(results: ToolResult[]): MemoryCitation[] {
+  return results.flatMap((result) => {
+    if (result.name !== 'search_conversation_history' || !result.output) return [];
+    try {
+      const parsed = JSON.parse(result.output) as { results?: MemoryCitation[] };
+      return (parsed.results ?? []).map(toMemoryCitation);
+    } catch { return []; }
+  });
+}
 
 // ── 模型列表 ──
 export const MODELS = [
@@ -104,7 +121,7 @@ export function useChatSession() {
           ...session,
           messages: session.messages.map((message) => ({
             ...message,
-            memorySources: message.memorySources?.map((source) => toMemoryCitation(source as MemorySource)),
+            memorySources: message.memorySources?.map(toMemoryCitation),
           })),
         })));
         setActiveSessionId(saved[0].id);
@@ -317,20 +334,36 @@ export function useChatSession() {
     for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal })) {
       switch (step.type) {
         case 'think':
-          updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: '🤔 思考中...' }; return u; });
+          updateSession((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: '🤔 思考中...' } : message));
           break;
         case 'act':
           thinkingText = step.content || ''; currentToolCalls = step.toolCalls || [];
-          updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: thinkingText || '🔧 调用工具中...', toolCalls: [...currentToolCalls] }; return u; });
+          updateSession((prev) => prev.map((message) => message.id === assistantId
+            ? { ...message, content: thinkingText || '🔧 调用工具中...', toolCalls: [...currentToolCalls] }
+            : message));
           break;
         case 'observe':
           if (step.toolResults && step.toolResults.length > 0) {
+            const recalledSources = memoryCitationsFromToolResults(step.toolResults);
             const toolMsg: Message = { id: `t-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, role: 'tool', content: step.toolResults.map((r) => r.error || r.output || '').join('\n'), timestamp: Date.now(), toolResults: step.toolResults };
-            updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, toolResults: step.toolResults, content: thinkingText || '' }; u.push(toolMsg); return u; });
+            updateSession((prev) => {
+              const u = [...prev];
+              const assistantIndex = u.findIndex((message) => message.id === assistantId);
+              if (assistantIndex >= 0) {
+                const assistant = u[assistantIndex];
+                const sources = [...(assistant.memorySources ?? []), ...recalledSources]
+                  .filter((source, index, all) => all.findIndex((item) => item.filePath === source.filePath && item.startLine === source.startLine) === index);
+                u[assistantIndex] = { ...assistant, toolResults: step.toolResults, content: thinkingText || '', memorySources: sources };
+              }
+              u.push(toolMsg);
+              return u;
+            });
           }
           break;
         case 'answer':
-          updateSession((prev) => { const u = [...prev]; const last = u[u.length - 1]; if (last?.id === assistantId) u[u.length - 1] = { ...last, content: step.content || '', toolCalls: last.toolCalls, toolResults: last.toolResults }; return u; });
+          updateSession((prev) => prev.map((message) => message.id === assistantId
+            ? { ...message, content: step.content || '' }
+            : message));
           break;
       }
     }
