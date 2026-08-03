@@ -7,10 +7,10 @@ import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools'
 import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
-import type { Prompt } from '@/store/types';
 import { useConversationMemory } from './useConversationMemory';
 import { toMemoryCitation } from '@/core/conversation-memory';
 import type { MemoryCitation } from '@/core/conversation-memory';
+import { buildBoundPromptContent, canExecutePrompt } from '@/features/prompts/execution';
 
 // ── Bubble.List 兼容的消息状态 ──
 export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'error' | 'abort';
@@ -187,7 +187,7 @@ export function useChatSession() {
   useEffect(() => {
     if (selectedPromptId && promptDrawerOpen === false) {
       const p = prompts.find((pp) => pp.id === selectedPromptId);
-      if (p && p.enabled !== false && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); }
+      if (canExecutePrompt(p) && !streaming) { setInput((prev) => (prev ? prev + '\n' + p.content : p.content)); }
     }
   }, [selectedPromptId, promptDrawerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -219,11 +219,7 @@ export function useChatSession() {
   const getBoundPromptsContent = useCallback((): string => {
     const ids = activeSession?.boundPromptIds ?? [];
     if (ids.length === 0) return '';
-    return ids
-      .map((id) => prompts.find((p) => p.id === id))
-      .filter((p): p is Prompt => p !== undefined && p.enabled !== false)
-      .map((p) => `[${p.title}]\n${p.content}`)
-      .join('\n\n');
+    return buildBoundPromptContent(prompts, ids);
   }, [activeSession, prompts]);
 
   // ── 新建/删除/导出会话 ──

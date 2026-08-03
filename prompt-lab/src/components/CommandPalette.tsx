@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search } from '@/components/icons';
 import { useStore } from '@/store';
 import { pluginRegistry } from '@/plugins';
+import { filterAndSortPrompts } from '@/features/prompts/domain';
 
 // ── 浮动搜索面板 ──
 
@@ -50,14 +51,7 @@ export const CommandPalette: React.FC = () => {
 
   // 过滤提示词（非命令模式）
   const filteredPrompts = !isCommandMode
-    ? query
-      ? prompts.filter(
-          (p) =>
-            p.title.toLowerCase().includes(query.toLowerCase()) ||
-            p.content.toLowerCase().includes(query.toLowerCase()) ||
-            p.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())),
-        )
-      : prompts.slice(0, 8)
+    ? filterAndSortPrompts(prompts, { search: query, enabledOnly: true }).slice(0, query ? undefined : 8)
     : [];
 
   // 总结果列表

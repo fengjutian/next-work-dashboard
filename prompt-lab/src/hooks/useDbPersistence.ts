@@ -35,20 +35,22 @@ export function useDbPersistence() {
       // 4. 加载数据到 Zustand
       useStore.getState().loadFromDb();
 
-      // 5. 恢复插件启用状态（delta overlay：内置默认值 + 用户差量）
+      // 5. 恢复插件启用状态
       try {
         const { dbGetSetting } = await import('@/db');
         const { pluginRegistry } = await import('@/plugins');
         const { builtInPlugins } = await import('@/plugins/built-in');
-        const saved = dbGetSetting('plugin.enabled');
+        // 构建内置默认值映射
+        const builtInDefaults: Record<string, boolean> = {};
+        for (const bp of builtInPlugins) builtInDefaults[bp.id] = bp.enabled;
+        const saved = dbGetSetting('plugin.enabled.delta');
         if (saved) {
-          // 先重置为内置默认值，再叠加用户手动调整过的差量
-          for (const bp of builtInPlugins) {
-            pluginRegistry.setEnabled(bp.id, bp.enabled);
-          }
-          const delta = JSON.parse(saved) as Record<string, boolean>;
-          for (const [id, enabled] of Object.entries(delta)) {
-            pluginRegistry.setEnabled(id, enabled);
+          const savedMap = JSON.parse(saved) as Record<string, boolean>;
+          for (const [id, enabled] of Object.entries(savedMap)) {
+            // 只应用与内置默认值不同的条目（差量格式）
+            if (builtInDefaults[id] === undefined || builtInDefaults[id] !== enabled) {
+              pluginRegistry.setEnabled(id, enabled);
+            }
           }
         }
       } catch { /* 恢复失败不阻塞启动 */ }

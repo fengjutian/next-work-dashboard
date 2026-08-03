@@ -7,12 +7,12 @@ import { useStore } from '@/store';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
 import { SaveConversationPanel } from '@/components/SaveConversationPanel';
 import {
-  extractVariables,
   buildInjectionScript,
   buildConversationExtractScript,
   parseExtractResult,
 } from '@/core';
 import type { Prompt } from '@/store';
+import { preparePromptExecution } from '@/features/prompts/execution';
 
 // ── 标签栏 ──
 
@@ -197,7 +197,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   }, [site, toast, notifyConversationSaved]);
 
   const [savePanelOpen, setSavePanelOpen] = useState(false);
-  const [variableDialogOpen, setVariableDialogOpen] = useState(false);
+  const [variablePrompt, setVariablePrompt] = useState<Prompt | null>(null);
 
   // ── 标注保存侧边栏 ──
   // 提取对话内容的回调：由面板中的「从页面提取」按钮触发
@@ -249,8 +249,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     }
   }, [site, toast, notifyConversationSaved]);
 
-  const doInject = useCallback((finalText: string) => {
-    if (!webviewRef.current || !selectedPrompt || !site) return;
+  const doInject = useCallback((prompt: Prompt, finalText: string) => {
+    if (!webviewRef.current || !site) return;
 
     const webview = webviewRef.current;
     const script = buildInjectionScript({
@@ -266,8 +266,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         const parsed = JSON.parse(result);
         setLastInjectResult(parsed);
         if (parsed.success) {
-          incrementUsage(selectedPrompt.id);
-          recordInject(selectedPrompt.id, site.id);
+          incrementUsage(prompt.id);
+          recordInject(prompt.id, site.id);
           toast('注入成功', 'success');
         } else {
           toast(parsed.error === 'INPUT_NOT_FOUND' ? '未找到输入框，请检查 CSS 选择器' : `注入失败: ${parsed.error}`, 'error');
@@ -277,17 +277,25 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         setLastInjectResult({ success: false, error: err.message });
         toast(`注入失败: ${err.message}`, 'error');
       });
-  }, [selectedPrompt, site, injectMode, injectStrategy, setLastInjectResult, incrementUsage, recordInject, toast]);
+  }, [site, injectMode, injectStrategy, setLastInjectResult, incrementUsage, recordInject, toast]);
+
+  const executePrompt = useCallback((prompt: Prompt) => {
+    const execution = preparePromptExecution(prompt, 'inject');
+    if (execution.status === 'blocked') {
+      toast('该提示词已禁用，无法注入', 'error');
+      return;
+    }
+    if (execution.status === 'requires-input') {
+      setVariablePrompt(prompt);
+      return;
+    }
+    doInject(prompt, execution.content);
+  }, [doInject, toast]);
 
   const handleInject = useCallback(() => {
     if (!selectedPrompt) return;
-    const vars = extractVariables(selectedPrompt.content);
-    if (vars.length > 0) {
-      setVariableDialogOpen(true);
-    } else {
-      doInject(selectedPrompt.content);
-    }
-  }, [selectedPrompt, doInject]);
+    executePrompt(selectedPrompt);
+  }, [selectedPrompt, executePrompt]);
 
   // 监听来自 CommandPalette 的注入信号
   useEffect(() => {
@@ -298,14 +306,9 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
     if (!prompt) return clearInjection();
 
     selectPrompt(prompt.id);
-    const vars = extractVariables(prompt.content);
-    if (vars.length > 0) {
-      setVariableDialogOpen(true);
-    } else {
-      doInject(prompt.content);
-    }
+    executePrompt(prompt);
     clearInjection();
-  }, [pendingInjection, tab, prompts, doInject, clearInjection]);
+  }, [pendingInjection, tab, prompts, executePrompt, clearInjection, selectPrompt]);
 
   if (!tab) return null;
 
@@ -405,15 +408,16 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
       </div>
 
       {/* 变量填充对话框 */}
-      {variableDialogOpen && selectedPrompt && (
+      {variablePrompt && (
         <VariableFillDialog
-          content={selectedPrompt.content}
-          variables={selectedPrompt.variables}
-          onConfirm={(filled) => {
-            setVariableDialogOpen(false);
-            doInject(filled);
+          content={variablePrompt.content}
+          variables={variablePrompt.variables}
+          onConfirm={(_filled, values) => {
+            const execution = preparePromptExecution(variablePrompt, 'inject', values);
+            setVariablePrompt(null);
+            if (execution.status === 'ready') doInject(variablePrompt, execution.content);
           }}
-          onCancel={() => setVariableDialogOpen(false)}
+          onCancel={() => setVariablePrompt(null)}
         />
       )}
     </div>

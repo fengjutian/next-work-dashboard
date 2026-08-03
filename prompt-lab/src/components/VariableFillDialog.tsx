@@ -22,7 +22,7 @@ export function fillVariables(
 interface Props {
   content: string;
   variables?: PromptVariable[];
-  onConfirm: (filledContent: string) => void;
+  onConfirm: (filledContent: string, values: Record<string, string>) => void;
   onCancel: () => void;
 }
 
@@ -48,7 +48,7 @@ export const VariableFillDialog: React.FC<Props> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel();
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        onConfirm(fillVariables(content, values));
+        onConfirm(fillVariables(content, values), values);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -56,7 +56,7 @@ export const VariableFillDialog: React.FC<Props> = ({
   }, [content, values, onConfirm, onCancel]);
 
   const handleSubmit = () => {
-    onConfirm(fillVariables(content, values));
+    onConfirm(fillVariables(content, values), values);
   };
 
   return (

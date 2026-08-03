@@ -134,7 +134,7 @@ export const PluginManagerPanel: React.FC = () => {
                             delta[id] = enabled;
                           }
                         }
-                        dbSetSetting('plugin.enabled', JSON.stringify(delta));
+                        dbSetSetting('plugin.enabled.delta', JSON.stringify(delta));
                       }
                     }
                   }}
