@@ -350,7 +350,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           onClick={handleSaveConversation}
           title="快速保存当前对话"
         >
-          保存
+          保存全部
         </Button>
 
         {/* 标注保存按钮 */}
@@ -361,7 +361,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           onClick={() => setSavePanelOpen(true)}
           title="打开侧边栏填写对话信息后保存"
         >
-          📝 标注保存
+          📝 新建笔记
         </Button>
 
         {/* 注入按钮 */}

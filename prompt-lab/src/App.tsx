@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, MessageSquare, Settings } from '@/components/icons';
+import { Edit3, Globe, MessageSquare, Plus, Send, Settings } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { AIPanel } from '@/components/AIPanel';
@@ -17,6 +17,56 @@ import { pluginRegistry, registerBuiltInPlugins } from '@/plugins';
 // 模块加载时注册所有内置插件（一次性、幂等）
 registerBuiltInPlugins();
 
+type ToolbarOption<T extends string> = {
+  value: T;
+  label: string;
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+function ToolbarSegment<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: ToolbarOption<T>[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div
+      className="flex h-8 items-center rounded-lg border border-border/70 bg-muted/60 p-0.5"
+      role="group"
+      aria-label={label}
+    >
+      {options.map((option) => {
+        const Icon = option.icon;
+        const selected = option.value === value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            className={`flex h-6 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              selected
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
+            }`}
+            aria-pressed={selected}
+            title={option.title}
+            onClick={() => onChange(option.value)}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            <span className="hidden xl:inline">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── 空状态（无标签页时，仅 AI 模式显示） ──
 
 const EmptyState: React.FC = () => {
@@ -29,7 +79,7 @@ const EmptyState: React.FC = () => {
         <Globe className="h-12 w-12 text-foreground mx-auto" />
         <div>
           <h1 className="text-xl font-bold text-foreground mb-2">
-            next-work-dashboard
+            选择 AI 站点
           </h1>
           {enabledSites.length > 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -99,78 +149,6 @@ export default function App() {
   return (
     <ToastProvider>
     <div className="h-screen flex flex-col">
-      {/* 顶部工具栏 */}
-      <div className="h-10 flex items-center px-3 border-b bg-card gap-2 select-none">
-        <span className="text-sm font-semibold text-foreground">
-          next-work-dashboard
-        </span>
-
-        <div className="flex-1" />
-
-        {/* 注入模式切换 — 仅 AI 模式显示 */}
-        {isAI && (
-          <>
-            <div className="flex items-center gap-1 text-xs bg-muted rounded-md p-0.5">
-              <button
-                className={`px-2 py-0.5 rounded-sm transition-colors ${
-                  injectMode === 'fill-only'
-                    ? 'bg-white bg-accent text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setInjectMode('fill-only')}
-              >
-                仅填充
-              </button>
-              <button
-                className={`px-2 py-0.5 rounded-sm transition-colors ${
-                  injectMode === 'fill-and-submit'
-                    ? 'bg-white bg-accent text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setInjectMode('fill-and-submit')}
-              >
-                填充并发送
-              </button>
-            </div>
-
-            <div className="flex items-center gap-1 text-xs bg-muted rounded-md p-0.5 ml-1">
-              <button
-                className={`px-2 py-0.5 rounded-sm transition-colors ${
-                  injectStrategy === 'replace'
-                    ? 'bg-white bg-accent text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setInjectStrategy('replace')}
-              >
-                替换
-              </button>
-              <button
-                className={`px-2 py-0.5 rounded-sm transition-colors ${
-                  injectStrategy === 'append'
-                    ? 'bg-white bg-accent text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setInjectStrategy('append')}
-              >
-                追加
-              </button>
-            </div>
-          </>
-        )}
-
-        {isAI && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-7 w-7 ml-1 ${promptDrawerOpen ? 'text-primary' : ''}`}
-            onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}
-            title="提示词"
-          >
-            <MessageSquare className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-
       {/* 主体：Activity Bar + AI 侧边栏 + 主内容区 */}
       <div className="flex flex-1 overflow-hidden">
         {/* VSCode 风格 Activity Bar — 从插件注册中心动态渲染图标 */}
@@ -188,6 +166,37 @@ export default function App() {
             className="flex-1 flex flex-col"
             style={{ display: isAI ? 'flex' : 'none' }}
           >
+            <div className="flex h-11 flex-shrink-0 items-center justify-end gap-1.5 border-b bg-card/95 px-3 select-none">
+              <ToolbarSegment
+                label="发送方式"
+                value={injectMode}
+                onChange={setInjectMode}
+                options={[
+                  { value: 'fill-only', label: '仅填充', title: '仅填充输入框', icon: Edit3 },
+                  { value: 'fill-and-submit', label: '填充并发送', title: '填充输入框并立即发送', icon: Send },
+                ]}
+              />
+              <ToolbarSegment
+                label="内容处理方式"
+                value={injectStrategy}
+                onChange={setInjectStrategy}
+                options={[
+                  { value: 'replace', label: '替换', title: '替换输入框中的现有内容', icon: Edit3 },
+                  { value: 'append', label: '追加', title: '追加到输入框的现有内容后', icon: Plus },
+                ]}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 flex-shrink-0 ${promptDrawerOpen ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`}
+                onClick={() => setPromptDrawerOpen(!promptDrawerOpen)}
+                title="提示词"
+                aria-label="打开提示词"
+                aria-pressed={promptDrawerOpen}
+              >
+                <MessageSquare className="h-4 w-4" />
+              </Button>
+            </div>
             {tabs.length > 0 ? <WebViewContainer /> : <EmptyState />}
           </div>
 
