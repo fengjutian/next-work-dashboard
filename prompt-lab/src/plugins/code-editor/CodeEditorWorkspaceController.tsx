@@ -14,7 +14,7 @@ import type {
   WorkspaceGitStatus,
   WorkspaceGitCommit,
 } from '@/types/electron';
-import { decodeBase64Utf8, hasGitConflictMarkers, languageFromName, languageIdFromName } from './editor-utils';
+import { decodeBase64Utf8, hasGitConflictMarkers, languageIdFromName } from './editor-utils';
 import { DialogOverlay } from './DialogOverlay';
 import { BottomPanel } from './BottomPanel';
 import { DiffViewPanel } from './DiffViewPanel';
@@ -38,6 +38,8 @@ import { WorkspaceToolbar } from './WorkspaceToolbar';
 import { WorkspaceExplorer } from './WorkspaceExplorer';
 import { EditorDocumentHeader } from './EditorDocumentHeader';
 import { EditorWorkspaceBody } from './EditorWorkspaceBody';
+import { EditorStatusBar } from './EditorStatusBar';
+import { EditorTabMenu } from './EditorTabMenu';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -49,7 +51,6 @@ import {
   type AiHunk,
   DEFAULT_PREFERENCES,
   displayError,
-  encodingLabel,
 } from './editor-types';
 
 export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
@@ -1178,20 +1179,15 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         terminalEnvText={terminalEnvText} setTerminalEnvText={setTerminalEnvText}
       />
 
-      <footer className="flex h-7 shrink-0 items-center gap-3 border-t bg-primary px-3 text-[11px] text-primary-foreground">
-        <span className="max-w-48 truncate">{workspace?.name ?? '无工作区'}</span>
-        <span className="flex-1 truncate opacity-90">{status}</span>
-        {activeDocument && (
-          <>
-            <span>Ln {position.line}, Col {position.column}</span>
-            <button type="button" onClick={() => setBottomPanel({ open: true, tab: 'settings', height: 220 })}>Spaces: {preferences.tabSize}</button>
-            <span>{encodingLabel(activeDocument.encoding)}</span>
-            <span>{activeDocument.lineEnding}{activeDocument.mixedLineEndings ? ' (混合)' : ''}</span>
-            {activeDocument.readOnly && <span>只读</span>}
-            <span>{languageFromName(activeDocument.name)}</span>
-          </>
-        )}
-      </footer>
+      <EditorStatusBar
+        workspaceName={workspace?.name}
+        status={status}
+        document={activeDocument}
+        line={position.line}
+        column={position.column}
+        tabSize={preferences.tabSize}
+        onOpenSettings={() => setBottomPanel({ open: true, tab: 'settings', height: 220 })}
+      />
 
       {treeMenu && (
         <div className="fixed inset-0 z-50" onMouseDown={() => setTreeMenu(null)}>
@@ -1221,35 +1217,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         </div>
       )}
 
-      {tabMenu && (() => {
-        const document = documents.find((item) => item.path === tabMenu.path);
-        const index = documents.findIndex((item) => item.path === tabMenu.path);
-        if (!document) return null;
-        return (
-          <div className="fixed inset-0 z-50" onMouseDown={() => setTabMenu(null)}>
-            <div
-              className="fixed min-w-44 rounded-md border bg-popover py-1 text-xs text-popover-foreground shadow-lg"
-              style={{ left: tabMenu.x, top: tabMenu.y }}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => {
-                setDocuments((previous) => previous.map((item) => item.path === document.path ? { ...item, pinned: item.pinned === false } : item));
-                setTabMenu(null);
-              }}>
-                {document.pinned === false ? '固定标签' : '取消固定'}
-              </button>
-              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { setSecondaryPath(document.path); setTabMenu(null); }}>
-                在右侧打开
-              </button>
-              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocument(document.path); setTabMenu(null); }}>关闭</button>
-              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.path !== document.path).map((item) => item.path)); setTabMenu(null); }}>关闭其他</button>
-              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent disabled:opacity-40" disabled={index === documents.length - 1} onClick={() => { closeDocumentSet(documents.slice(index + 1).map((item) => item.path)); setTabMenu(null); }}>关闭右侧</button>
-              <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { closeDocumentSet(documents.filter((item) => item.content === item.savedContent).map((item) => item.path)); setTabMenu(null); }}>关闭已保存</button>
-            </div>
-          </div>
-        );
-      })()}
-
+      <EditorTabMenu
+        menu={tabMenu}
+        documents={documents}
+        onCloseMenu={() => setTabMenu(null)}
+        onTogglePin={(path) => setDocuments((previous) => previous.map((document) => document.path === path ? { ...document, pinned: document.pinned === false } : document))}
+        onOpenSecondary={setSecondaryPath}
+        onClosePaths={(paths) => { void closeDocumentSet(paths); }}
+      />
       {diffView && <DiffViewPanel
         diffView={diffView}
         resolvedTheme={resolvedTheme}
