@@ -1,5 +1,5 @@
 import React from 'react';
-import { pluginRegistry } from '@/plugins';
+import { pluginRegistry, usePluginRegistryVersion } from '@/plugins';
 import { useStore } from '@/store';
 
 /**
@@ -10,11 +10,7 @@ import { useStore } from '@/store';
  */
 export const PluginStatusBar: React.FC = () => {
   // 订阅 registry 变更
-  const [, setTick] = React.useState(0);
-  React.useEffect(
-    () => pluginRegistry.subscribe(() => setTick((t) => t + 1)),
-    [],
-  );
+  usePluginRegistryVersion();
 
   const allItems = pluginRegistry
     .getEnabled()

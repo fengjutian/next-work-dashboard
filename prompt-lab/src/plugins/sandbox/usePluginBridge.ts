@@ -33,6 +33,39 @@ interface UsePluginBridgeReturn {
 // ── 插件私有存储（按 pluginId 命名空间隔离） ──
 
 const DATA_PREFIX = 'pksdk:data:';
+const MAX_MESSAGE_SIZE = 256 * 1024;
+const MAX_PLUGIN_STORAGE_SIZE = 512 * 1024;
+const VALID_CHANNELS = new Set(['store', 'ui', 'actions', 'data', 'preview', 'file', 'config']);
+const SAFE_EXTERNAL_PROTOCOLS = new Set(['https:', 'http:', 'mailto:']);
+
+function validateMessage(value: unknown): value is SandboxMessage {
+  if (typeof value !== 'object' || value === null) return false;
+  const msg = value as Partial<SandboxMessage>;
+  if (typeof msg.requestId !== 'string' || msg.requestId.length < 1 || msg.requestId.length > 128) return false;
+  if (typeof msg.channel !== 'string' || !VALID_CHANNELS.has(msg.channel)) return false;
+  if (typeof msg.method !== 'string' || !/^[a-zA-Z][a-zA-Z0-9]{0,63}$/.test(msg.method)) return false;
+  if (msg.args !== undefined && (!Array.isArray(msg.args) || msg.args.length > 8)) return false;
+  try {
+    return JSON.stringify(value).length <= MAX_MESSAGE_SIZE;
+  } catch {
+    return false;
+  }
+}
+
+function requireString(value: unknown, field: string, maxLength: number): string {
+  if (typeof value !== 'string' || value.length > maxLength) {
+    throw new Error(`${field} must be a string of at most ${maxLength} characters`);
+  }
+  return value;
+}
+
+function requireStorageKey(value: unknown): string {
+  const key = requireString(value, 'key', 128);
+  if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') {
+    throw new Error('Invalid storage key');
+  }
+  return key;
+}
 
 function getPluginStore(pluginId: string): Record<string, unknown> {
   try {
@@ -44,7 +77,11 @@ function getPluginStore(pluginId: string): Record<string, unknown> {
 }
 
 function setPluginStore(pluginId: string, store: Record<string, unknown>): void {
-  localStorage.setItem(DATA_PREFIX + pluginId, JSON.stringify(store));
+  const serialized = JSON.stringify(store);
+  if (serialized.length > MAX_PLUGIN_STORAGE_SIZE) {
+    throw new Error('Plugin storage quota exceeded (512 KB)');
+  }
+  localStorage.setItem(DATA_PREFIX + pluginId, serialized);
 }
 
 export function usePluginBridge({
@@ -138,7 +175,7 @@ export function usePluginBridge({
           case 'ui': {
             switch (method) {
               case 'setContent': {
-                const html = String(args[0] ?? '');
+                const html = requireString(args[0] ?? '', 'html', 200_000);
                 iframeRef.current?.contentWindow?.postMessage(
                   { event: 'setContent', payload: html },
                   '*',
@@ -156,7 +193,7 @@ export function usePluginBridge({
                 });
                 break;
               case 'showToast': {
-                const message = String(args[0] ?? '');
+                const message = requireString(args[0] ?? '', 'message', 2_000);
                 // TODO: 对接 toast 系统
                 console.log(`[PluginSDK Toast] ${message}`);
                 respond(requestId, true);
@@ -185,7 +222,7 @@ export function usePluginBridge({
                   respond(requestId, false, undefined, '缺少权限: clipboard');
                   return;
                 }
-                const text = String(args[0] ?? '');
+                const text = requireString(args[0] ?? '', 'text', 1_000_000);
                 (window as any).electronAPI
                   ?.copyText(text)
                   .then(() => respond(requestId, true))
@@ -198,6 +235,11 @@ export function usePluginBridge({
                   return;
                 }
                 const [siteId, text, autoSubmit] = args as [string, string, boolean?];
+                requireString(siteId, 'siteId', 128);
+                requireString(text, 'text', 1_000_000);
+                if (autoSubmit !== undefined && typeof autoSubmit !== 'boolean') {
+                  throw new Error('autoSubmit must be a boolean');
+                }
                 const store = storeRef.current;
                 const site = store.sites.find((s) => s.id === siteId);
                 if (!site) {
@@ -230,8 +272,17 @@ export function usePluginBridge({
                   respond(requestId, false, undefined, '缺少权限: external.open');
                   return;
                 }
-                const url = String(args[0] ?? '');
-                window.open(url, '_blank', 'noopener,noreferrer');
+                const rawUrl = requireString(args[0] ?? '', 'url', 2_048);
+                let url: URL;
+                try {
+                  url = new URL(rawUrl);
+                } catch {
+                  throw new Error('Invalid external URL');
+                }
+                if (!SAFE_EXTERNAL_PROTOCOLS.has(url.protocol) || url.username || url.password) {
+                  throw new Error(`External URL protocol is not allowed: ${url.protocol}`);
+                }
+                window.open(url.href, '_blank', 'noopener,noreferrer');
                 respond(requestId, true);
                 return;
               }
@@ -251,17 +302,17 @@ export function usePluginBridge({
             const store = getPluginStore(pluginId);
             switch (method) {
               case 'get':
-                respond(requestId, true, store[String(args[0])]);
+                respond(requestId, true, store[requireStorageKey(args[0])]);
                 break;
               case 'set': {
-                const key = String(args[0]);
+                const key = requireStorageKey(args[0]);
                 store[key] = args[1];
                 setPluginStore(pluginId, store);
                 respond(requestId, true);
                 break;
               }
               case 'delete': {
-                delete store[String(args[0])];
+                delete store[requireStorageKey(args[0])];
                 setPluginStore(pluginId, store);
                 respond(requestId, true);
                 break;
@@ -460,8 +511,9 @@ export function usePluginBridge({
   // ── 监听 iframe 消息 ──
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      const msg = e.data as SandboxMessage;
-      if (!msg?.requestId || !msg?.channel) return;
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      if (!validateMessage(e.data)) return;
+      const msg = e.data;
       // 只处理来自自己 iframe 的消息
       if (e.source !== iframeRef.current?.contentWindow) return;
       handleMessage(msg);

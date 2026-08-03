@@ -1,13 +1,12 @@
 import React from 'react';
 import { useStore } from '@/store';
-import { pluginRegistry } from '@/plugins';
+import { pluginRegistry, usePluginRegistryVersion } from '@/plugins';
 
 export const ActivityBar: React.FC = () => {
   const { activeActivity, setActiveActivity } = useStore();
 
   // 订阅 registry 变更，插件开关后自动重渲染
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => pluginRegistry.subscribe(() => setTick((t) => t + 1)), []);
+  usePluginRegistryVersion();
 
   // 从插件注册中心获取已启用的插件（按 order 排序）
   const bottomNavigationPluginIds = new Set(['plugin-manager', 'database']);

@@ -14,7 +14,7 @@ import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useDbPersistence } from '@/hooks/useDbPersistence';
 import { useStore } from '@/store';
-import { pluginRegistry, registerBuiltInPlugins, rehydrateUserPlugins } from '@/plugins';
+import { pluginRegistry, registerBuiltInPlugins, rehydrateUserPlugins, usePluginRegistryVersion } from '@/plugins';
 
 // 模块加载时注册所有内置插件（一次性、幂等）
 registerBuiltInPlugins();
@@ -75,6 +75,7 @@ function ToolbarSegment<T extends string>({
 // ── 根布局 ──
 
 export default function App() {
+  usePluginRegistryVersion();
   const {
     activeActivity,
     setActiveActivity,

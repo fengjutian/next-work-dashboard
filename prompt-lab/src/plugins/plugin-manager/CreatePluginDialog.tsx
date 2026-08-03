@@ -90,9 +90,16 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
     // 构建清单
     const isKernel = activeTab === 'kernel' && formBundle.trim().length > 0;
+    if (isKernel && !window.confirm(
+      '内核插件会在宿主环境中直接执行代码，并可访问应用数据和 Electron API。确认创建并立即启用这个插件吗？',
+    )) {
+      return;
+    }
     const manifest: PluginManifest = {
+      id,
       name,
       version: formVersion || '0.1.0',
+      apiVersion: '1',
       description: formDescription || undefined,
       author: formAuthor || undefined,
       iconEmoji: formIconEmoji || undefined,

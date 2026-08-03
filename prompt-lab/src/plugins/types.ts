@@ -1,5 +1,18 @@
 import type { ComponentType, FC } from 'react';
 
+export type PluginDisposable = () => void;
+
+export interface PluginContext {
+  pluginId: string;
+  /** Register cleanup work that runs automatically on disable or uninstall. */
+  subscriptions: {
+    add(disposable: PluginDisposable): void;
+  };
+  commands: {
+    register(commandId: string, handler: (...args: unknown[]) => void | Promise<void>): PluginDisposable;
+  };
+}
+
 // ── 命令定义 ──
 
 export interface PluginCommand {
@@ -65,4 +78,10 @@ export interface Plugin {
 
   /** 插件贡献声明（命令、状态栏项、附加视图等） */
   contributions?: PluginContributions;
+
+  /** Called when an enabled plugin becomes active. */
+  activate?: (context: PluginContext) => void | PluginDisposable | Promise<void | PluginDisposable>;
+
+  /** Called after registered resources are disposed during disable/uninstall. */
+  deactivate?: () => void | Promise<void>;
 }

@@ -119,6 +119,19 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
       });
 
       // 便捷注入函数 — 对齐沙箱 PluginSDK.actions.injectPrompt
+      const callElectronApi = (method: 'pickFile' | 'saveFile' | 'copyText', ...args: unknown[]) => {
+        const fn = electronAPI[method];
+        if (typeof fn !== 'function') {
+          throw new Error(`electronAPI.${method} 不可用，请重新构建 Electron 应用使 preload 改动生效。`);
+        }
+        return fn(...args);
+      };
+      const kernelElectronAPI = Object.freeze({
+        pickFile: (...args: unknown[]) => callElectronApi('pickFile', ...args),
+        saveFile: (...args: unknown[]) => callElectronApi('saveFile', ...args),
+        copyText: (...args: unknown[]) => callElectronApi('copyText', ...args),
+      });
+
       const injectToAI = async (siteId: string, text: string, autoSubmit = false) => {
         const store = useStore.getState();
         const site = store.sites.find((s: any) => s.id === siteId);
@@ -141,7 +154,7 @@ const KernelPluginLoader: React.FC<{ bundle: string; pluginId: string }> = ({
         React,
         XLSX,
         useStore,
-        electronAPI,
+        electronAPI: kernelElectronAPI,
         injectToAI,
       };
 

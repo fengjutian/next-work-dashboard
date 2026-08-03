@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search } from '@/components/icons';
 import { useStore } from '@/store';
-import { pluginRegistry } from '@/plugins';
+import { pluginRegistry, usePluginRegistryVersion } from '@/plugins';
 import { filterAndSortPrompts } from '@/features/prompts/domain';
 
 // ── 浮动搜索面板 ──
@@ -26,14 +26,10 @@ export const CommandPalette: React.FC = () => {
   const cmdQuery = isCommandMode ? query.slice(1).trim() : '';
 
   // 所有插件命令 — 通过订阅保证实时性
-  const [cmdTick, setCmdTick] = React.useState(0);
-  React.useEffect(
-    () => pluginRegistry.subscribe(() => setCmdTick((t) => t + 1)),
-    [],
-  );
+  const registryVersion = usePluginRegistryVersion();
   const allCommands = React.useMemo(
     () => pluginRegistry.getCommands(),
-    [cmdTick],
+    [registryVersion],
   );
 
   // 过滤命令

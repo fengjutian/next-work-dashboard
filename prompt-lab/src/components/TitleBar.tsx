@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, Maximize2, Minus, X } from '@/components/icons';
-import { pluginRegistry } from '@/plugins';
+import { pluginRegistry, usePluginRegistryVersion } from '@/plugins';
 import { useStore } from '@/store';
 
 type MenuName = 'file' | 'modules' | 'view';
@@ -9,15 +9,13 @@ export const TitleBar: React.FC = () => {
   const { activeActivity, setActiveActivity, theme, setTheme } = useStore();
   const [openMenu, setOpenMenu] = React.useState<MenuName | null>(null);
   const [maximized, setMaximized] = React.useState(false);
-  const [, refreshPlugins] = React.useState(0);
+  usePluginRegistryVersion();
   const barRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     void window.electronAPI.isMaximized().then(setMaximized);
     return window.electronAPI.onMaximizedChange(setMaximized);
   }, []);
-
-  React.useEffect(() => pluginRegistry.subscribe(() => refreshPlugins((value) => value + 1)), []);
 
   React.useEffect(() => {
     const closeMenu = (event: MouseEvent) => {

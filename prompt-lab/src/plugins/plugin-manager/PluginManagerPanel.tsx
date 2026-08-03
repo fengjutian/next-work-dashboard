@@ -6,12 +6,12 @@ import { loadUserPlugins, saveUserPlugins } from './user-plugin-store';
 import { builtInPlugins } from '../built-in';
 import { CreatePluginDialog } from './CreatePluginDialog';
 import { exportPlugin, importPlugin } from './import-export';
+import { usePluginRegistryVersion } from '../usePluginRegistry';
 
 // ── 主面板 ──
 
 export const PluginManagerPanel: React.FC = () => {
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => pluginRegistry.subscribe(() => setTick((t) => t + 1)), []);
+  usePluginRegistryVersion();
 
   // 启动时从 localStorage 恢复用户插件
   // 弹层状态
@@ -57,7 +57,6 @@ export const PluginManagerPanel: React.FC = () => {
                 if (file) {
                   const result = await importPlugin(file);
                   alert(result.message);
-                  if (result.ok) setTick((t) => t + 1);
                 }
               };
               input.click();
@@ -81,7 +80,7 @@ export const PluginManagerPanel: React.FC = () => {
       <CreatePluginDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onCreated={() => setTick((t) => t + 1)}
+        onCreated={() => undefined}
       />
 
       {/* 插件卡片网格 */}
