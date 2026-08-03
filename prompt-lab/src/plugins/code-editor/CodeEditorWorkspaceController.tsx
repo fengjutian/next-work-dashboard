@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Editor, { loader } from '@monaco-editor/react';
+import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -7,19 +7,6 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
-import {
-  ChevronDown,
-  Code,
-  FileText,
-  FolderOpen,
-  Edit3,
-  PanelLeft,
-  Plus,
-  RefreshCw,
-  Search,
-  Trash2,
-  X,
-} from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import type {
@@ -47,6 +34,10 @@ import { useExplorerTree } from './useExplorerTree';
 import { useExplorerMutations } from './useExplorerMutations';
 import { useFileOpening } from './useFileOpening';
 import { useExplorerNavigation } from './useExplorerNavigation';
+import { WorkspaceToolbar } from './WorkspaceToolbar';
+import { WorkspaceExplorer } from './WorkspaceExplorer';
+import { EditorDocumentHeader } from './EditorDocumentHeader';
+import { EditorWorkspaceBody } from './EditorWorkspaceBody';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -1053,328 +1044,91 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
-      <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setSidebarVisible((value) => !value)} title="切换资源管理器 (Ctrl+B)">
-          <PanelLeft className="h-4 w-4" />
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => void openWorkspace(false)}>
-          <FolderOpen className="h-4 w-4" /> 打开文件夹
-        </Button>
-        {workspace && <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => void openWorkspace(true)}>
-          <Plus className="h-3.5 w-3.5" /> 添加文件夹
-        </Button>}
-        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openStandaloneFile}>
-          <FileText className="h-4 w-4" /> 打开文件
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 px-2 text-xs"
-          onClick={() => setSearchPanel((previous) => ({ ...previous, open: true }))}
-          disabled={!workspace}
-        >
-          <Search className="h-4 w-4" /> 全文搜索
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!workspace} onClick={() => void runSemanticSearch()} title="跨工作区搜索定义、引用和 import">语义搜索</Button>
-        <div className="flex-1" />
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.revealDefinition', '当前位置没有可跳转的定义')} title="转到定义 (F12)">定义</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void runEditorAction('editor.action.referenceSearch.trigger', '当前位置没有可查找的引用')} title="查找所有引用 (Shift+F12)">引用</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => void formatActiveDocument()} title="格式化文档 (Shift+Alt+F)">
-          格式化
-        </Button>
-        <Button size="sm" variant={bottomPanel.open ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setBottomPanel((previous) => ({ ...previous, open: !previous.open }))}>
-          面板
-        </Button>
-        <Button size="sm" variant={autoSave ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => setAutoSave((value) => !value)}>
-          自动保存
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument || activeDocument.content === activeDocument.savedContent} onClick={saveActive}>
-          保存
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!hasDirtyDocuments} onClick={saveAll}>
-          全部保存
-        </Button>
-      </header>
+      <WorkspaceToolbar
+        workspaceOpen={Boolean(workspace)}
+        activeDocument={activeDocument}
+        hasDirtyDocuments={hasDirtyDocuments}
+        autoSave={autoSave}
+        bottomPanelOpen={bottomPanel.open}
+        onToggleSidebar={() => setSidebarVisible((value) => !value)}
+        onOpenWorkspace={(add) => { void openWorkspace(add); }}
+        onOpenFile={() => { void openStandaloneFile(); }}
+        onOpenSearch={() => setSearchPanel((previous) => ({ ...previous, open: true }))}
+        onSemanticSearch={() => { void runSemanticSearch(); }}
+        onEditorAction={(id, message) => { void runEditorAction(id, message); }}
+        onFormat={() => { void formatActiveDocument(); }}
+        onTogglePanel={() => setBottomPanel((previous) => ({ ...previous, open: !previous.open }))}
+        onToggleAutoSave={() => setAutoSave((value) => !value)}
+        onSave={() => { void saveActive(); }}
+        onSaveAll={() => { void saveAll(); }}
+      />
 
       <div className="flex min-h-0 flex-1">
-        {sidebarVisible && (
-          <aside className="relative flex shrink-0 flex-col border-r bg-sidebar-bg outline-none" style={{ width: sidebarWidth }} tabIndex={0} onKeyDown={handleTreeKeyDown} aria-label="文件资源管理器">
-            <div className="flex h-9 items-center gap-0.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <span className="flex-1 px-1">Explorer</span>
-              <button type="button" className="rounded px-1 text-[9px] hover:bg-accent" onClick={() => setExplorerSort((s) => s === 'name' ? 'type' : 'name')} title="排序方式">{explorerSort === 'name' ? 'A-Z' : 'Type'}</button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件" onClick={() => beginCreate('file')} disabled={!workspace}>
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="新建文件夹" onClick={() => beginCreate('directory')} disabled={!workspace}>
-                <FolderOpen className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="重命名选中项" onClick={() => beginRename()} disabled={!selectedNode}>
-                <Edit3 className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="删除选中项" onClick={() => void (selectedPaths.size > 1 ? deleteTreeSelection() : deleteSelected())} disabled={!selectedNode}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="快速打开 (Ctrl+P)" onClick={() => void showQuickOpen()} disabled={!workspace}>
-                <Search className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="刷新资源管理器" onClick={() => void refreshWorkspaceTree()} disabled={!workspace}>
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" className="rounded p-1 hover:bg-accent" title="折叠全部" onClick={() => {
-                setExpandedPaths(new Set());
-                setTree((previous) => previous.map((node) => ({ ...node, children: undefined })));
-              }} disabled={!workspace}>
-                <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
-              </button>
-            </div>
-            {workspace ? (
-              <div className="min-h-0 flex-1 overflow-auto">
-                {workspaceFolders.length > 1 && <div className="flex gap-0.5 border-b px-1 py-1">{workspaceFolders.map((f) => <button key={f.id} type="button" className={`group flex items-center truncate rounded px-2 py-0.5 text-[10px] ${f.path === workspace.path ? 'bg-accent' : 'hover:bg-accent/50'}`} onClick={async () => { if (f.path === workspace.path) return; setStatus(`切换到 ${f.name}…`); const entries = await loadDirectory(f.path); setWorkspace({ path: f.path, name: f.name }); setTree(entries); setExpandedPaths(new Set()); setActiveFolderId(f.id); setStatus(`已切换至 ${f.name}`); }} title={f.path}>{f.name}<span className="ml-1 hidden group-hover:inline hover:text-destructive" onClick={async (e) => { e.stopPropagation(); if (f.path === workspace.path) { const next = workspaceFolders.find((x) => x.path !== f.path); if (next) { const entries = await loadDirectory(next.path); setWorkspace({ path: next.path, name: next.name }); setTree(entries); } else { setWorkspace(null); setTree([]); } } setWorkspaceFolders((prev) => prev.filter((x) => x.id !== f.id)); }}>×</span></button>)}</div>}
-                <div className="px-2 pb-1">
-                  <input value={explorerFilter} onChange={(e) => setExplorerFilter(e.target.value)} placeholder="过滤文件…" className="h-6 w-full rounded border bg-background px-2 text-[10px] outline-none" />
-                </div>
-                <div className="flex h-7 items-center gap-1 px-2 text-xs font-semibold">
-                  <ChevronDown className="h-3 w-3" />
-                  <span className="truncate uppercase">{workspace.name}</span>
-                </div>
-                {treeEdit && treeEdit.mode !== 'rename' && (
-                  <div className="flex h-7 items-center gap-1 px-2">
-                    {treeEdit.mode === 'create-directory'
-                      ? <FolderOpen className="h-3.5 w-3.5 text-primary" />
-                      : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
-                    <input
-                      autoFocus
-                      value={treeEdit.value}
-                      onChange={(event) => setTreeEdit((previous) => previous ? { ...previous, value: event.target.value } : previous)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') void commitTreeEdit();
-                        if (event.key === 'Escape') setTreeEdit(null);
-                      }}
-                      onBlur={() => void commitTreeEdit()}
-                      placeholder={selectedNode?.type === 'directory' ? `在 ${selectedNode.name} 中创建` : '输入名称'}
-                      className="h-5 min-w-0 flex-1 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-                    />
-                  </div>
-                )}
-                {tree.map((node) => (
-                  <FileTreeRow
-                    key={node.path}
-                    node={node}
-                    depth={0}
-                    activePath={activePath}
-                    selectedPaths={selectedPaths}
-                    onOpen={openTreeFile}
-                    onToggle={toggleDirectory}
-                    onSelect={selectTreeNode}
-                    editing={treeEdit}
-                    onEditChange={(value: string) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
-                    onEditCommit={(): void => { void commitTreeEdit(); }}
-                    onEditCancel={() => setTreeEdit(null)}
-                    onContextMenu={(event: React.MouseEvent, current: TreeNode) => {
-                      event.preventDefault();
-                      if (!selectedPaths.has(current.path)) {
-                        setSelectedPaths(new Set([current.path]));
-                        setSelectedNode(current);
-                      }
-                      setTreeMenu({ x: event.clientX, y: event.clientY, node: current });
-                    }}
-                    onMove={(source: TreeNode, target: TreeNode): void => { void moveTreeEntry(source, target); }}
-                    decorations={treeDecorations}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="px-4 py-5 text-xs leading-5 text-muted-foreground">
-                尚未打开文件夹。打开工作区后可浏览和编辑其中的文件。
-              </div>
-            )}
-            <div className="absolute bottom-0 right-[-3px] top-0 z-20 w-1.5 cursor-col-resize" onMouseDown={(event) => {
-              const startX = event.clientX;
-              const startWidth = sidebarWidth;
-              const move = (moveEvent: MouseEvent) => setSidebarWidth(Math.max(180, Math.min(520, startWidth + moveEvent.clientX - startX)));
-              const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-              window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
-            }} />
-          </aside>
-        )}
-
+        {sidebarVisible && <WorkspaceExplorer
+          width={sidebarWidth}
+          workspace={workspace}
+          folders={workspaceFolders}
+          tree={tree}
+          filter={explorerFilter}
+          sort={explorerSort}
+          activePath={activePath}
+          selectedNode={selectedNode}
+          selectedPaths={selectedPaths}
+          treeEdit={treeEdit}
+          decorations={treeDecorations}
+          onKeyDown={handleTreeKeyDown}
+          onFilterChange={setExplorerFilter}
+          onToggleSort={() => setExplorerSort((value) => value === 'name' ? 'type' : 'name')}
+          onCreate={beginCreate}
+          onRename={() => beginRename()}
+          onDelete={() => { void (selectedPaths.size > 1 ? deleteTreeSelection() : deleteSelected()); }}
+          onQuickOpen={() => { void showQuickOpen(); }}
+          onRefresh={() => { void refreshWorkspaceTree(); }}
+          onCollapseAll={() => { setExpandedPaths(new Set()); setTree((previous) => previous.map((node) => ({ ...node, children: undefined }))); }}
+          onSwitchFolder={(folder) => { void (async () => { if (folder.path === workspace?.path) return; setStatus(`切换到 ${folder.name}…`); const entries = await loadDirectory(folder.path); setWorkspace({ path: folder.path, name: folder.name }); setTree(entries); setExpandedPaths(new Set()); setActiveFolderId(folder.id); setStatus(`已切换至 ${folder.name}`); })(); }}
+          onRemoveFolder={(folder) => { void (async () => { if (folder.path === workspace?.path) { const next = workspaceFolders.find((item) => item.path !== folder.path); if (next) { const entries = await loadDirectory(next.path); setWorkspace({ path: next.path, name: next.name }); setTree(entries); } else { setWorkspace(null); setTree([]); } } setWorkspaceFolders((previous) => previous.filter((item) => item.id !== folder.id)); })(); }}
+          onOpen={openTreeFile}
+          onToggle={toggleDirectory}
+          onSelect={selectTreeNode}
+          onEditChange={(value) => setTreeEdit((previous) => previous ? { ...previous, value } : previous)}
+          onEditCommit={() => { void commitTreeEdit(); }}
+          onEditCancel={() => setTreeEdit(null)}
+          onContextMenu={(event, node) => { event.preventDefault(); if (!selectedPaths.has(node.path)) { setSelectedPaths(new Set([node.path])); setSelectedNode(node); } setTreeMenu({ x: event.clientX, y: event.clientY, node }); }}
+          onMove={(source, target) => { void moveTreeEntry(source, target); }}
+          onResize={setSidebarWidth}
+        />}
         <main className="flex min-w-0 flex-1 flex-col">
-          {documents.length > 0 && (
-            <div className="flex h-9 shrink-0 overflow-x-auto border-b bg-muted/40">
-              {documents.map((document) => {
-                const dirty = document.content !== document.savedContent;
-                const active = document.path === activePath;
-                return (
-                  <button
-                    type="button"
-                    key={document.path}
-                    className={`group flex min-w-0 max-w-52 items-center gap-2 border-r px-3 text-xs ${
-                      active ? 'border-t-2 border-t-primary bg-background text-foreground' : 'text-muted-foreground hover:bg-accent/50'
-                    }`}
-                    onClick={() => setActivePath(document.path)}
-                    onDoubleClick={() => setDocuments((previous) => previous.map((item) => (
-                      item.path === document.path ? { ...item, pinned: true } : item
-                    )))}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setTabMenu({ x: event.clientX, y: event.clientY, path: document.path });
-                    }}
-                    draggable
-                    onDragStart={(event) => event.dataTransfer.setData('application/x-nwd-tab-path', document.path)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      moveTab(event.dataTransfer.getData('application/x-nwd-tab-path'), document.path);
-                    }}
-                    title={document.path}
-                  >
-                    <Code className="h-3.5 w-3.5 shrink-0" />
-                    <span className={`truncate ${document.pinned === false ? 'italic' : ''}`}>{document.name}</span>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className={`shrink-0 rounded p-0.5 hover:bg-muted ${dirty ? '' : 'opacity-0 group-hover:opacity-100'}`}
-                      onClick={(event) => { event.stopPropagation(); closeDocument(document.path); }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') closeDocument(document.path);
-                      }}
-                      aria-label={`关闭 ${document.name}${dirty ? '，未保存' : ''}`}
-                    >
-                      {dirty
-                        ? <span className="block h-2 w-2 rounded-full bg-foreground/70 group-hover:hidden" />
-                        : null}
-                      <X className={`h-3 w-3 ${dirty ? 'hidden group-hover:block' : ''}`} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {activeDocument?.externalChanged && (
-            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 text-xs">
-              <span className="flex-1 truncate">该文件已在外部修改，本地编辑内容尚未保存。</span>
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void reloadExternalDocument(activeDocument)}>
-                重新加载
-              </Button>
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void compareExternalDocument(activeDocument)}>
-                比较
-              </Button>
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void saveDocument(activeDocument, true)}>
-                覆盖保存
-              </Button>
-            </div>
-          )}
-
-          {activeDocument?.missing && (
-            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-3 text-xs">
-              <span className="flex-1 truncate">该文件已在外部删除或重命名，当前内容以只读方式保留。</span>
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => closeDocument(activeDocument.path)}>
-                关闭标签
-              </Button>
-            </div>
-          )}
-
-          {activeDocument && (
-            <nav className="flex h-7 shrink-0 items-center gap-1 overflow-hidden border-b px-3 text-[11px] text-muted-foreground" aria-label="Breadcrumb">
-              {(workspace ? activeDocument.path.split(/[\\/]/) : [activeDocument.name]).map((part, index, parts) => (
-                <React.Fragment key={`${part}:${index}`}>
-                  {index > 0 && <span className="opacity-50">›</span>}
-                  <span className={index === parts.length - 1 ? 'text-foreground' : ''}>{part}</span>
-                </React.Fragment>
-              ))}
-            </nav>
-          )}
-
-          {activeDocument ? (
-            <div className="flex min-h-0 flex-1">
-              {inlineEdit.visible && (
-                <div className="absolute top-1 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border bg-popover px-3 py-2 shadow-lg">
-                  <input autoFocus value={inlineEdit.instruction} onChange={(e) => setInlineEdit((p) => ({ ...p, instruction: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') void runInlineEdit(); if (e.key === 'Escape') setInlineEdit({ instruction: '', visible: false }); }} placeholder="AI 内联修改指令…" className="h-7 w-64 rounded border bg-background px-2 text-xs outline-none" />
-                  <Button size="sm" className="h-7 px-3 text-xs" disabled={!inlineEdit.instruction.trim() || aiEditing} onClick={() => void runInlineEdit()}>{aiEditing ? '…' : '生成'}</Button>
-                  <kbd className="text-[10px] text-muted-foreground">Ctrl+K</kbd>
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <Editor
-                  path={editorPath}
-                  language={activeDocument.language}
-                  value={activeDocument.content}
-                  theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
-                  onMount={handleMount}
-                  onChange={(value) => {
-                    setDocuments((previous) => previous.map((document) => (
-                      document.path === activeDocument.path
-                        ? { ...document, content: value ?? '', pinned: true }
-                        : document
-                    )));
-                  }}
-                  options={{
-                    automaticLayout: true,
-                    glyphMargin: true,
-                    fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
-                    fontSize: preferences.fontSize,
-                    lineHeight: Math.round(preferences.fontSize * 1.55),
-                    minimap: { enabled: preferences.minimap },
-                    padding: { top: 8 },
-                    scrollBeyondLastLine: false,
-                    smoothScrolling: true,
-                    tabSize: preferences.tabSize,
-                    wordWrap: preferences.wordWrap,
-                    readOnly: activeDocument.readOnly,
-                  }}
-                />
-              </div>
-              {secondaryDocument && (
-                <div className="relative min-w-0 flex-1 border-l">
-                  <div className="absolute right-2 top-1 z-10 flex items-center gap-1 rounded bg-background/90 px-1 text-[10px] shadow">
-                    <span className="max-w-36 truncate">{secondaryDocument.name}</span>
-                    <button type="button" className="rounded p-1 hover:bg-accent" title="关闭分栏" onClick={() => setSecondaryPath(null)}>
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                  <Editor
-                    path={`file:///${secondaryDocument.path.replace(/\\/g, '/')}`}
-                    language={secondaryDocument.language}
-                    value={secondaryDocument.content}
-                    theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
-                    onChange={(value) => {
-                      setDocuments((previous) => previous.map((document) => (
-                        document.path === secondaryDocument.path
-                          ? { ...document, content: value ?? '', pinned: true }
-                          : document
-                      )));
-                    }}
-                    options={{
-                      automaticLayout: true,
-                      glyphMargin: true,
-                      fontFamily: "'Cascadia Code', 'SF Mono', Consolas, monospace",
-                      fontSize: preferences.fontSize,
-                      lineHeight: Math.round(preferences.fontSize * 1.55),
-                      minimap: { enabled: preferences.minimap },
-                      padding: { top: 8 },
-                      scrollBeyondLastLine: false,
-                      tabSize: preferences.tabSize,
-                      wordWrap: preferences.wordWrap,
-                      readOnly: secondaryDocument.readOnly,
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground">
-              <Code className="h-14 w-14 opacity-40" />
-              <div className="text-center">
-                <p className="text-sm font-medium text-foreground">代码编辑器</p>
-                <p className="mt-1 text-xs">打开文件夹开始浏览项目，或直接打开单个文本文件。</p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => void openWorkspace(false)}>打开文件夹</Button>
-                <Button variant="outline" size="sm" onClick={openStandaloneFile}>打开文件</Button>
-              </div>
-            </div>
-          )}
+          <EditorDocumentHeader
+            documents={documents}
+            activeDocument={activeDocument}
+            activePath={activePath}
+            workspaceOpen={Boolean(workspace)}
+            onActivate={setActivePath}
+            onPin={(path) => setDocuments((previous) => previous.map((document) => document.path === path ? { ...document, pinned: true } : document))}
+            onClose={(path) => { void closeDocument(path); }}
+            onTabMenu={(x, y, path) => setTabMenu({ x, y, path })}
+            onMoveTab={moveTab}
+            onReload={(document) => { void reloadExternalDocument(document); }}
+            onCompare={(document) => { void compareExternalDocument(document); }}
+            onForceSave={(document) => { void saveDocument(document, true); }}
+          />
+          <EditorWorkspaceBody
+            activeDocument={activeDocument}
+            secondaryDocument={secondaryDocument}
+            editorPath={editorPath}
+            dark={resolvedTheme === 'dark'}
+            preferences={preferences}
+            inlineEdit={inlineEdit}
+            aiEditing={aiEditing}
+            onInlineEditChange={(instruction) => setInlineEdit((previous) => ({ ...previous, instruction }))}
+            onInlineEditCancel={() => setInlineEdit({ instruction: '', visible: false })}
+            onInlineEditRun={() => { void runInlineEdit(); }}
+            onMount={handleMount}
+            onDocumentChange={(path, content) => setDocuments((previous) => previous.map((document) => document.path === path ? { ...document, content, pinned: true } : document))}
+            onCloseSecondary={() => setSecondaryPath(null)}
+            onOpenWorkspace={() => { void openWorkspace(false); }}
+            onOpenFile={() => { void openStandaloneFile(); }}
+          />
 
         </main>
       </div>
