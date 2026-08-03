@@ -4,8 +4,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/Toast';
 import { useStore, useAllTags, useAllCategories } from '@/store';
 import type { Prompt } from '@/store';
-import { filterAndSortPrompts, getPromptPreview } from '@/features/prompts/domain';
+import { filterAndSortPrompts } from '@/features/prompts/domain';
 import { PromptFilters } from '@/features/prompts/PromptFilters';
+import { PromptCardContent } from '@/features/prompts/PromptCardContent';
 
 // ── 抽屉中的提示词卡片 ──
 
@@ -13,7 +14,7 @@ const DrawerCard: React.FC<{
   prompt: Prompt;
   onSelect: (prompt: Prompt) => void;
 }> = ({ prompt, onSelect }) => {
-  const { updatePrompt, triggerInjection, tabs, activeTabId } = useStore();
+  const { triggerInjection, tabs, activeTabId } = useStore();
   const { toast } = useToast();
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -35,45 +36,28 @@ const DrawerCard: React.FC<{
     toast('已复制到剪贴板', 'success');
   };
 
-  const preview = getPromptPreview(prompt.content, 80);
-
   return (
     <div
       className="group p-3 rounded-lg border border-border cursor-pointer hover:border-primary hover:shadow-sm transition-all bg-card"
       onClick={handleClick}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <h5 className="text-sm font-medium text-foreground truncate">
-            {prompt.title}
-          </h5>
-          <p className="text-[11px] text-muted-foreground leading-relaxed mt-1 line-clamp-2">
-            {preview}
-          </p>
-        </div>
-        <div className="flex items-center gap-0.5 shrink-0">
+      <PromptCardContent
+        compact
+        prompt={prompt}
+        actions={(
+          <>
           {prompt.isPinned && <Pin className="h-3 w-3 text-warning fill-amber-500" />}
           {prompt.isFavorite && <Star className="h-3 w-3 text-warning fill-amber-500" />}
-        </div>
-      </div>
-      <div className="flex items-center gap-1.5 mt-2">
-        <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-          {prompt.category}
-        </span>
-        {prompt.tags.slice(0, 2).map((t) => (
-          <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-            {t}
-          </span>
-        ))}
-        <span className="text-[9px] text-muted-foreground ml-auto">×{prompt.usageCount}</span>
-        <button
-          className="p-0.5 rounded hover:bg-accent opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={handleCopy}
-          title="复制"
-        >
-          <Copy className="h-3 w-3 text-muted-foreground" />
-        </button>
-      </div>
+            <button
+              className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100"
+              onClick={handleCopy}
+              title="复制"
+            >
+              <Copy className="h-3 w-3 text-muted-foreground" />
+            </button>
+          </>
+        )}
+      />
     </div>
   );
 };

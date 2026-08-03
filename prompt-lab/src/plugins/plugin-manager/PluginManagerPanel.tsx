@@ -4,6 +4,7 @@ import { pluginRegistry } from '../registry';
 import { isDbReady, dbSetSetting } from '@/db';
 import { loadUserPlugins, saveUserPlugins, rehydrateUserPlugins } from './user-plugin-store';
 import type { UserPluginDef } from './user-plugin-store';
+import { builtInPlugins } from '../built-in';
 import { CreatePluginDialog } from './CreatePluginDialog';
 import { exportPlugin, importPlugin } from './import-export';
 
@@ -123,7 +124,17 @@ export const PluginManagerPanel: React.FC = () => {
                     if (p) {
                       pluginRegistry.setEnabled(id, !p.enabled);
                       if (isDbReady()) {
-                        dbSetSetting('plugin.enabled', JSON.stringify(pluginRegistry.getEnabledSnapshot()));
+                        // 只保存与内置默认值不同的差量，避免修改默认值后被旧快照覆盖
+                        const builtInDefaults: Record<string, boolean> = {};
+                        for (const bp of builtInPlugins) builtInDefaults[bp.id] = bp.enabled;
+                        const full = pluginRegistry.getEnabledSnapshot();
+                        const delta: Record<string, boolean> = {};
+                        for (const [id, enabled] of Object.entries(full)) {
+                          if (builtInDefaults[id] === undefined || builtInDefaults[id] !== enabled) {
+                            delta[id] = enabled;
+                          }
+                        }
+                        dbSetSetting('plugin.enabled', JSON.stringify(delta));
                       }
                     }
                   }}

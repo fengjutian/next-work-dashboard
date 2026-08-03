@@ -35,13 +35,21 @@ export function useDbPersistence() {
       // 4. 加载数据到 Zustand
       useStore.getState().loadFromDb();
 
-      // 5. 恢复插件启用状态（持久化在 settings 表中）
+      // 5. 恢复插件启用状态（delta overlay：内置默认值 + 用户差量）
       try {
         const { dbGetSetting } = await import('@/db');
         const { pluginRegistry } = await import('@/plugins');
+        const { builtInPlugins } = await import('@/plugins/built-in');
         const saved = dbGetSetting('plugin.enabled');
         if (saved) {
-          pluginRegistry.setEnabledMap(JSON.parse(saved));
+          // 先重置为内置默认值，再叠加用户手动调整过的差量
+          for (const bp of builtInPlugins) {
+            pluginRegistry.setEnabled(bp.id, bp.enabled);
+          }
+          const delta = JSON.parse(saved) as Record<string, boolean>;
+          for (const [id, enabled] of Object.entries(delta)) {
+            pluginRegistry.setEnabled(id, enabled);
+          }
         }
       } catch { /* 恢复失败不阻塞启动 */ }
     })();

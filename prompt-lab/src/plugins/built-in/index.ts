@@ -124,7 +124,7 @@ const builtInPlugins: Plugin[] = [
     name: 'Word 预览',
     icon: Word,
     component: WordPreviewPanel,
-    enabled: true,
+    enabled: false,
     order: 12,
     contributions: {
       commands: [
@@ -138,7 +138,7 @@ const builtInPlugins: Plugin[] = [
     name: 'Excel 编辑',
     icon: Excel,
     component: ExcelPreviewPanel,
-    enabled: true,
+    enabled: false,
     order: 13,
     contributions: {
       commands: [
@@ -152,7 +152,7 @@ const builtInPlugins: Plugin[] = [
     name: 'PPT 演示',
     icon: Ppt,
     component: PptPreviewPanel,
-    enabled: true,
+    enabled: false,
     order: 14,
     contributions: {
       commands: [

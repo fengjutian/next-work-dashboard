@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Star, Pin, Trash2, Edit3, X, Copy, Check } from '@/components/icons';
+import { Plus, Star, Pin, Trash2, Edit3, Copy, Check } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/Toast';
@@ -12,8 +11,10 @@ import {
   useAllCategories,
 } from '@/store';
 import type { Prompt } from '@/store';
-import { filterAndSortPrompts, getPromptPreview, normalizePromptTags, syncPromptVariables } from '@/features/prompts/domain';
+import { filterAndSortPrompts } from '@/features/prompts/domain';
 import { PromptFilters } from '@/features/prompts/PromptFilters';
+import { PromptEditorDialog } from '@/features/prompts/PromptEditorDialog';
+import { PromptCardContent } from '@/features/prompts/PromptCardContent';
 
 // ── 提示词卡片 ──
 
@@ -56,9 +57,6 @@ const PromptCard: React.FC<{
     updatePrompt(prompt.id, { isPinned: !prompt.isPinned });
   };
 
-  // 内容预览：取前 120 个字符，去掉变量标记
-  const preview = getPromptPreview(prompt.content);
-
   return (
     <div
       className={`group p-4 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md ${
@@ -68,39 +66,19 @@ const PromptCard: React.FC<{
       }`}
       onClick={handleClick}
     >
-      {/* 顶部：置顶 + 收藏 + 标题 */}
-      <div className="flex items-start gap-2 mb-2">
-        {batchMode && (
+      <PromptCardContent
+        prompt={prompt}
+        leading={batchMode ? (
           <input
             type="checkbox"
             checked={selected}
             onChange={onToggleSelect}
-            className="shrink-0 h-4 w-4 mt-0.5"
+            className="mt-0.5 h-4 w-4 shrink-0"
             onClick={(e) => e.stopPropagation()}
           />
-        )}
-        <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-semibold text-foreground truncate">
-            {prompt.title}
-          </h4>
-          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
-              {prompt.category}
-            </span>
-            {prompt.tags.slice(0, 3).map((t) => (
-              <span
-                key={t}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-              >
-                {t}
-              </span>
-            ))}
-            {prompt.tags.length > 3 && (
-              <span className="text-[10px] text-muted-foreground">+{prompt.tags.length - 3}</span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-0.5 shrink-0">
+        ) : undefined}
+        actions={(
+          <>
           <button
             className="p-1 rounded hover:bg-accent transition-colors"
             onClick={togglePin}
@@ -123,29 +101,15 @@ const PromptCard: React.FC<{
               }`}
             />
           </button>
-        </div>
-      </div>
-
-      {/* 内容预览 */}
-      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mb-3">
-        {preview}
-      </p>
-
-      {/* 底部：使用次数 + 操作按钮 */}
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground">
-          使用 {prompt.usageCount} 次
-        </span>
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
-            className="p-1 rounded hover:bg-accent transition-colors"
+            className="rounded p-1 opacity-0 transition-all hover:bg-accent group-hover:opacity-100"
             onClick={handleCopy}
             title="复制内容"
           >
             <Copy className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           <button
-            className="p-1 rounded hover:bg-accent transition-colors"
+            className="rounded p-1 opacity-0 transition-all hover:bg-accent group-hover:opacity-100"
             onClick={(e) => {
               e.stopPropagation();
               onEdit?.(prompt);
@@ -155,7 +119,7 @@ const PromptCard: React.FC<{
             <Edit3 className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
           <button
-            className="p-1 rounded hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors"
+            className="rounded p-1 opacity-0 transition-all hover:bg-destructive/10 group-hover:opacity-100"
             onClick={(e) => {
               e.stopPropagation();
               if (confirm('确定删除？')) deletePrompt(prompt.id);
@@ -164,118 +128,9 @@ const PromptCard: React.FC<{
           >
             <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
           </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ── 提示词编辑对话框 ──
-
-const PromptEditor: React.FC<{
-  prompt?: Prompt;
-  onClose: () => void;
-}> = ({ prompt, onClose }) => {
-  const { addPrompt, updatePrompt } = useStore();
-  const categories = useAllCategories();
-  const [title, setTitle] = useState(prompt?.title ?? '');
-  const [content, setContent] = useState(prompt?.content ?? '');
-  const [category, setCategory] = useState(prompt?.category ?? '通用');
-  const [tagsStr, setTagsStr] = useState(prompt?.tags.join(', ') ?? '');
-
-  const handleSave = () => {
-    const now = Date.now();
-    const tags = normalizePromptTags(tagsStr);
-    const variables = syncPromptVariables(content, prompt?.variables);
-
-    if (prompt) {
-      updatePrompt(prompt.id, { title: title.trim(), content, category, tags, variables });
-    } else {
-      addPrompt({
-        id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
-        title: title.trim(),
-        content,
-        category,
-        tags,
-        variables,
-        isFavorite: false,
-        isPinned: false,
-        usageCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div
-        className="bg-card rounded-lg shadow-xl max-h-[85vh] flex flex-col mx-4" style={{ width: 800 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b">
-          <span className="text-sm font-semibold">
-            {prompt ? '编辑提示词' : '新建提示词'}
-          </span>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-        <div className="flex-1 p-4 space-y-3 overflow-y-auto">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">标题</label>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="提示词标题"
-              className="h-8 text-sm"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              正文（用 {'{{变量名}}'} 表示占位符）
-            </label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="输入提示词内容..."
-              className="w-full h-32 text-sm p-2 rounded-md border resize-none focus:outline-none focus:ring-2 ring-ring"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">分类</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full h-8 text-sm border rounded-md px-2"
-            >
-              {categories.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">
-              标签（逗号分隔）
-            </label>
-            <Input
-              value={tagsStr}
-              onChange={(e) => setTagsStr(e.target.value)}
-              placeholder="代码, 审查"
-              className="h-8 text-sm"
-            />
-          </div>
-        </div>
-        <div className="p-4 border-t flex gap-2 justify-end">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            取消
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!title.trim()}>
-            保存
-          </Button>
-        </div>
-      </div>
+          </>
+        )}
+      />
     </div>
   );
 };
@@ -433,7 +288,7 @@ export const PromptSidebar: React.FC = () => {
 
       {/* 编辑器浮层 */}
       {editorOpen && (
-        <PromptEditor
+        <PromptEditorDialog
           prompt={editingPrompt}
           onClose={() => setEditorOpen(false)}
         />
