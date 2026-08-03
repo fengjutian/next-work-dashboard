@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import type { TerminalProfile, TerminalTab } from '@/components/Terminal';
+import type { TerminalProfile, TerminalTab } from '@/plugins/terminal/Terminal';
 import type { WorkspaceTask, WorkspaceTaskEvent } from '@/types/electron';
 import type { BottomPanelTab, EditorProblem } from './editor-types';
 import { displayError } from './editor-types';

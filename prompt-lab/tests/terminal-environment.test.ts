@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeEnvironmentLayers, resolveSecretReferences } from '../src/terminal/environment';
+import { mergeEnvironmentLayers, resolveSecretReferences } from '../src/plugins/terminal/backend/environment';
 
 describe('terminal environment layers', () => {
   it('applies user, workspace and task layers in order', () => {

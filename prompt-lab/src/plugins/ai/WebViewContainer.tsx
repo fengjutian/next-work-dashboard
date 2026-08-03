@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
-import { SaveConversationPanel } from '@/components/SaveConversationPanel';
+import { SaveConversationPanel } from './SaveConversationPanel';
 import {
   buildInjectionScript,
   buildConversationExtractScript,

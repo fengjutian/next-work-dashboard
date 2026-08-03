@@ -7,9 +7,9 @@ import AutoLaunch from 'electron-auto-launch';
 import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
-import { createSession, write, resize, destroySession } from '../terminal/terminal-manager';
-import { discoverShellProfiles } from '../terminal/shell-profiles';
-import { resolveSecretReferences } from '../terminal/environment';
+import { createSession, write, resize, destroySession } from '../plugins/terminal/backend/terminal-manager';
+import { discoverShellProfiles } from '../plugins/terminal/backend/shell-profiles';
+import { resolveSecretReferences } from '../plugins/terminal/backend/environment';
 import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace-path';
 import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
 import {

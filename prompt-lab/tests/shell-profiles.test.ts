@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverShellProfiles } from '../src/terminal/shell-profiles';
+import { discoverShellProfiles } from '../src/plugins/terminal/backend/shell-profiles';
 
 describe('discoverShellProfiles', () => {
   it('discovers Windows built-ins and installed Git Bash', () => {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { TerminalSingle } from '@/components/Terminal';
-import type { TerminalTab, TerminalProfile } from '@/components/Terminal';
+import { TerminalSingle } from '@/plugins/terminal/Terminal';
+import type { TerminalTab, TerminalProfile } from '@/plugins/terminal/Terminal';
 import { Code, X } from '@/components/icons';
 import type { BottomPanelTab, EditorPreferences, EditorProblem, EditorSymbol } from './editor-types';
 import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus, WorkspaceTask } from '@/types/electron';

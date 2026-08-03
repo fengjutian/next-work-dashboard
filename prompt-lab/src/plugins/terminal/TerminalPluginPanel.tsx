@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useCallback, useRef, useMemo } from 'react';
-import { TerminalSingle, TerminalHandle, TerminalTab, TerminalProfile } from '@/components/Terminal';
+import { TerminalSingle, TerminalHandle, TerminalTab, TerminalProfile } from './Terminal';
 import { Plus, X, RefreshCw, Terminal as TerminalIcon, ChevronDown } from '@/components/icons';
 import { useStore } from '@/store';
 

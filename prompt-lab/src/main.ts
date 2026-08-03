@@ -5,7 +5,7 @@ import { createWindow } from './main/window';
 import { createTray } from './main/tray';
 import { setupIPC } from './main/ipc-handlers';
 import { registerShortcuts } from './main/shortcuts';
-import { destroyAll } from './terminal/terminal-manager';
+import { destroyAll } from './plugins/terminal/backend/terminal-manager';
 
 if (started) app.quit();
 
