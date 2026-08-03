@@ -1,6 +1,7 @@
 // ── 注入引擎 — 纯函数，不依赖 React / Electron ──
 
 import type { SiteConfig, InjectMode, InjectStrategy } from '@/store';
+import { extractPromptVariableNames, fillPromptVariables } from '@/features/prompts/domain';
 
 // ── 变量提取与替换 ──
 
@@ -8,13 +9,7 @@ import type { SiteConfig, InjectMode, InjectStrategy } from '@/store';
  * 从提示词内容中提取 {{变量名}} 
  */
 export function extractVariables(content: string): string[] {
-  const re = /\{\{(\w+)\}\}/g;
-  const names = new Set<string>();
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    names.add(m[1]);
-  }
-  return [...names];
+  return extractPromptVariableNames(content);
 }
 
 /**
@@ -24,7 +19,7 @@ export function fillVariables(
   content: string,
   values: Record<string, string>,
 ): string {
-  return content.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name] ?? `{{${name}}}`);
+  return fillPromptVariables(content, values);
 }
 
 // ── 注入脚本生成 ──

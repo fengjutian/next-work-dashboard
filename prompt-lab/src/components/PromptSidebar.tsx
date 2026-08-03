@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Search, Plus, Star, Pin, Trash2, Edit3, X, Copy, Check } from '@/components/icons';
+import React, { useMemo, useState } from 'react';
+import { Plus, Star, Pin, Trash2, Edit3, X, Copy, Check } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -7,13 +7,13 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/Toast';
 import {
   useStore,
-  useFilteredPrompts,
   useAllTags,
   useRecentPrompts,
   useAllCategories,
-  CATEGORIES,
 } from '@/store';
 import type { Prompt } from '@/store';
+import { filterAndSortPrompts, getPromptPreview, normalizePromptTags, syncPromptVariables } from '@/features/prompts/domain';
+import { PromptFilters } from '@/features/prompts/PromptFilters';
 
 // ── 提示词卡片 ──
 
@@ -57,9 +57,7 @@ const PromptCard: React.FC<{
   };
 
   // 内容预览：取前 120 个字符，去掉变量标记
-  const preview = prompt.content
-    .replace(/\{\{.*?\}\}/g, '___')
-    .slice(0, 120) + (prompt.content.length > 120 ? '…' : '');
+  const preview = getPromptPreview(prompt.content);
 
   return (
     <div
@@ -187,21 +185,19 @@ const PromptEditor: React.FC<{
 
   const handleSave = () => {
     const now = Date.now();
-    const tags = tagsStr
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    const tags = normalizePromptTags(tagsStr);
+    const variables = syncPromptVariables(content, prompt?.variables);
 
     if (prompt) {
-      updatePrompt(prompt.id, { title, content, category, tags, updatedAt: now });
+      updatePrompt(prompt.id, { title: title.trim(), content, category, tags, variables });
     } else {
       addPrompt({
         id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
-        title,
+        title: title.trim(),
         content,
         category,
         tags,
-        variables: [],
+        variables,
         isFavorite: false,
         isPinned: false,
         usageCount: 0,
@@ -288,21 +284,20 @@ const PromptEditor: React.FC<{
 
 export const PromptSidebar: React.FC = () => {
   const {
-    searchQuery,
-    setSearch,
-    filterCategory,
-    setFilterCategory,
-    filterTag,
-    setFilterTag,
+    prompts: allPrompts,
     selectedPromptId,
     selectPrompt,
     batchDeletePrompts,
-    addCategory,
   } = useStore();
-  const prompts = useFilteredPrompts();
   const recentPrompts = useRecentPrompts(5);
   const allTags = useAllTags();
   const categories = useAllCategories();
+  const [search, setSearch] = useState('');
+  const [filterCategory, setFilterCategory] = useState<string | null>(null);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
+  const prompts = useMemo(() => filterAndSortPrompts(allPrompts, {
+    search, category: filterCategory, tag: filterTag,
+  }), [allPrompts, search, filterCategory, filterTag]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | undefined>();
   const [batchMode, setBatchMode] = useState(false);
@@ -311,71 +306,16 @@ export const PromptSidebar: React.FC = () => {
 
   return (
     <div className="h-full flex-1 flex flex-col bg-card relative">
-      {/* 搜索框 */}
-      <div className="p-3 pb-2">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <input
-            className="w-full h-8 pl-7 pr-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 ring-ring"
-            placeholder="搜索提示词..."
-            value={searchQuery}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* 分类筛选 */}
-      <div className="px-3 py-2">
-        <div className="flex flex-wrap gap-1">
-          <button
-            className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-              !filterCategory
-                ? 'bg-primary text-white'
-                : 'bg-muted text-muted-foreground hover:bg-accent'
-            }`}
-            onClick={() => setFilterCategory(null)}
-          >
-            全部
-          </button>
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-                filterCategory === cat
-                  ? 'bg-primary text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-accent'
-              }`}
-              onClick={() =>
-                setFilterCategory(filterCategory === cat ? null : cat)
-              }
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-
-        {/* 标签筛选 */}
-        {allTags.length > 0 && (
-          <div className="flex flex-wrap gap-0.5 mt-1.5">
-            {allTags.map((tag) => (
-              <button
-                key={tag}
-                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
-                  filterTag === tag
-                    ? 'border-primary bg-primary-light text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/50'
-                }`}
-                onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
+      <PromptFilters
+        search={search}
+        category={filterCategory}
+        tag={filterTag}
+        categories={categories}
+        tags={allTags}
+        onSearchChange={setSearch}
+        onCategoryChange={setFilterCategory}
+        onTagChange={setFilterTag}
+      />
       <Separator />
 
       {/* 最近使用 */}
@@ -481,10 +421,10 @@ export const PromptSidebar: React.FC = () => {
       {selectedPromptId && (
         <div className="border-t p-2 text-[10px] text-muted-foreground bg-background">
           <span className="text-muted-foreground text-foreground font-medium">
-            {prompts.find((p) => p.id === selectedPromptId)?.title}
+            {allPrompts.find((p) => p.id === selectedPromptId)?.title}
           </span>
           <span className="ml-2">
-            {prompts.find((p) => p.id === selectedPromptId)?.variables
+            {allPrompts.find((p) => p.id === selectedPromptId)?.variables
               .length ?? 0}{' '}
             个变量
           </span>

@@ -25,10 +25,9 @@ describe('extractVariables', () => {
     expect(extractVariables('')).toEqual([]);
   });
 
-  it('变量名仅匹配 \\w 字符（中文不在变量名中）', () => {
-    // {{中文}} 不会匹配，因为 \w 只匹配 [a-zA-Z0-9_]
+  it('支持中文变量名', () => {
     expect(extractVariables('{{var1}} 和 {{中文}}').sort())
-      .toEqual(['var1'].sort());
+      .toEqual(['var1', '中文'].sort());
   });
 
   it('处理大括号不配对的情况', () => {

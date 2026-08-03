@@ -2,37 +2,16 @@ import { useStore } from './store';
 import { useShallow } from 'zustand/shallow';
 import { CATEGORIES } from './types';
 import type { Prompt } from './types';
+import { filterAndSortPrompts } from '@/features/prompts/domain';
 
 // ── 派生选择器 ──
 
 export function useFilteredPrompts() {
-  return useStore(useShallow((s) => {
-    let list = s.prompts;
-
-    if (s.searchQuery) {
-      const q = s.searchQuery.toLowerCase();
-      list = list.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.content.toLowerCase().includes(q) ||
-          p.tags.some((t) => t.toLowerCase().includes(q))
-      );
-    }
-
-    if (s.filterCategory) {
-      list = list.filter((p) => p.category === s.filterCategory);
-    }
-
-    if (s.filterTag) {
-      list = list.filter((p) => p.tags.includes(s.filterTag));
-    }
-
-    return [...list].sort((a, b) => {
-      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-      if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-      return b.usageCount - a.usageCount;
-    });
-  }));
+  return useStore(useShallow((s) => filterAndSortPrompts(s.prompts, {
+    search: s.searchQuery,
+    category: s.filterCategory,
+    tag: s.filterTag,
+  })));
 }
 
 export function useAllTags() {
