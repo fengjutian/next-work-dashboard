@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import Editor, { loader, type OnMount } from '@monaco-editor/react';
+import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -21,19 +21,13 @@ import {
   X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import type { TerminalTab, TerminalProfile } from '@/components/Terminal';
 import { useStore } from '@/store';
 import { createOpenAIProvider } from '@/core/llm';
 import type {
   FilePickResult,
   WorkspaceEncoding,
   WorkspaceGitStatus,
-  WorkspaceGitOverview,
   WorkspaceGitCommit,
-  WorkspaceGitOperation,
-  WorkspaceSearchResult,
-  WorkspaceTask,
-  WorkspaceTaskEvent,
 } from '@/types/electron';
 import { decodeBase64Utf8, hasGitConflictMarkers, languageFromName, languageIdFromName } from './editor-utils';
 import { DialogOverlay } from './DialogOverlay';
@@ -43,11 +37,12 @@ import { FileTreeRow } from './FileTreeRow';
 import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
 import { estimateTokens, fitContextToTokenBudget } from './ai-context';
-import { parseProblemLine, resolveTaskOrder } from '../../main/workspace-tasks';
 import { classifyConflictStatus } from '../../main/git-conflicts';
 import { applyConversationSummary, conversationNeedsSummary, recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
 import { useTerminalTasks } from './useTerminalTasks';
 import { useGitRepository } from './useGitRepository';
+import { useWorkspaceSearch } from './useWorkspaceSearch';
+import { useEditorIntelligence } from './useEditorIntelligence';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -134,20 +129,6 @@ function computeDiffHunks(original: string, modified: string): AiHunk[] {
   }
   return hunks;
 }
-interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
-interface ReplaceSnapshot { path: string; content: string; encoding: WorkspaceEncoding; lineEnding: 'LF' | 'CRLF' }
-
-interface SearchPreview {
-  path: string;
-  name: string;
-  original: string;
-  modified: string;
-  language: string;
-  encoding: WorkspaceEncoding;
-  lineEnding: 'LF' | 'CRLF';
-  modifiedAt?: number;
-}
-
 function extractGitHunks(patchText: string): GitHunk[] {
   const lines = patchText.split('\n');
   const firstHunk = lines.findIndex((line) => line.startsWith('@@'));
@@ -211,8 +192,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const [bottomPanel, setBottomPanel] = useState<{ open: boolean; tab: BottomPanelTab; height: number }>({
     open: false, tab: 'problems', height: 220,
   });
-  const [problems, setProblems] = useState<EditorProblem[]>([]);
-  const [symbols, setSymbols] = useState<EditorSymbol[]>([]);
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [status, setStatus] = useState('就绪');
   const [aiInstruction, setAiInstruction] = useState('');
@@ -243,24 +222,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const appConfirm = useCallback((message: string): Promise<boolean> => new Promise((resolve) => {
     setDialog({ type: 'confirm', message, resolve });
   }), []);
-  const [position, setPosition] = useState({ line: 1, column: 1 });
   const [quickOpen, setQuickOpen] = useState<{ open: boolean; query: string; files: TreeNode[] }>({
     open: false, query: '', files: [],
   });
-  const [searchPanel, setSearchPanel] = useState<{
-    open: boolean;
-    query: string;
-    replacement: string;
-    caseSensitive: boolean;
-    wholeWord: boolean;
-    useRegex: boolean;
-    include: string;
-    exclude: string;
-    loading: boolean;
-    results: WorkspaceSearchResult[];
-  }>({ open: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, useRegex: false, include: '', exclude: '', loading: false, results: [] });
-  const [replaceHistory, setReplaceHistory] = useState<ReplaceSnapshot[][]>([]);
-  const [searchPreviews, setSearchPreviews] = useState<SearchPreview[]>([]);
   const restoringRef = useRef(true);
   const documentsRef = useRef<OpenDocument[]>([]);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -313,6 +277,17 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const activeDocument = documents.find((document) => document.path === activePath) ?? null;
   const secondaryDocument = documents.find((document) => document.path === secondaryPath) ?? null;
   const hasDirtyDocuments = documents.some((document) => document.content !== document.savedContent);
+  const {
+    problems, symbols, position, refreshProblems, refreshSymbols, handleMount,
+  } = useEditorIntelligence({
+    editorRef,
+    workspace,
+    activePath,
+    activeDocument,
+    appConfirm,
+    setDocuments,
+    setStatus,
+  });
   const allProblems = useMemo(() => [...problems, ...taskProblems], [problems, taskProblems]);
   const visibleTreeNodes = useMemo(() => {
     const result: TreeNode[] = [];
@@ -886,312 +861,30 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     });
   }, []);
 
-  const refreshProblems = useCallback(() => {
-    setProblems(monaco.editor.getModels().flatMap((model) => (
-      monaco.editor.getModelMarkers({ resource: model.uri }).map((marker) => ({
-        path: model.uri.path.replace(/^\//, ''),
-        message: marker.message,
-        line: marker.startLineNumber,
-        column: marker.startColumn,
-        severity: marker.severity,
-      }))
-    )));
-  }, []);
-
-  const refreshSymbols = useCallback(async (editor: monaco.editor.IStandaloneCodeEditor | null = editorRef.current) => {
-    const model = editor?.getModel();
-    if (!model) {
-      setSymbols([]);
-      return;
-    }
-    if (model.getLanguageId() === 'typescript' || model.getLanguageId() === 'javascript') {
-      try {
-        const getWorker = model.getLanguageId() === 'typescript'
-          ? await monaco.languages.typescript.getTypeScriptWorker()
-          : await monaco.languages.typescript.getJavaScriptWorker();
-        const worker = await getWorker(model.uri);
-        const tree = await worker.getNavigationTree(model.uri.toString());
-        if (tree) {
-          const semanticEntries: EditorSymbol[] = [];
-          const visit = (item: { text?: string; kind?: string; spans?: Array<{ start: number }>; childItems?: unknown[] }, depth: number) => {
-            const span = item.spans?.[0];
-            if (depth > 0 && item.text && span) {
-              const position = model.getPositionAt(span.start);
-              semanticEntries.push({ name: item.text, detail: item.kind, line: position.lineNumber, column: position.column, depth: depth - 1 });
-            }
-            for (const child of item.childItems ?? []) visit(child as typeof item, depth + 1);
-          };
-          visit(tree, 0);
-          setSymbols(semanticEntries);
-          return;
-        }
-      } catch {
-        // Fall through to a language-neutral outline.
-      }
-    }
-    // Language-neutral fallback for common declarations.
-    const declaration = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var|def|fn|struct)\s+([\w$]+)/;
-    const entries: EditorSymbol[] = [];
-    for (let line = 1; line <= model.getLineCount(); line += 1) {
-      const text = model.getLineContent(line);
-      const match = declaration.exec(text);
-      if (!match) continue;
-      entries.push({ name: match[2], detail: match[1], line, column: Math.max(1, text.indexOf(match[2]) + 1), depth: 0 });
-    }
-    setSymbols(entries);
-  }, []);
-
-  const handleMount: OnMount = useCallback((editor) => {
-    editorRef.current = editor;
-    editor.onDidChangeCursorPosition((event) => {
-      setPosition({ line: event.position.lineNumber, column: event.position.column });
-    });
-    // Gutter click → revert line/hunk
-    editor.onMouseDown(async (event) => {
-      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && event.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) return;
-      const line = event.target.position?.lineNumber;
-      if (!line || !workspace || !activeDocument || activeDocument.readOnly) return;
-      if (!await appConfirm(`回滚第 ${line} 行的更改？此操作将用 HEAD 版本覆盖该行所在 Hunk。`)) return;
-      const revert = await window.electronAPI.workspace.gitShowHead(workspace.path, activeDocument.path);
-      if (!revert.success) { setStatus(`回滚失败：${displayError(revert.error)}`); return; }
-      setDocuments((prev) => prev.map((d) => d.path === activeDocument.path ? { ...d, content: revert.data ?? '', savedContent: revert.data ?? '', externalChanged: false } : d));
-      setStatus(`已回滚 ${activeDocument.name}`);
-    });
-    refreshProblems();
-    void refreshSymbols(editor);
-    editor.focus();
-  }, [refreshProblems, refreshSymbols]);
-
-  const runSearch = useCallback(async () => {
-    if (!workspace || !searchPanel.query.trim()) return;
-    setSearchPanel((previous) => ({ ...previous, loading: true }));
-    const result = await window.electronAPI.workspace.search(
-      workspace.path,
-      searchPanel.query.trim(),
-      {
-        caseSensitive: searchPanel.caseSensitive,
-        wholeWord: searchPanel.wholeWord,
-        useRegex: searchPanel.useRegex,
-        include: searchPanel.include,
-        exclude: searchPanel.exclude,
-      },
-    );
-    if (!result.success) {
-      setStatus(`搜索失败：${displayError(result.error)}`);
-      setSearchPanel((previous) => ({ ...previous, loading: false }));
-      return;
-    }
-    setSearchPanel((previous) => ({
-      ...previous,
-      loading: false,
-      results: result.data ?? [],
-    }));
-    setStatus(`找到 ${result.data?.length ?? 0} 个结果`);
-  }, [searchPanel.caseSensitive, searchPanel.exclude, searchPanel.include, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
-
-  const buildReplaceMatcher = useCallback(() => {
-    const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const source = searchPanel.useRegex ? searchPanel.query : escaped;
-    return new RegExp(searchPanel.wholeWord ? `\\b(?:${source})\\b` : source, searchPanel.caseSensitive ? 'g' : 'gi');
-  }, [searchPanel.caseSensitive, searchPanel.query, searchPanel.useRegex, searchPanel.wholeWord]);
-
-  const previewSearchReplace = useCallback(async (results: WorkspaceSearchResult[]) => {
-    if (!workspace || results.length === 0 || !searchPanel.replacement) return;
-    let matcher: RegExp;
-    try {
-      matcher = buildReplaceMatcher();
-    } catch (error) {
-      setStatus(`预览失败：${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-    setSearchPanel((previous) => ({ ...previous, loading: true }));
-    const paths = [...new Set(results.map((r) => r.path))];
-    const previews: SearchPreview[] = [];
-    for (const filePath of paths) {
-      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
-      if (!read.success || !read.data) continue;
-      const modified = read.data.content.replace(matcher, searchPanel.replacement);
-      if (modified === read.data.content) continue;
-      previews.push({
-        path: filePath,
-        name: filePath.split(/[\\/]/).pop() ?? filePath,
-        original: read.data.content,
-        modified,
-        language: languageIdFromName(filePath),
-        encoding: read.data.encoding,
-        lineEnding: read.data.lineEnding,
-        modifiedAt: read.data.modifiedAt,
-      });
-    }
-    setSearchPanel((previous) => ({ ...previous, loading: false }));
-    if (previews.length === 0) {
-      setStatus('没有文件需要修改');
-      return;
-    }
-    setSearchPreviews(previews);
-    const first = previews[0];
-    setDiffView({ path: first.path, name: first.name, original: first.original, modified: first.modified, language: first.language, source: 'search' });
-    appendOutput(`替换预览：${previews.length} 个文件，${results.length} 处匹配`);
-    setStatus(`预览 ${previews.length} 个文件的变更`);
-  }, [appendOutput, buildReplaceMatcher, searchPanel.replacement, workspace]);
-
-  const acceptSearchReplace = useCallback(async () => {
-    if (!diffView || diffView.source !== 'search' || !workspace) return;
-    const preview = searchPreviews.find((p) => p.path === diffView.path);
-    if (!preview) return;
-    const write = await window.electronAPI.workspace.writeTextFile(workspace.path, preview.path, preview.modified, {
-      encoding: preview.encoding, lineEnding: preview.lineEnding, expectedModifiedAt: preview.modifiedAt,
-    });
-    if (!write.success) {
-      setStatus(`替换失败：${preview.path} — ${displayError(write.error)}`);
-      return;
-    }
-    recentlySavedRef.current.set(preview.path, Date.now());
-    setDocuments((previous) => previous.map((d) => d.path === preview.path ? { ...d, content: preview.modified, savedContent: preview.modified, modifiedAt: write.data?.modifiedAt } : d));
-    const remaining = searchPreviews.filter((p) => p.path !== diffView.path);
-    setSearchPreviews(remaining);
-    const next = remaining[0];
-    setDiffView(next ? { path: next.path, name: next.name, original: next.original, modified: next.modified, language: next.language, source: 'search' } : null);
-    if (!next) {
-      appendOutput('全部替换预览已应用');
-      setStatus('所有替换已应用');
-      setSearchPanel((previous) => ({ ...previous, results: [] }));
-    } else {
-      setStatus(`已应用 ${preview.name}，剩余 ${remaining.length} 个文件`);
-    }
-  }, [diffView, searchPreviews, workspace]);
-
-  const rejectSearchReplace = useCallback(() => {
-    if (!diffView || diffView.source !== 'search') return;
-    const remaining = searchPreviews.filter((p) => p.path !== diffView.path);
-    setSearchPreviews(remaining);
-    const next = remaining[0];
-    setDiffView(next ? { path: next.path, name: next.name, original: next.original, modified: next.modified, language: next.language, source: 'search' } : null);
-    if (!next) {
-      appendOutput('已取消所有替换预览');
-      setStatus('已取消替换预览');
-    } else {
-      setStatus(`已跳过，剩余 ${remaining.length} 个文件`);
-    }
-  }, [diffView, searchPreviews]);
-
-  const replaceAllSearchResults = useCallback(async () => {
-    if (!workspace || searchPanel.results.length === 0) return;
-    const paths = [...new Set(searchPanel.results.map((result) => result.path))];
-    if (!await appConfirm(`将在 ${paths.length} 个文件中替换 ${searchPanel.results.length} 处匹配，是否继续？`)) return;
-    let matcher: RegExp;
-    try {
-      const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const source = searchPanel.useRegex ? searchPanel.query : escaped;
-      matcher = new RegExp(searchPanel.wholeWord ? `\\b(?:${source})\\b` : source, searchPanel.caseSensitive ? 'g' : 'gi');
-    } catch (error) {
-      setStatus(`替换失败：${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-    setSearchPanel((previous) => ({ ...previous, loading: true }));
-    let replacedFiles = 0;
-    for (const filePath of paths) {
-      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
-      if (!read.success || !read.data) continue;
-      const content = read.data.content.replace(matcher, searchPanel.replacement);
-      if (content === read.data.content) continue;
-      const write = await window.electronAPI.workspace.writeTextFile(workspace.path, filePath, content, {
-        encoding: read.data.encoding,
-        lineEnding: read.data.lineEnding,
-        expectedModifiedAt: read.data.modifiedAt,
-      });
-      if (!write.success) {
-        setStatus(`替换中止：${filePath} — ${displayError(write.error)}`);
-        break;
-      }
-      replacedFiles += 1;
-      recentlySavedRef.current.set(filePath, Date.now());
-      setDocuments((previous) => previous.map((document) => document.path === filePath ? {
-        ...document, content, savedContent: content, modifiedAt: write.data?.modifiedAt,
-      } : document));
-    }
-    appendOutput(`工作区替换完成：${replacedFiles}/${paths.length} 个文件`);
-    setSearchPanel((previous) => ({ ...previous, loading: false, results: [] }));
-    setStatus(`已在 ${replacedFiles} 个文件中完成替换`);
-  }, [appendOutput, searchPanel.caseSensitive, searchPanel.query, searchPanel.replacement, searchPanel.results, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
-
-  const replaceSearchResults = useCallback(async (results: WorkspaceSearchResult[]) => {
-    if (!workspace || results.length === 0) return;
-    if (results.length > 1 && !await appConfirm(`将替换 ${results.length} 处匹配，是否继续？`)) return;
-    let matcher: RegExp;
-    try {
-      const escaped = searchPanel.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const source = searchPanel.useRegex ? searchPanel.query : escaped;
-      matcher = new RegExp(`^(?:${searchPanel.wholeWord ? `\\b(?:${source})\\b` : source})`, searchPanel.caseSensitive ? '' : 'i');
-    } catch (error) {
-      setStatus(`替换失败：${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-    const grouped = new Map<string, WorkspaceSearchResult[]>();
-    for (const result of results) grouped.set(result.path, [...(grouped.get(result.path) ?? []), result]);
-    const snapshots: ReplaceSnapshot[] = [];
-    const edits: Array<{ path: string; content: string; encoding: WorkspaceEncoding; lineEnding: 'LF' | 'CRLF'; expectedModifiedAt: number }> = [];
-    for (const [filePath, matches] of grouped) {
-      const read = await window.electronAPI.workspace.readTextFile(workspace.path, filePath);
-      if (!read.success || !read.data) continue;
-      let content = read.data.content;
-      snapshots.push({ path: filePath, content, encoding: read.data.encoding, lineEnding: read.data.lineEnding });
-      const lines = content.split('\n');
-      const offsets: number[] = [];
-      let offset = 0;
-      for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
-      for (const match of [...matches].sort((a, b) => b.line - a.line || b.column - a.column)) {
-        const start = (offsets[match.line - 1] ?? 0) + match.column - 1;
-        const tail = content.slice(start);
-        if (!matcher.test(tail)) continue;
-        matcher.lastIndex = 0;
-        content = `${content.slice(0, start)}${tail.replace(matcher, searchPanel.replacement)}`;
-      }
-      edits.push({ path: filePath, content, encoding: read.data.encoding, lineEnding: read.data.lineEnding, expectedModifiedAt: read.data.modifiedAt });
-    }
-    if (edits.length === 0) return;
-    const write = await window.electronAPI.workspace.writeTextFiles(workspace.path, edits);
-    if (!write.success) {
-      setStatus(`替换失败，未写入任何文件：${displayError(write.error)}`);
-      return;
-    }
-    const modifiedAtByPath = new Map((write.data ?? []).map((item) => [item.path, item.modifiedAt]));
-    for (const edit of edits) recentlySavedRef.current.set(edit.path, Date.now());
-    setDocuments((previous) => previous.map((document) => {
-      const edit = edits.find((item) => item.path === document.path);
-      return edit ? { ...document, content: edit.content, savedContent: edit.content, modifiedAt: modifiedAtByPath.get(edit.path) } : document;
-    }));
-    if (snapshots.length > 0) setReplaceHistory((previous) => [...previous.slice(-19), snapshots]);
-    await runSearch();
-  }, [runSearch, searchPanel.caseSensitive, searchPanel.query, searchPanel.replacement, searchPanel.useRegex, searchPanel.wholeWord, workspace]);
-
-  const undoSearchReplace = useCallback(async () => {
-    if (!workspace) return;
-    const snapshots = replaceHistory.at(-1);
-    if (!snapshots) return;
-    for (const snapshot of snapshots) {
-      const current = await window.electronAPI.workspace.readTextFile(workspace.path, snapshot.path);
-      if (!current.success || !current.data) continue;
-      const write = await window.electronAPI.workspace.writeTextFile(workspace.path, snapshot.path, snapshot.content, { encoding: snapshot.encoding, lineEnding: snapshot.lineEnding, expectedModifiedAt: current.data.modifiedAt });
-      if (!write.success) { setStatus(`撤销替换失败：${snapshot.path} — ${displayError(write.error)}`); return; }
-      recentlySavedRef.current.set(snapshot.path, Date.now());
-      setDocuments((previous) => previous.map((document) => document.path === snapshot.path ? { ...document, content: snapshot.content, savedContent: snapshot.content, modifiedAt: write.data?.modifiedAt } : document));
-    }
-    setReplaceHistory((previous) => previous.slice(0, -1));
-    await runSearch();
-    setStatus('已撤销上一次搜索替换');
-  }, [replaceHistory, runSearch, workspace]);
-
-  const openSearchResult = useCallback(async (result: WorkspaceSearchResult) => {
+  const openSearchResultFile = useCallback(async (result: { path: string; line: number; column: number }) => {
     pendingRevealRef.current = { path: result.path, line: result.line, column: result.column };
     await openTreeFile({
       name: result.path.split(/[\\/]/).pop() ?? result.path,
       path: result.path,
       type: 'file',
     });
-    setSearchPanel((previous) => ({ ...previous, open: false }));
   }, [openTreeFile]);
 
+  const {
+    searchPanel, setSearchPanel, replaceHistory, searchPreviews, runSearch, previewSearchReplace,
+    acceptSearchReplace, rejectSearchReplace, replaceAllSearchResults,
+    replaceSearchResults, undoSearchReplace, openSearchResult,
+  } = useWorkspaceSearch({
+    workspace,
+    diffView,
+    setDiffView,
+    setDocuments,
+    appConfirm,
+    appendOutput,
+    setStatus,
+    markRecentlySaved: (path) => recentlySavedRef.current.set(path, Date.now()),
+    openResult: openSearchResultFile,
+  });
   const reloadExternalDocument = useCallback(async (document: OpenDocument) => {
     if (!workspace || document.standalone) return;
     const result = await window.electronAPI.workspace.readTextFile(workspace.path, document.path);
@@ -1451,17 +1144,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   }, []);
 
   useEffect(() => localStorage.setItem('code-editor.sidebar-width', String(sidebarWidth)), [sidebarWidth]);
-  useEffect(() => {
-    const disposable = monaco.editor.onDidChangeMarkers(() => refreshProblems());
-    refreshProblems();
-    return () => disposable.dispose();
-  }, [refreshProblems]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => { void refreshSymbols(); }, 250);
-    return () => window.clearTimeout(timer);
-  }, [activePath, activeDocument?.content, refreshSymbols]);
-
   const showGitDiff = useCallback(async (entry: WorkspaceGitStatus) => {
     if (!workspace) return;
     if (classifyConflictStatus(entry.status)) {
