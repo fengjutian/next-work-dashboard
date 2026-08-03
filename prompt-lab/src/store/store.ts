@@ -105,6 +105,8 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   provider: 'local', contextBudget: 6000, recallCount: 6, minScore: 0.08,
   maxPerDocument: 2, autoIndex: true, embeddingBaseUrl: '', embeddingApiKey: '',
   embeddingModel: 'text-embedding-3-small',
+  localEmbeddingEnabled: false,
+  localEmbeddingModel: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   tencentDbEnabled: false, tencentDbBaseUrl: 'http://localhost:8420',
   tencentDbServiceId: '', tencentDbUserKey: '',
 };
@@ -121,6 +123,7 @@ function normalizeMemoryConfig(value: Partial<MemoryConfig>): MemoryConfig {
     minScore: number(value.minScore, 0.08, 0, 1),
     maxPerDocument: Math.floor(number(value.maxPerDocument, 2, 1, 6)),
     autoIndex: typeof value.autoIndex === 'boolean' ? value.autoIndex : true,
+    localEmbeddingEnabled: typeof value.localEmbeddingEnabled === 'boolean' ? value.localEmbeddingEnabled : false,
     tencentDbEnabled: typeof value.tencentDbEnabled === 'boolean' ? value.tencentDbEnabled : false,
   };
 }

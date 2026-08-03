@@ -1,5 +1,8 @@
 import type { ConversationFile } from '@/types/electron';
 import type { MemoryConfig } from '@/store/types';
+import { createLocalEmbeddings } from './memory/local-embedding';
+
+type EmbeddingBackend = 'remote' | 'local' | 'sparse';
 
 export interface MemorySource {
   documentId: string;
@@ -42,6 +45,7 @@ export interface MemoryIndexStats {
   failedFiles: string[];
   durationMs: number;
   embeddingFallback: boolean;
+  embeddingBackend?: EmbeddingBackend;
 }
 
 export interface MemorySyncProgress {
@@ -68,6 +72,7 @@ interface PersistedMemoryIndex {
   signature: string;
   chunks: IndexedChunk[];
   documentSignatures?: Record<string, string>;
+  embeddingBackend?: EmbeddingBackend;
 }
 
 const MAX_CHUNK_CHARS = 800;
@@ -273,11 +278,13 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   private documentSignatures: Record<string, string> = {};
   private cacheLoaded = false;
   private activeSync: Promise<MemoryIndexStats> | null = null;
+  private embeddingBackend: EmbeddingBackend = 'sparse';
   private searchConfig: MemoryConfig = {
     provider: 'local', contextBudget: 6000, recallCount: 6,
     minScore: 0.08,
     maxPerDocument: 2,
     autoIndex: true, embeddingBaseUrl: '', embeddingApiKey: '', embeddingModel: 'text-embedding-3-small',
+    localEmbeddingEnabled: false, localEmbeddingModel: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
     tencentDbEnabled: false, tencentDbBaseUrl: 'http://localhost:8420',
     tencentDbServiceId: '', tencentDbUserKey: '',
   };
@@ -289,32 +296,58 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   }
 
   private embeddingIdentity(): string {
-    return this.searchConfig.provider === 'openai'
-      ? `openai:${this.searchConfig.embeddingBaseUrl}:${this.searchConfig.embeddingModel}`
-      : 'local-sparse';
+    const remote = this.searchConfig.provider === 'openai'
+      ? `remote:${this.searchConfig.embeddingBaseUrl}:${this.searchConfig.embeddingModel}`
+      : 'remote:disabled';
+    const local = this.searchConfig.localEmbeddingEnabled
+      ? `local:${this.searchConfig.localEmbeddingModel}`
+      : 'local:disabled';
+    return `${remote}|${local}`;
   }
 
-  private async embedChunks(chunks: IndexedChunk[], options?: MemorySyncOptions): Promise<boolean> {
-    if (this.searchConfig.provider !== 'openai' || chunks.length === 0) return true;
-    if (!this.searchConfig.embeddingBaseUrl || !this.searchConfig.embeddingApiKey || !this.searchConfig.embeddingModel) return false;
+  private semanticEmbeddingRequested(): boolean {
+    return this.searchConfig.provider === 'openai' || this.searchConfig.localEmbeddingEnabled;
+  }
+
+  private async embedChunksWith(chunks: IndexedChunk[], backend: Exclude<EmbeddingBackend, 'sparse'>, options?: MemorySyncOptions): Promise<boolean> {
     for (let offset = 0; offset < chunks.length; offset += 32) {
       if (options?.signal?.aborted) throw new Error('INDEX_CANCELLED');
       const batch = chunks.slice(offset, offset + 32);
       options?.onProgress?.({ phase: 'embedding', completed: offset, total: chunks.length });
-      const result = await window.electronAPI.createEmbeddings({
-        baseUrl: this.searchConfig.embeddingBaseUrl,
-        apiKey: this.searchConfig.embeddingApiKey,
-        model: this.searchConfig.embeddingModel,
-        inputs: batch.map((chunk) => chunk.content),
-      });
-      if (!result.success || result.embeddings?.length !== batch.length) return false;
-      result.embeddings.forEach((embedding, index) => {
+      let embeddings: number[][];
+      try {
+        if (backend === 'remote') {
+          const result = await window.electronAPI.createEmbeddings({
+            baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
+            model: this.searchConfig.embeddingModel, inputs: batch.map((chunk) => chunk.content),
+          });
+          if (!result.success || result.embeddings?.length !== batch.length) return false;
+          embeddings = result.embeddings;
+        } else {
+          embeddings = await createLocalEmbeddings(batch.map((chunk) => chunk.content), this.searchConfig.localEmbeddingModel);
+        }
+      } catch { return false; }
+      embeddings.forEach((embedding, index) => {
         batch[index].denseVector = embedding;
         batch[index].denseNorm = denseNorm(embedding);
       });
     }
     options?.onProgress?.({ phase: 'embedding', completed: chunks.length, total: chunks.length });
     return true;
+  }
+
+  private async embedChunks(chunks: IndexedChunk[], options?: MemorySyncOptions): Promise<EmbeddingBackend> {
+    if (!chunks.length) return this.embeddingBackend;
+    const remoteConfigured = this.searchConfig.provider === 'openai'
+      && !!this.searchConfig.embeddingBaseUrl && !!this.searchConfig.embeddingApiKey && !!this.searchConfig.embeddingModel;
+    const preferExistingLocal = this.embeddingBackend === 'local' && this.searchConfig.localEmbeddingEnabled;
+    if (preferExistingLocal && await this.embedChunksWith(chunks, 'local', options)) return 'local';
+    if (remoteConfigured && await this.embedChunksWith(chunks, 'remote', options)) return 'remote';
+    chunks.forEach((chunk) => { delete chunk.denseVector; delete chunk.denseNorm; });
+    if (this.embeddingBackend !== 'remote' && this.searchConfig.localEmbeddingEnabled && this.searchConfig.localEmbeddingModel
+      && await this.embedChunksWith(chunks, 'local', options)) return 'local';
+    chunks.forEach((chunk) => { delete chunk.denseVector; delete chunk.denseNorm; });
+    return 'sparse';
   }
 
   private async loadCache(): Promise<void> {
@@ -325,6 +358,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       this.signature = cached.signature;
       this.chunks = cached.chunks;
       this.documentSignatures = cached.documentSignatures ?? {};
+      this.embeddingBackend = cached.embeddingBackend ?? (cached.chunks.some((chunk) => chunk.denseVector) ? 'remote' : 'sparse');
     }
   }
 
@@ -353,7 +387,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     let signature = files.map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
     if (signature === this.signature) return {
       documents: files.length, chunks: this.chunks.length, failedFiles: [], durationMs: Date.now() - startedAt,
-      embeddingFallback: false,
+      embeddingFallback: this.embeddingBackend === 'sparse' && this.semanticEmbeddingRequested(), embeddingBackend: this.embeddingBackend,
     };
     const changedFiles = files.filter((file) => this.documentSignatures[file.path] !== currentSignatures[file.path]);
     const currentPaths = new Set(files.map((file) => file.path));
@@ -376,21 +410,22 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     }
     signature = files.filter((file) => currentSignatures[file.path]).map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
     const newChunks = documents.flatMap((document) => document?.chunks ?? []);
-    const embeddingReady = await this.embedChunks(newChunks, options);
-    if (!embeddingReady && this.searchConfig.provider === 'openai') {
+    const embeddingBackend = await this.embedChunks(newChunks, options);
+    if (embeddingBackend === 'sparse' && (this.searchConfig.provider === 'openai' || this.searchConfig.localEmbeddingEnabled)) {
       for (const file of changedFiles) delete currentSignatures[file.path];
       signature = files.filter((file) => currentSignatures[file.path]).map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
     }
     this.chunks = [...retainedChunks, ...newChunks];
     this.signature = signature;
     this.documentSignatures = currentSignatures;
+    this.embeddingBackend = embeddingBackend;
     if (options.signal?.aborted) throw new Error('INDEX_CANCELLED');
     options.onProgress?.({ phase: 'saving', completed: 0, total: 1 });
-    await writePersistedIndex({ signature, chunks: this.chunks, documentSignatures: currentSignatures });
+    await writePersistedIndex({ signature, chunks: this.chunks, documentSignatures: currentSignatures, embeddingBackend });
     options.onProgress?.({ phase: 'saving', completed: 1, total: 1 });
     return { documents: files.length, chunks: this.chunks.length,
       failedFiles: failedFiles.map((file) => file.fileName), durationMs: Date.now() - startedAt,
-      embeddingFallback: this.searchConfig.provider === 'openai' && !embeddingReady };
+      embeddingFallback: embeddingBackend === 'sparse' && this.semanticEmbeddingRequested(), embeddingBackend };
   }
 
   async clear(): Promise<void> {
@@ -398,6 +433,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     this.documentSignatures = {};
     this.chunks = [];
     this.cacheLoaded = true;
+    this.embeddingBackend = 'sparse';
     await clearPersistedIndex();
   }
 
@@ -407,13 +443,17 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     if (!queries.length) return [];
     const encodedQueries = queries.map(vectorize);
     let queryDenseVectors: number[][] = [];
-    if (this.searchConfig.provider === 'openai' && this.searchConfig.embeddingBaseUrl && this.searchConfig.embeddingApiKey) {
-      const result = await window.electronAPI.createEmbeddings({
-        baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
-        model: this.searchConfig.embeddingModel, inputs: queries,
-      });
-      queryDenseVectors = result.success ? (result.embeddings ?? []) : [];
-    }
+    try {
+      if (this.embeddingBackend === 'remote') {
+        const result = await window.electronAPI.createEmbeddings({
+          baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
+          model: this.searchConfig.embeddingModel, inputs: queries,
+        });
+        queryDenseVectors = result.success ? (result.embeddings ?? []) : [];
+      } else if (this.embeddingBackend === 'local') {
+        queryDenseVectors = await createLocalEmbeddings(queries, this.searchConfig.localEmbeddingModel);
+      }
+    } catch { queryDenseVectors = []; }
     const queryDenseNorms = queryDenseVectors.map(denseNorm);
     const normalizedQuery = query.toLocaleLowerCase();
     const bm25Variants = queries.map((candidate) => bm25Scores(candidate, this.chunks));

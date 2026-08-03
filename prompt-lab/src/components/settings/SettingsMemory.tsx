@@ -5,6 +5,7 @@ import { useStore } from '@/store';
 import { conversationMemory } from '@/core/conversation-memory';
 import type { MemorySyncProgress } from '@/core/conversation-memory';
 import { TencentDbMemoryAdapter } from '@/core/tencentdb-memory-adapter';
+import { testLocalEmbedding } from '@/core/memory/local-embedding';
 
 export const SettingsMemory: React.FC = () => {
   const config = useStore((state) => state.memoryConfig);
@@ -13,6 +14,7 @@ export const SettingsMemory: React.FC = () => {
   const [indexing, setIndexing] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [testingTencentDb, setTestingTencentDb] = React.useState(false);
+  const [testingLocalEmbedding, setTestingLocalEmbedding] = React.useState(false);
   const [progress, setProgress] = React.useState<MemorySyncProgress | null>(null);
   const [failedFiles, setFailedFiles] = React.useState<string[]>([]);
   const indexController = React.useRef<AbortController | null>(null);
@@ -45,7 +47,8 @@ export const SettingsMemory: React.FC = () => {
       conversationMemory.configure(config);
       const stats = await conversationMemory.sync({ force, signal: controller.signal, onProgress: setProgress });
       setFailedFiles(stats.failedFiles);
-      setStatus(`已索引 ${stats.documents} 个文件、${stats.chunks} 个片段；耗时 ${(stats.durationMs / 1000).toFixed(1)} 秒${stats.failedFiles.length ? `；失败 ${stats.failedFiles.length} 个` : ''}${stats.embeddingFallback ? '；Embedding 失败，已降级为本地索引' : ''}`);
+      const backend = stats.embeddingBackend === 'remote' ? '远程语义向量' : stats.embeddingBackend === 'local' ? '本地语义向量' : 'BM25/稀疏索引';
+      setStatus(`已索引 ${stats.documents} 个文件、${stats.chunks} 个片段；${backend}；耗时 ${(stats.durationMs / 1000).toFixed(1)} 秒${stats.failedFiles.length ? `；失败 ${stats.failedFiles.length} 个` : ''}${stats.embeddingFallback ? '；语义模型不可用，已使用最终兼容模式' : ''}`);
     } catch (error) { setStatus(error instanceof Error && error.message === 'INDEX_CANCELLED' ? '索引已取消' : '索引失败，请检查历史文件'); }
     finally { setIndexing(false); indexController.current = null; }
   };
@@ -68,6 +71,17 @@ export const SettingsMemory: React.FC = () => {
       ? `Embedding 连接成功，向量维度 ${result.embeddings?.[0]?.length ?? 0}`
       : `Embedding 连接失败：${result.error ?? '未知错误'}`);
     setTesting(false);
+  };
+
+  const testLocal = async () => {
+    setTestingLocalEmbedding(true);
+    setStatus('正在加载本地模型；首次使用需要下载，之后可从缓存离线运行…');
+    try {
+      const dimension = await testLocalEmbedding(config.localEmbeddingModel);
+      setStatus(`本地 Embedding 可用，向量维度 ${dimension}`);
+    } catch (error) {
+      setStatus(`本地 Embedding 加载失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally { setTestingLocalEmbedding(false); }
   };
 
   const testTencentDb = async () => {
@@ -114,6 +128,22 @@ export const SettingsMemory: React.FC = () => {
           <Button variant="outline" size="sm" className="h-7 text-xs" disabled={testing || !config.embeddingBaseUrl || !config.embeddingModel}
             onClick={() => void testEmbedding()}>{testing ? '测试中…' : '测试 Embedding'}</Button>
         </div>}
+
+        <div className="space-y-3 rounded-md border p-3">
+          <label className="flex items-center justify-between">
+            <span><span className="block text-xs font-medium">本地语义 Embedding</span><span className="text-[10px] text-muted-foreground">远程不可用时自动接管；模型缓存后支持断网检索</span></span>
+            <input type="checkbox" checked={config.localEmbeddingEnabled}
+              onChange={(event) => setConfig({ localEmbeddingEnabled: event.target.checked })} />
+          </label>
+          {config.localEmbeddingEnabled && <div className="space-y-2">
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">Transformers.js 模型</label>
+              <Input value={config.localEmbeddingModel} onChange={(event) => setConfig({ localEmbeddingModel: event.target.value })}
+                placeholder="Xenova/paraphrase-multilingual-MiniLM-L12-v2" className="h-8 text-xs" /></div>
+            <p className="text-[10px] text-muted-foreground">首次运行会下载量化 ONNX 模型。更换模型后需要强制重建索引。</p>
+            <Button variant="outline" size="sm" className="h-7 text-xs" disabled={testingLocalEmbedding || !config.localEmbeddingModel}
+              onClick={() => void testLocal()}>{testingLocalEmbedding ? '加载中…' : '测试本地 Embedding'}</Button>
+          </div>}
+        </div>
 
         <div className="space-y-3 rounded-md border p-3">
           <label className="flex items-center justify-between">

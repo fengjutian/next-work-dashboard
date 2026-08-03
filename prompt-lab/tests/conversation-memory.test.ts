@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveMemoryQueries, hashMemoryText, LocalConversationMemoryProvider, selectMemorySourcesForBudget, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
 import type { ConversationFile } from '../src/types/electron';
 import type { MemoryConfig } from '../src/store/types';
+import { createLocalEmbeddings } from '../src/core/memory/local-embedding';
+
+vi.mock('../src/core/memory/local-embedding', () => ({
+  createLocalEmbeddings: vi.fn(async (inputs: string[]) => inputs.map((input) =>
+    input.includes('汉高祖') || input.includes('刘邦') ? [1, 0] : [0, 1])),
+}));
 
 const file: ConversationFile = {
   site: 'deepseek',
@@ -148,6 +154,27 @@ describe('local conversation memory index', () => {
     expect(results).toHaveLength(1);
     expect(createEmbeddings).toHaveBeenCalledTimes(2);
     expect(results[0].score).toBeGreaterThan(0.7);
+  });
+
+  it('uses local semantic embeddings when remote embeddings are unavailable', async () => {
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        listConversations: vi.fn(async () => [file]),
+        readConversation: vi.fn(async () => ({ success: true, content: '# 人物评价\n后世对刘邦历史地位的看法存在分歧。' })),
+      },
+    });
+    const provider = new LocalConversationMemoryProvider();
+    provider.configure({
+      ...embeddingConfig,
+      provider: 'local',
+      localEmbeddingEnabled: true,
+      localEmbeddingModel: 'test-local-model',
+    });
+    const results = await provider.search('汉高祖的评价');
+    expect(createLocalEmbeddings).toHaveBeenCalled();
+    expect(results[0]?.content).toContain('刘邦');
+    expect(results[0]?.score).toBeGreaterThan(0.6);
   });
 
   it('supports force rebuilding and cancellation progress', async () => {
