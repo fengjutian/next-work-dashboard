@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, Globe, MessageSquare, Plus, Send, Settings } from '@/components/icons';
+import { Edit3, Globe, MessageSquare, Plus, Puzzle, Send, Settings } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { TitleBar } from '@/components/TitleBar';
@@ -140,6 +140,7 @@ export default function App() {
 
   const isAI = activeActivity === 'ai' || activeActivity === null;
   const isSettings = activeActivity === 'settings';
+  const isPluginManager = activeActivity === 'plugin-manager';
 
   // 根据 activeActivity 找到对应的插件（非 AI/非 settings 时）
   const activePlugin =
@@ -237,6 +238,18 @@ export default function App() {
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
       <div className="h-7 flex items-center px-2 border-t border-[#61245b] bg-[#61245b] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(97_36_91_/_0.16)]">
         <PluginStatusBar />
+        <button
+          className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
+            isPluginManager
+              ? 'bg-white/20 text-white'
+              : 'text-white/80 hover:bg-white/15 hover:text-white'
+          }`}
+          onClick={() => setActiveActivity(isPluginManager ? null : 'plugin-manager')}
+          title="插件管理"
+          aria-label="插件管理"
+        >
+          <Puzzle className="h-4 w-4" />
+        </button>
         <button
           className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
             isSettings

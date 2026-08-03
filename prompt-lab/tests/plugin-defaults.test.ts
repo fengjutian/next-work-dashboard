@@ -10,6 +10,11 @@ describe('plugin defaults', () => {
     expect(getUserPluginDefaultEnabled({ name: '今日待办' })).toBe(false);
   });
 
+  it('disables Excel 阅读器 by default and normalizes whitespace', () => {
+    expect(getUserPluginDefaultEnabled({ name: 'Excel 阅读器' })).toBe(false);
+    expect(getUserPluginDefaultEnabled({ name: 'Excel  阅读器' })).toBe(false);
+  });
+
   it('keeps other user plugins enabled and respects explicit settings', () => {
     expect(getUserPluginDefaultEnabled({ name: '其他插件' })).toBe(true);
     expect(getUserPluginDefaultEnabled({ name: '今日待办', enabled: true })).toBe(true);
