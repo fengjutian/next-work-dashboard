@@ -250,7 +250,7 @@ const PluginCard: React.FC<PluginCardProps> = ({
         </span>
       )}
       {isScriptPlugin && (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 font-medium">
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-light text-primary font-medium">
           <Code className="h-2.5 w-2.5 inline mr-0.5" />
           脚本
         </span>

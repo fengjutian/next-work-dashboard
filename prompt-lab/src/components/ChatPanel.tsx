@@ -395,7 +395,7 @@ export const ChatPanel: React.FC = () => {
                 <button
                   className={`h-6 text-[10px] rounded border px-2 ${
                     compareModels.length > 1
-                      ? 'border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
+                      ? 'border-primary/40 bg-primary-light text-primary'
                       : 'border-border bg-card text-muted-foreground'
                   }`}
                   onClick={() => setModelPickerOpen((open) => !open)}
@@ -512,10 +512,10 @@ export const ChatPanel: React.FC = () => {
                     {latestComparison.map((message) => (
                       <section
                         key={message.id}
-                        className="min-w-0 rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900 dark:bg-violet-950/20"
+                        className="min-w-0 rounded-lg border border-primary/20 bg-primary-light/40 p-3"
                       >
-                        <div className="mb-2 flex items-center justify-between border-b border-violet-100 pb-2 text-xs dark:border-violet-900">
-                          <span className="font-semibold text-violet-700 dark:text-violet-300">
+                        <div className="mb-2 flex items-center justify-between border-b border-primary/15 pb-2 text-xs">
+                          <span className="font-semibold text-primary">
                             {MODELS.find((model) => model.value === message.model)?.label ?? message.model}
                           </span>
                           <button

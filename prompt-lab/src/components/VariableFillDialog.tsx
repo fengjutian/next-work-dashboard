@@ -2,16 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { PromptVariable } from '@/store';
+import { extractPromptVariableNames, fillPromptVariables } from '@/features/prompts/domain';
 
 // 从提示词内容中提取 {{变量名}} 
 export function extractVariables(content: string): string[] {
-  const re = /\{\{(\w+)\}\}/g;
-  const names = new Set<string>();
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    names.add(m[1]);
-  }
-  return [...names];
+  return extractPromptVariableNames(content);
 }
 
 // 替换变量
@@ -19,7 +14,7 @@ export function fillVariables(
   content: string,
   values: Record<string, string>
 ): string {
-  return content.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name] ?? `{{${name}}}`);
+  return fillPromptVariables(content, values);
 }
 
 // ── 变量填充对话框 ──

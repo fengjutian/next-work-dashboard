@@ -160,7 +160,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
           ))}
         </select>
         <button
-          className="h-6 px-2 flex items-center gap-1 text-[11px] rounded bg-violet-500 hover:bg-violet-600 text-white transition-colors disabled:opacity-50 shrink-0"
+          className="h-6 px-2 flex items-center gap-1 text-[11px] rounded bg-primary hover:bg-primary-hover text-primary-foreground transition-colors disabled:opacity-50 shrink-0"
           disabled={extracting}
           onClick={handleExtract}
         >
