@@ -56,8 +56,8 @@ export const PluginStatusBar: React.FC = () => {
       key={`${item.pluginId}:${item.id}`}
       className={`text-[11px] px-2 transition-colors ${
         item.command
-          ? 'cursor-pointer hover:text-primary'
-          : 'text-muted-foreground cursor-default'
+          ? 'cursor-pointer text-white/85 hover:text-white'
+          : 'text-white/65 cursor-default'
       }`}
       title={item.tooltip ?? item.text}
       onClick={() => handleItemClick(item)}

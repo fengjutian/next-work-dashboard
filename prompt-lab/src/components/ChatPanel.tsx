@@ -383,11 +383,12 @@ export const ChatPanel: React.FC = () => {
           <div className="flex-1 flex flex-col h-full min-w-0">
             {/* 头部工具栏 */}
             <div className="flex items-center gap-1.5 px-3 py-2 border-b shrink-0 flex-wrap">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNewSession} title="新建对话"><Plus className="h-4 w-4" /></Button>
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${showHistory ? 'text-primary' : ''}`}
-                onClick={() => setShowHistory(!showHistory)} title="对话历史">
+                onClick={() => setShowHistory((visible) => !visible)} title="对话历史"
+                aria-label={showHistory ? '收起对话历史' : '展开对话历史'}>
                 {showHistory ? <ArrowLeft className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
               </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNewSession} title="新建对话"><Plus className="h-4 w-4" /></Button>
               <span className="text-xs font-medium text-muted-foreground truncate max-w-[120px]">{activeSession?.title || '新对话'}</span>
               <div className="flex-1" />
               <div className="relative">

@@ -2,6 +2,7 @@ import React from 'react';
 import { Edit3, Globe, MessageSquare, Plus, Send, Settings } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
+import { TitleBar } from '@/components/TitleBar';
 import { AIPanel } from '@/components/AIPanel';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
 import { PromptDrawer } from '@/components/PromptDrawer';
@@ -149,6 +150,7 @@ export default function App() {
   return (
     <ToastProvider>
     <div className="h-screen flex flex-col">
+      <TitleBar />
       {/* 主体：Activity Bar + AI 侧边栏 + 主内容区 */}
       <div className="flex flex-1 overflow-hidden">
         {/* VSCode 风格 Activity Bar — 从插件注册中心动态渲染图标 */}
@@ -233,13 +235,13 @@ export default function App() {
       <PromptDrawer />
 
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
-      <div className="h-8 flex items-center px-2 border-t bg-muted select-none flex-shrink-0 gap-2">
+      <div className="h-8 flex items-center px-2 border-t border-[#431876] bg-[#51208f] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(59_23_109_/_0.16)]">
         <PluginStatusBar />
         <button
           className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
             isSettings
-              ? 'text-foreground bg-accent'
-              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50 dark:hover:bg-muted'
+              ? 'bg-white/20 text-white'
+              : 'text-white/80 hover:bg-white/15 hover:text-white'
           }`}
           onClick={() => setActiveActivity(isSettings ? null : 'settings')}
           title="设置"
