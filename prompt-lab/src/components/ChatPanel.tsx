@@ -421,8 +421,8 @@ export const ChatPanel: React.FC = () => {
               <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-warning/10 bg-warning/10 text-warning text-warning' : 'bg-muted text-muted-foreground'}`}
                 onClick={() => setAgentMode((v) => !v)}>{agentMode ? 'Agent ✓' : 'Agent'}</button>
               <button className={`h-6 rounded-full px-1.5 text-[10px] font-medium transition-colors ${memoryEnabled ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}`}
-                onClick={() => setMemoryEnabled((value) => !value)} title="检索已保存的历史对话并附带原文来源">
-                {memoryEnabled ? '历史知识库 ✓' : '历史知识库'}
+                onClick={() => setMemoryEnabled((value) => !value)} title="检索知识库并附带原文来源">
+                {memoryEnabled ? '知识库 ✓' : '知识库'}
               </button>
               <button onClick={() => setRoleManagerOpen(true)}
                 className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">

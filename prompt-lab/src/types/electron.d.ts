@@ -48,6 +48,7 @@ export interface ElectronAPI {
     title?: string;
     notes?: string;
     createNew?: boolean;
+    contentMode?: 'exchange' | 'document';
   }) => Promise<{ success: boolean; filePath?: string }>;
   listConversations: () => Promise<ConversationFile[]>;
   searchConversations: (query: string) => Promise<ConversationSearchResult[]>;

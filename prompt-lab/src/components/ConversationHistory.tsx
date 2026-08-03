@@ -68,7 +68,7 @@ export const ConversationHistory: React.FC = () => {
 
   const loadList = useCallback(async () => {
     try { setFiles(await window.electronAPI.listConversations()); }
-    catch { toast('读取对话列表失败', 'error'); }
+    catch { toast('读取知识库文件列表失败', 'error'); }
   }, [toast]);
 
   useEffect(() => { void loadList(); }, [loadList, conversationSavedAt]);
@@ -139,7 +139,7 @@ export const ConversationHistory: React.FC = () => {
       const stats = await conversationMemory.sync();
       setIndexStats(stats);
       toast(`已索引 ${stats.documents} 个文件、${stats.chunks} 个片段`, 'success');
-    } catch { toast('历史知识库索引失败', 'error'); }
+    } catch { toast('知识库索引失败', 'error'); }
     finally { setIndexing(false); }
   }, [toast]);
 
@@ -147,7 +147,7 @@ export const ConversationHistory: React.FC = () => {
     <div className="flex h-full">
       <div className="flex w-72 flex-shrink-0 flex-col border-r bg-background">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-xs font-semibold text-muted-foreground">对话记录 ({files.length})</span>
+          <span className="text-xs font-semibold text-muted-foreground">知识库 ({files.length})</span>
           <div className="flex gap-1">
             <button className="p-1 text-muted-foreground hover:text-foreground" onClick={() => void loadList()} title="刷新"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button className="p-1 text-muted-foreground hover:text-foreground" onClick={() => void window.electronAPI.openConversationFolder()} title="打开文件夹"><FolderOpen className="h-3.5 w-3.5" /></button>
@@ -156,14 +156,14 @@ export const ConversationHistory: React.FC = () => {
         <div className="border-b p-2">
           <div className="flex items-center gap-1.5 rounded-md border bg-card px-2">
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、备注和对话内容"
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、备注和知识库内容"
               className="h-8 min-w-0 flex-1 bg-transparent text-xs outline-none" />
             {searching ? <Loader2 className="h-3.5 w-3.5" /> : query && <button onClick={() => setQuery('')}><X className="h-3.5 w-3.5" /></button>}
           </div>
           {query.trim().length === 1 && <p className="mt-1 text-[10px] text-muted-foreground">再输入 1 个字符开始搜索</p>}
           {query.trim().length >= 2 && !searching && <p className="mt-1 text-[10px] text-muted-foreground">找到 {totalMatches} 处结果 / {results.length} 个文件</p>}
           <div className="mt-2 flex items-center justify-between rounded bg-muted/50 px-2 py-1.5 text-[10px] text-muted-foreground">
-            <span>{indexStats ? `知识库：${indexStats.documents} 文件 / ${indexStats.chunks} 片段` : '历史知识库尚未索引'}</span>
+            <span>{indexStats ? `知识库：${indexStats.documents} 文件 / ${indexStats.chunks} 片段` : '知识库尚未索引'}</span>
             <button className="text-primary disabled:opacity-50" disabled={indexing} onClick={() => void rebuildIndex()}>
               {indexing ? '索引中…' : indexStats ? '更新索引' : '构建索引'}
             </button>
@@ -172,7 +172,7 @@ export const ConversationHistory: React.FC = () => {
         <div className="flex-1 overflow-y-auto">
           {!searching && displayed.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground">
-              <FileText className="h-8 w-8" /><p className="text-xs">{query.trim().length >= 2 ? '没有匹配的对话文件' : '暂无对话记录'}</p>
+              <FileText className="h-8 w-8" /><p className="text-xs">{query.trim().length >= 2 ? '没有匹配的知识库文件' : '知识库暂无文件'}</p>
             </div>
           ) : displayed.map(({ file, result }) => <FileItem key={file.path} file={file} result={result} query={query.trim()}
             isActive={activeFile?.path === file.path} onClick={() => void selectFile(file)} onDelete={() => void deleteFile(file)} />)}

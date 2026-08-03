@@ -3,11 +3,11 @@ import { conversationMemory } from '../conversation-memory';
 
 const searchConversationHistory: ToolDefinition = {
   name: 'search_conversation_history',
-  description: '搜索用户已保存的 AI 对话历史。返回相关原文件、行号和原始片段；当问题涉及过去的讨论、决策或结论时使用。',
+  description: '搜索用户知识库中的已保存文档。返回相关原文件、行号和原始片段；当问题需要查阅既有资料、讨论、决策或结论时使用。',
   parameters: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: '用于检索历史对话的关键词或自然语言问题' },
+      query: { type: 'string', description: '用于检索知识库的关键词或自然语言问题' },
       limit: { type: 'number', description: '最多返回多少个片段，范围 1-8，默认 5' },
     },
     required: ['query'],

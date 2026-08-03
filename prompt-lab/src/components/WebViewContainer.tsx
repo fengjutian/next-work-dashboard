@@ -143,6 +143,8 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
           timestamp: Date.now(),
           requestBody: { note: 'DOM extraction' },
           responseContent: parsed.content,
+          contentMode: 'document',
+          createNew: true,
         });
         if (saveResult?.success) {
           toast('对话已保存', 'success');
@@ -194,6 +196,7 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         title,
         notes: notes || undefined,
         createNew: true,
+        contentMode: 'document',
       });
       console.log('[WebViewPanel] saveResult:', saveResult);
       if (saveResult?.success) {

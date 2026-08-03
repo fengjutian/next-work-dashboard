@@ -4,6 +4,26 @@
 
 console.log('[next-work-dashboard] webview preload loaded');
 
+// Keep the last submitted prompt on the shared DOM so the knowledge-base
+// extractor can pair it with sites whose message nodes have obfuscated classes.
+const rememberSubmittedPrompt = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return;
+  const input = target.closest('textarea, input, [contenteditable="true"]') as HTMLElement | null;
+  if (!input) return;
+  const text = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement
+    ? input.value.trim()
+    : (input.innerText || input.textContent || '').trim();
+  if (text.length >= 1) document.documentElement.dataset.nextWorkLastPrompt = text.slice(0, 20000);
+};
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) rememberSubmittedPrompt(event.target);
+}, true);
+
+document.addEventListener('click', () => {
+  rememberSubmittedPrompt(document.activeElement);
+}, true);
+
 // ── Standard Chrome 134 (Electron 35) UA on Windows ──
 const CHROME_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';

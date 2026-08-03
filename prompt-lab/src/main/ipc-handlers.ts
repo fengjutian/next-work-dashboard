@@ -337,6 +337,7 @@ export function setupIPC(webviewPreloadPath: string) {
     title?: string;
     notes?: string;
     createNew?: boolean;
+    contentMode?: 'exchange' | 'document';
   }) => {
     try {
       if (!fs.existsSync(exportDir)) {
@@ -382,7 +383,11 @@ export function setupIPC(webviewPreloadPath: string) {
         }
       }
 
-      entryParts.push('', `---`, `### 🧑 用户 — ${time}`, '', userMsg, '', `### 🤖 AI — ${time}`, '', payload.responseContent, '');
+      if (payload.contentMode === 'document') {
+        entryParts.push('', payload.responseContent.trim(), '');
+      } else {
+        entryParts.push('', `---`, `### 🧑 用户 — ${time}`, '', userMsg, '', `### 🤖 AI — ${time}`, '', payload.responseContent, '');
+      }
 
       const entry = entryParts.join('\n');
 

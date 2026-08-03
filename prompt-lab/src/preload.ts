@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     timestamp: number;
     requestBody: unknown;
     responseContent: string;
+    title?: string;
+    notes?: string;
+    createNew?: boolean;
+    contentMode?: 'exchange' | 'document';
   }) => ipcRenderer.invoke('store-conversation', payload),
 
   // 对话历史管理

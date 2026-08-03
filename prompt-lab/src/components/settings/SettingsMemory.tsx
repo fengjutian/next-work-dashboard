@@ -65,7 +65,7 @@ export const SettingsMemory: React.FC = () => {
       baseUrl: config.embeddingBaseUrl,
       apiKey: config.embeddingApiKey,
       model: config.embeddingModel,
-      inputs: ['历史知识库连接测试'],
+      inputs: ['知识库连接测试'],
     });
     setStatus(result.success
       ? `Embedding 连接成功，向量维度 ${result.embeddings?.[0]?.length ?? 0}`
@@ -100,7 +100,7 @@ export const SettingsMemory: React.FC = () => {
 
   return (
     <section>
-      <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">历史知识库</h4>
+      <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">知识库检索</h4>
       <div className="space-y-4">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">Memory Provider</label>
@@ -109,7 +109,7 @@ export const SettingsMemory: React.FC = () => {
             <option value="local">本地索引（IndexedDB）</option>
             <option value="openai">OpenAI 兼容 Embedding</option>
           </select>
-          <p className="text-[10px] text-muted-foreground">远程模式会将历史片段发送给配置的 Embedding 服务；失败时自动降级到本地检索。</p>
+          <p className="text-[10px] text-muted-foreground">远程模式会将知识库片段发送给配置的 Embedding 服务；失败时自动降级到本地检索。</p>
         </div>
 
         {config.provider === 'openai' && <div className="space-y-3 rounded-md border p-3">
@@ -119,7 +119,7 @@ export const SettingsMemory: React.FC = () => {
           <div className="space-y-1"><label className="text-xs text-muted-foreground">Embedding API Key</label>
             <Input type="password" value={config.embeddingApiKey} onChange={(event) => setConfig({ embeddingApiKey: event.target.value })}
               onBlur={() => void (config.embeddingApiKey
-                ? window.electronAPI.auth.saveToken('memory-embedding', config.embeddingApiKey, '历史知识库 Embedding')
+                ? window.electronAPI.auth.saveToken('memory-embedding', config.embeddingApiKey, '知识库 Embedding')
                 : window.electronAPI.auth.deleteToken('memory-embedding'))}
               placeholder="sk-..." className="h-8 text-xs" /></div>
           <div className="space-y-1"><label className="text-xs text-muted-foreground">Embedding 模型</label>
@@ -179,7 +179,7 @@ export const SettingsMemory: React.FC = () => {
           min={1} max={6} step={1} onChange={numberSetting('maxPerDocument', 1, 6)} />
 
         <label className="flex items-center justify-between rounded-md border p-2.5">
-          <span><span className="block text-xs font-medium">自动更新索引</span><span className="text-[10px] text-muted-foreground">保存或修改历史文件后自动同步</span></span>
+          <span><span className="block text-xs font-medium">自动更新索引</span><span className="text-[10px] text-muted-foreground">保存或修改知识库文件后自动同步</span></span>
           <input type="checkbox" checked={config.autoIndex} onChange={(event) => setConfig({ autoIndex: event.target.checked })} />
         </label>
 

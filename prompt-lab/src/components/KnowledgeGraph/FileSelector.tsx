@@ -73,7 +73,7 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
         {files.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
             <FileText className="h-6 w-6" />
-            <p className="text-xs">暂无对话记录</p>
+            <p className="text-xs">知识库暂无文件</p>
           </div>
         ) : (
           files.map((f) => (

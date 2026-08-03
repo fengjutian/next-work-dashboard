@@ -414,7 +414,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (raw) {
         const saved = JSON.parse(raw) as Partial<MemoryConfig>;
         if (saved.embeddingApiKey) {
-          void window.electronAPI.auth.saveToken('memory-embedding', saved.embeddingApiKey, '历史知识库 Embedding');
+          void window.electronAPI.auth.saveToken('memory-embedding', saved.embeddingApiKey, '知识库 Embedding');
           saved.embeddingApiKey = '';
           dbSetSetting('memoryConfig', JSON.stringify(saved));
           void flushDbToDisk();

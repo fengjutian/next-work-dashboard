@@ -18,7 +18,7 @@ export interface Message {
   comparisonId?: string;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
-  /** 本次回答使用的历史知识库原始来源。 */
+  /** 本次回答使用的知识库原始来源。 */
   memorySources?: MemoryCitation[];
 }
 

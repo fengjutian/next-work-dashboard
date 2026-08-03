@@ -522,7 +522,7 @@ export function selectMemorySourcesForBudget(
 export function buildMemoryContext(sources: MemorySource[], budget = DEFAULT_MEMORY_CONTEXT_BUDGET): string {
   if (!sources.length) return '';
   const selected = selectMemorySourcesForBudget(sources, budget);
-  return ['[历史知识库上下文]', '请基于以下原始历史片段回答；引用事实时使用 [S1]、[S2]。上下文不足时请明确说明。',
+  return ['[知识库上下文]', '请基于以下知识库原始片段回答；引用事实时使用 [S1]、[S2]。上下文不足时请明确说明。',
     ...selected.map((source, index) => `[S${index + 1}] 文件：${source.fileName}；位置：第 ${source.startLine}-${source.endLine} 行\n${source.content}`),
   ].join('\n\n');
 }

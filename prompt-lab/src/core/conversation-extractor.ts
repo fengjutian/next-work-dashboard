@@ -19,9 +19,11 @@ export function buildConversationExtractScript(): string {
           for (const el of nodes) {
             const t = el.textContent?.trim();
             if (!t || t.length < 3) continue;
-            const role = el.getAttribute('data-message-author-role') || '';
-            const isUser = role === 'user';
-            lines.push('### ' + (isUser ? '🧑 用户' : '🤖 AI'));
+            const roleNode = el.matches('[data-message-author-role]')
+              ? el
+              : el.querySelector('[data-message-author-role]');
+            const role = roleNode?.getAttribute('data-message-author-role') || '';
+            lines.push('### ' + (role === 'user' ? '🧑 用户' : role === 'assistant' ? '🤖 AI' : '内容'));
             lines.push('');
             lines.push(t);
             lines.push('');
@@ -62,17 +64,19 @@ export function buildConversationExtractScript(): string {
       const best = candidates[0];
 
       if (best && best.count > 1) {
-        const lines = [];
+        const lines = ['## 页面提取内容', ''];
+        let previousText = '';
         for (const el of best.el) {
           const t = el.textContent?.trim();
           if (!t || t.length < 5) continue;
-          const isAI = /(好的|当然|可以|以下是|以下为|根据|我来|这是|Here|Sure|Certainly|Let me|I can)/i.test(t.substring(0, 60));
-          lines.push('### ' + (isAI ? '🤖 AI' : '🧑 用户'));
-          lines.push('');
+          if (t === previousText || previousText.includes(t)) continue;
           lines.push(t);
           lines.push('');
+          lines.push('---');
+          lines.push('');
+          previousText = t;
         }
-        if (lines.length > 0) {
+        if (lines.length > 2) {
           return JSON.stringify({ success: true, content: lines.join('\\n'), via: 'auto' });
         }
       }
