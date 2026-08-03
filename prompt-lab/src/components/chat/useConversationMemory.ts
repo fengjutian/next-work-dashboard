@@ -7,6 +7,7 @@ const MEMORY_ENABLED_KEY = 'chat.memory.enabled';
 export function useConversationMemory() {
   const [memoryEnabled, setMemoryEnabled] = useState(() => localStorage.getItem(MEMORY_ENABLED_KEY) === 'true');
   const memoryConfig = useStore((state) => state.memoryConfig);
+  const setMemoryConfig = useStore((state) => state.setMemoryConfig);
 
   useEffect(() => {
     localStorage.setItem(MEMORY_ENABLED_KEY, String(memoryEnabled));
@@ -16,13 +17,21 @@ export function useConversationMemory() {
     conversationMemory.configure(memoryConfig);
   }, [memoryConfig]);
 
+  useEffect(() => {
+    if (memoryConfig.embeddingApiKey) return;
+    void window.electronAPI.auth.getToken('memory-embedding').then((key) => {
+      if (key) setMemoryConfig({ embeddingApiKey: key });
+    });
+  }, [memoryConfig.embeddingApiKey, setMemoryConfig]);
+
   const enrichUserMessage = useCallback(async (
     text: string,
     additionalContext?: string,
+    retrievalQuery = text,
   ): Promise<{ contextContent?: string; sources: MemoryCitation[] }> => {
     let retrieved = [] as Awaited<ReturnType<typeof conversationMemory.search>>;
     if (memoryEnabled) {
-      try { retrieved = await conversationMemory.search(text, memoryConfig.recallCount); }
+      try { retrieved = await conversationMemory.search(retrievalQuery, memoryConfig.recallCount); }
       catch { /* Retrieval failures must not block the conversation. */ }
     }
     const selected = selectMemorySourcesForBudget(retrieved, memoryConfig.contextBudget);

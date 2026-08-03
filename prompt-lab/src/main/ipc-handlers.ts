@@ -230,11 +230,28 @@ export function setupIPC(webviewPreloadPath: string) {
         ? payload.inputs.slice(0, 64).map((input) => String(input).slice(0, 12000))
         : [];
       if (!inputs.length || !payload.model) return { success: false, error: 'INVALID_REQUEST' };
-      const response = await fetch(`${baseUrl}/embeddings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${payload.apiKey}` },
-        body: JSON.stringify({ model: payload.model, input: inputs }),
-      });
+      let response: Response | null = null;
+      let lastError = '';
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30_000);
+        try {
+          response = await fetch(`${baseUrl}/embeddings`, {
+            method: 'POST', signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${payload.apiKey}` },
+            body: JSON.stringify({ model: payload.model, input: inputs }),
+          });
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+        } finally { clearTimeout(timeout); }
+        if (!response) {
+          if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+          continue;
+        }
+        if (response.ok || (response.status !== 429 && response.status < 500)) break;
+        await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      }
+      if (!response) return { success: false, error: lastError || 'NO_RESPONSE' };
       if (!response.ok) return { success: false, error: `HTTP_${response.status}: ${(await response.text()).slice(0, 300)}` };
       const body = await response.json() as { data?: Array<{ index: number; embedding: number[] }> };
       const ordered = [...(body.data ?? [])].sort((a, b) => a.index - b.index).map((item) => item.embedding);

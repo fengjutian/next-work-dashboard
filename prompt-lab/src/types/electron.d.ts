@@ -30,6 +30,13 @@ export interface ElectronAPI {
   onSaveBeforeQuit: (callback: () => void) => () => void;
   copyText: (text: string) => void;
   fetchFavicon: (siteUrl: string) => Promise<string | null>;
+  fetchUrl: (url: string, options?: { headers?: Record<string, string> }) => Promise<{
+    ok: boolean;
+    status: number;
+    text: string;
+    contentType?: string;
+    error?: string;
+  }>;
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) => Promise<{
     success: boolean; embeddings?: number[][]; error?: string;
   }>;

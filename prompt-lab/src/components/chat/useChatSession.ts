@@ -375,7 +375,10 @@ export function useChatSession() {
     if (!text || streaming) return;
     if (!directText) setInput('');
     setError(null);
-    const memory = await enrichUserMessage(text, contextText);
+    const previousUser = [...messages].reverse().find((message) => message.role === 'user');
+    const isFollowUp = text.length < 24 || /^(继续|再说|这个|那个|它|上面|之前|然后|为什么|还有)/.test(text);
+    const retrievalQuery = isFollowUp && previousUser ? `${previousUser.content}\n${text}` : text;
+    const memory = await enrichUserMessage(text, contextText, retrievalQuery);
     const userMsg: Message = {
       id: `u-${Date.now()}`,
       role: 'user',

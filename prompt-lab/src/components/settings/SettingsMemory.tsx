@@ -12,7 +12,14 @@ export const SettingsMemory: React.FC = () => {
   const [indexing, setIndexing] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [progress, setProgress] = React.useState<MemorySyncProgress | null>(null);
+  const [failedFiles, setFailedFiles] = React.useState<string[]>([]);
   const indexController = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => {
+    void window.electronAPI.auth.getToken('memory-embedding').then((key) => {
+      if (key && key !== config.embeddingApiKey) setConfig({ embeddingApiKey: key });
+    });
+  }, [config.embeddingApiKey, setConfig]);
 
   const numberSetting = (key: 'contextBudget' | 'recallCount' | 'minScore' | 'maxPerDocument', min: number, max: number) =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,11 +30,13 @@ export const SettingsMemory: React.FC = () => {
   const updateIndex = async (force = false) => {
     setIndexing(true);
     setProgress(null);
+    setFailedFiles([]);
     const controller = new AbortController();
     indexController.current = controller;
     try {
       conversationMemory.configure(config);
       const stats = await conversationMemory.sync({ force, signal: controller.signal, onProgress: setProgress });
+      setFailedFiles(stats.failedFiles);
       setStatus(`已索引 ${stats.documents} 个文件、${stats.chunks} 个片段；耗时 ${(stats.durationMs / 1000).toFixed(1)} 秒${stats.failedFiles.length ? `；失败 ${stats.failedFiles.length} 个` : ''}${stats.embeddingFallback ? '；Embedding 失败，已降级为本地索引' : ''}`);
     } catch (error) { setStatus(error instanceof Error && error.message === 'INDEX_CANCELLED' ? '索引已取消' : '索引失败，请检查历史文件'); }
     finally { setIndexing(false); indexController.current = null; }
@@ -73,6 +82,9 @@ export const SettingsMemory: React.FC = () => {
               placeholder="https://api.openai.com/v1" className="h-8 text-xs" /></div>
           <div className="space-y-1"><label className="text-xs text-muted-foreground">Embedding API Key</label>
             <Input type="password" value={config.embeddingApiKey} onChange={(event) => setConfig({ embeddingApiKey: event.target.value })}
+              onBlur={() => void (config.embeddingApiKey
+                ? window.electronAPI.auth.saveToken('memory-embedding', config.embeddingApiKey, '历史知识库 Embedding')
+                : window.electronAPI.auth.deleteToken('memory-embedding'))}
               placeholder="sk-..." className="h-8 text-xs" /></div>
           <div className="space-y-1"><label className="text-xs text-muted-foreground">Embedding 模型</label>
             <Input value={config.embeddingModel} onChange={(event) => setConfig({ embeddingModel: event.target.value })}
@@ -113,6 +125,10 @@ export const SettingsMemory: React.FC = () => {
             style={{ width: `${progress.total ? Math.round(progress.completed / progress.total * 100) : 0}%` }} /></div>
         </div>}
         {status && <div className="text-[10px] text-muted-foreground">{status}</div>}
+        {failedFiles.length > 0 && <div className="rounded border border-destructive/30 bg-destructive/5 p-2">
+          <div className="mb-1 text-[10px] font-semibold text-destructive">索引失败文件</div>
+          {failedFiles.map((file) => <div key={file} className="truncate text-[10px] text-muted-foreground">{file}</div>)}
+        </div>}
       </div>
     </section>
   );

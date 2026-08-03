@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashMemoryText, LocalConversationMemoryProvider, selectMemorySourcesForBudget, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
 import type { ConversationFile } from '../src/types/electron';

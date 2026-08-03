@@ -134,7 +134,7 @@ async function clearPersistedIndex(): Promise<void> {
 
 function tokens(text: string): string[] {
   const normalized = text.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
-  const words = normalized.match(/[a-z0-9_\-.]{2,}/g) ?? [];
+  const words: string[] = normalized.match(/[a-z0-9_\-.]{2,}/g) ?? [];
   const chinese = normalized.replace(/[^\u3400-\u9fff]/g, '');
   for (let index = 0; index < chinese.length - 1; index += 1) words.push(chinese.slice(index, index + 2));
   return words;
@@ -164,6 +164,45 @@ function denseSimilarity(a: number[], aNorm: number, b: number[], bNorm: number)
   let dot = 0;
   for (let index = 0; index < a.length; index += 1) dot += a[index] * b[index];
   return dot / (aNorm * bNorm);
+}
+
+function bm25Scores(query: string, chunks: IndexedChunk[]): Map<IndexedChunk, number> {
+  const queryTokens = [...new Set(tokens(query))];
+  const scores = new Map<IndexedChunk, number>();
+  if (!queryTokens.length || !chunks.length) return scores;
+  const lengths = chunks.map((chunk) => Object.values(chunk.vector).reduce((sum, count) => sum + count, 0));
+  const averageLength = lengths.reduce((sum, length) => sum + length, 0) / Math.max(1, lengths.length);
+  const documentFrequency = Object.fromEntries(queryTokens.map((token) => [token,
+    chunks.reduce((count, chunk) => count + (chunk.vector[token] ? 1 : 0), 0)]));
+  chunks.forEach((chunk, index) => {
+    let score = 0;
+    for (const token of queryTokens) {
+      const frequency = chunk.vector[token] ?? 0;
+      if (!frequency) continue;
+      const idf = Math.log(1 + (chunks.length - documentFrequency[token] + 0.5) / (documentFrequency[token] + 0.5));
+      const denominator = frequency + 1.2 * (1 - 0.75 + 0.75 * lengths[index] / Math.max(1, averageLength));
+      score += idf * frequency * 2.2 / denominator;
+    }
+    scores.set(chunk, score / (score + 3));
+  });
+  return scores;
+}
+
+function mergeAdjacentChunks(chunks: Array<IndexedChunk & { score: number }>): Array<IndexedChunk & { score: number }> {
+  const merged: Array<IndexedChunk & { score: number }> = [];
+  for (const chunk of chunks) {
+    if (merged.some((item) => item.excerptHash === chunk.excerptHash)) continue;
+    const neighbor = merged.find((item) => item.documentId === chunk.documentId
+      && chunk.startLine <= item.endLine + 2 && chunk.endLine >= item.startLine - 2);
+    if (!neighbor) { merged.push({ ...chunk }); continue; }
+    if (chunk.startLine < neighbor.startLine) neighbor.content = `${chunk.content}\n${neighbor.content}`;
+    else if (chunk.endLine > neighbor.endLine) neighbor.content = `${neighbor.content}\n${chunk.content}`;
+    neighbor.startLine = Math.min(neighbor.startLine, chunk.startLine);
+    neighbor.endLine = Math.max(neighbor.endLine, chunk.endLine);
+    neighbor.score = Math.max(neighbor.score, chunk.score);
+    neighbor.excerptHash = hashMemoryText(neighbor.content);
+  }
+  return merged;
 }
 
 export function splitConversationDocument(file: ConversationFile, content: string): IndexedChunk[] {
@@ -213,6 +252,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   private signature = '';
   private documentSignatures: Record<string, string> = {};
   private cacheLoaded = false;
+  private activeSync: Promise<MemoryIndexStats> | null = null;
   private searchConfig: MemoryConfig = {
     provider: 'local', contextBudget: 6000, recallCount: 6,
     minScore: 0.08,
@@ -267,6 +307,17 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   }
 
   async sync(options: MemorySyncOptions = {}): Promise<MemoryIndexStats> {
+    if (this.activeSync) {
+      if (!options.force) return this.activeSync;
+      try { await this.activeSync; } catch { /* start the requested rebuild */ }
+    }
+    const run = this.performSync(options);
+    this.activeSync = run;
+    try { return await run; }
+    finally { if (this.activeSync === run) this.activeSync = null; }
+  }
+
+  private async performSync(options: MemorySyncOptions): Promise<MemoryIndexStats> {
     const startedAt = Date.now();
     await this.loadCache();
     if (options.force) {
@@ -341,20 +392,28 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     }
     const queryDenseNorm = queryDense ? denseNorm(queryDense) : 0;
     const normalizedQuery = query.toLocaleLowerCase();
-    const ranked = this.chunks
+    const bm25 = bm25Scores(query, this.chunks);
+    const now = Date.now();
+    const ranked = mergeAdjacentChunks(this.chunks
       .map((chunk) => {
         const sparse = similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm);
         const dense = queryDense && chunk.denseVector
           ? denseSimilarity(queryDense, queryDenseNorm, chunk.denseVector, chunk.denseNorm ?? denseNorm(chunk.denseVector))
           : 0;
         const keyword = chunk.content.toLocaleLowerCase().includes(normalizedQuery) ? 1 : 0;
+        const field = Math.max(
+          similarity(encoded.vector, encoded.norm, vectorize(chunk.title ?? '').vector, vectorize(chunk.title ?? '').norm),
+          similarity(encoded.vector, encoded.norm, vectorize(chunk.site).vector, vectorize(chunk.site).norm),
+        );
+        const freshness = Math.exp(-Math.max(0, now - chunk.documentModifiedAt) / (180 * 24 * 60 * 60 * 1000));
+        const lexical = bm25.get(chunk) ?? 0;
         const score = queryDense && chunk.denseVector
-          ? dense * 0.75 + sparse * 0.15 + keyword * 0.10
-          : sparse * 0.75 + keyword * 0.25;
+          ? dense * 0.65 + lexical * 0.15 + sparse * 0.10 + keyword * 0.05 + field * 0.03 + freshness * 0.02
+          : lexical * 0.35 + sparse * 0.35 + keyword * 0.15 + field * 0.10 + freshness * 0.05;
         return { ...chunk, score };
       })
       .filter((chunk) => chunk.score >= this.searchConfig.minScore)
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score));
     const perDocument = new Map<string, number>();
     const diversified = ranked.filter((chunk) => {
       const count = perDocument.get(chunk.documentId) ?? 0;

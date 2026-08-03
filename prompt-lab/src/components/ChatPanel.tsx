@@ -72,6 +72,7 @@ export const ChatPanel: React.FC = () => {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [memoryPreview, setMemoryPreview] = useState<MemoryDocumentPreview | null>(null);
+  const [memoryPreviewSources, setMemoryPreviewSources] = useState<MemoryCitation[]>([]);
   const senderRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notifApi, contextHolder] = notification.useNotification();
@@ -273,12 +274,13 @@ export const ChatPanel: React.FC = () => {
     return last?.role === 'assistant' && last.content.trim().length > 0;
   }, [messages, streaming]);
 
-  const openMemorySource = useCallback(async (source: MemoryCitation) => {
+  const openMemorySource = useCallback(async (source: MemoryCitation, sources?: MemoryCitation[]) => {
     const result = await window.electronAPI.readConversation(source.filePath);
     if (!result.success) {
       notifApi.error({ message: '无法读取历史原文件', description: result.error });
       return;
     }
+    if (sources) setMemoryPreviewSources(sources);
     setMemoryPreview({ source, content: result.content ?? '' });
   }, [notifApi]);
 
@@ -339,7 +341,7 @@ export const ChatPanel: React.FC = () => {
         <div>
           {toolCalls && toolCalls.length > 0 && <ToolCallCard calls={toolCalls} results={toolResults} />}
           {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="text-sm" />}
-          {!!memorySources?.length && !streaming && <MemorySourceList sources={memorySources} onOpen={(source) => void openMemorySource(source)} />}
+          {!!memorySources?.length && !streaming && <MemorySourceList sources={memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
         </div>
       );
     }
@@ -526,7 +528,7 @@ export const ChatPanel: React.FC = () => {
                         {message.content ? (
                           <div>
                             <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="text-sm" />
-                            {!!message.memorySources?.length && !streaming && <MemorySourceList sources={message.memorySources} onOpen={(source) => void openMemorySource(source)} />}
+                            {!!message.memorySources?.length && !streaming && <MemorySourceList sources={message.memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
                           </div>
                         ) : (
                           <div className="py-6 text-center text-xs text-muted-foreground">
@@ -656,7 +658,8 @@ export const ChatPanel: React.FC = () => {
             </div>
           </div>
         )}
-        <MemoryDocumentDialog preview={memoryPreview} onClose={() => setMemoryPreview(null)} />
+        <MemoryDocumentDialog preview={memoryPreview} sources={memoryPreviewSources}
+          onNavigate={(source) => void openMemorySource(source)} onClose={() => setMemoryPreview(null)} />
       </XProvider>
     </ConfigProvider>
   );

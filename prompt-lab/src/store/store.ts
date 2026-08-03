@@ -101,6 +101,26 @@ interface AppState {
 
 let idCounter = 10;
 const genId = () => `${Date.now()}-${idCounter++}`;
+const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+  provider: 'local', contextBudget: 6000, recallCount: 6, minScore: 0.08,
+  maxPerDocument: 2, autoIndex: true, embeddingBaseUrl: '', embeddingApiKey: '',
+  embeddingModel: 'text-embedding-3-small',
+};
+
+function normalizeMemoryConfig(value: Partial<MemoryConfig>): MemoryConfig {
+  const number = (candidate: unknown, fallback: number, min: number, max: number) =>
+    typeof candidate === 'number' && Number.isFinite(candidate) ? Math.max(min, Math.min(max, candidate)) : fallback;
+  return {
+    ...DEFAULT_MEMORY_CONFIG,
+    ...value,
+    provider: value.provider === 'openai' ? 'openai' : 'local',
+    contextBudget: number(value.contextBudget, 6000, 1000, 30000),
+    recallCount: Math.floor(number(value.recallCount, 6, 1, 12)),
+    minScore: number(value.minScore, 0.08, 0, 1),
+    maxPerDocument: Math.floor(number(value.maxPerDocument, 2, 1, 6)),
+    autoIndex: typeof value.autoIndex === 'boolean' ? value.autoIndex : true,
+  };
+}
 
 // ── Store ──
 
@@ -294,22 +314,12 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  memoryConfig: {
-    provider: 'local',
-    contextBudget: 6000,
-    recallCount: 6,
-    minScore: 0.08,
-    maxPerDocument: 2,
-    autoIndex: true,
-    embeddingBaseUrl: '',
-    embeddingApiKey: '',
-    embeddingModel: 'text-embedding-3-small',
-  },
+  memoryConfig: DEFAULT_MEMORY_CONFIG,
   setMemoryConfig: (patch) => {
     set((state) => {
-      const next = { ...state.memoryConfig, ...patch };
+      const next = normalizeMemoryConfig({ ...state.memoryConfig, ...patch });
       if (isDbReady()) {
-        try { dbSetSetting('memoryConfig', JSON.stringify(next)); } catch { /* ignore */ }
+        try { dbSetSetting('memoryConfig', JSON.stringify({ ...next, embeddingApiKey: '' })); } catch { /* ignore */ }
         flushDbToDisk();
       }
       return { memoryConfig: next };
@@ -395,7 +405,16 @@ export const useStore = create<AppState>((set, get) => ({
 
     try {
       const raw = dbGetSetting('memoryConfig');
-      if (raw) set({ memoryConfig: { ...get().memoryConfig, ...JSON.parse(raw) } });
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<MemoryConfig>;
+        if (saved.embeddingApiKey) {
+          void window.electronAPI.auth.saveToken('memory-embedding', saved.embeddingApiKey, '历史知识库 Embedding');
+          saved.embeddingApiKey = '';
+          dbSetSetting('memoryConfig', JSON.stringify(saved));
+          void flushDbToDisk();
+        }
+        set({ memoryConfig: normalizeMemoryConfig({ ...get().memoryConfig, ...saved }) });
+      }
     } catch (err) {
       console.warn('[store] Failed to load memoryConfig from DB:', err);
     }
