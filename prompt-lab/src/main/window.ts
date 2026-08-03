@@ -9,6 +9,9 @@ export function createWindow(preloadPath: string) {
     minWidth: 800,
     minHeight: 500,
     title: 'next-work-dashboard',
+    frame: false,
+    titleBarStyle: 'hidden',
+    backgroundColor: '#ffffff',
     show: false,
     webPreferences: {
       preload: preloadPath,
@@ -19,6 +22,12 @@ export function createWindow(preloadPath: string) {
   });
 
   setMainWindow(win);
+
+  const publishMaximizedState = () => {
+    win.webContents.send('window-maximized-changed', win.isMaximized());
+  };
+  win.on('maximize', publishMaximizedState);
+  win.on('unmaximize', publishMaximizedState);
 
   // 加载页面 — Vite/Forge 注入的全局常量
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {

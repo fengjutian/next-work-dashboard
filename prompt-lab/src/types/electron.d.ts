@@ -14,6 +14,8 @@ export interface InjectResult {
 export interface ElectronAPI {
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
+  isMaximized: () => Promise<boolean>;
+  onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
   close: () => Promise<void>;
   injectPrompt: (payload: InjectPayload) => Promise<InjectResult>;
   onToggleSearchPanel: (callback: () => void) => () => void;

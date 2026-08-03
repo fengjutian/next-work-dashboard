@@ -5,6 +5,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 窗口控制
   minimize: () => ipcRenderer.invoke('window-minimize'),
   maximize: () => ipcRenderer.invoke('window-maximize'),
+  isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  onMaximizedChange: (callback: (maximized: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized);
+    ipcRenderer.on('window-maximized-changed', handler);
+    return () => ipcRenderer.removeListener('window-maximized-changed', handler);
+  },
   close: () => ipcRenderer.invoke('window-close'),
 
   // 提示词注入（传递到主进程执行）

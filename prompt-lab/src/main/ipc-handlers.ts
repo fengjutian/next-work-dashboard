@@ -190,6 +190,7 @@ export function setupIPC(webviewPreloadPath: string) {
     if (mw.isMaximized()) mw.unmaximize();
     else mw.maximize();
   });
+  ipcMain.handle('window-is-maximized', () => mw.isMaximized());
   ipcMain.handle('window-close', () => mw.close());
 
   // ── 窗口置顶 ──
