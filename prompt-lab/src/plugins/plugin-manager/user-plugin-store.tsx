@@ -2,7 +2,8 @@ import React from 'react';
 import { Blocks } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { DynamicPlugin } from '../dynamic';
-import type { PluginPermission, PluginManifest, PluginConfigDeclaration } from '../sandbox/types';
+import type { PluginPermission, PluginManifest } from '../sandbox/types';
+import { getUserPluginDefaultEnabled } from '../defaults';
 
 // ── localStorage 持久化 ──
 
@@ -18,6 +19,8 @@ export interface UserPluginDef {
   iconEmoji?: string;
   manifest?: PluginManifest;
   bundle?: string;
+  /** 首次注册时的默认状态；用户持久化设置仍可覆盖。 */
+  enabled?: boolean;
 }
 
 export function loadUserPlugins(): UserPluginDef[] {
@@ -62,7 +65,7 @@ export function rehydrateUserPlugins(): void {
       name: def.name,
       icon: Blocks,
       component: BoundPlugin,
-      enabled: true,
+      enabled: getUserPluginDefaultEnabled(def),
       order: nextOrder + i,
       contributions: { commands },
     });
@@ -94,7 +97,7 @@ export function registerUserPlugin(def: UserPluginDef): void {
     name: def.name,
     icon: Blocks,
     component: BoundPlugin,
-    enabled: true,
+    enabled: getUserPluginDefaultEnabled(def),
     order: pluginRegistry.getAll().length,
     contributions: { commands },
   });

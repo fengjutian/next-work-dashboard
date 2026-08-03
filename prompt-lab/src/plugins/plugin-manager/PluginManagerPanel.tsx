@@ -1,9 +1,8 @@
 import React from 'react';
-import { Puzzle, Plus, X, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
+import { Puzzle, Plus, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { isDbReady, dbSetSetting } from '@/db';
 import { loadUserPlugins, saveUserPlugins, rehydrateUserPlugins } from './user-plugin-store';
-import type { UserPluginDef } from './user-plugin-store';
 import { builtInPlugins } from '../built-in';
 import { CreatePluginDialog } from './CreatePluginDialog';
 import { exportPlugin, importPlugin } from './import-export';
@@ -122,7 +121,14 @@ export const PluginManagerPanel: React.FC = () => {
                   onToggle={(id) => {
                     const p = pluginRegistry.get(id);
                     if (p) {
-                      pluginRegistry.setEnabled(id, !p.enabled);
+                      const nextEnabled = !p.enabled;
+                      pluginRegistry.setEnabled(id, nextEnabled);
+                      if (isUserPlugin) {
+                        const defs = loadUserPlugins().map((def) => def.id === id
+                          ? { ...def, enabled: nextEnabled }
+                          : def);
+                        saveUserPlugins(defs);
+                      }
                       if (isDbReady()) {
                         // 只保存与内置默认值不同的差量，避免修改默认值后被旧快照覆盖
                         const builtInDefaults: Record<string, boolean> = {};

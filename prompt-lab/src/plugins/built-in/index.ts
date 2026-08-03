@@ -23,6 +23,7 @@ import { ChatPanel } from '@/components/ChatPanel';
 import { CodeEditorPanel } from '../code-editor';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
+import { EXCEL_PREVIEW_DEFAULT_ENABLED } from '../defaults';
 
 const builtInPlugins: Plugin[] = [
   {
@@ -138,7 +139,7 @@ const builtInPlugins: Plugin[] = [
     name: 'Excel 编辑',
     icon: Excel,
     component: ExcelPreviewPanel,
-    enabled: false,
+    enabled: EXCEL_PREVIEW_DEFAULT_ENABLED,
     order: 13,
     contributions: {
       commands: [
