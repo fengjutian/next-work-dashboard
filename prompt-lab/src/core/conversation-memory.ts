@@ -77,6 +77,26 @@ const INDEX_STORE_NAME = 'indexes';
 const INDEX_CACHE_KEY = 'conversation-history-v3';
 export const DEFAULT_MEMORY_CONTEXT_BUDGET = 6000;
 
+/**
+ * Produces domain-neutral retrieval variants. A complete question remains the
+ * primary query; interrogative clauses are also removed so a document heading
+ * can match the subject even when it does not contain the user's full question.
+ */
+export function deriveMemoryQueries(query: string): string[] {
+  const original = query.replace(/[？?！!。]+$/g, '').trim();
+  if (!original) return [];
+  const candidates = new Set<string>([original]);
+  const questionClause = original.match(/^(.{2,}?)(?:为什么|为何|怎么会|怎么|如何)(?:.*)$/)?.[1]?.trim();
+  if (questionClause && questionClause.length >= 2) candidates.add(questionClause);
+  const normalized = original
+    .replace(/(?:为什么|为何|怎么会|怎么|如何|请问|是否|能否)/g, ' ')
+    .replace(/(?:这么|那么|这样|那样|究竟|到底)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length >= 2 && normalized !== original) candidates.add(normalized);
+  return [...candidates].slice(0, 3);
+}
+
 export function hashMemoryText(text: string): string {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -383,33 +403,35 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
 
   async search(query: string, limit = 6): Promise<MemorySource[]> {
     await this.sync();
-    const encoded = vectorize(query);
-    let queryDense: number[] | undefined;
+    const queries = deriveMemoryQueries(query);
+    if (!queries.length) return [];
+    const encodedQueries = queries.map(vectorize);
+    let queryDenseVectors: number[][] = [];
     if (this.searchConfig.provider === 'openai' && this.searchConfig.embeddingBaseUrl && this.searchConfig.embeddingApiKey) {
       const result = await window.electronAPI.createEmbeddings({
         baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
-        model: this.searchConfig.embeddingModel, inputs: [query],
+        model: this.searchConfig.embeddingModel, inputs: queries,
       });
-      queryDense = result.success ? result.embeddings?.[0] : undefined;
+      queryDenseVectors = result.success ? (result.embeddings ?? []) : [];
     }
-    const queryDenseNorm = queryDense ? denseNorm(queryDense) : 0;
+    const queryDenseNorms = queryDenseVectors.map(denseNorm);
     const normalizedQuery = query.toLocaleLowerCase();
-    const bm25 = bm25Scores(query, this.chunks);
+    const bm25Variants = queries.map((candidate) => bm25Scores(candidate, this.chunks));
     const now = Date.now();
     const ranked = mergeAdjacentChunks(this.chunks
       .map((chunk) => {
-        const sparse = similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm);
-        const dense = queryDense && chunk.denseVector
-          ? denseSimilarity(queryDense, queryDenseNorm, chunk.denseVector, chunk.denseNorm ?? denseNorm(chunk.denseVector))
+        const sparse = Math.max(...encodedQueries.map((encoded) => similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm)));
+        const dense = chunk.denseVector && queryDenseVectors.length
+          ? Math.max(...queryDenseVectors.map((vector, index) => denseSimilarity(vector, queryDenseNorms[index], chunk.denseVector!, chunk.denseNorm ?? denseNorm(chunk.denseVector!))))
           : 0;
         const keyword = chunk.content.toLocaleLowerCase().includes(normalizedQuery) ? 1 : 0;
         const field = Math.max(
-          similarity(encoded.vector, encoded.norm, vectorize(chunk.title ?? '').vector, vectorize(chunk.title ?? '').norm),
-          similarity(encoded.vector, encoded.norm, vectorize(chunk.site).vector, vectorize(chunk.site).norm),
+          ...encodedQueries.map((encoded) => similarity(encoded.vector, encoded.norm, vectorize(chunk.title ?? '').vector, vectorize(chunk.title ?? '').norm)),
+          ...encodedQueries.map((encoded) => similarity(encoded.vector, encoded.norm, vectorize(chunk.site).vector, vectorize(chunk.site).norm)),
         );
         const freshness = Math.exp(-Math.max(0, now - chunk.documentModifiedAt) / (180 * 24 * 60 * 60 * 1000));
-        const lexical = bm25.get(chunk) ?? 0;
-        const score = queryDense && chunk.denseVector
+        const lexical = Math.max(...bm25Variants.map((scores) => scores.get(chunk) ?? 0));
+        const score = queryDenseVectors.length && chunk.denseVector
           ? dense * 0.65 + lexical * 0.15 + sparse * 0.10 + keyword * 0.05 + field * 0.03 + freshness * 0.02
           : lexical * 0.35 + sparse * 0.35 + keyword * 0.15 + field * 0.10 + freshness * 0.05;
         return { ...chunk, score };

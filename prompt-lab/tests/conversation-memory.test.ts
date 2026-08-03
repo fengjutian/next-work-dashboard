@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { hashMemoryText, LocalConversationMemoryProvider, selectMemorySourcesForBudget, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
+import { deriveMemoryQueries, hashMemoryText, LocalConversationMemoryProvider, selectMemorySourcesForBudget, splitConversationDocument, toMemoryCitation } from '../src/core/conversation-memory';
 import type { ConversationFile } from '../src/types/electron';
 import type { MemoryConfig } from '../src/store/types';
 
@@ -21,6 +21,12 @@ const embeddingConfig: MemoryConfig = {
 };
 
 describe('conversation memory chunking', () => {
+  it('derives a subject query from a complete question without domain aliases', () => {
+    const queries = deriveMemoryQueries('汉高祖的评价为什么这么低？');
+    expect(queries).toContain('汉高祖的评价');
+    expect(queries.some((query) => query.includes('刘邦'))).toBe(false);
+  });
+
   it('persists citations without duplicating source content', () => {
     const citation = toMemoryCitation({
       documentId: file.path, filePath: file.path, fileName: file.fileName,
@@ -109,6 +115,18 @@ describe('local conversation memory index', () => {
     const results = await new LocalConversationMemoryProvider().search('向量知识库');
     expect(results[0]).toMatchObject({ filePath: file.path, fileName: file.fileName });
     expect(results[0].content).toContain('原始文件');
+  });
+
+  it('matches a subject heading when the full question contains an interrogative clause', async () => {
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        listConversations: vi.fn(async () => [file]),
+        readConversation: vi.fn(async () => ({ success: true, content: '# 汉高祖的评价\n相关评价受到政治制度和史料立场影响。' })),
+      },
+    });
+    const results = await new LocalConversationMemoryProvider().search('汉高祖的评价为什么这么低？');
+    expect(results[0]?.content).toContain('汉高祖的评价');
   });
 
   it('uses dense embeddings when the remote provider is configured', async () => {
