@@ -23,7 +23,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import type {
-  FilePickResult,
   WorkspaceEncoding,
   WorkspaceGitStatus,
   WorkspaceGitCommit,
@@ -44,8 +43,10 @@ import { useAiSessionState, type AiFileProposal } from './useAiSessionState';
 import { useGitDiffMerge } from './useGitDiffMerge';
 import { useAiProposalReview } from './useAiProposalReview';
 import { useAiEditGeneration } from './useAiEditGeneration';
-import { updateTreeNode, useExplorerTree } from './useExplorerTree';
+import { useExplorerTree } from './useExplorerTree';
 import { useExplorerMutations } from './useExplorerMutations';
+import { useFileOpening } from './useFileOpening';
+import { useExplorerNavigation } from './useExplorerNavigation';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -184,7 +185,6 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const gitDecorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   const pendingRevealRef = useRef<{ path: string; line: number; column: number } | null>(null);
   const recentlySavedRef = useRef(new Map<string, number>());
-  const openRequestRef = useRef(0);
   const viewStatesRef = useRef<Record<string, monaco.editor.ICodeEditorViewState | null>>({});
 
   const appendOutput = useCallback((message: string) => {
@@ -417,151 +417,28 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     treeClipboard, setTreeClipboard,
     refreshWorkspaceTree, remapOpenPaths, appConfirm, setStatus,
   });
-  const showQuickOpen = useCallback(async () => {
-    if (!workspace) {
-      setStatus('请先打开工作区');
-      return;
-    }
-    setStatus('正在索引工作区文件…');
-    const result = await window.electronAPI.workspace.listFiles(workspace.path);
-    if (!result.success) {
-      setStatus(`文件索引失败：${displayError(result.error)}`);
-      return;
-    }
-    setQuickOpen({ open: true, query: '', files: (result.data ?? []) as TreeNode[] });
-    setStatus(`已索引 ${result.data?.length ?? 0} 个文件`);
-  }, [workspace]);
-
-  const openStandaloneFile = useCallback(async () => {
-    const result = await window.electronAPI.pickFile({ multiple: false });
-    const file = (Array.isArray(result) ? result[0] : result) as FilePickResult | null;
-    if (!file) return;
-    try {
-      const content = decodeBase64Utf8(file.content);
-      const existing = documents.some((document) => document.path === file.path);
-      if (!existing) {
-        setDocuments((previous) => [...previous, {
-          path: file.path,
-          name: file.name,
-          content,
-          savedContent: content,
-          language: languageIdFromName(file.name),
-          standalone: true,
-          encoding: 'utf8',
-          lineEnding: content.includes('\r\n') ? 'CRLF' : 'LF',
-          mixedLineEndings: false,
-          readOnly: false,
-          pinned: true,
-        }]);
-      }
-      setActivePath(file.path);
-      setStatus(`已打开 ${file.name}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : '文件打开失败');
-    }
-  }, [documents]);
-
-  const openTreeFile = useCallback(async (node: TreeNode, pinned = false) => {
-    if (!workspace) return;
-    if (documents.some((document) => document.path === node.path)) {
-      if (pinned) {
-        setDocuments((previous) => previous.map((document) => (
-          document.path === node.path ? { ...document, pinned: true } : document
-        )));
-      }
-      setActivePath(node.path);
-      void revealWorkspacePath(node.path);
-      return;
-    }
-    const requestId = ++openRequestRef.current;
-    setStatus(`正在打开 ${node.name}…`);
-    const result = await window.electronAPI.workspace.readTextFile(workspace.path, node.path);
-    if (requestId !== openRequestRef.current) return;
-    if (!result.success || !result.data) {
-      setStatus(displayError(result.error));
-      return;
-    }
-    setDocuments((previous) => [
-      ...previous.filter((document) => (
-        document.pinned !== false || document.content !== document.savedContent
-      )),
-      {
-        path: node.path,
-        name: node.name,
-        content: result.data!.content,
-        savedContent: result.data!.content,
-        language: languageIdFromName(node.name),
-        encoding: result.data.encoding,
-      lineEnding: result.data.lineEnding,
-      mixedLineEndings: result.data.mixedLineEndings,
-        modifiedAt: result.data.modifiedAt,
-        readOnly: result.data.readOnly,
-        pinned,
-      },
-    ]);
-    setActivePath(node.path);
-    void revealWorkspacePath(node.path);
-    setStatus(`已打开 ${node.name}`);
-  }, [documents, revealWorkspacePath, workspace]);
-
-  const toggleDirectory = useCallback(async (node: TreeNode) => {
-    if (!workspace) return;
-    if (node.children !== undefined) {
-      setExpandedPaths((previous) => {
-        const next = new Set(previous);
-        next.delete(node.path);
-        return next;
-      });
-      setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
-        ...current, children: undefined,
-      })));
-      return;
-    }
-    setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
-      ...current, loading: true,
-    })));
-    try {
-      const children = await loadDirectory(workspace.path, node.path);
-      setExpandedPaths((previous) => new Set(previous).add(node.path));
-      setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
-        ...current, loading: false, children,
-      })));
-    } catch (error) {
-      setTree((previous) => updateTreeNode(previous, node.path, (current) => ({
-        ...current, loading: false,
-      })));
-      setStatus(error instanceof Error ? error.message : '目录读取失败');
-    }
-  }, [loadDirectory, workspace]);
-
-  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent) => {
-    if ((event.target as HTMLElement).tagName === 'INPUT') return;
-    const index = selectedNode ? visibleTreeNodes.findIndex((node) => node.path === selectedNode.path) : -1;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const nextIndex = event.key === 'ArrowDown' ? Math.min(visibleTreeNodes.length - 1, index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
-      const next = visibleTreeNodes[nextIndex];
-      if (next) selectTreeNode(next);
-    } else if (event.key === 'ArrowRight' && selectedNode?.type === 'directory' && selectedNode.children === undefined) {
-      event.preventDefault(); void toggleDirectory(selectedNode);
-    } else if (event.key === 'ArrowLeft' && selectedNode) {
-      event.preventDefault();
-      if (selectedNode.type === 'directory' && selectedNode.children !== undefined) void toggleDirectory(selectedNode);
-      else {
-        const parentPath = selectedNode.path.replace(/[\\/][^\\/]+$/, '');
-        const parent = visibleTreeNodes.find((node) => node.path === parentPath);
-        if (parent) selectTreeNode(parent);
-      }
-    } else if (event.key === 'Enter' && selectedNode) {
-      event.preventDefault();
-      if (selectedNode.type === 'directory') void toggleDirectory(selectedNode); else void openTreeFile(selectedNode);
-    } else if (event.key === 'F2' && selectedNode) {
-      event.preventDefault(); beginRename(selectedNode);
-    } else if (event.key === 'Delete') {
-      event.preventDefault(); void deleteTreeSelection();
-    }
-  }, [beginRename, deleteTreeSelection, openTreeFile, selectTreeNode, selectedNode, toggleDirectory, visibleTreeNodes]);
-
+  const { showQuickOpen, openStandaloneFile, openTreeFile } = useFileOpening({
+    workspace,
+    documents,
+    setDocuments,
+    setActivePath,
+    setQuickOpen,
+    revealWorkspacePath,
+    setStatus,
+  });
+  const { toggleDirectory, handleTreeKeyDown } = useExplorerNavigation({
+    workspace,
+    visibleTreeNodes,
+    selectedNode,
+    selectTreeNode,
+    setTree,
+    setExpandedPaths,
+    loadDirectory,
+    openTreeFile,
+    beginRename,
+    deleteTreeSelection,
+    setStatus,
+  });
   const saveDocument = useCallback(async (document: OpenDocument, force = false) => {
     if (document.readOnly) {
       setStatus(`${document.name} 为只读文件`);
