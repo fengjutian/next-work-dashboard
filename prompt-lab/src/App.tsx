@@ -3,13 +3,11 @@ import { Database, Edit3, MessageSquare, Plus, Puzzle, Send, Settings } from '@/
 import { Button } from '@/components/ui/button';
 import { ActivityBar } from '@/components/ActivityBar';
 import { TitleBar } from '@/components/TitleBar';
-import { AIPanel } from '@/plugins/ai/AIPanel';
+import { AIPanel, AISiteWelcome, WebViewContainer } from '@/plugins/ai';
 import { SettingsSidebar } from '@/components/SettingsSidebar';
-import { PromptDrawer } from '@/plugins/prompts/PromptDrawer';
-import { WebViewContainer } from '@/plugins/ai/WebViewContainer';
+import { PromptDrawer } from '@/plugins/prompts';
 import { CommandPalette } from '@/components/CommandPalette';
 import { PluginStatusBar } from '@/components/PluginStatusBar';
-import { AISiteWelcome } from '@/plugins/ai/AISiteWelcome';
 import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useDbPersistence } from '@/hooks/useDbPersistence';
