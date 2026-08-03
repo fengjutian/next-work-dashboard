@@ -61,8 +61,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 对话历史管理
   listConversations: () => ipcRenderer.invoke('list-conversations'),
+  searchConversations: (query: string) => ipcRenderer.invoke('search-conversations', query),
   readConversation: (filePath: string) => ipcRenderer.invoke('read-conversation', filePath),
   deleteConversation: (filePath: string) => ipcRenderer.invoke('delete-conversation', filePath),
+  revealConversation: (filePath: string) => ipcRenderer.invoke('reveal-conversation', filePath),
   openConversationFolder: () => ipcRenderer.invoke('open-conversation-folder'),
 
   // 剪贴板（绕过 web 层，避免焦点问题）

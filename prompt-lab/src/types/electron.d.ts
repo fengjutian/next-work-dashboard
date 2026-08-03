@@ -40,8 +40,10 @@ export interface ElectronAPI {
     createNew?: boolean;
   }) => Promise<{ success: boolean; filePath?: string }>;
   listConversations: () => Promise<ConversationFile[]>;
+  searchConversations: (query: string) => Promise<ConversationSearchResult[]>;
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  revealConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openConversationFolder: () => Promise<{ success: boolean; error?: string }>;
   getWebviewPreloadPath: () => Promise<string>;
   /** 打开文件选择对话框，返回文件信息(base64 content) */
@@ -123,8 +125,15 @@ export interface ConversationFile {
   fileName: string;
   path: string;
   size: number;
+  modifiedAt: number;
   title?: string;
   notes?: string;
+}
+
+export interface ConversationSearchResult {
+  file: ConversationFile;
+  matchCount: number;
+  snippets: Array<{ text: string; line: number }>;
 }
 
 export interface FilePickResult {

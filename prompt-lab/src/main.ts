@@ -16,8 +16,10 @@ app.whenReady().then(() => {
   const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
 
   createWindow(preloadPath, webviewPreloadPath);
-  createTray();
+  // createWindow synchronously publishes the BrowserWindow through globals;
+  // setupIPC depends on that window and must run afterwards.
   setupIPC(webviewPreloadPath);
+  createTray();
   registerShortcuts();
 });
 

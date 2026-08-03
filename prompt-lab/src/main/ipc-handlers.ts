@@ -355,6 +355,28 @@ export function setupIPC(webviewPreloadPath: string) {
   });
 
   // ── 对话历史管理 ──
+  const resolveConversationPath = (filePath: string): string | null => {
+    const root = path.resolve(exportDir);
+    const resolved = path.resolve(filePath);
+    const relative = path.relative(root, resolved);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? resolved : null;
+  };
+
+  const conversationMetadata = (file: string) => {
+    const match = file.match(/^(.+)-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.md$/);
+    const filePath = path.join(exportDir, file);
+    const stat = fs.statSync(filePath);
+    let title: string | undefined;
+    let notes: string | undefined;
+    try {
+      const head = fs.readFileSync(filePath, 'utf-8').slice(0, 1024);
+      title = head.match(/^# (.+)$/m)?.[1].trim();
+      notes = head.match(/^> (.+)$/m)?.[1].trim();
+    } catch { /* keep undefined */ }
+    return { site: match?.[1] || 'unknown', date: match?.[2] || '', fileName: file,
+      path: filePath, size: stat.size, modifiedAt: stat.mtimeMs, title, notes };
+  };
+
   ipcMain.handle('list-conversations', async () => {
     try {
       if (!fs.existsSync(exportDir)) return [];
@@ -365,48 +387,53 @@ export function setupIPC(webviewPreloadPath: string) {
         fileName: string;
         path: string;
         size: number;
+        modifiedAt: number;
         title?: string;
         notes?: string;
       }> = [];
 
       const files = fs.readdirSync(exportDir).filter((f) => f.endsWith('.md'));
       for (const file of files) {
-        const match = file.match(/^(.+)-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.md$/);
-        const stat = fs.statSync(path.join(exportDir, file));
-        const filePath = path.join(exportDir, file);
-
-        let title: string | undefined;
-        let notes: string | undefined;
-        try {
-          const head = fs.readFileSync(filePath, 'utf-8').slice(0, 1024);
-          const titleMatch = head.match(/^# (.+)$/m);
-          if (titleMatch) title = titleMatch[1].trim();
-          const notesMatch = head.match(/^> (.+)$/m);
-          if (notesMatch) notes = notesMatch[1].trim();
-        } catch { /* keep undefined */ }
-
-        list.push({
-          site: match?.[1] || 'unknown',
-          date: match?.[2] || '',
-          fileName: file,
-          path: filePath,
-          size: stat.size,
-          title,
-          notes,
-        });
+        list.push(conversationMetadata(file));
       }
 
-      list.sort((a, b) => b.date.localeCompare(a.date) || a.site.localeCompare(b.site));
+      list.sort((a, b) => b.modifiedAt - a.modifiedAt);
       return list;
     } catch {
       return [];
     }
   });
 
+  ipcMain.handle('search-conversations', async (_event, rawQuery: string) => {
+    const query = String(rawQuery || '').trim().toLocaleLowerCase();
+    if (query.length < 2 || !fs.existsSync(exportDir)) return [];
+    const results = [];
+    for (const fileName of fs.readdirSync(exportDir).filter((file) => file.endsWith('.md'))) {
+      if (results.length >= 100) break;
+      try {
+        const file = conversationMetadata(fileName);
+        if (file.size > 5 * 1024 * 1024) continue;
+        const content = fs.readFileSync(file.path, 'utf-8');
+        const lower = content.toLocaleLowerCase();
+        const metadata = `${file.fileName}\n${file.title || ''}\n${file.notes || ''}\n${file.site}`.toLocaleLowerCase();
+        let matchCount = 0;
+        let offset = 0;
+        while ((offset = lower.indexOf(query, offset)) !== -1) { matchCount += 1; offset += query.length; }
+        if (!matchCount && metadata.includes(query)) matchCount = 1;
+        if (!matchCount) continue;
+        const snippets = content.split(/\r?\n/).flatMap((line, index) =>
+          line.toLocaleLowerCase().includes(query) ? [{ text: line.trim().slice(0, 240), line: index + 1 }] : []
+        ).slice(0, 3);
+        results.push({ file, matchCount, snippets });
+      } catch { /* skip unreadable files */ }
+    }
+    return results.sort((a, b) => b.file.modifiedAt - a.file.modifiedAt);
+  });
+
   ipcMain.handle('read-conversation', async (_event, filePath: string) => {
     try {
-      const resolved = path.resolve(filePath);
-      if (!resolved.startsWith(path.resolve(exportDir))) {
+      const resolved = resolveConversationPath(filePath);
+      if (!resolved) {
         return { success: false, error: 'ACCESS_DENIED' };
       }
       if (!fs.existsSync(resolved)) {
@@ -421,8 +448,8 @@ export function setupIPC(webviewPreloadPath: string) {
 
   ipcMain.handle('delete-conversation', async (_event, filePath: string) => {
     try {
-      const resolved = path.resolve(filePath);
-      if (!resolved.startsWith(path.resolve(exportDir))) {
+      const resolved = resolveConversationPath(filePath);
+      if (!resolved) {
         return { success: false, error: 'ACCESS_DENIED' };
       }
       if (fs.existsSync(resolved)) {
@@ -432,6 +459,14 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  });
+
+  ipcMain.handle('reveal-conversation', async (_event, filePath: string) => {
+    const resolved = resolveConversationPath(filePath);
+    if (!resolved) return { success: false, error: 'ACCESS_DENIED' };
+    if (!fs.existsSync(resolved)) return { success: false, error: 'NOT_FOUND' };
+    shell.showItemInFolder(resolved);
+    return { success: true };
   });
 
   // ── 按路径读取文件（供 AI 工具使用） ──
