@@ -2,7 +2,7 @@ import React from 'react';
 import { Puzzle, Plus, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { isDbReady, dbSetSetting } from '@/db';
-import { loadUserPlugins, saveUserPlugins, rehydrateUserPlugins } from './user-plugin-store';
+import { loadUserPlugins, saveUserPlugins } from './user-plugin-store';
 import { builtInPlugins } from '../built-in';
 import { CreatePluginDialog } from './CreatePluginDialog';
 import { exportPlugin, importPlugin } from './import-export';
@@ -14,11 +14,6 @@ export const PluginManagerPanel: React.FC = () => {
   React.useEffect(() => pluginRegistry.subscribe(() => setTick((t) => t + 1)), []);
 
   // 启动时从 localStorage 恢复用户插件
-  React.useEffect(() => {
-    rehydrateUserPlugins();
-    setTick((t) => t + 1);
-  }, []);
-
   // 弹层状态
   const [dialogOpen, setDialogOpen] = React.useState(false);
 

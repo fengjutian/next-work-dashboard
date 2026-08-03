@@ -1,140 +1,17 @@
-/**
- * PluginSandbox — 用户插件 iframe 沙箱容器。
- *
- * 包装 usePluginBridge，管理 iframe 生命周期：
- *  1. 通过 srcdoc 注入 frame template + SDK + 用户脚本 + 自定义样式
- *  2. 响应 setContent 事件（用户脚本调用 ui.setContent）
- *  3. 自适应容器高度
- *
- * 用法：
- *  <PluginSandbox pluginId="my-plugin" permissions={['store.read']} script="..." style="..." />
- */
-
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo } from 'react';
 import type { PluginPermission } from './types';
 import { usePluginBridge } from './usePluginBridge';
-
-// ── SDK 源码字符串化（构建时静态导入） ──
-// plugin-sdk.ts 会导出 default SDK，我们需要它的字符串形式注入 iframe。
-// 简单方案：内联 SDK 函数字符串。生产环境可用 Vite ?raw 导入。
-// ⚠️ 此字符串必须与 plugin-sdk.ts 保持同步，修改 SDK 时两处都要改。
-
-const SDK_SOURCE = `
-(function() {
-  'use strict';
-  var listeners = new Map();
-  function genId() { return 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9); }
-
-  function request(channel, method, args) {
-    return new Promise(function(resolve, reject) {
-      var id = genId();
-      function handler(e) {
-        var msg = e.data;
-        if (!msg || msg.requestId !== id) return;
-        window.removeEventListener('message', handler);
-        if (msg.ok) resolve(msg.result);
-        else reject(new Error(msg.error || 'Unknown error'));
-      }
-      window.addEventListener('message', handler);
-      window.parent.postMessage({ requestId: id, channel: channel, method: method, args: args || [] }, '*');
-    });
-  }
-
-  function subscribe(evt, fn) {
-    if (!listeners.has(evt)) listeners.set(evt, new Set());
-    listeners.get(evt).add(fn);
-    return function() { var s = listeners.get(evt); if (s) s.delete(fn); };
-  }
-
-  window.addEventListener('message', function(e) {
-    var msg = e.data;
-    if (!msg || !msg.event) return;
-    var set = listeners.get(msg.event);
-    if (set) set.forEach(function(fn) { fn(msg.payload); });
-  });
-
-  // setContent 事件
-  subscribe('setContent', function(html) {
-    var root = document.getElementById('root');
-    if (root) root.innerHTML = String(html);
-  });
-
-  window.PluginSDK = {
-    store: {
-      getPrompts: function() { return request('store', 'getPrompts'); },
-      getSites: function() { return request('store', 'getSites'); },
-      getTabs: function() { return request('store', 'getTabs'); },
-      getActiveTab: function() { return request('store', 'getActiveTab'); },
-      getTheme: function() { return request('store', 'getTheme'); },
-      getConversations: function() { return request('store', 'getConversations'); },
-      subscribe: subscribe,
-    },
-    on: subscribe,
-    ui: {
-      setContent: function(html) { return request('ui', 'setContent', [html]); },
-      getThemeTokens: function() { return request('ui', 'getThemeTokens'); },
-      showToast: function(msg, type) { return request('ui', 'showToast', [msg, type || 'info']); },
-      getContainerSize: function() { return request('ui', 'getContainerSize'); },
-    },
-    actions: {
-      copyToClipboard: function(text) { return request('actions', 'copyToClipboard', [text]); },
-      injectPrompt: function(siteId, text, autoSubmit) { return request('actions', 'injectPrompt', [siteId, text, autoSubmit || false]); },
-      openUrl: function(url) { return request('actions', 'openUrl', [url]); },
-    },
-    data: {
-      get: function(key) { return request('data', 'get', [key]); },
-      set: function(key, value) { return request('data', 'set', [key, value]); },
-      delete: function(key) { return request('data', 'delete', [key]); },
-      list: function() { return request('data', 'list'); },
-    },
-    preview: {
-      markdown: function(c) { return request('preview', 'markdown', [c]); },
-      image: function(src, alt) { return request('preview', 'image', [src, alt]); },
-      pdf: function(src) { return request('preview', 'pdf', [src]); },
-      code: function(source, lang) { return request('preview', 'code', [source, lang]); },
-    },
-    file: {
-      pickOpen: function(opts) { return request('file', 'pickOpen', [opts]); },
-      pickSave: function(content, name) { return request('file', 'pickSave', [content, name]); },
-    },
-    config: {
-      get: function(key) { return request('config', 'get', [key]); },
-      getAll: function() { return request('config', 'getAll'); },
-      set: function(key, value) { return request('config', 'set', [key, value]); },
-      getDefaults: function() { return request('config', 'getDefaults'); },
-    },
-  };
-})();
-`;
-
-// ── 组件 Props ──
+import { PLUGIN_SDK_SOURCE } from './plugin-sdk';
 
 interface PluginSandboxProps {
   pluginId: string;
   script: string;
   style?: string;
   permissions: PluginPermission[];
-  /** 附加 className */
   className?: string;
 }
 
-export const PluginSandbox: React.FC<PluginSandboxProps> = ({
-  pluginId,
-  script,
-  style,
-  permissions,
-  className = '',
-}) => {
-  const { bridgeProps } = usePluginBridge({ pluginId, permissions });
-
-  // ── 构建 srcdoc ──
-  const srcdoc = useMemo(() => {
-    // 基础 frame 模板（手写，避免额外文件依赖）
-    const frameHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; font-src data:">
-<style>
+const BASE_STYLES = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:var(--foreground,#09090b);background:var(--background,#fff);overflow:auto}
 #root{min-height:100%;padding:16px}
@@ -150,26 +27,41 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .pk-badge{display:inline-flex;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600}
 .pk-separator{height:1px;background:var(--border,#e4e4e7);margin:12px 0}
 @media (prefers-color-scheme:dark){:root{--foreground:#fafafa;--background:#09090b;--border:#27272a;--card:#18181b;--muted:#27272a}}
-</style>
+`;
+
+export const PluginSandbox: React.FC<PluginSandboxProps> = ({
+  pluginId,
+  script,
+  style,
+  permissions,
+  className = '',
+}) => {
+  const { bridgeProps } = usePluginBridge({ pluginId, permissions });
+
+  const srcdoc = useMemo(() => `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; font-src data:">
+  <style>${BASE_STYLES}</style>
+  ${style ? `<style>${style}</style>` : ''}
 </head>
-<body><div id="root"></div>
-<script>window.onerror=function(m,s,l,c,e){window.parent.postMessage({requestId:'error',channel:'ui',method:'error',error:String(m)+(l!=null?' (line '+l+')':'')},'*')};
-window.onunhandledrejection=function(e){window.parent.postMessage({requestId:'error',channel:'ui',method:'error',error:'Unhandled: '+String(e.reason)},'*')};</script>
-<script>${SDK_SOURCE}</script>
-${style ? `<style>${style}</style>` : ''}
-<script>${script}</script>
+<body>
+  <div id="root"></div>
+  <script>
+    window.onerror=function(message,source,line){window.parent.postMessage({requestId:'error',channel:'ui',method:'error',error:String(message)+(line!=null?' (line '+line+')':'')},'*')};
+    window.onunhandledrejection=function(event){window.parent.postMessage({requestId:'error',channel:'ui',method:'error',error:'Unhandled: '+String(event.reason)},'*')};
+  </script>
+  <script>${PLUGIN_SDK_SOURCE}</script>
+  <script>${script}</script>
 </body>
-</html>`;
-
-    return frameHtml;
-  }, [script, style]);
-
-  // ── 自适应高度：监听 iframe 内容变化 ──
-  // (iframe sandbox 内无法 postMessage 高度，这里暂用固定 100% 高度)
+</html>`, [script, style]);
 
   return (
     <iframe
       ref={bridgeProps.ref}
+      onLoad={bridgeProps.onLoad}
       className={`w-full h-full border-0 ${className}`}
       srcDoc={srcdoc}
       sandbox="allow-scripts"

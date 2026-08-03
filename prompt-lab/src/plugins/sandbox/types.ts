@@ -145,9 +145,13 @@ export interface PluginConfigDeclaration {
 
 /** 插件清单（对应 .nwd 打包格式的 manifest.json） */
 export interface PluginManifest {
+  /** 稳定插件 ID；旧版插件缺失时会从 name 推导。 */
+  id?: string;
   /** 与 package.json 对齐的扩展清单 */
   name: string;
   version: string;
+  /** 宿主插件 API 版本，当前为 1。 */
+  apiVersion?: string;
   description?: string;
   author?: string;
   /** emoji 图标 */

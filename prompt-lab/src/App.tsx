@@ -14,10 +14,11 @@ import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useDbPersistence } from '@/hooks/useDbPersistence';
 import { useStore } from '@/store';
-import { pluginRegistry, registerBuiltInPlugins } from '@/plugins';
+import { pluginRegistry, registerBuiltInPlugins, rehydrateUserPlugins } from '@/plugins';
 
 // 模块加载时注册所有内置插件（一次性、幂等）
 registerBuiltInPlugins();
+rehydrateUserPlugins();
 
 type ToolbarOption<T extends string> = {
   value: T;

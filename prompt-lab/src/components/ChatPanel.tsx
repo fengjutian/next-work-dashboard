@@ -4,7 +4,11 @@ import { XProvider } from '@ant-design/x';
 import type { BubbleProps } from '@ant-design/x';
 import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
-import { Wrench, MessageSquare, Trash2, Plus, Download, PanelLeft, Bot, Robot } from '@/components/icons';
+import {
+  BookOpen, Bot, Copy, Download, ExternalLink, MessageSquare, PanelLeft,
+  Paperclip, Plus, Robot, RotateCcw, Settings, SlidersHorizontal, Trash2,
+  Wrench, X,
+} from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { useChatSession, MODELS, toBubbleItems } from './chat/useChatSession';
@@ -423,22 +427,22 @@ export const ChatPanel: React.FC = () => {
               </div>
               <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-warning/10 bg-warning/10 text-warning text-warning' : 'bg-muted text-muted-foreground'}`}
                 onClick={() => setAgentMode((v) => !v)}>{agentMode ? 'Agent ✓' : 'Agent'}</button>
-              <button className={`h-6 rounded-full px-1.5 text-[10px] font-medium transition-colors ${memoryEnabled ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}`}
+              <button className={`h-6 rounded-full px-1.5 text-[10px] font-medium transition-colors flex items-center gap-1 ${memoryEnabled ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}`}
                 onClick={() => setMemoryEnabled((value) => !value)} title="检索知识库并附带原文来源">
-                {memoryEnabled ? '知识库 ✓' : '知识库'}
+                <BookOpen className="h-3 w-3" /><span>{memoryEnabled ? '知识库 ✓' : '知识库'}</span>
               </button>
               <button onClick={() => setRoleManagerOpen(true)}
                 className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">
                 <Bot className="h-3 w-3" /><span>{activeRole ? activeRole.name : '角色'}</span></button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setToolManagerOpen(true)} title="工具管理"><Wrench className="h-3.5 w-3.5" /></Button>
-              <Button variant="ghost" size="icon" className={`h-7 w-7 text-[10px] ${sysPromptOpen || systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}
-                onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词">Sys</Button>
+              <Button variant="ghost" size="icon" className={`h-7 w-7 ${sysPromptOpen || systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}
+                onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词" aria-label="系统提示词"><SlidersHorizontal className="h-3.5 w-3.5" /></Button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setPromptManagerOpen(true)} title="提示词管理"><MessageSquare className="h-3.5 w-3.5" /></Button>
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>}
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={handleExport} title="导出 Markdown"><Download className="h-3.5 w-3.5" /></Button>}
-              {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')}><span className="text-xs">⚙</span></Button>}
+              {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')} title="配置 AI API" aria-label="配置 AI API"><Settings className="h-3.5 w-3.5" /></Button>}
             </div>
 
             {/* 系统提示词 */}
@@ -491,8 +495,8 @@ export const ChatPanel: React.FC = () => {
                         const text = typeof content === 'string' ? content : '';
                         return (
                           <div className="flex gap-2 text-[10px]">
-                            <button className="text-muted-foreground hover:text-muted-foreground" onClick={() => navigator.clipboard.writeText(text)} title="复制">📋 复制</button>
-                            <button className="text-muted-foreground hover:text-muted-foreground" onClick={handleRegenerate} title="重新生成">↻ 重新生成</button>
+                            <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={() => navigator.clipboard.writeText(text)} title="复制"><Copy className="h-3 w-3" />复制</button>
+                            <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={handleRegenerate} title="重新生成"><RotateCcw className="h-3 w-3" />重新生成</button>
                           </div>
                         );
                       },
@@ -521,11 +525,11 @@ export const ChatPanel: React.FC = () => {
                             {MODELS.find((model) => model.value === message.model)?.label ?? message.model}
                           </span>
                           <button
-                            className="text-[10px] text-muted-foreground hover:text-muted-foreground"
+                            className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
                             onClick={() => navigator.clipboard.writeText(message.content)}
                             disabled={!message.content}
                           >
-                            复制
+                            <Copy className="h-3 w-3" />复制
                           </button>
                         </div>
                         {message.content ? (
@@ -553,7 +557,7 @@ export const ChatPanel: React.FC = () => {
                 {/* Agent 搜索引用源 */}
                 {sourcesItems.length > 0 && (
                   <div className="px-4 py-2 border-t border-border">
-                    <div className="text-[10px] font-semibold text-muted-foreground mb-1">📚 引用来源</div>
+                    <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold text-muted-foreground"><BookOpen className="h-3 w-3" />引用来源</div>
                     <div className="flex flex-wrap gap-1">
                       {sourcesItems.map((s) => (
                         <span key={s.key} className="text-[10px] px-2 py-0.5 rounded-full bg-primary-light text-primary"
@@ -625,8 +629,8 @@ export const ChatPanel: React.FC = () => {
                     <div className="flex items-center">
                       <button className="p-1 text-muted-foreground hover:text-foreground"
                         onClick={() => fileInputRef.current?.click()} title="选择文件"
-                        disabled={!hasKey}>
-                        📎
+                        aria-label="选择文件" disabled={!hasKey}>
+                        <Paperclip className="h-4 w-4" />
                       </button>
                     </div>
                   }
@@ -658,11 +662,11 @@ export const ChatPanel: React.FC = () => {
               <div className="flex items-center justify-between px-3 py-2 border-b bg-background bg-muted">
                 <span className="text-xs text-muted-foreground truncate max-w-[80%]">{previewUrl}</span>
                 <div className="flex gap-1">
-                  <button className="text-xs text-muted-foreground hover:text-muted-foreground px-2"
+                  <button className="inline-flex items-center gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => { const api = (window as any).electronAPI; api?.shell?.openExternal?.(previewUrl); }}>
-                    ↗ 浏览器打开
+                    <ExternalLink className="h-3.5 w-3.5" />浏览器打开
                   </button>
-                  <button className="text-xs text-muted-foreground hover:text-destructive px-2" onClick={() => setPreviewUrl(null)}>✕ 关闭</button>
+                  <button className="inline-flex items-center gap-1 px-2 text-xs text-muted-foreground hover:text-destructive" onClick={() => setPreviewUrl(null)}><X className="h-3.5 w-3.5" />关闭</button>
                 </div>
               </div>
               <webview src={previewUrl} style={{ width: '100%', height: 'calc(100% - 37px)' }} />
