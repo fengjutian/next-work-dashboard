@@ -645,7 +645,7 @@ Phase 2 — 写入：逐个写文件
 
 ## 11. 终端系统
 
-> 文件：`src/terminal/` + 插件 `plugins/terminal/`
+> 文件：`src/plugins/terminal/`（Renderer UI 与 `backend/` 主进程实现）
 
 ### 11.1 双模式终端
 

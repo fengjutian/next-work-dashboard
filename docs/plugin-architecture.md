@@ -413,6 +413,13 @@ Manifest 必须声明 `store.read`，否则调用会被 Bridge 拒绝。
 | `prompt-lab/src/plugins/registry.ts` | 注册、启用、命令、生命周期与资源回收 |
 | `prompt-lab/src/plugins/usePluginRegistry.ts` | React `useSyncExternalStore` 适配 |
 | `prompt-lab/src/plugins/built-in/index.ts` | 内置插件清单 |
+| `prompt-lab/src/plugins/ai/` | AI 导航、WebView、欢迎页与会话保存 |
+| `prompt-lab/src/plugins/chat/` | AI 对话面板及其专属子组件 |
+| `prompt-lab/src/plugins/prompts/` | 提示词侧栏与全局抽屉 |
+| `prompt-lab/src/plugins/history/` | 会话历史插件 |
+| `prompt-lab/src/plugins/knowledge-graph/` | 知识图谱面板、画布与类型 |
+| `prompt-lab/src/plugins/database/` | 数据库浏览器插件 |
+| `prompt-lab/src/plugins/terminal/` | 终端 UI 与主进程 backend |
 | `prompt-lab/src/plugins/dynamic/DynamicPlugin.tsx` | content、Sandbox、Kernel 模式分发 |
 | `prompt-lab/src/plugins/plugin-manager/` | 创建、导入、导出、持久化和管理 UI |
 | `prompt-lab/src/plugins/sandbox/types.ts` | Manifest、权限与 Bridge 协议类型 |

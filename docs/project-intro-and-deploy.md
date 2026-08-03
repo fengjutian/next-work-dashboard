@@ -143,15 +143,8 @@ prompt-lab/
 │   │   ├── types.ts                    # Store 类型
 │   │   └── defaultPrompts.ts           # 默认提示词数据
 │   ├── components/
-│   │   ├── AIPanel.tsx                 # AI 站点标签页容器
 │   │   ├── ActivityBar.tsx             # VSCode 风格侧边活动栏
 │   │   ├── CommandPalette.tsx          # Spotlight 浮动搜索面板
-│   │   ├── PromptSidebar.tsx           # 提示词管理侧边栏
-│   │   ├── PromptDrawer.tsx            # 提示词抽屉
-│   │   ├── WebViewContainer.tsx        # WebView 多标签容器
-│   │   ├── ConversationHistory.tsx     # 对话历史
-│   │   ├── KnowledgeGraph.tsx          # 知识图谱
-│   │   ├── SaveConversationPanel.tsx   # 对话保存面板
 │   │   ├── VariableFillDialog.tsx      # 变量填充对话框
 │   │   ├── ImportExport.tsx            # 导入导出
 │   │   ├── SettingsSidebar.tsx         # 设置侧边栏
@@ -175,10 +168,16 @@ prompt-lab/
 │   │   ├── registry.ts                 # 注册、命令、生命周期
 │   │   ├── usePluginRegistry.ts        # React 外部 Store 适配
 │   │   ├── built-in/index.ts           # 18 个内置插件
+│   │   ├── ai/                         # AI 导航、WebView、会话保存
+│   │   ├── chat/                       # AI 对话及专属子组件
+│   │   ├── prompts/                    # 提示词侧栏与抽屉
+│   │   ├── history/                    # 会话历史
+│   │   ├── knowledge-graph/            # 知识图谱及画布组件
+│   │   ├── database/                   # 数据库浏览器
 │   │   ├── dynamic/DynamicPlugin.tsx   # 用户插件运行模式分发
 │   │   ├── plugin-manager/             # 创建、导入、导出、管理
 │   │   ├── code-editor/                # 代码编辑器插件
-│   │   ├── terminal/                   # 终端插件
+│   │   ├── terminal/                   # 终端 UI 与主进程 backend
 │   │   ├── excel-preview/              # Excel 插件
 │   │   └── sandbox/                    # iframe 沙箱运行时
 │   │       ├── types.ts                # 协议/权限类型

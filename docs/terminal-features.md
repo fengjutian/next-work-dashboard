@@ -69,9 +69,9 @@ Terminal.tsx  ←→  electronAPI  ←→  terminal-manager  ←→  PTY
 
 | 文件 | 说明 |
 |------|------|
-| `src/terminal/terminal-manager.ts` | 主进程 PTY 管理器 (profile 支持) |
-| `src/components/Terminal.tsx` | React 终端组件 (TerminalSingle + TerminalHandle) |
-| `src/plugins/built-in/terminal.plugin.tsx` | 终端插件面板 (Tab bar + 工具栏 + 右键菜单 + 状态栏) |
+| `src/plugins/terminal/backend/terminal-manager.ts` | 主进程 PTY 管理器 (profile 支持) |
+| `src/plugins/terminal/Terminal.tsx` | React 终端组件 (TerminalSingle + TerminalHandle) |
+| `src/plugins/terminal/TerminalPluginPanel.tsx` | 终端插件面板 (Tab bar + 工具栏 + 右键菜单 + 状态栏) |
 | `src/plugins/built-in/index.ts` | 内置插件列表 |
 | `src/main.ts` | IPC handler (terminal:*, shell:open-external) |
 | `src/preload.ts` | contextBridge API |
