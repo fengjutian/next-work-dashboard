@@ -1,14 +1,6 @@
 {
   "legacy_20260727-050454_237011500-deepseek-deepseek-v4-flash_a9ff7d60b403": "manual",
   "topic_20260728-002329_e63034267d43b75f": "auto",
-  "topic_20260730-052800_48c04b0df00e9a44": "auto",
   "topic_20260730-054805_48e91e2a3b1e6d6e": "auto",
-  "topic_20260730-064405_486cc73c402d3bbe": "auto",
-  "topic_20260730-074115_fa106973513ee19a": "auto",
-  "topic_20260731-030709_e754be382ecd3acd": "auto",
-  "topic_20260731-032614_70f4128752769b49": "auto",
-  "topic_20260731-065427_5a3f9108ccf8264a": "auto",
-  "topic_20260731-160607_1f9ebc605bb01e0b": "auto",
-  "topic_20260801-082601_5bc3c92ef7650c0e": "auto",
-  "topic_20260803-120210_887b836a55196c8f": "auto"
+  "topic_20260730-074115_fa106973513ee19a": "auto"
 }

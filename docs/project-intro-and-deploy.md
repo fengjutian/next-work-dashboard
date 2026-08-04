@@ -88,7 +88,7 @@
 - Token 存储使用 `safeStorage` + OS 原生加密
 - 打包时启用 Fuse 保护：`RunAsNode: false`、`OnlyLoadAppFromAsar: true`
 
-### 2.4 插件系统（统一注册、三种运行模式）
+### 2.4 插件系统（内置插件与用户 Sandbox）
 
 详见 `docs/plugin-architecture.md`。
 
@@ -101,12 +101,10 @@
 │  iframe 隔离 → postMessage → usePluginBridge │
 │  7 通道 / 8 权限 / private localStorage   │
 ├──────────────────────────────────────────┤
-│  用户 Kernel 层（高风险、仅可信来源）      │
-│  React bundle → Renderer 宿主上下文       │
 └──────────────────────────────────────────┘
 ```
 
-`PluginRegistry` 同时负责启用状态、命令贡献、生命周期和资源回收。React 组件通过基于 `useSyncExternalStore` 的 `usePluginRegistryVersion()` 订阅变化。Sandbox 插件具备 iframe、CSP、权限、消息大小和存储配额限制；Kernel 插件不具备可靠安全隔离。
+`PluginRegistry` 同时负责启用状态、命令贡献、生命周期和资源回收。React 组件通过基于 `useSyncExternalStore` 的 `usePluginRegistryVersion()` 订阅变化。用户插件只能运行在 iframe Sandbox 中，并通过 CSP、权限和消息校验访问宿主能力；用户 Kernel 执行链已经移除。
 
 ---
 
@@ -319,4 +317,9 @@ npm run make
 |------|------|
 | 需求文档 | `REQUIREMENTS.md` |
 | 功能对照表 | `FEATURE_CHECKLIST.md` |
+| 文档中心 | `docs/README.md` |
+| 用户手册 | `docs/user-guide.md` |
 | 插件架构 | `docs/plugin-architecture.md` |
+| 故障排查 | `docs/troubleshooting.md` |
+| 贡献指南 | `docs/contributing.md` |
+| 安全模型 | `docs/security.md` |

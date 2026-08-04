@@ -292,7 +292,7 @@ AI 网站在 Electron webview 中会检测到异常浏览器指纹（如 `naviga
 
 > 详细架构见 [plugin-architecture.md](./plugin-architecture.md)。此处仅提炼核心原理。
 
-### 6.1 统一注册、三种运行模式
+### 6.1 统一注册、两类插件
 
 ```
 ┌─────────────────────────────────────┐
@@ -300,17 +300,18 @@ AI 网站在 Electron webview 中会检测到异常浏览器指纹（如 `naviga
 │   用户点击 → 切换 activeActivity      │
 └──────────────┬──────────────────────┘
                │
-    ┌──────────┼──────────┐
-    ▼          ▼          ▼
- 内置插件   Sandbox    Kernel
-(React FC)  (iframe)  (React bundle)
+        ┌──────┴──────┐
+        ▼             ▼
+     内置插件      用户 Sandbox
+    (React FC)       (iframe)
 ```
 
 | 层级 | 说明 | 安全隔离 |
 |------|------|----------|
 | **内置层** | 18 个随应用编译的 React 插件 | 完全信任，直接访问 React 上下文 |
 | **Sandbox 层** | 用户编写或导入的 JS 脚本 | iframe + CSP + postMessage，不直接暴露 Node.js |
-| **Kernel 层** | 用户导入的 React bundle | Renderer 宿主上下文，无可靠安全隔离，仅可信来源 |
+
+用户 Kernel 插件已经移除；外部插件代码不会直接注入 Renderer React 树。
 
 ### 6.2 PluginRegistry — 发布-订阅单例
 

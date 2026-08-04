@@ -162,11 +162,7 @@ export interface PluginManifest {
   config?: PluginConfigDeclaration[];
   /** 激活事件（预留，当前不支持懒加载） */
   activationEvents?: string[];
-  /**
-   * 运行时类型：
-   *  - 'sandbox'（默认） — iframe 沙箱，script 是 JS 源码
-   *  - 'kernel' — 直接注入 React 树，bundle 是预编译的 JS 模块
-   */
+  /** 运行时类型：iframe Sandbox；用户 Kernel 已移除。 */
   runtime?: 'sandbox';
 }
 

@@ -1,30 +1,27 @@
 # next-work-dashboard 插件系统
 
-> 本文描述 `prompt-lab/src/plugins/` 当前实现。最后更新：2026-08-03。
+> 本文描述 `prompt-lab/src/plugins/` 当前实现。最后更新：2026-08-04。
 
 ## 1. 总览
 
-插件系统采用统一注册、三种运行模式的设计：
+插件系统采用统一注册、两类插件的设计：
 
 ```text
 内置 React 插件 ───────────────────┐
-用户 Kernel 插件 ── DynamicPlugin ─┼─> PluginRegistry
-用户 Sandbox 插件 ─ iframe/Bridge ─┘        │
+用户 Sandbox 插件 ─ iframe/Bridge ─┴─> PluginRegistry
                                              ├─ ActivityBar / TitleBar
                                              ├─ App 主面板
                                              ├─ CommandPalette
                                              └─ PluginStatusBar
 ```
 
-三种模式的定位不同：
+两类插件的定位不同：
 
 | 模式 | 代码来源 | 运行位置 | 信任级别 | 典型用途 |
 |---|---|---|---|---|
 | 内置插件 | 随应用编译 | 宿主 React 树 | 完全信任 | 核心工作台功能 |
 | Sandbox | 用户脚本或 `.nwd` | `sandbox="allow-scripts"` iframe | 低信任 | 数据面板、轻量工具 |
-| Kernel | 历史兼容代码 | Renderer 宿主上下文 | 已关闭 | 不再允许用户创建或导入 |
-
-旧版纯文本 `content` 插件仍可由 `DynamicPlugin` 渲染，以保证向后兼容。
+旧版纯文本 `content` 插件仍可由 `DynamicPlugin` 渲染，以保证向后兼容。历史 Kernel 定义只会被识别并跳过，不存在执行路径。
 
 ## 2. 启动与渲染流程
 
@@ -374,37 +371,398 @@ SDK 类型和实际注入 iframe 的运行时代码都来自 `sandbox/plugin-sdk
 
 首次读取会自动迁移旧的插件定义、`$config` 和 `pksdk:data:*` 数据，且不破坏旧 key。插件连续发生 3 次运行错误会被熔断禁用；插件管理器可切换安全模式、查看日志、覆盖更新和回滚上一版本。“设置 → 插件”支持逐项授予或撤销已声明权限，Bridge 每次调用都会同时检查声明与当前授权。
 
-## 10. 开发一个 Sandbox 插件
+## 10. Sandbox 插件开发指南
 
-最小脚本：
+用户插件是一个扩展名为 `.nwd` 的 JSON 文件。插件脚本运行在带 `sandbox="allow-scripts"` 的独立 iframe 中，不能直接访问宿主 DOM、Node.js、Electron API 或宿主 JavaScript 对象。需要宿主能力时，只能调用全局对象 `PluginSDK`。
 
-```js
-const { ui, store } = PluginSDK;
+### 10.1 开发流程
 
-await ui.setContent(`
-  <section class="pk-card">
-    <h1>提示词统计</h1>
-    <button id="load" class="pk-btn pk-primary">加载</button>
-    <p id="result"></p>
-  </section>
-`);
+推荐按以下顺序开发：
 
-document.getElementById('load').addEventListener('click', async () => {
-  const prompts = await store.getPrompts();
-  document.getElementById('result').textContent = `共 ${prompts.length} 条`;
-});
+1. 确定稳定的插件 ID、功能和最小权限集合。
+2. 编写普通 JavaScript 脚本和可选 CSS。
+3. 在应用的“插件管理 → 新建插件 → 高级模式”中粘贴脚本测试。
+4. 在“设置 → 插件”检查或调整授权和配置。
+5. 导出 `.nwd`，或按下文格式自行打包。
+6. 用“插件管理 → 导入”完成一次干净安装测试。
+
+插件不需要 React、Node.js 或构建工具。iframe 的 `#root` 是插件自己的页面根节点，可以使用原生 DOM API。当前不支持用户 Kernel 插件。
+
+### 10.2 最小可运行插件
+
+创建 `hello.nwd`：
+
+```json
+{
+  "format": "nwd-v1",
+  "manifest": {
+    "id": "example.hello",
+    "name": "Hello Plugin",
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "runtime": "sandbox",
+    "description": "最小 Sandbox 插件示例",
+    "author": "Your Name",
+    "iconEmoji": "👋",
+    "permissions": []
+  },
+  "script": "document.getElementById('root').innerHTML = '<section class=\"pk-card\"><h1>Hello Plugin</h1><p>插件运行成功。</p></section>';",
+  "style": "h1 { margin-bottom: 8px; font-size: 18px; }"
+}
 ```
 
-Manifest 必须声明 `store.read`，否则调用会被 Bridge 拒绝。
+在插件管理器导入该文件。成功后会出现一个用户插件卡片和对应活动栏入口。
 
-开发建议：
+### 10.3 推荐的源码组织方式
 
-- 默认选择 Sandbox，不要因为需要 React 就直接选择 Kernel。
-- 只申请实际使用的权限。
-- 所有 SDK 调用都处理 Promise rejection。
-- 不在插件数据中保存密钥和敏感凭据。
-- 使用稳定 ID；插件名称可以变化，ID 不应变化。
-- 在 `apiVersion` 升级前完成兼容测试。
+直接手写 JSON 时，换行和引号需要转义。更适合维护的目录结构是：
+
+```text
+example-plugin/
+├── manifest.json
+├── index.js
+├── style.css
+└── build.mjs
+```
+
+`manifest.json` 只保存 manifest 对象，`index.js` 和 `style.css` 保持正常源码。可使用下面的 Node.js 脚本生成 `.nwd`：
+
+```js
+// build.mjs
+import { readFile, writeFile } from 'node:fs/promises';
+
+const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
+const script = await readFile('index.js', 'utf8');
+const style = await readFile('style.css', 'utf8').catch(() => '');
+
+await writeFile(
+  `${manifest.id}.nwd`,
+  JSON.stringify({ format: 'nwd-v1', manifest, script, style }, null, 2),
+  'utf8',
+);
+```
+
+在插件目录执行：
+
+```bash
+node build.mjs
+```
+
+生成的 `.nwd` 不得超过 2 MB。
+
+### 10.4 Manifest 字段
+
+| 字段 | 必填 | 说明 |
+|---|---:|---|
+| `id` | 推荐 | 2–64 位稳定标识，可使用 Unicode 字母、数字、`.`、`_`、`-`；发布后不要修改 |
+| `name` | 是 | 显示名称，1–100 个字符 |
+| `version` | 是 | 语义版本，例如 `1.2.0` 或 `1.2.0-beta.1` |
+| `apiVersion` | 推荐 | 当前必须使用 `"1"` |
+| `runtime` | 推荐 | 当前只能是 `"sandbox"` |
+| `description` | 否 | 插件用途说明 |
+| `author` | 否 | 作者或组织名称 |
+| `iconEmoji` | 否 | 插件图标字符 |
+| `permissions` | 是 | 权限字符串数组；无权限时写 `[]` |
+| `config` | 否 | 宿主自动生成的插件设置项 |
+| `activationEvents` | 否 | 预留字段，当前不会改变加载行为 |
+
+如果旧包缺少 `id`，宿主会从名称推导，但新插件应始终显式填写 ID。ID 用于数据、配置、授权和版本历史分区，更改 ID 会被视为另一个插件。
+
+配置声明示例：
+
+```json
+{
+  "config": [
+    {
+      "key": "pageSize",
+      "label": "每页数量",
+      "description": "列表一次显示的项目数量",
+      "type": "number",
+      "default": 20
+    },
+    {
+      "key": "showTimestamp",
+      "label": "显示时间",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "title",
+      "label": "面板标题",
+      "type": "string",
+      "default": "我的插件"
+    }
+  ]
+}
+```
+
+用户可以在“设置 → 插件”编辑这些配置。脚本使用 `PluginSDK.config` 读取和修改。
+
+### 10.5 权限与 SDK 对照
+
+权限必须同时出现在 manifest 声明和用户当前授权中。用户撤销权限后，后续调用会立即失败。
+
+| 权限 | 允许调用 |
+|---|---|
+| 无需权限 | `ui.*`、`config.*` |
+| `store.read` | `store.getPrompts/getSites/getTabs/getActiveTab/getTheme/getConversations` |
+| `clipboard` | `actions.copyToClipboard` |
+| `inject` | `actions.injectPrompt` |
+| `external.open` | `actions.openUrl` |
+| `data` | `data.get/set/delete/list` |
+| `preview` | `preview.markdown/image/pdf/code` |
+| `file.read` | `file.pickOpen` |
+| `file.write` | `file.pickSave` |
+
+只声明实际使用的权限。不要为了避免报错申请全部权限。
+
+### 10.6 PluginSDK API
+
+所有 SDK 方法都是异步方法并返回 Promise。插件脚本作为普通 `<script>` 执行，不支持顶层 `await`；使用异步函数包装初始化代码：
+
+```js
+(async function main() {
+  try {
+    await PluginSDK.ui.setContent('<section class="pk-card">加载完成</section>');
+  } catch (error) {
+    console.error(error);
+    await PluginSDK.ui.showToast(error.message || String(error), 'error');
+  }
+})();
+```
+
+#### UI
+
+```js
+await PluginSDK.ui.setContent('<main>HTML 内容</main>');
+const tokens = await PluginSDK.ui.getThemeTokens();
+const size = await PluginSDK.ui.getContainerSize(); // { w, h }
+await PluginSDK.ui.showToast('保存成功', 'success');
+```
+
+`setContent` 会替换 `#root` 内容。不要把不可信文本直接拼入 HTML；优先创建 DOM 节点并设置 `textContent`。
+
+#### 读取宿主数据
+
+```js
+const prompts = await PluginSDK.store.getPrompts();
+const sites = await PluginSDK.store.getSites();
+const tabs = await PluginSDK.store.getTabs();
+const activeTab = await PluginSDK.store.getActiveTab();
+const theme = await PluginSDK.store.getTheme();
+const conversations = await PluginSDK.store.getConversations();
+```
+
+返回值是可序列化快照，修改它不会修改宿主状态。
+
+#### 操作
+
+```js
+await PluginSDK.actions.copyToClipboard('需要复制的文本');
+await PluginSDK.actions.openUrl('https://example.com');
+await PluginSDK.actions.injectPrompt('deepseek', '请总结这段内容', false);
+```
+
+`injectPrompt(siteId, text, autoSubmit)` 要求对应 AI 站点已经打开；第三个参数为 `true` 时会尝试自动提交。
+
+#### 插件私有数据
+
+```js
+await PluginSDK.data.set('draft', { title: '草稿', updatedAt: Date.now() });
+const draft = await PluginSDK.data.get('draft');
+const keys = await PluginSDK.data.list();
+await PluginSDK.data.delete('draft');
+```
+
+数据按插件 ID 隔离。只保存可 JSON 序列化的数据，不要保存函数、DOM 节点、循环引用、密码或访问令牌。
+
+#### 配置
+
+```js
+const defaults = await PluginSDK.config.getDefaults();
+const saved = await PluginSDK.config.getAll();
+const pageSize = await PluginSDK.config.get('pageSize');
+await PluginSDK.config.set('pageSize', 50);
+```
+
+`get` 在用户尚未保存该字段时可能返回 `null`。常用读取方式：
+
+```js
+const defaults = await PluginSDK.config.getDefaults();
+const saved = await PluginSDK.config.getAll();
+const config = { ...defaults, ...saved };
+```
+
+#### 文件
+
+```js
+const selected = await PluginSDK.file.pickOpen({ accept: '.json,.txt', multiple: false });
+if (selected) {
+  // selected.content 是 base64；selected 还包含 path、name、size、mimeType
+}
+
+await PluginSDK.file.pickSave('hello\n', 'hello.txt');
+```
+
+文件选择只在 Electron 环境可用。不要假定用户一定选择了文件；取消时应直接返回。
+
+#### 预览
+
+```js
+await PluginSDK.preview.markdown('# 标题');
+await PluginSDK.preview.code('const answer = 42;', 'javascript');
+await PluginSDK.preview.image('data:image/png;base64,...', '图片说明');
+await PluginSDK.preview.pdf('data:application/pdf;base64,...');
+```
+
+每次预览调用会替换插件当前内容。
+
+#### 事件
+
+```js
+const unsubscribe = PluginSDK.on('event-name', (payload) => {
+  console.log(payload);
+});
+
+// 不再需要时解除订阅
+unsubscribe();
+```
+
+`PluginSDK.store.subscribe` 与 `PluginSDK.on` 使用同一事件机制。当前公开的业务事件有限，不要依赖未记录的内部事件名。
+
+### 10.7 完整示例：提示词统计
+
+Manifest 需要声明 `store.read`：
+
+```json
+{
+  "id": "example.prompt-stats",
+  "name": "提示词统计",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "runtime": "sandbox",
+  "permissions": ["store.read", "clipboard"],
+  "config": [
+    { "key": "showCategories", "label": "显示分类", "type": "boolean", "default": true }
+  ]
+}
+```
+
+`index.js`：
+
+```js
+(async function main() {
+  const root = document.getElementById('root');
+  root.innerHTML = `
+    <section class="pk-card">
+      <h1>提示词统计</h1>
+      <div class="pk-separator"></div>
+      <button id="load" class="pk-btn pk-primary">加载统计</button>
+      <button id="copy" class="pk-btn" disabled>复制结果</button>
+      <pre id="result" aria-live="polite">尚未加载</pre>
+    </section>`;
+
+  let resultText = '';
+  const loadButton = document.getElementById('load');
+  const copyButton = document.getElementById('copy');
+  const result = document.getElementById('result');
+
+  loadButton.addEventListener('click', async () => {
+    loadButton.disabled = true;
+    try {
+      const prompts = await PluginSDK.store.getPrompts();
+      const defaults = await PluginSDK.config.getDefaults();
+      const saved = await PluginSDK.config.getAll();
+      const config = { ...defaults, ...saved };
+      const categories = new Set(prompts.map((item) => item.category).filter(Boolean));
+      resultText = `提示词：${prompts.length} 条`;
+      if (config.showCategories) resultText += `\n分类：${categories.size} 个`;
+      result.textContent = resultText;
+      copyButton.disabled = false;
+    } catch (error) {
+      result.textContent = `加载失败：${error.message || String(error)}`;
+    } finally {
+      loadButton.disabled = false;
+    }
+  });
+
+  copyButton.addEventListener('click', async () => {
+    try {
+      await PluginSDK.actions.copyToClipboard(resultText);
+      await PluginSDK.ui.showToast('统计结果已复制', 'success');
+    } catch (error) {
+      await PluginSDK.ui.showToast(error.message || String(error), 'error');
+    }
+  });
+})();
+```
+
+`style.css`：
+
+```css
+h1 { margin-bottom: 8px; font-size: 18px; }
+.pk-btn + .pk-btn { margin-left: 8px; }
+pre { margin-top: 12px; white-space: pre-wrap; color: var(--foreground); }
+```
+
+### 10.8 更新、导出和回滚
+
+- 导入相同 ID 的更高版本会覆盖更新，并保存旧定义为 revision。
+- 当前保留最近 5 个 revision。
+- 插件管理器卡片提供导出、日志和回滚入口。
+- 更新时保持稳定 ID，并递增语义版本。
+- 当前自动健康检查和失败自动回滚尚未开发，更新前应先导出可用版本备份。
+
+### 10.9 调试与错误处理
+
+- 语法错误、未处理的 Promise rejection 和 Bridge 报告的错误会写入插件日志；普通 `console.error` 当前只出现在 iframe 开发者工具中。
+- 插件连续发生 3 次运行错误后会被熔断禁用。
+- 可在插件管理器查看日志和回滚版本；也可以进入安全模式禁用全部用户插件。
+- 每个 SDK 请求的当前超时时间为 30 秒。
+- CSP 禁止任意脚本和网络请求；图片只允许 `data:` 和 `https:` 来源。
+
+建议统一包装异步事件：
+
+```js
+function run(action) {
+  return async function handler(event) {
+    try {
+      await action(event);
+    } catch (error) {
+      console.error(error);
+      await PluginSDK.ui.showToast(error.message || String(error), 'error');
+    }
+  };
+}
+
+document.getElementById('save').addEventListener('click', run(async () => {
+  await PluginSDK.data.set('value', { savedAt: Date.now() });
+}));
+```
+
+常见错误：
+
+| 错误 | 原因与处理 |
+|---|---|
+| `缺少权限: ...` | manifest 未声明或用户已撤销权限；检查“设置 → 插件” |
+| `PluginSDK request timed out` | 宿主未响应或操作超过 30 秒；查看插件日志并避免并发大量请求 |
+| `文件选择仅在 Electron 环境下可用` | 当前运行环境没有 Electron 文件 API |
+| `未知 channel/method` | SDK 与 `apiVersion` 不匹配或调用了未公开接口 |
+| 插件被自动禁用 | 连续错误触发熔断；先查看日志并修复脚本 |
+| 导入提示格式无效 | 检查 `format`、版本、ID、权限、runtime 和非空 `script` |
+
+### 10.10 发布前检查清单
+
+- [ ] ID 稳定且符合格式，版本已经递增。
+- [ ] `apiVersion` 为 `"1"`，`runtime` 为 `"sandbox"`。
+- [ ] 只声明实际使用的权限。
+- [ ] 所有事件处理器都捕获异步错误。
+- [ ] 用户输入通过 `textContent` 渲染，未直接拼接到 HTML。
+- [ ] 文件取消、空数据、权限拒绝和 SDK 超时都有处理。
+- [ ] 私有数据可 JSON 序列化，且不包含密钥或密码。
+- [ ] 浅色和深色主题下均可阅读。
+- [ ] `.nwd` 小于 2 MB，并完成全新导入和覆盖更新测试。
+- [ ] 保留了上一个可用版本，以便当前阶段手动回滚。
 
 ## 11. 关键文件
 
@@ -422,7 +780,7 @@ Manifest 必须声明 `store.read`，否则调用会被 Bridge 拒绝。
 | `prompt-lab/src/plugins/knowledge-graph/` | 知识图谱面板、画布与类型 |
 | `prompt-lab/src/plugins/database/` | 数据库浏览器插件 |
 | `prompt-lab/src/plugins/terminal/` | 终端 UI 与主进程 backend |
-| `prompt-lab/src/plugins/dynamic/DynamicPlugin.tsx` | content、Sandbox、Kernel 模式分发 |
+| `prompt-lab/src/plugins/dynamic/DynamicPlugin.tsx` | 静态 content 与 Sandbox 模式分发 |
 | `prompt-lab/src/plugins/plugin-manager/` | 创建、导入、导出、持久化和管理 UI |
 | `prompt-lab/src/plugins/sandbox/types.ts` | Manifest、权限与 Bridge 协议类型 |
 | `prompt-lab/src/plugins/sandbox/PluginSandbox.tsx` | iframe 与 CSP 容器 |
