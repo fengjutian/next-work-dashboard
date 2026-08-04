@@ -13,6 +13,13 @@ export interface AgentSession {
   accepted: number;
 }
 
+export interface AgentLogEntry {
+  id: string;
+  timestamp: number;
+  level: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+}
+
 export function createAgentSession(
   workspace: { path: string; name: string },
   now = Date.now(),
@@ -47,4 +54,12 @@ export function archivedSessionsForWorkspace(sessions: AgentSession[], workspace
 export function titleFromInstruction(instruction: string, maxLength = 50): string {
   const firstLine = instruction.split(/\r?\n/, 1)[0].replace(/\s+/g, ' ').trim();
   return firstLine.slice(0, maxLength) || 'Agent 任务';
+}
+
+export function createAgentLogEntry(
+  level: AgentLogEntry['level'],
+  message: string,
+  timestamp = Date.now(),
+): AgentLogEntry {
+  return { id: `log-${timestamp}-${Math.random().toString(36).slice(2, 7)}`, timestamp, level, message };
 }

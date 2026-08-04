@@ -195,12 +195,15 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     sessions: agentSessionList,
     archivedSessions: archivedAgentSessionList,
     activeSession: activeAgentSession,
+    activeLogs: activeAgentLogs,
     createSession: createAgentSession,
     selectSession: selectAgentSession,
     updateSession: updateAgentSession,
     archiveSession: archiveAgentSession,
     restoreSession: restoreAgentSession,
     deleteSession: deleteAgentSession,
+    appendLog: appendAgentLog,
+    clearLogs: clearAgentLogs,
   } = useAgentSessions(workspace);
   const {
     aiInstruction, setAiInstruction, aiEditing, setAiEditing, inlineEdit, setInlineEdit,
@@ -276,7 +279,10 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     computeDiffHunks,
     updateSessionAcceptCount: (count = 1) => {
       updateSessionAcceptCount(count);
-      if (activeAgentSession) updateAgentSession(activeAgentSession.id, { accepted: activeAgentSession.accepted + count });
+      if (activeAgentSession) {
+        updateAgentSession(activeAgentSession.id, { accepted: activeAgentSession.accepted + count });
+        appendAgentLog(activeAgentSession.id, 'success', `已接受 ${count} 个文件修改`);
+      }
     },
     appendOutput,
     setStatus,
@@ -386,14 +392,35 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setDocuments,
     setActivePath,
   });
+  const lastLoggedStageRef = useRef('');
+
+  useEffect(() => {
+    if (!activeAgentSession || aiExecutionStage === 'idle') return;
+    const key = `${activeAgentSession.id}:${aiExecutionStage}`;
+    if (lastLoggedStageRef.current === key) return;
+    lastLoggedStageRef.current = key;
+    const messages = {
+      'collecting-context': '正在收集工作区上下文',
+      summarizing: '正在压缩历史会话',
+      generating: '模型正在生成修改',
+      parsing: '正在解析和校验模型结果',
+      review: `已生成 ${aiProposals.length} 个待审修改`,
+      cancelling: '用户请求取消 Agent 运行',
+      interrupted: 'Agent 请求已中断',
+      failed: 'Agent 请求失败',
+    } as const;
+    const level = aiExecutionStage === 'failed' ? 'error' : aiExecutionStage === 'interrupted' || aiExecutionStage === 'cancelling' ? 'warning' : aiExecutionStage === 'review' ? 'success' : 'info';
+    if (aiExecutionStage in messages) appendAgentLog(activeAgentSession.id, level, messages[aiExecutionStage as keyof typeof messages]);
+  }, [activeAgentSession, aiExecutionStage, aiProposals.length, appendAgentLog]);
 
   const runAgentEdit = useCallback(async () => {
     const instruction = aiInstruction.trim();
     if (activeAgentSession?.title === '新 Agent 会话' && instruction) {
       updateAgentSession(activeAgentSession.id, { title: titleFromInstruction(instruction) });
     }
+    if (activeAgentSession && instruction) appendAgentLog(activeAgentSession.id, 'info', `开始任务：${instruction}`);
     await generateAiEdit();
-  }, [activeAgentSession, aiInstruction, generateAiEdit, updateAgentSession]);
+  }, [activeAgentSession, aiInstruction, appendAgentLog, generateAiEdit, updateAgentSession]);
 
   const selectTreeNode = useCallback((node: TreeNode, event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
     if (event?.shiftKey && selectedNode) {
@@ -1186,6 +1213,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         sessions={agentSessionList}
         archivedSessions={archivedAgentSessionList}
         activeSession={activeAgentSession}
+        activeLogs={activeAgentLogs}
         aiInstruction={aiInstruction}
         aiEditing={aiEditing}
         aiPendingRequest={aiPendingRequest}
@@ -1207,6 +1235,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onRestoreSession={restoreAgentSession}
         onDeleteSession={(id) => { void (async () => {
           if (await appConfirm('永久删除这个 Agent 会话及其本地对话和待审候选？此操作无法撤销。')) deleteAgentSession(id);
+        })(); }}
+        onClearLogs={(id) => { void (async () => {
+          if (await appConfirm('清空这个 Agent 会话的全部日志？')) clearAgentLogs(id);
         })(); }}
         onInstructionChange={setAiInstruction}
         onMultiFileChange={setAiMultiFile}

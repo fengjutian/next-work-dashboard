@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archivedSessionsForWorkspace, createAgentSession, sessionsForWorkspace, titleFromInstruction, type AgentSession } from '../src/plugins/code-editor/agent-sessions';
+import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, titleFromInstruction, type AgentSession } from '../src/plugins/code-editor/agent-sessions';
 
 describe('agent sessions', () => {
   it('creates a workspace-bound idle session', () => {
@@ -27,5 +27,9 @@ describe('agent sessions', () => {
   it('derives a compact title from the first instruction line', () => {
     expect(titleFromInstruction('  修复   登录失败问题  \n并补充测试')).toBe('修复 登录失败问题');
     expect(titleFromInstruction('abcdef', 4)).toBe('abcd');
+  });
+
+  it('creates timestamped session log entries', () => {
+    expect(createAgentLogEntry('success', 'done', 42)).toMatchObject({ timestamp: 42, level: 'success', message: 'done' });
   });
 });

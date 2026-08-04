@@ -1,27 +1,34 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Database, FileText, Plus, Trash2, Check, Search, X } from '@/components/icons';
 
+const MANUAL_MEMORY_ENABLED_KEY = 'chat.manual-memory.enabled';
+
 interface MemoryItem {
   path: string;
   fileName: string;
   title: string;
   size: number;
   modifiedAt: number;
-  sourceType: 'manual' | 'conversation';
-  site?: string;
+}
+
+export function useManualMemoryEnabled() {
+  const [enabled, setEnabled] = useState(() => localStorage.getItem(MANUAL_MEMORY_ENABLED_KEY) !== 'false');
+  useEffect(() => { localStorage.setItem(MANUAL_MEMORY_ENABLED_KEY, String(enabled)); }, [enabled]);
+  return { manualMemoryEnabled: enabled, setManualMemoryEnabled: setEnabled };
 }
 
 /**
- * 记忆管理器弹层
+ * 记忆管理器弹层 — 管理手动添加的记忆
  *
- * 左侧：记忆列表（手动记忆在上，对话历史在下，支持搜索过滤）
- * 右侧：编辑区（Markdown 编辑 + 保存 / 删除）
+ * 左侧：记忆列表（搜索过滤）
+ * 右侧：编辑区（Markdown + 保存 / 删除）
  */
 export const MemoryManagerDialog: React.FC<{
   open: boolean;
   onClose: () => void;
 }> = ({ open, onClose }) => {
   const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [manualMemoryEnabled, setManualMemoryEnabled] = useState(() => localStorage.getItem(MANUAL_MEMORY_ENABLED_KEY) !== 'false');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -30,29 +37,14 @@ export const MemoryManagerDialog: React.FC<{
   const [isNew, setIsNew] = useState(false);
 
   const refreshList = useCallback(async () => {
-    const api = window.electronAPI;
-    const [memFiles, convFiles] = await Promise.all([
-      api.listMemories(),
-      api.listConversations(),
-    ]);
-    const manual: MemoryItem[] = memFiles.map((m) => ({
+    const memFiles = await window.electronAPI.listMemories();
+    setMemories(memFiles.map((m) => ({
       path: m.path,
       fileName: m.fileName,
       title: m.title,
       size: m.size,
       modifiedAt: m.modifiedAt,
-      sourceType: 'manual' as const,
-    }));
-    const conversation: MemoryItem[] = convFiles.map((c) => ({
-      path: c.path,
-      fileName: c.fileName,
-      title: c.title || c.fileName.replace(/\.md$/, ''),
-      size: c.size,
-      modifiedAt: c.modifiedAt,
-      sourceType: 'conversation' as const,
-      site: c.site,
-    }));
-    setMemories([...manual, ...conversation]);
+    })));
   }, []);
 
   useEffect(() => {
@@ -64,14 +56,11 @@ export const MemoryManagerDialog: React.FC<{
     setSelectedPath(item.path);
     setIsNew(false);
     setEditTitle(item.title);
-    const api = window.electronAPI;
-    const result = item.sourceType === 'manual'
-      ? await api.readMemory(item.path)
-      : await api.readConversation(item.path);
+    const result = await window.electronAPI.readMemory(item.path);
     setEditContent(result.success ? (result.content ?? '') : '');
   }, []);
 
-  // ── 新建手动记忆 ──
+  // ── 新建 ──
   const createNew = useCallback(() => {
     setSelectedPath(null);
     setIsNew(true);
@@ -93,20 +82,14 @@ export const MemoryManagerDialog: React.FC<{
         setSelectedPath(result.filePath!);
         setIsNew(false);
       } else if (selectedPath) {
-        const item = memories.find((m) => m.path === selectedPath);
-        if (item?.sourceType === 'manual') {
-          const result = await api.writeMemory(selectedPath, content);
-          if (!result.success) throw new Error(result.error);
-        } else {
-          const result = await api.writeConversation(selectedPath, content);
-          if (!result.success) throw new Error(result.error);
-        }
+        const result = await api.writeMemory(selectedPath, content);
+        if (!result.success) throw new Error(result.error);
       }
       await refreshList();
     } catch (err: any) {
       alert(`保存失败: ${err.message}`);
     } finally { setSaving(false); }
-  }, [editTitle, editContent, isNew, selectedPath, memories, refreshList]);
+  }, [editTitle, editContent, isNew, selectedPath, refreshList]);
 
   // ── 删除 ──
   const handleDelete = useCallback(async () => {
@@ -115,10 +98,7 @@ export const MemoryManagerDialog: React.FC<{
     if (!item) return;
     if (!confirm(`确定删除「${item.title}」？此操作不可撤销。`)) return;
     try {
-      const api = window.electronAPI;
-      const result = item.sourceType === 'manual'
-        ? await api.deleteMemory(selectedPath)
-        : await api.deleteConversation(selectedPath);
+      const result = await window.electronAPI.deleteMemory(selectedPath);
       if (!result.success) throw new Error(result.error);
       setSelectedPath(null);
       setIsNew(false);
@@ -131,11 +111,10 @@ export const MemoryManagerDialog: React.FC<{
   // ── 过滤 ──
   const q = searchQuery.toLowerCase();
   const filtered = q
-    ? memories.filter((m) => m.title.toLowerCase().includes(q) || m.fileName.toLowerCase().includes(q) || (m.site ?? '').toLowerCase().includes(q))
+    ? memories.filter((m) => m.title.toLowerCase().includes(q) || m.fileName.toLowerCase().includes(q))
     : memories;
 
-  const manualMemories = filtered.filter((m) => m.sourceType === 'manual');
-  const conversationMemories = filtered.filter((m) => m.sourceType === 'conversation');
+  useEffect(() => { localStorage.setItem(MANUAL_MEMORY_ENABLED_KEY, String(manualMemoryEnabled)); }, [manualMemoryEnabled]);
 
   if (!open) return null;
 
@@ -145,9 +124,16 @@ export const MemoryManagerDialog: React.FC<{
         {/* 左侧列表 */}
         <div className="w-56 shrink-0 border-r flex flex-col bg-background">
           <div className="px-2 py-2 border-b">
-            <div className="flex items-center gap-1 mb-1.5">
-              <Database className="h-4 w-4 text-primary" />
-              <span className="text-xs font-semibold">记忆管理</span>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1">
+                <Database className="h-4 w-4 text-primary" />
+                <span className="text-xs font-semibold">记忆管理</span>
+              </div>
+              <label className="flex items-center gap-1 cursor-pointer" title="开启后手动记忆参与 AI 检索">
+                <input type="checkbox" className="h-3 w-3" checked={manualMemoryEnabled}
+                  onChange={(e) => setManualMemoryEnabled(e.target.checked)} />
+                <span className="text-[10px] text-muted-foreground">检索</span>
+              </label>
             </div>
             <div className="relative">
               <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
@@ -160,46 +146,21 @@ export const MemoryManagerDialog: React.FC<{
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {/* 手动记忆 */}
-            {manualMemories.length > 0 && (
-              <div>
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground flex items-center gap-1">
-                  <FileText className="h-3 w-3" /> 手动记忆
-                </div>
-                {manualMemories.map((m) => (
-                  <button
-                    key={m.path}
-                    className={`w-full text-left px-2 py-1.5 text-[11px] hover:bg-accent truncate block ${selectedPath === m.path ? 'bg-primary-light text-primary' : ''}`}
-                    onClick={() => selectMemory(m)}
-                    title={m.title}
-                  >
-                    {m.title}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* 对话历史 */}
-            {conversationMemories.length > 0 && (
-              <div>
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground flex items-center gap-1 border-t mt-1">
-                  <Database className="h-3 w-3" /> 对话历史
-                </div>
-                {conversationMemories.map((m) => (
-                  <button
-                    key={m.path}
-                    className={`w-full text-left px-2 py-1.5 text-[11px] hover:bg-accent truncate block ${selectedPath === m.path ? 'bg-primary-light text-primary' : ''}`}
-                    onClick={() => selectMemory(m)}
-                    title={`${m.site ? `[${m.site}] ` : ''}${m.title}`}
-                  >
-                    <span className="text-muted-foreground">{m.site ? `[${m.site}] ` : ''}</span>
-                    {m.title}
-                  </button>
-                ))}
-              </div>
-            )}
-            {filtered.length === 0 && (
+            {filtered.length > 0 ? (
+              filtered.map((m) => (
+                <button
+                  key={m.path}
+                  className={`w-full text-left px-2 py-1.5 text-[11px] hover:bg-accent truncate block ${selectedPath === m.path ? 'bg-primary-light text-primary' : ''}`}
+                  onClick={() => selectMemory(m)}
+                  title={m.title}
+                >
+                  <FileText className="h-3 w-3 inline mr-1 text-muted-foreground" />
+                  {m.title}
+                </button>
+              ))
+            ) : (
               <div className="px-2 py-4 text-[11px] text-muted-foreground text-center">
-                {searchQuery ? '无匹配记忆' : '暂无记忆'}
+                {searchQuery ? '无匹配记忆' : '暂无记忆，点击下方按钮新建'}
               </div>
             )}
           </div>
@@ -208,7 +169,7 @@ export const MemoryManagerDialog: React.FC<{
               className="w-full flex items-center justify-center gap-1 rounded border py-1 text-[11px] hover:bg-accent"
               onClick={createNew}
             >
-              <Plus className="h-3 w-3" /> 新建手动记忆
+              <Plus className="h-3 w-3" /> 新建记忆
             </button>
           </div>
         </div>
@@ -233,7 +194,7 @@ export const MemoryManagerDialog: React.FC<{
                     </span>
                   )}
                   <span className="text-[10px] text-muted-foreground">
-                    {isNew ? '新建' : (memories.find((m) => m.path === selectedPath)?.sourceType === 'manual' ? '手动记忆' : '对话历史')}
+                    {isNew ? '新建' : '手动记忆'}
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -260,12 +221,11 @@ export const MemoryManagerDialog: React.FC<{
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-              选择左侧记忆或新建手动记忆
+              选择左侧记忆或新建记忆
             </div>
           )}
         </div>
 
-        {/* 关闭 */}
         <button
           className="absolute top-2 right-2 h-6 w-6 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted"
           onClick={onClose}

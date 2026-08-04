@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { archivedSessionsForWorkspace, createAgentSession, sessionsForWorkspace, type AgentSession } from './agent-sessions';
+import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, type AgentLogEntry, type AgentSession } from './agent-sessions';
 
 const STORAGE_KEY = 'code-editor.agent-sessions.v1';
 const ACTIVE_KEY = 'code-editor.active-agent-sessions.v1';
+const LOGS_KEY = 'code-editor.agent-logs.v1';
 
 function readStored<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? '') as T; } catch { return fallback; }
@@ -11,6 +12,7 @@ function readStored<T>(key: string, fallback: T): T {
 export function useAgentSessions(workspace: { path: string; name: string } | null) {
   const [sessions, setSessions] = useState<AgentSession[]>(() => readStored(STORAGE_KEY, []));
   const [activeByWorkspace, setActiveByWorkspace] = useState<Record<string, string>>(() => readStored(ACTIVE_KEY, {}));
+  const [logsBySession, setLogsBySession] = useState<Record<string, AgentLogEntry[]>>(() => readStored(LOGS_KEY, {}));
   const visibleSessions = useMemo(
     () => sessionsForWorkspace(sessions, workspace?.path),
     [sessions, workspace?.path],
@@ -21,9 +23,11 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
   );
   const activeSessionId = workspace ? activeByWorkspace[workspace.path] : undefined;
   const activeSession = visibleSessions.find((session) => session.id === activeSessionId) ?? visibleSessions[0] ?? null;
+  const activeLogs = activeSession ? logsBySession[activeSession.id] ?? [] : [];
 
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.slice(-200))), [sessions]);
   useEffect(() => localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeByWorkspace)), [activeByWorkspace]);
+  useEffect(() => localStorage.setItem(LOGS_KEY, JSON.stringify(logsBySession)), [logsBySession]);
   useEffect(() => {
     if (!workspace || !activeSession || activeByWorkspace[workspace.path] === activeSession.id) return;
     setActiveByWorkspace((previous) => ({ ...previous, [workspace.path]: activeSession.id }));
@@ -73,7 +77,23 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
       delete stored[persistenceKey];
       localStorage.setItem(storageKey, JSON.stringify(stored));
     }
+    setLogsBySession((previous) => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
   }, [sessions]);
 
-  return { sessions: visibleSessions, archivedSessions, activeSession, createSession, selectSession, updateSession, archiveSession, restoreSession, deleteSession };
+  const appendLog = useCallback((sessionId: string, level: AgentLogEntry['level'], message: string) => {
+    setLogsBySession((previous) => ({
+      ...previous,
+      [sessionId]: [...(previous[sessionId] ?? []).slice(-499), createAgentLogEntry(level, message)],
+    }));
+  }, []);
+
+  const clearLogs = useCallback((sessionId: string) => {
+    setLogsBySession((previous) => ({ ...previous, [sessionId]: [] }));
+  }, []);
+
+  return { sessions: visibleSessions, archivedSessions, activeSession, activeLogs, createSession, selectSession, updateSession, archiveSession, restoreSession, deleteSession, appendLog, clearLogs };
 }
