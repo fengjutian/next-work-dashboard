@@ -62,8 +62,8 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-10 items-center gap-2 border-b px-3">
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{props.activeSession?.title ?? '选择或创建会话'}</span>
-          {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => props.onRenameSession(props.activeSession!.id)}><Edit3 className="mr-1 h-3 w-3" />重命名</Button>}
-          {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={props.aiEditing} onClick={() => props.onArchiveSession(props.activeSession!.id)}>归档</Button>}
+          {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => props.activeSession && props.onRenameSession(props.activeSession.id)}><Edit3 className="mr-1 h-3 w-3" />重命名</Button>}
+          {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={props.aiEditing} onClick={() => props.activeSession && props.onArchiveSession(props.activeSession.id)}>归档</Button>}
           <button title="关闭 Agents" className="rounded p-1 hover:bg-accent" onClick={props.onClose}><X className="h-4 w-4" /></button>
         </header>
         <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -93,4 +93,3 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
     </div>
   );
 };
-

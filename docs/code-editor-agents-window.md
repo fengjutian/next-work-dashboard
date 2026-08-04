@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-- 状态：首版开发中
+- 状态：阶段 A 首版已实现
 - 创建日期：2026-08-04
 - 适用模块：`prompt-lab/src/plugins/code-editor`
 - 参考产品：Visual Studio Code Agents Window（Preview）
@@ -129,6 +129,8 @@ interface AgentConversation {
 
 限制：同一工作区只有当前选中会话可以执行；执行仍运行在现有渲染进程调用链中。
 
+实现记录（2026-08-04）：已加入工具栏入口、三栏 Agents 视图、按工作区过滤的会话创建/选择/重命名/归档、按会话隔离的对话与候选持久化，以及 Changes 到现有 Diff Editor 的审阅入口。真正并行执行、取消和 worktree 隔离仍属于阶段 B/C。
+
 ### 阶段 B：任务执行器
 
 - 将 Agent 调用迁移到独立任务服务；
@@ -163,4 +165,3 @@ interface AgentConversation {
 - 大型候选内容存储在 `localStorage` 可能达到容量上限；阶段 B 应迁移到 SQLite。
 - 渲染进程执行长请求时，取消与并发控制能力有限。
 - 多会话共享未保存编辑器文档时，候选可能过期；必须继续执行现有版本检查。
-

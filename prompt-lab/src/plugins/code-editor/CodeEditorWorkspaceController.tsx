@@ -191,21 +191,27 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   }, []);
 
   const {
+    sessions: agentSessionList,
+    activeSession: activeAgentSession,
+    createSession: createAgentSession,
+    selectSession: selectAgentSession,
+    updateSession: updateAgentSession,
+    archiveSession: archiveAgentSession,
+  } = useAgentSessions(workspace);
+  const {
     aiInstruction, setAiInstruction, aiEditing, setAiEditing, inlineEdit, setInlineEdit,
     aiSessions, aiMultiFile, setAiMultiFile, aiProposals, setAiProposals,
     aiTokenBudget, setAiTokenBudget, aiHistory, setAiHistory, aiHunks, setAiHunks,
     aiMessages, setAiMessages, aiPendingRequest, setAiPendingRequest,
     recordAiSession, updateSessionAcceptCount,
-  } = useAiSessionState({ workspace, appendOutput });
-  const agentSessions = useAgentSessions(workspace);
+  } = useAiSessionState({ workspace, sessionId: activeAgentSession?.id, appendOutput });
 
   useEffect(() => {
-    const session = agentSessions.activeSession;
-    if (!session) return;
+    if (!activeAgentSession) return;
     const nextStatus = aiEditing ? 'running' : aiProposals.length ? 'review' : 'idle';
-    if (session.status === nextStatus && session.filesChanged === aiProposals.length) return;
-    agentSessions.updateSession(session.id, { status: nextStatus, filesChanged: aiProposals.length });
-  }, [agentSessions.activeSession, agentSessions.updateSession, aiEditing, aiProposals.length]);
+    if (activeAgentSession.status === nextStatus && activeAgentSession.filesChanged === aiProposals.length) return;
+    updateAgentSession(activeAgentSession.id, { status: nextStatus, filesChanged: aiProposals.length });
+  }, [activeAgentSession, aiEditing, aiProposals.length, updateAgentSession]);
 
   const openExternalDiff = useCallback((value: { path: string; name: string; modified: string }) => {
     setDiffView({ ...value, original: '', language: 'diff', source: 'external' });
@@ -1154,8 +1160,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
       {agentsOpen ? <AgentsWindow
         workspace={workspace}
-        sessions={agentSessions.sessions}
-        activeSession={agentSessions.activeSession}
+        sessions={agentSessionList}
+        activeSession={activeAgentSession}
         aiInstruction={aiInstruction}
         aiEditing={aiEditing}
         aiMultiFile={aiMultiFile}
@@ -1163,14 +1169,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiProposals={aiProposals}
         activeDocumentPath={activeDocument?.path}
         onClose={() => setAgentsOpen(false)}
-        onCreateSession={() => { agentSessions.createSession(); }}
-        onSelectSession={agentSessions.selectSession}
+        onCreateSession={() => { createAgentSession(); }}
+        onSelectSession={selectAgentSession}
         onRenameSession={(id) => { void (async () => {
-          const title = await appPrompt('重命名 Agent 会话', agentSessions.activeSession?.title ?? '');
-          if (title?.trim()) agentSessions.updateSession(id, { title: title.trim().slice(0, 80) });
+          const title = await appPrompt('重命名 Agent 会话', activeAgentSession?.title ?? '');
+          if (title?.trim()) updateAgentSession(id, { title: title.trim().slice(0, 80) });
         })(); }}
         onArchiveSession={(id) => { void (async () => {
-          if (await appConfirm('归档这个 Agent 会话？')) agentSessions.archiveSession(id);
+          if (await appConfirm('归档这个 Agent 会话？')) archiveAgentSession(id);
         })(); }}
         onInstructionChange={setAiInstruction}
         onMultiFileChange={setAiMultiFile}

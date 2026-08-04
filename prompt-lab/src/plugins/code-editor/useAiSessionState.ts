@@ -24,6 +24,7 @@ interface AiSession {
 
 interface UseAiSessionStateOptions {
   workspace: { path: string; name: string } | null;
+  sessionId?: string;
   appendOutput: (message: string) => void;
 }
 
@@ -31,7 +32,8 @@ function readStored<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) ?? '') as T; } catch { return fallback; }
 }
 
-export function useAiSessionState({ workspace, appendOutput }: UseAiSessionStateOptions) {
+export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiSessionStateOptions) {
+  const persistenceKey = workspace ? `${workspace.path}::${sessionId ?? 'default'}` : null;
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiEditing, setAiEditing] = useState(false);
   const [inlineEdit, setInlineEdit] = useState({ instruction: '', visible: false });
@@ -52,56 +54,56 @@ export function useAiSessionState({ workspace, appendOutput }: UseAiSessionState
   useEffect(() => localStorage.setItem('code-editor.ai-token-budget', String(aiTokenBudget)), [aiTokenBudget]);
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!workspace || !persistenceKey) return;
     const drafts = readStored<Record<string, { proposals: AiFileProposal[]; instruction: string }>>('code-editor.ai-drafts.v1', {});
-    const draft = drafts[workspace.path];
+    const draft = drafts[persistenceKey];
     setAiProposals(draft?.proposals ?? []);
-    if (draft?.instruction) setAiInstruction(draft.instruction);
-    restoredDraftWorkspace.current = workspace.path;
+    setAiInstruction(draft?.instruction ?? '');
+    restoredDraftWorkspace.current = persistenceKey;
     if (draft?.proposals.length) appendOutput(`已恢复 ${draft.proposals.length} 个待审 AI 修改候选`);
-  }, [appendOutput, workspace]);
+  }, [appendOutput, persistenceKey, workspace]);
 
   useEffect(() => {
-    if (!workspace) { setAiMessages([]); setAiPendingRequest(null); return; }
+    if (!workspace || !persistenceKey) { setAiMessages([]); setAiPendingRequest(null); return; }
     const conversations = readStored<Record<string, AiConversationMessage[]>>('code-editor.ai-conversations.v1', {});
     const pending = readStored<Record<string, AiPendingRequest>>('code-editor.ai-pending.v1', {});
-    setAiMessages(conversations[workspace.path] ?? []);
-    const recovered = recoverInterruptedRequest(pending[workspace.path]);
+    setAiMessages(conversations[persistenceKey] ?? []);
+    const recovered = recoverInterruptedRequest(pending[persistenceKey]);
     setAiPendingRequest(recovered ?? null);
     if (recovered) {
       setAiInstruction(recovered.instruction);
       appendOutput(`已恢复中断的 AI 请求：${recovered.instruction.slice(0, 80)}`);
     }
-  }, [appendOutput, workspace]);
+  }, [appendOutput, persistenceKey, workspace]);
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!persistenceKey) return;
     const conversations = readStored<Record<string, AiConversationMessage[]>>('code-editor.ai-conversations.v1', {});
-    conversations[workspace.path] = aiMessages.slice(-100);
+    conversations[persistenceKey] = aiMessages.slice(-100);
     localStorage.setItem('code-editor.ai-conversations.v1', JSON.stringify(conversations));
-  }, [aiMessages, workspace]);
+  }, [aiMessages, persistenceKey]);
 
   useEffect(() => {
-    if (!workspace) return;
+    if (!persistenceKey) return;
     const pending = readStored<Record<string, AiPendingRequest>>('code-editor.ai-pending.v1', {});
-    if (aiPendingRequest) pending[workspace.path] = aiPendingRequest;
-    else delete pending[workspace.path];
+    if (aiPendingRequest) pending[persistenceKey] = aiPendingRequest;
+    else delete pending[persistenceKey];
     localStorage.setItem('code-editor.ai-pending.v1', JSON.stringify(pending));
-  }, [aiPendingRequest, workspace]);
+  }, [aiPendingRequest, persistenceKey]);
 
   useEffect(() => {
-    if (!workspace || restoredDraftWorkspace.current !== workspace.path) return;
+    if (!workspace || !persistenceKey || restoredDraftWorkspace.current !== persistenceKey) return;
     try {
       const drafts = readStored<Record<string, { proposals: AiFileProposal[]; instruction: string; savedAt?: number }>>('code-editor.ai-drafts.v1', {});
-      if (aiProposals.length) drafts[workspace.path] = {
+      if (aiProposals.length) drafts[persistenceKey] = {
         proposals: aiProposals, instruction: aiInstruction, savedAt: Date.now(),
       };
-      else delete drafts[workspace.path];
+      else delete drafts[persistenceKey];
       localStorage.setItem('code-editor.ai-drafts.v1', JSON.stringify(drafts));
     } catch (error) {
       appendOutput(`AI 待审候选持久化失败：${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [aiInstruction, aiProposals, appendOutput, workspace]);
+  }, [aiInstruction, aiProposals, appendOutput, persistenceKey, workspace]);
 
   const recordAiSession = useCallback((fileCount: number) => {
     if (!workspace) return;

@@ -27,7 +27,7 @@
 |---|---|---|
 | [代码编辑器需求](./code-editor-requirements.md) | 编辑器目标、接口和验收标准 | 持续更新 |
 | [代码编辑器未完成功能](./code-editor-remaining-features.md) | Git、AI 编辑、终端和搜索待办 | 规划 |
-| [代码编辑器 Agents Window](./code-editor-agents-window.md) | Agent 会话视图、数据模型、分阶段计划和验收标准 | 开发中 |
+| [代码编辑器 Agents Window](./code-editor-agents-window.md) | Agent 会话视图、数据模型、分阶段计划和验收标准 | 阶段 A 已实现 |
 | [终端功能](./terminal-features.md) | 终端架构、功能和已知问题 | 持续更新 |
 | [Excel 插件方案](./excel-plugin-plan.md) | Excel 插件技术选型与阶段计划 | 方案 |
 | [设计规范](../design/DESIGN.md) | UI 与视觉设计规范 | 参考 |
