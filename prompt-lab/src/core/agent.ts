@@ -17,11 +17,18 @@ export interface AgentStep {
 export interface AgentOptions {
   maxSteps?: number;
   signal?: AbortSignal;
+  systemPrompt?: string;
 }
 
 // ── System prompt ──
 
-const SYSTEM_PROMPT = `You are a helpful AI assistant. You have access to tools. Use them when needed to gather information or perform actions. Always respond in the user's language.`;
+const SYSTEM_PROMPT = `You are a helpful AI assistant with access to tools. Follow these rules:
+
+1. **URL handling**: When the user mentions a URL (http:// or https://), you MUST call the \`fetch_url\` tool to retrieve its content before answering. Never claim you cannot access the network — you have the fetch_url tool for this purpose.
+
+2. **Memory first**: When available, use \`search_conversation_history\` to find relevant context before answering.
+
+3. **Tools over guesses**: Prefer calling a tool over guessing or relying on training data. Always respond in the user's language.`;
 
 // ── Agent ──
 
@@ -47,7 +54,10 @@ export async function* runAgent(
   const toolSchemas = getEnabledToolSchemas();
   const tools = toolSchemas.map(openAiSchemaToToolDef);
 
-  const systemMsg: ChatMessage = { role: 'system', content: SYSTEM_PROMPT };
+  const systemPrompt = options.systemPrompt
+    ? `${SYSTEM_PROMPT}\n\n${options.systemPrompt}`
+    : SYSTEM_PROMPT;
+  const systemMsg: ChatMessage = { role: 'system', content: systemPrompt };
   const messages: ChatMessage[] = [systemMsg, ...history, { role: 'user', content: userMessage }];
 
   for (let step = 0; step < maxSteps; step++) {

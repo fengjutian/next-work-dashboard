@@ -347,7 +347,7 @@ export function useChatSession() {
 
     let thinkingText = '';
     let currentToolCalls: ToolCall[] = [];
-    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal })) {
+    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal, systemPrompt })) {
       switch (step.type) {
         case 'think':
           updateSession((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: '🤔 思考中...' } : message));
@@ -383,7 +383,7 @@ export function useChatSession() {
           break;
       }
     }
-  }, [currentModel, getProvider, updateSession]);
+  }, [currentModel, getProvider, updateSession, systemPrompt]);
 
   // ── 发送 ──
   const handleSend = useCallback(async (directText?: string, contextText?: string) => {

@@ -40,42 +40,60 @@ export function useAiProposalReview({
     setDiffView(remaining[0] ? proposalDiff(remaining[0]) : null);
   }, [aiProposals, setAiProposals, setDiffView]);
 
-  const acceptAiEdit = useCallback(() => {
-    if (!diffView || diffView.source !== 'ai') return;
-    const proposal = aiProposals.find((item) => item.path === diffView.path);
+  const acceptProposalView = useCallback((view: EditorDiffView) => {
+    const proposal = aiProposals.find((item) => item.path === view.path);
     const isNew = !proposal?.metadata;
-    const isDelete = diffView.modified === '' && diffView.original !== '';
+    const isDelete = view.modified === '' && view.original !== '';
     setDocuments((previous) => {
-      const exists = previous.some((document) => document.path === diffView.path);
-      if (isDelete) return previous.filter((document) => document.path !== diffView.path);
-      const updated = previous.map((document) => document.path === diffView.path
-        ? { ...document, content: diffView.modified, pinned: true }
+      const exists = previous.some((document) => document.path === view.path);
+      if (isDelete) return previous.filter((document) => document.path !== view.path);
+      const updated = previous.map((document) => document.path === view.path
+        ? { ...document, content: view.modified, pinned: true }
         : document);
       if (exists) return updated;
       return [...updated, {
-        path: diffView.path,
-        name: diffView.path.split(/[\\/]/).pop() ?? diffView.path,
-        content: diffView.modified,
-        savedContent: isNew ? '' : diffView.modified,
-        language: diffView.language,
+        path: view.path,
+        name: view.path.split(/[\\/]/).pop() ?? view.path,
+        content: view.modified,
+        savedContent: isNew ? '' : view.modified,
+        language: view.language,
         encoding: 'utf8',
         lineEnding: 'LF',
         pinned: true,
       }];
     });
     setAiHistory((previous) => [...previous.slice(-49), {
-      id: Date.now(), path: diffView.path, before: diffView.original, after: diffView.modified,
+      id: Date.now(), path: view.path, before: view.original, after: view.modified,
     }]);
-    setActivePath(diffView.path);
-    appendOutput(`已接受 AI 对 ${diffView.name} 的修改（尚未保存）`);
+    setActivePath(view.path);
+    appendOutput(`已接受 AI 对 ${view.name} 的修改（尚未保存）`);
     setStatus('已接受 AI 修改，请检查后保存');
     updateSessionAcceptCount();
-    advance(diffView.path);
-  }, [advance, aiProposals, appendOutput, diffView, setActivePath, setAiHistory, setDocuments, setStatus, updateSessionAcceptCount]);
+    advance(view.path);
+  }, [advance, aiProposals, appendOutput, setActivePath, setAiHistory, setDocuments, setStatus, updateSessionAcceptCount]);
+
+  const acceptAiEdit = useCallback(() => {
+    if (!diffView || diffView.source !== 'ai') return;
+    acceptProposalView(diffView);
+  }, [acceptProposalView, diffView]);
+
+  const acceptAiProposal = useCallback((path: string) => {
+    const proposal = aiProposals.find((item) => item.path === path);
+    if (proposal) acceptProposalView(proposalDiff(proposal));
+  }, [acceptProposalView, aiProposals]);
 
   const rejectAiEdit = useCallback(() => {
     if (diffView?.source === 'ai') advance(diffView.path);
   }, [advance, diffView]);
+
+  const rejectAiProposal = useCallback((path: string) => advance(path), [advance]);
+
+  const rejectAllAiEdits = useCallback(() => {
+    const count = aiProposals.length;
+    setAiProposals([]);
+    setDiffView(null);
+    setStatus(count ? `已拒绝 ${count} 个 AI 修改候选` : '没有待拒绝的 AI 修改');
+  }, [aiProposals.length, setAiProposals, setDiffView, setStatus]);
 
   const acceptAllAiEdits = useCallback(async () => {
     if (!workspace || !aiProposals.length) return;
@@ -199,5 +217,5 @@ export function useAiProposalReview({
     setStatus(`已撤销 AI 对 ${edit.path} 的修改`);
   }, [aiHistory, setActivePath, setAiHistory, setDocuments, setStatus]);
 
-  return { acceptAiEdit, rejectAiEdit, acceptAllAiEdits, applyAiHunk, undoLastAiEdit };
+  return { acceptAiEdit, acceptAiProposal, rejectAiEdit, rejectAiProposal, rejectAllAiEdits, acceptAllAiEdits, applyAiHunk, undoLastAiEdit };
 }

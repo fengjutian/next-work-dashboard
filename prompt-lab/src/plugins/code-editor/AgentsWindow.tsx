@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentLogEntry, AgentSession } from './agent-sessions';
 import type { AiExecutionStage } from './useAiEditGeneration';
+import { summarizeAiProposal } from './ai-proposal-summary';
 
 interface AgentsWindowProps {
   workspace: { path: string; name: string } | null;
@@ -32,6 +33,10 @@ interface AgentsWindowProps {
   onGenerate: () => void;
   onCancel: () => void;
   onOpenProposal: (proposal: AiFileProposal) => void;
+  onAcceptProposal: (path: string) => void;
+  onRejectProposal: (path: string) => void;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
 }
 
 const statusLabel: Record<AgentSession['status'], string> = {
@@ -125,10 +130,14 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
       </section>
 
       <aside className="flex w-72 shrink-0 flex-col border-l">
-        <div className="flex h-10 items-center border-b px-3 text-xs font-semibold">CHANGES <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">{props.aiProposals.length}</span></div>
+        <div className="flex h-10 items-center border-b px-3 text-xs font-semibold">CHANGES <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">{props.aiProposals.length}</span><div className="flex-1" />{props.aiProposals.length > 0 && <><button className="rounded px-1.5 py-1 text-[10px] font-normal text-primary hover:bg-accent" onClick={props.onAcceptAll}>全部接受</button><button className="rounded px-1.5 py-1 text-[10px] font-normal text-destructive hover:bg-accent" onClick={props.onRejectAll}>全部拒绝</button></>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">
           {props.aiProposals.length === 0 && <p className="p-3 text-xs text-muted-foreground">Agent 生成修改后会显示在这里。</p>}
-          {props.aiProposals.map((proposal) => <button key={proposal.path} className="mb-1 w-full rounded border px-2 py-2 text-left text-xs hover:bg-accent" onClick={() => props.onOpenProposal(proposal)}><div className="truncate font-medium">{proposal.path.split(/[\\/]/).pop()}</div><div className="mt-1 truncate text-[10px] text-muted-foreground">{proposal.path}</div></button>)}
+          {props.aiProposals.map((proposal) => {
+            const summary = summarizeAiProposal(proposal);
+            const kindLabel = { create: '新增', modify: '修改', delete: '删除', rename: '重命名' }[summary.kind];
+            return <div key={proposal.path} className="mb-1 rounded border px-2 py-2 text-xs hover:bg-accent/40"><button className="w-full text-left" onClick={() => props.onOpenProposal(proposal)}><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{proposal.path.split(/[\\/]/).pop()}</span><span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">{kindLabel}</span></div><div className="mt-1 truncate text-[10px] text-muted-foreground">{proposal.previousPath ? `${proposal.previousPath} → ${proposal.path}` : proposal.path}</div><div className="mt-1 text-[10px]"><span className="text-success">+{summary.additions}</span> <span className="text-destructive">-{summary.deletions}</span></div></button><div className="mt-1 flex justify-end gap-1"><button className="rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-accent" onClick={() => props.onAcceptProposal(proposal.path)}>接受</button><button className="rounded px-1.5 py-0.5 text-[10px] text-destructive hover:bg-accent" onClick={() => props.onRejectProposal(proposal.path)}>拒绝</button></div></div>;
+          })}
         </div>
         <div className="border-t p-3 text-[10px] text-muted-foreground">所有修改都需要通过 Diff 审阅，不会自动保存。</div>
       </aside>

@@ -262,7 +262,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   });
 
   const {
-    acceptAiEdit, rejectAiEdit, acceptAllAiEdits, applyAiHunk, undoLastAiEdit,
+    acceptAiEdit, acceptAiProposal, rejectAiEdit, rejectAiProposal, rejectAllAiEdits, acceptAllAiEdits, applyAiHunk, undoLastAiEdit,
   } = useAiProposalReview({
     workspace,
     documents,
@@ -1244,6 +1244,10 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onGenerate={() => { void runAgentEdit(); }}
         onCancel={cancelAiEdit}
         onOpenProposal={(proposal) => setDiffView({ path: proposal.path, name: proposal.path, original: proposal.original, modified: proposal.modified, language: proposal.language, source: 'ai' })}
+        onAcceptProposal={acceptAiProposal}
+        onRejectProposal={rejectAiProposal}
+        onAcceptAll={() => { void (async () => { if (await appConfirm(`接受全部 ${aiProposals.length} 个修改并写入工作区？`)) await acceptAllAiEdits(); })(); }}
+        onRejectAll={() => { void (async () => { if (await appConfirm(`拒绝全部 ${aiProposals.length} 个修改候选？`)) rejectAllAiEdits(); })(); }}
       /> : <div className="flex min-h-0 flex-1">
         {sidebarVisible && <WorkspaceExplorer
           width={sidebarWidth}
