@@ -27,6 +27,7 @@ const DEFAULT_NODES = [
   'Vite', 'Tailwind', 'SQLite', 'Drizzle',
 ];
 const GRAPH_STORAGE_KEY = 'prompt-lab:knowledge-graph:v1';
+const LEGACY_CODE_GRAPH_LIMIT = 100;
 
 // ── 默认节点工厂 ──
 const makeDefaultNodes = (): GraphNode[] =>
@@ -43,13 +44,25 @@ function loadPersistedGraph(): { nodes: GraphNode[]; graphData: GraphData | null
     if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
       return { nodes: makeDefaultNodes(), graphData: null };
     }
-    const nodes = parsed.nodes.filter((node): node is GraphNode =>
+    let nodes = parsed.nodes.filter((node): node is GraphNode =>
       Boolean(node && typeof node.id === 'string' && typeof node.label === 'string' && ['manual', 'extracted', 'code'].includes(node.source)),
     );
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    const edges = parsed.edges.filter((edge) =>
+    let nodeIds = new Set(nodes.map((node) => node.id));
+    let edges = parsed.edges.filter((edge) =>
       Boolean(edge && typeof edge.source === 'string' && typeof edge.target === 'string' && nodeIds.has(edge.source) && nodeIds.has(edge.target)),
     );
+    // 早期版本没有代码节点上限。自动迁移旧大图，避免应用启动后立即渲染上千节点。
+    if (nodes.length > 500 && nodes.some((node) => node.source === 'code')) {
+      nodes = [...nodes].sort((a, b) => b.degree - a.degree).slice(0, LEGACY_CODE_GRAPH_LIMIT);
+      nodeIds = new Set(nodes.map((node) => node.id));
+      edges = edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+      const degree = new Map<string, number>();
+      edges.forEach((edge) => {
+        degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+        degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+      });
+      nodes = nodes.map((node) => ({ ...node, degree: degree.get(node.id) ?? 0 }));
+    }
     return { nodes: nodes.length > 0 ? nodes : makeDefaultNodes(), graphData: nodes.length > 0 ? { nodes, edges } : null };
   } catch {
     return { nodes: makeDefaultNodes(), graphData: null };

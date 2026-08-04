@@ -1,7 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Graph, type IEvent } from '@antv/g6';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, GitBranch } from '@/components/icons';
-import type { GraphData } from './graph-types';
+import type { GraphData, GraphNode } from './graph-types';
+import { aggregateGraph, dependencyMatrix, localGraph } from './graph-views';
+
+type GraphView = 'relation' | 'layered' | 'aggregate' | 'local' | 'matrix';
 
 // ── 调色板 ──
 
@@ -19,6 +22,19 @@ interface GraphCanvasProps {
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelect }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
+  const [view, setView] = useState<GraphView>('aggregate');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const fallbackNodeId = useMemo(() => graphData?.nodes.reduce<GraphNode | undefined>(
+    (best, node) => !best || node.degree > best.degree ? node : best,
+    undefined,
+  )?.id ?? null, [graphData]);
+  const displayGraph = useMemo(() => {
+    if (!graphData) return null;
+    if (view === 'aggregate' || view === 'matrix') return aggregateGraph(graphData);
+    if (view === 'local') return localGraph(graphData, selectedNodeId ?? fallbackNodeId ?? '', 1);
+    return graphData;
+  }, [fallbackNodeId, graphData, selectedNodeId, view]);
+  const matrix = useMemo(() => graphData ? dependencyMatrix(graphData) : null, [graphData]);
 
   // ── 工具栏操作 ──
   const zoomIn = () => graphRef.current?.zoomBy(1.3);
@@ -31,31 +47,32 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
 
   // ── 渲染 G6 ──
   useEffect(() => {
-    if (!graphData || !containerRef.current) return;
+    if (!displayGraph || view === 'matrix' || !containerRef.current) return;
 
     if (graphRef.current) { graphRef.current.destroy(); graphRef.current = null; }
 
     const container = containerRef.current;
     const { clientWidth: w, clientHeight: h } = container;
 
-    const maxWeight = Math.max(...graphData.edges.map((e) => e.weight), 1);
-    const maxDegree = Math.max(...graphData.nodes.map((n) => n.degree), 1);
+    const maxWeight = Math.max(...displayGraph.edges.map((e) => e.weight), 1);
+    const maxDegree = Math.max(...displayGraph.nodes.map((n) => n.degree), 1);
     const minSize = 28;
     const maxSize = 48;
-    const isLargeGraph = graphData.nodes.length > 180;
-    const incidentEdges = new Map<string, typeof graphData.edges>();
-    graphData.nodes.forEach((node) => incidentEdges.set(node.id, []));
-    graphData.edges.forEach((edge) => {
+    const isLargeGraph = displayGraph.nodes.length > 180;
+    const incidentEdges = new Map<string, typeof displayGraph.edges>();
+    displayGraph.nodes.forEach((node) => incidentEdges.set(node.id, []));
+    displayGraph.edges.forEach((edge) => {
       incidentEdges.get(edge.source)?.push(edge);
       incidentEdges.get(edge.target)?.push(edge);
     });
 
     // 按度数分配颜色
-    const sortedByDegree = [...graphData.nodes].sort((a, b) => b.degree - a.degree);
+    const sortedByDegree = [...displayGraph.nodes].sort((a, b) => b.degree - a.degree);
     const colorMap = new Map<string, string>();
     sortedByDegree.forEach((n, i) => {
       colorMap.set(n.id, NODE_COLORS[i % NODE_COLORS.length]);
     });
+    const labeledNodeIds = new Set(sortedByDegree.slice(0, isLargeGraph ? 24 : sortedByDegree.length).map((node) => node.id));
 
     const graph = new Graph({
       container,
@@ -64,11 +81,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       autoFit: 'view',
       padding: [40, 100, 40, 40],
       data: {
-        nodes: graphData.nodes.map((n) => ({
+        nodes: displayGraph.nodes.map((n) => ({
           id: n.id,
           data: { label: n.label, degree: n.degree, edges: incidentEdges.get(n.id) ?? [] },
         })),
-        edges: graphData.edges.map((e, index) => ({
+        edges: displayGraph.edges.map((e, index) => ({
           // G6 默认使用 source-target 作为边 ID；同一对节点的“定义/调用”等
           // 平行关系会因此冲突。显式 ID 同时保留关系类型和原始序号。
           id: `${e.source}->${e.target}:${e.kind ?? 'edge'}:${e.label ?? ''}:${index}`,
@@ -77,7 +94,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           data: { weight: e.weight, label: e.label, kind: e.kind },
         })),
       },
-      layout: isLargeGraph
+      layout: view === 'layered'
+        ? { type: 'dagre', rankdir: 'LR', nodesep: 28, ranksep: 70 }
+        : isLargeGraph
         ? { type: 'circular' }
         : { type: 'd3-force', linkDistance: 150, nodeStrength: -300, collide: { radius: 50 }, animate: true },
       node: {
@@ -90,7 +109,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           stroke: (d: any) => colorMap.get(d.id) ?? '#3b82f6',
           lineWidth: 0,
           fillOpacity: 0.9,
-          labelText: (d: any) => isLargeGraph && (d.data?.degree ?? 0) < 2 ? '' : d.data?.label ?? d.id,
+          labelText: (d: any) => labeledNodeIds.has(d.id) ? d.data?.label ?? d.id : '',
           labelPlacement: 'bottom',
           labelOffsetY: 4,
           labelFontSize: 11,
@@ -119,7 +138,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
         style: {
           stroke: (d: any) => {
             const wgt: number = d.data?.weight ?? 1;
-            const alpha = 0.15 + (wgt / maxWeight) * 0.55;
+            const alpha = (isLargeGraph ? 0.04 : 0.15) + (wgt / maxWeight) * (isLargeGraph ? 0.16 : 0.55);
             return `rgba(100, 116, 139, ${alpha.toFixed(2)})`;
           },
           lineWidth: (d: any) => {
@@ -177,8 +196,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       animation: !isLargeGraph,
     });
 
-    if (onNodeSelect) graph.on('node:click', (event: IEvent) => {
-      if ('target' in event && event.target && 'id' in event.target) onNodeSelect(String(event.target.id));
+    graph.on('node:click', (event: IEvent) => {
+      if ('target' in event && event.target && 'id' in event.target) {
+        const id = String(event.target.id);
+        if (graphData.nodes.some((node) => node.id === id)) {
+          setSelectedNodeId(id);
+          onNodeSelect?.(id);
+        }
+      }
     });
     graph.render();
     graphRef.current = graph;
@@ -194,7 +219,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       graph.destroy();
       graphRef.current = null;
     };
-  }, [graphData, onNodeSelect]);
+  }, [displayGraph, graphData, onNodeSelect, view]);
 
   // ── 空状态 ──
   if (!graphData) {
@@ -211,11 +236,25 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
 
   return (
     <>
+      <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border bg-background/90 p-1 shadow-sm backdrop-blur">
+        <select className="h-7 rounded bg-transparent px-2 text-xs outline-none" value={view} onChange={(event) => setView(event.target.value as GraphView)}>
+          <option value="aggregate">模块聚合</option><option value="layered">分层依赖</option><option value="local">局部关系</option><option value="matrix">依赖矩阵</option><option value="relation">完整关系</option>
+        </select>
+        {view === 'local' && <select className="h-7 max-w-56 rounded border-l border-border bg-transparent px-2 text-xs outline-none" value={selectedNodeId ?? fallbackNodeId ?? ''} onChange={(event) => setSelectedNodeId(event.target.value)}>
+          {graphData.nodes.slice().sort((a, b) => a.label.localeCompare(b.label)).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
+        </select>}
+      </div>
+
       {/* G6 画布 */}
-      <div ref={containerRef} className="flex-1 w-full h-full" />
+      {view === 'matrix' && matrix ? <div className="h-full w-full overflow-auto p-16">
+        <table className="border-collapse text-[10px]">
+          <thead><tr><th className="sticky left-0 bg-background p-1" />{matrix.labels.map((label) => <th key={label} className="max-w-20 rotate-[-45deg] whitespace-nowrap p-2 text-left font-normal">{label}</th>)}</tr></thead>
+          <tbody>{matrix.labels.map((label, row) => <tr key={label}><th className="sticky left-0 z-[1] whitespace-nowrap bg-background p-1 text-right font-normal">{label}</th>{matrix.values[row].map((value, column) => <td key={column} className="h-7 w-7 border border-border text-center" title={`${label} → ${matrix.labels[column]}: ${value}`} style={{ backgroundColor: value ? `rgba(109, 40, 105, ${Math.min(.15 + value / 20, .9)})` : undefined, color: value ? 'white' : undefined }}>{value || ''}</td>)}</tr>)}</tbody>
+        </table>
+      </div> : <div ref={containerRef} className="h-full w-full flex-1" />}
 
       {/* 工具栏浮层 */}
-      <div className="absolute top-3 right-3 flex flex-col gap-1 z-10">
+      {view !== 'matrix' && <div className="absolute top-3 right-3 flex flex-col gap-1 z-10">
         {[
           { icon: ZoomIn, label: '放大', onClick: zoomIn },
           { icon: ZoomOut, label: '缩小', onClick: zoomOut },
@@ -231,10 +270,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
             <Icon className="h-3.5 w-3.5" />
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* 图例浮层 */}
-      <div className="absolute bottom-3 left-3 z-10 bg-white/90 bg-muted/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-sm text-[10px] text-muted-foreground space-y-1">
+      {view !== 'matrix' && <div className="absolute bottom-3 left-3 z-10 bg-white/90 bg-muted/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-sm text-[10px] text-muted-foreground space-y-1">
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/40" /> 节点大小 = 关联强度
         </div>
@@ -242,7 +281,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           <svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke="#94a3b8" strokeWidth="3" opacity="0.4"/></svg>
           {' '}← 边粗细 & 数字 = 共现次数
         </div>
-      </div>
+      </div>}
     </>
   );
 };

@@ -7,7 +7,7 @@ import type { GraphData } from './graph-types';
 export const CodeExtractControls: React.FC<{ onExtract: (graph: GraphData) => void }> = ({ onExtract }) => {
   const { toast } = useToast();
   const [extracting, setExtracting] = useState(false);
-  const [maxNodes, setMaxNodes] = useState(250);
+  const [maxNodes, setMaxNodes] = useState(100);
   const handleExtract = useCallback(async () => {
     const folder = await window.electronAPI.workspace.openFolder();
     if (!folder) return;
