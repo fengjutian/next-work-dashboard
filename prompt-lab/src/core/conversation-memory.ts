@@ -418,8 +418,10 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       this.chunks = [];
     }
     const convFiles = await window.electronAPI.listConversations();
-    const memFilesRaw = await window.electronAPI.listMemories();
-    const memFiles: ConversationFile[] = memFilesRaw.map((m) => ({
+    const memFilesRaw = typeof window.electronAPI.listMemories === 'function'
+      ? await window.electronAPI.listMemories()
+      : [];
+    const memFiles: ConversationFile[] = memFilesRaw.filter((m) => m.enabled !== false).map((m) => ({
       site: 'manual',
       date: new Date(m.modifiedAt).toISOString().slice(0, 10),
       fileName: m.fileName,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
+import { isDbReady, dbInsertAgentMessage, dbInsertAgentProposal } from '@/db';
 import type { AiHunk, OpenDocument } from './editor-types';
 
 export interface AiFileProposal {
@@ -81,6 +82,12 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
     const conversations = readStored<Record<string, AiConversationMessage[]>>('code-editor.ai-conversations.v1', {});
     conversations[persistenceKey] = aiMessages.slice(-100);
     localStorage.setItem('code-editor.ai-conversations.v1', JSON.stringify(conversations));
+      // Also persist to SQLite
+      if (isDbReady() && aiMessages.length > 0) {
+        const last = aiMessages[aiMessages.length - 1];
+        const sid = persistenceKey.split("::")[1] ?? persistenceKey;
+        try { dbInsertAgentMessage({ id: "msg-" + sid + "-" + aiMessages.length, sessionId: sid, role: last.role, content: last.content, seq: aiMessages.length, timestamp: last.timestamp }); } catch {}
+      }
   }, [aiMessages, persistenceKey]);
 
   useEffect(() => {
@@ -100,6 +107,16 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
       };
       else delete drafts[persistenceKey];
       localStorage.setItem('code-editor.ai-drafts.v1', JSON.stringify(drafts));
+      // Also persist to SQLite
+      if (isDbReady() && aiProposals.length > 0) {
+        const sid = persistenceKey.split("::")[1] ?? persistenceKey;
+        try {
+          for (let i = 0; i < aiProposals.length; i++) {
+            const p = aiProposals[i];
+            dbInsertAgentProposal({ id: "prop-" + sid + "-" + Date.now() + "-" + i, sessionId: sid, path: p.path, original: p.original, modified: p.modified, language: p.language, previousPath: p.previousPath ?? null, accepted: null, acceptedAt: null, seq: i, createdAt: Date.now() });
+          }
+        } catch {}
+      }
     } catch (error) {
       appendOutput(`AI 待审候选持久化失败：${error instanceof Error ? error.message : String(error)}`);
     }

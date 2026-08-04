@@ -85,6 +85,7 @@ const electronAPI: ElectronAPI = {
   readMemory: (filePath: string) => ipcRenderer.invoke('read-memory', filePath) as Promise<{ success: boolean; content?: string; error?: string }>,
   writeMemory: (filePath: string, content: string) => ipcRenderer.invoke('write-memory', filePath, content) as Promise<{ success: boolean; filePath?: string; error?: string }>,
   deleteMemory: (filePath: string) => ipcRenderer.invoke('delete-memory', filePath) as Promise<{ success: boolean; error?: string }>,
+  setMemoryEnabled: (filePath: string, enabled: boolean) => ipcRenderer.invoke('set-memory-enabled', filePath, enabled) as Promise<{ success: boolean; error?: string }>,
 
   // 剪贴板（绕过 web 层，避免焦点问题）
   copyText: (text: string) => clipboard.writeText(text),

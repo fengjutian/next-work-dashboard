@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, type AgentLogEntry, type AgentSession } from './agent-sessions';
+import { isDbReady, dbInsertAgentSession, dbUpdateAgentSession, dbDeleteAgentSession, dbInsertAgentLog, dbDeleteAgentLogs } from '@/db';
 
 const STORAGE_KEY = 'code-editor.agent-sessions.v1';
 const ACTIVE_KEY = 'code-editor.active-agent-sessions.v1';
@@ -26,8 +27,36 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
   const activeLogs = activeSession ? logsBySession[activeSession.id] ?? [] : [];
 
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.slice(-200))), [sessions]);
+  // Also persist to SQLite
+  useEffect(() => {
+    if (!isDbReady() || sessions.length === 0) return;
+    try {
+      for (const s of sessions) {
+        dbInsertAgentSession({
+          id: s.id, title: s.title, status: s.status,
+          instruction: (s as any).instruction ?? "",
+          worktreePath: s.worktree?.path ?? null,
+          worktreeBranch: s.worktree?.branch ?? null,
+          worktreeHead: s.worktree?.head ?? null,
+          worktreeDirty: s.worktree?.dirty ? 1 : 0,
+          isPinned: s.pinned ? 1 : 0, parentSessionId: null,
+          tokenBudget: null,
+          createdAt: s.createdAt, updatedAt: s.updatedAt,
+          archivedAt: s.archivedAt ?? null,
+        });
+      }
+    } catch {}
+  }, [sessions]);
   useEffect(() => localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeByWorkspace)), [activeByWorkspace]);
   useEffect(() => localStorage.setItem(LOGS_KEY, JSON.stringify(logsBySession)), [logsBySession]);
+  useEffect(() => {
+    if (!isDbReady()) return;
+    for (const [sid, logs] of Object.entries(logsBySession)) {
+      if (logs.length === 0) continue;
+      const last = logs[logs.length - 1];
+      try { dbInsertAgentLog({ id: last.id, sessionId: sid, level: last.level, message: last.message, seq: logs.length, timestamp: last.timestamp }); } catch {}
+    }
+  }, [logsBySession]);
   useEffect(() => {
     if (!workspace || !activeSession || activeByWorkspace[workspace.path] === activeSession.id) return;
     setActiveByWorkspace((previous) => ({ ...previous, [workspace.path]: activeSession.id }));
@@ -82,6 +111,7 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
       delete next[id];
       return next;
     });
+    if (isDbReady()) { try { dbDeleteAgentSession(id); dbDeleteAgentLogs(id); } catch {} }
   }, [sessions]);
 
   const appendLog = useCallback((sessionId: string, level: AgentLogEntry['level'], message: string) => {

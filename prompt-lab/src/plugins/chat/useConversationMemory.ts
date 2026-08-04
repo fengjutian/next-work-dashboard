@@ -31,13 +31,16 @@ export function useConversationMemory() {
   ): Promise<{ contextContent?: string; sources: MemoryCitation[] }> => {
     let retrieved = [] as Awaited<ReturnType<typeof conversationMemory.search>>;
     if (memoryEnabled) {
-      try { retrieved = await conversationMemory.search(retrievalQuery, memoryConfig.recallCount); }
+      try {
+        const manualEnabled = localStorage.getItem('chat.manual-memory.enabled') !== 'false';
+        retrieved = await conversationMemory.search(retrievalQuery, manualEnabled ? memoryConfig.recallCount : memoryConfig.recallCount * 3);
+      }
       catch { /* Retrieval failures must not block the conversation. */ }
     }
     // 过滤手动记忆：当手动记忆检索开关关闭时，排除 sourceType === 'manual'
     const manualMemoryEnabled = localStorage.getItem('chat.manual-memory.enabled') !== 'false';
     const filtered = manualMemoryEnabled ? retrieved : retrieved.filter((r) => r.sourceType !== 'manual');
-    const selected = selectMemorySourcesForBudget(filtered, memoryConfig.contextBudget);
+    const selected = selectMemorySourcesForBudget(filtered.slice(0, memoryConfig.recallCount), memoryConfig.contextBudget);
     const memoryContext = buildMemoryContext(selected, memoryConfig.contextBudget);
     const context = [memoryContext, additionalContext?.trim()].filter(Boolean).join('\n\n---\n\n');
     return {

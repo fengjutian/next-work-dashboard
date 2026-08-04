@@ -86,6 +86,7 @@ export interface ElectronAPI {
   readMemory: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   writeMemory: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   deleteMemory: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  setMemoryEnabled: (filePath: string, enabled: boolean) => Promise<{ success: boolean; error?: string }>;
   getWebviewPreloadPath: () => Promise<string>;
   /** 打开文件选择对话框，返回文件信息(base64 content) */
   pickFile: (options?: { accept?: string; multiple?: boolean }) => Promise<FilePickResult | FilePickResult[] | null>;
@@ -208,6 +209,7 @@ export interface MemoryFile {
   size: number;
   modifiedAt: number;
   title: string;
+  enabled: boolean;
 }
 
 export interface ConversationSearchResult {

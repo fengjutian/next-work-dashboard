@@ -596,6 +596,19 @@ export function setupIPC(webviewPreloadPath: string) {
 
   // ── 手动记忆管理 ──
   const memoriesDir = path.join(app.getPath('documents'), 'next-work-dashboard', 'memories');
+  const memorySettingsPath = path.join(memoriesDir, '.settings.json');
+
+  const readDisabledMemories = (): Set<string> => {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(memorySettingsPath, 'utf-8')) as { disabled?: unknown };
+      return new Set(Array.isArray(parsed.disabled) ? parsed.disabled.filter((item): item is string => typeof item === 'string') : []);
+    } catch { return new Set(); }
+  };
+
+  const writeDisabledMemories = (disabled: Set<string>) => {
+    if (!fs.existsSync(memoriesDir)) fs.mkdirSync(memoriesDir, { recursive: true });
+    fs.writeFileSync(memorySettingsPath, JSON.stringify({ disabled: [...disabled].sort() }, null, 2), 'utf-8');
+  };
 
   const resolveMemoryPath = (filePath: string): string | null => {
     const root = path.resolve(memoriesDir);
@@ -611,6 +624,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('list-memories', async () => {
     try {
       if (!fs.existsSync(memoriesDir)) return [];
+      const disabled = readDisabledMemories();
       const files = fs.readdirSync(memoriesDir).filter((f) => f.endsWith('.md'));
       return files.map((file) => {
         const filePath = path.join(memoriesDir, file);
@@ -622,7 +636,7 @@ export function setupIPC(webviewPreloadPath: string) {
         } catch { /* keep undefined */ }
         return {
           fileName: file, path: filePath, size: stat.size, modifiedAt: stat.mtimeMs,
-          title: title || file.replace(/\.md$/, ''),
+          title: title || file.replace(/\.md$/, ''), enabled: !disabled.has(file),
         };
       }).sort((a, b) => b.modifiedAt - a.modifiedAt);
     } catch { return []; }
@@ -646,6 +660,9 @@ export function setupIPC(webviewPreloadPath: string) {
         return { success: false, error: 'ACCESS_DENIED' };
       }
       if (typeof content !== 'string') return { success: false, error: 'INVALID_CONTENT' };
+      if (path.basename(filePath) === filePath && fs.existsSync(resolved)) {
+        return { success: false, error: 'FILE_EXISTS' };
+      }
       fs.writeFileSync(resolved, content, 'utf-8');
       return { success: true, filePath: resolved };
     } catch (err) { return { success: false, error: String(err) }; }
@@ -656,6 +673,22 @@ export function setupIPC(webviewPreloadPath: string) {
       const resolved = resolveMemoryPath(filePath);
       if (!resolved) return { success: false, error: 'ACCESS_DENIED' };
       if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+      const disabled = readDisabledMemories();
+      if (disabled.delete(path.basename(resolved))) writeDisabledMemories(disabled);
+      return { success: true };
+    } catch (err) { return { success: false, error: String(err) }; }
+  });
+
+  ipcMain.handle('set-memory-enabled', async (_event, filePath: string, enabled: boolean) => {
+    try {
+      const resolved = resolveMemoryPath(filePath);
+      if (!resolved) return { success: false, error: 'ACCESS_DENIED' };
+      if (!fs.existsSync(resolved)) return { success: false, error: 'NOT_FOUND' };
+      if (typeof enabled !== 'boolean') return { success: false, error: 'INVALID_ENABLED_STATE' };
+      const disabled = readDisabledMemories();
+      if (enabled) disabled.delete(path.basename(resolved));
+      else disabled.add(path.basename(resolved));
+      writeDisabledMemories(disabled);
       return { success: true };
     } catch (err) { return { success: false, error: String(err) }; }
   });
