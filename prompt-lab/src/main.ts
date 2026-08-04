@@ -6,6 +6,7 @@ import { createTray } from './main/tray';
 import { setupIPC } from './main/ipc-handlers';
 import { registerShortcuts } from './main/shortcuts';
 import { destroyAll } from './plugins/terminal/backend/terminal-manager';
+import { mcpManager } from './main/mcp/mcp-manager';
 
 if (started) app.quit();
 
@@ -41,4 +42,5 @@ app.on('activate', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   destroyAll();
+  void mcpManager.closeAll();
 });

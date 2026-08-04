@@ -5,6 +5,7 @@ import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
 import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools';
 import { knowledgeTools } from '@/core/tools/knowledge-tools';
+import { syncMcpTools } from '@/core/tools/mcp-tools';
 import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
@@ -69,6 +70,7 @@ if (!toolsRegistered) {
   registerTools(pluginTools);
   registerTools(conversationMemoryTools);
   registerTools(knowledgeTools);
+  void syncMcpTools().catch((error) => console.warn('[mcp] Failed to synchronize tools', error));
   toolsRegistered = true;
 }
 

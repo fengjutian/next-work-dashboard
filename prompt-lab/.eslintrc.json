@@ -33,6 +33,12 @@
       "rules": {
         "import/default": "off"
       }
+    },
+    {
+      "files": ["src/main/mcp/mcp-manager.ts"],
+      "rules": {
+        "import/no-unresolved": "off"
+      }
     }
   ]
 }

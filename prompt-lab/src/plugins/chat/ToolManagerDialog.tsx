@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Wrench, X } from '@/components/icons';
-import { listTools, isToolEnabled, setToolEnabled } from '@/core/tools';
+import { listTools, isToolEnabled, setToolEnabled, syncMcpTools } from '@/core/tools';
 import type { ToolDefinition } from '@/core/tools';
+import type { McpServerStatus } from '@/types/mcp';
 
 /**
  * 工具管理器弹层
@@ -15,17 +16,23 @@ export const ToolManagerDialog: React.FC<{
 }> = ({ open, onClose }) => {
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [enabledState, setEnabledState] = useState<Record<string, boolean>>({});
+  const [servers, setServers] = useState<McpServerStatus[]>([]);
+  const [mcpForm, setMcpForm] = useState({ id: '', name: '', command: '', args: '[]' });
+  const [mcpError, setMcpError] = useState('');
+
+  const refreshTools = () => {
+    const allTools = listTools();
+    setTools(allTools);
+    setEnabledState(Object.fromEntries(allTools.map((tool) => [tool.name, isToolEnabled(tool.name)])));
+  };
+
+  const refreshServers = async () => setServers(await window.electronAPI.mcp.listServers());
 
   // 加载工具列表和启用状态
   useEffect(() => {
     if (open) {
-      const allTools = listTools();
-      setTools(allTools);
-      const state: Record<string, boolean> = {};
-      for (const t of allTools) {
-        state[t.name] = isToolEnabled(t.name);
-      }
-      setEnabledState(state);
+      refreshTools();
+      void refreshServers();
     }
   }, [open]);
 
@@ -37,13 +44,57 @@ export const ToolManagerDialog: React.FC<{
     setToolEnabled(name, newVal);
   };
 
+  const saveMcpServer = async () => {
+    setMcpError('');
+    try {
+      const args = JSON.parse(mcpForm.args) as unknown;
+      if (!Array.isArray(args) || !args.every((item) => typeof item === 'string')) throw new Error('参数必须是 JSON 字符串数组');
+      const saved = await window.electronAPI.mcp.saveServer({
+        id: mcpForm.id,
+        name: mcpForm.name,
+        transport: 'stdio',
+        command: mcpForm.command,
+        args,
+        autoConnect: true,
+      });
+      if (!saved.success) throw new Error(saved.error);
+      const connected = await window.electronAPI.mcp.connect(mcpForm.id);
+      if (!connected.success) throw new Error(connected.error);
+      await syncMcpTools(false);
+      refreshTools();
+      await refreshServers();
+      setMcpForm({ id: '', name: '', command: '', args: '[]' });
+    } catch (error) {
+      setMcpError(error instanceof Error ? error.message : String(error));
+      await refreshServers();
+    }
+  };
+
+  const toggleMcpServer = async (server: McpServerStatus) => {
+    const result = server.state === 'connected'
+      ? await window.electronAPI.mcp.disconnect(server.config.id)
+      : await window.electronAPI.mcp.connect(server.config.id);
+    if (!result.success) setMcpError(result.error ?? 'MCP 操作失败');
+    await syncMcpTools(false);
+    refreshTools();
+    await refreshServers();
+  };
+
+  const removeMcpServer = async (serverId: string) => {
+    await window.electronAPI.mcp.removeServer(serverId);
+    await syncMcpTools(false);
+    refreshTools();
+    await refreshServers();
+  };
+
   // 工具分组
   const builtInTools = tools.filter(
-    (t) => !t.name.startsWith('read_') && t.name !== 'open_image' && t.name !== 'read_file_content',
+    (t) => !t.name.startsWith('mcp__') && !t.name.startsWith('read_') && t.name !== 'open_image' && t.name !== 'read_file_content',
   );
   const previewTools = tools.filter(
-    (t) => t.name.startsWith('read_') || t.name === 'open_image' || t.name === 'read_file_content',
+    (t) => !t.name.startsWith('mcp__') && (t.name.startsWith('read_') || t.name === 'open_image' || t.name === 'read_file_content'),
   );
+  const mcpTools = tools.filter((tool) => tool.name.startsWith('mcp__'));
 
   const enabledCount = Object.values(enabledState).filter(Boolean).length;
 
@@ -71,6 +122,30 @@ export const ToolManagerDialog: React.FC<{
 
         {/* 工具列表 */}
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-4">
+          <div className="rounded-lg border p-3 space-y-2">
+            <h3 className="text-xs font-semibold text-foreground">MCP Server（stdio）</h3>
+            {servers.map((server) => (
+              <div key={server.config.id} className="flex items-center gap-2 text-xs">
+                <span className={`h-2 w-2 rounded-full ${server.state === 'connected' ? 'bg-success' : server.state === 'error' ? 'bg-destructive' : 'bg-muted-foreground'}`} />
+                <span className="flex-1 truncate" title={server.error}>{server.config.name} · {server.toolCount} tools</span>
+                <button className="text-primary hover:underline" onClick={() => void toggleMcpServer(server)}>
+                  {server.state === 'connected' ? '断开' : '连接'}
+                </button>
+                <button className="text-destructive hover:underline" onClick={() => void removeMcpServer(server.config.id)}>删除</button>
+              </div>
+            ))}
+            <div className="grid grid-cols-2 gap-2">
+              <input className="rounded border bg-background px-2 py-1 text-xs" placeholder="ID，例如 filesystem" value={mcpForm.id} onChange={(event) => setMcpForm({ ...mcpForm, id: event.target.value })} />
+              <input className="rounded border bg-background px-2 py-1 text-xs" placeholder="显示名称" value={mcpForm.name} onChange={(event) => setMcpForm({ ...mcpForm, name: event.target.value })} />
+              <input className="rounded border bg-background px-2 py-1 text-xs" placeholder="命令，例如 npx" value={mcpForm.command} onChange={(event) => setMcpForm({ ...mcpForm, command: event.target.value })} />
+              <input className="rounded border bg-background px-2 py-1 text-xs font-mono" placeholder='参数 JSON，例如 ["-y","server"]' value={mcpForm.args} onChange={(event) => setMcpForm({ ...mcpForm, args: event.target.value })} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-destructive">{mcpError}</span>
+              <button className="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50" disabled={!mcpForm.id || !mcpForm.name || !mcpForm.command} onClick={() => void saveMcpServer()}>添加并连接</button>
+            </div>
+          </div>
+
           {/* 内置工具 */}
           <div>
             <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
@@ -87,6 +162,18 @@ export const ToolManagerDialog: React.FC<{
               ))}
             </div>
           </div>
+          {mcpTools.length > 0 && (
+            <div>
+              <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                MCP 工具
+              </h3>
+              <div className="space-y-1">
+                {mcpTools.map((tool) => (
+                  <ToolRow key={tool.name} tool={tool} enabled={enabledState[tool.name] ?? true} onToggle={toggleTool} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 预览插件工具 */}
           {previewTools.length > 0 && (
@@ -150,7 +237,7 @@ const ToolRow: React.FC<{
   onToggle: (name: string) => void;
 }> = ({ tool, enabled, onToggle }) => {
   const icon = toolIcons[tool.name] || '🔧';
-  const paramNames = Object.keys(tool.parameters.properties);
+  const paramNames = Object.keys(tool.parameters.properties ?? {});
   const paramHint = paramNames.length > 0
     ? `参数: ${paramNames.join(', ')}`
     : '无需参数';

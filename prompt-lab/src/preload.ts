@@ -203,6 +203,17 @@ const electronAPI: ElectronAPI = {
     clearAll: () => ipcRenderer.invoke('auth:clear-all'),
   },
 
+  // ── Model Context Protocol ──
+  mcp: {
+    listServers: () => ipcRenderer.invoke('mcp:list-servers'),
+    saveServer: (config) => ipcRenderer.invoke('mcp:save-server', config),
+    removeServer: (serverId) => ipcRenderer.invoke('mcp:remove-server', serverId),
+    connect: (serverId) => ipcRenderer.invoke('mcp:connect', serverId),
+    disconnect: (serverId) => ipcRenderer.invoke('mcp:disconnect', serverId),
+    listTools: (serverId) => ipcRenderer.invoke('mcp:list-tools', serverId),
+    callTool: (serverId, name, args) => ipcRenderer.invoke('mcp:call-tool', serverId, name, args),
+  },
+
   // ── 终端 (Terminal) ──
   terminal: {
     profiles: () => ipcRenderer.invoke('terminal:profiles'),

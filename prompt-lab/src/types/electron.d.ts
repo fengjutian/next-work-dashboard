@@ -51,6 +51,15 @@ export interface ElectronAPI {
     search: (vector: number[], limit: number) => Promise<Array<{ id: string; distance: number }>>;
     clear: () => Promise<void>;
   };
+  mcp: {
+    listServers: () => Promise<McpServerStatus[]>;
+    saveServer: (config: McpServerConfig) => Promise<McpOperationResult>;
+    removeServer: (serverId: string) => Promise<McpOperationResult>;
+    connect: (serverId: string) => Promise<McpOperationResult>;
+    disconnect: (serverId: string) => Promise<McpOperationResult>;
+    listTools: (serverId?: string) => Promise<McpToolDescriptor[]>;
+    callTool: (serverId: string, name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
+  };
   saveConversation: (payload: {
     site: string;
     timestamp: number;
@@ -341,3 +350,10 @@ declare global {
     electronAPI: ElectronAPI;
   }
 }
+import type {
+  McpOperationResult,
+  McpServerConfig,
+  McpServerStatus,
+  McpToolCallResult,
+  McpToolDescriptor,
+} from './mcp';

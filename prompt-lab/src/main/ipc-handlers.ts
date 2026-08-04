@@ -40,6 +40,8 @@ import {
   searchLanceMemory,
   type LanceMemoryChunk,
 } from './lancedb-memory';
+import { mcpManager } from './mcp/mcp-manager';
+import type { McpServerConfig } from '../types/mcp';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -1531,6 +1533,18 @@ export function setupIPC(webviewPreloadPath: string) {
   });
   ipcMain.handle('auth:list-services', async () => listServices());
   ipcMain.handle('auth:clear-all', async () => clearAll());
+
+  // ── Model Context Protocol ──
+  ipcMain.handle('mcp:list-servers', () => mcpManager.listStatuses());
+  ipcMain.handle('mcp:save-server', (_event, config: McpServerConfig) => mcpManager.saveConfig(config));
+  ipcMain.handle('mcp:remove-server', (_event, serverId: string) => mcpManager.removeConfig(serverId));
+  ipcMain.handle('mcp:connect', (_event, serverId: string) => mcpManager.connect(serverId));
+  ipcMain.handle('mcp:disconnect', (_event, serverId: string) => mcpManager.disconnect(serverId));
+  ipcMain.handle('mcp:list-tools', (_event, serverId?: string) => mcpManager.listTools(serverId));
+  ipcMain.handle('mcp:call-tool', (_event, serverId: string, name: string, args: Record<string, unknown>) => (
+    mcpManager.callTool(serverId, name, args)
+  ));
+  void mcpManager.connectAutoServers();
 
   // ── 终端 ──
   ipcMain.handle('terminal:profiles', () => ({ success: true, data: discoverShellProfiles() }));

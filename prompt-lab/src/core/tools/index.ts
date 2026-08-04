@@ -12,6 +12,7 @@ export { toOpenAIFunction } from './types';
 export {
   registerTool,
   registerTools,
+  unregisterTool,
   getTool,
   listTools,
   getToolSchemas,
@@ -21,6 +22,8 @@ export {
   getToolEnabledMap,
   executeToolCall,
 } from './registry';
+
+export { syncMcpTools, toMcpToolDefinition } from './mcp-tools';
 
 export { builtInTools } from './builtin';
 export { pluginTools } from './plugin-tools';

@@ -25,6 +25,12 @@ export function registerTools(tools: ToolDefinition[]): void {
   tools.forEach(registerTool);
 }
 
+/** 移除动态工具（例如断开的 MCP Server 工具）。 */
+export function unregisterTool(name: string): void {
+  registry.delete(name);
+  enabledMap.delete(name);
+}
+
 /** 按名称获取工具 */
 export function getTool(name: string): ToolDefinition | undefined {
   return registry.get(name);

@@ -12,16 +12,21 @@ export interface ToolDefinition {
 }
 
 export interface ToolParameterSchema {
-  type: 'object';
-  properties: Record<string, ToolParamProperty>;
+  type?: string | string[];
+  properties?: Record<string, ToolParamProperty>;
   required?: string[];
+  additionalProperties?: boolean | ToolParamProperty;
+  [key: string]: unknown;
 }
 
 export interface ToolParamProperty {
-  type: 'string' | 'number' | 'boolean' | 'array';
-  description: string;
-  enum?: string[];
-  items?: { type: 'string' | 'number' | 'boolean' };
+  type?: string | string[];
+  description?: string;
+  enum?: unknown[];
+  items?: ToolParamProperty | ToolParamProperty[];
+  properties?: Record<string, ToolParamProperty>;
+  required?: string[];
+  [key: string]: unknown;
 }
 
 /**
