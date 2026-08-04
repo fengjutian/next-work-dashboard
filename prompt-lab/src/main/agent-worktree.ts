@@ -139,6 +139,46 @@ export async function previewAgentWorktreeMerge(rootPath: string, storageRoot: s
   return { canMerge: !mainDirty && changedPaths.length > 0 && conflictingPaths.length === 0, changedPaths, conflictingPaths, mainDirty, base, mainHead, agentHead };
 }
 
+export interface AgentWorktreeConflictFile {
+  path: string;
+  base: string;
+  main: string;   // ours — main workspace version
+  agent: string;  // theirs — agent worktree version
+  conflictType: "content" | "add/add" | "delete/modify" | "modify/delete" | "rename/rename";
+}
+
+export async function getAgentWorktreeConflictVersions(
+  rootPath: string, storageRoot: string, sessionId: string, filePath: string,
+  runGit: GitRunner = defaultRunner,
+): Promise<AgentWorktreeConflictFile> {
+  const root = fs.realpathSync(path.resolve(rootPath));
+  const spec = buildAgentWorktreeSpec(root, storageRoot, sessionId);
+  const [mainHead, agentHead] = await Promise.all([
+    runGit(root, ["rev-parse", "HEAD"]),
+    runGit(spec.path, ["rev-parse", "HEAD"]),
+  ]);
+  const base = await runGit(root, ["merge-base", mainHead, agentHead]);
+
+  // Get the three file versions
+  const [baseContent, mainContent, agentContent] = await Promise.all([
+    runGitFile(spec.path, base, filePath, runGit).catch(() => ""),
+    runGitFile(root, mainHead, filePath, runGit).catch(() => ""),
+    runGitFile(spec.path, agentHead, filePath, runGit).catch(() => ""),
+  ]);
+
+  // Detect conflict type
+  let conflictType: AgentWorktreeConflictFile["conflictType"] = "content";
+  if (!baseContent && mainContent && agentContent) conflictType = "add/add";
+  else if (baseContent && !mainContent && agentContent) conflictType = "delete/modify";
+  else if (baseContent && mainContent && !agentContent) conflictType = "modify/delete";
+
+  return { path: filePath, base: baseContent, main: mainContent, agent: agentContent, conflictType };
+}
+
+async function runGitFile(cwd: string, revision: string, filePath: string, runGit: GitRunner): Promise<string> {
+  return runGit(cwd, ["show", ]);
+}
+
 export async function mergeAgentWorktree(rootPath: string, storageRoot: string, sessionId: string, message: string, runGit: GitRunner = defaultRunner): Promise<AgentWorktreeMergeResult> {
   const root = fs.realpathSync(path.resolve(rootPath));
   const spec = buildAgentWorktreeSpec(root, storageRoot, sessionId);

@@ -1,6 +1,6 @@
 import initSqlJs, { type Database as SqlJsDatabase, type QueryExecResult } from 'sql.js';
 import { drizzle, type SQLJsDatabase } from 'drizzle-orm/sql-js';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, desc, and, sql } from 'drizzle-orm';
 import * as schema from './schema';
 
 let _db: SQLJsDatabase<typeof schema> | null = null;
@@ -63,6 +63,77 @@ export function exportDb(): Uint8Array {
 function ensureSchema(): void {
   if (!_sqlDb) return;
   _sqlDb.run(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at INTEGER NOT NULL,
+      description TEXT NOT NULL DEFAULT ""
+    );
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT "active",
+      instruction TEXT NOT NULL DEFAULT "",
+      worktree_path TEXT,
+      worktree_branch TEXT,
+      worktree_head TEXT,
+      worktree_dirty INTEGER NOT NULL DEFAULT 0,
+      is_pinned INTEGER NOT NULL DEFAULT 0,
+      parent_session_id TEXT,
+      token_budget INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      archived_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS agent_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      seq INTEGER NOT NULL DEFAULT 0,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_messages_session ON agent_messages(session_id, seq);
+    CREATE TABLE IF NOT EXISTS agent_logs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+      level TEXT NOT NULL DEFAULT "info",
+      message TEXT NOT NULL,
+      seq INTEGER NOT NULL DEFAULT 0,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_logs_session ON agent_logs(session_id, seq);
+    CREATE TABLE IF NOT EXISTS agent_proposals (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      original TEXT NOT NULL DEFAULT "",
+      modified TEXT NOT NULL DEFAULT "",
+      language TEXT NOT NULL DEFAULT "",
+      previous_path TEXT,
+      accepted INTEGER,
+      accepted_at INTEGER,
+      seq INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agent_tasks (
+      task_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      workspace_root TEXT NOT NULL DEFAULT "",
+      execution_root TEXT,
+      instruction TEXT NOT NULL DEFAULT "",
+      model_config TEXT NOT NULL DEFAULT "{}",
+      multi_file INTEGER NOT NULL DEFAULT 0,
+      token_budget INTEGER NOT NULL DEFAULT 32000,
+      state TEXT NOT NULL DEFAULT "queued",
+      error TEXT,
+      recovery TEXT,
+      result TEXT,
+      created_at INTEGER NOT NULL,
+      started_at INTEGER,
+      ended_at INTEGER,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_tasks_session ON agent_tasks(session_id);
     CREATE TABLE IF NOT EXISTS prompts (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -315,6 +386,266 @@ export function dbLoadChatSessions<T = unknown>(): T | null {
   try { return JSON.parse(raw) as T; } catch { return null; }
 }
 
+
+// ═══════════════════════════════════════════
+// Agent Sessions CRUD
+// ═══════════════════════════════════════════
+
+interface AgentSessionRow {
+  id: string; title: string; status: string; instruction: string;
+  worktreePath: string | null; worktreeBranch: string | null;
+  worktreeHead: string | null; worktreeDirty: number;
+  isPinned: number; parentSessionId: string | null;
+  tokenBudget: number | null;
+  createdAt: number; updatedAt: number; archivedAt: number | null;
+}
+
+interface AgentMessageRow {
+  id: string; sessionId: string; role: string; content: string;
+  seq: number; timestamp: number;
+}
+
+interface AgentLogRow {
+  id: string; sessionId: string; level: string; message: string;
+  seq: number; timestamp: number;
+}
+
+interface AgentProposalRow {
+  id: string; sessionId: string; path: string;
+  original: string; modified: string; language: string;
+  previousPath: string | null; accepted: number | null;
+  acceptedAt: number | null; seq: number; createdAt: number;
+}
+
+export interface AgentTaskRow {
+  taskId: string; sessionId: string; workspaceRoot: string;
+  executionRoot: string | null; instruction: string;
+  modelConfig: string; multiFile: number; tokenBudget: number;
+  state: string; error: string | null;
+  recovery: string | null; result: string | null;
+  createdAt: number; startedAt: number | null;
+  endedAt: number | null; updatedAt: number;
+}
+
+// ── Sessions ──
+
+export function dbLoadAgentSessions(): AgentSessionRow[] {
+  try {
+    return getDb().select().from(schema.agentSessions).orderBy(desc(schema.agentSessions.updatedAt)).all() as unknown as AgentSessionRow[];
+  } catch { return []; }
+}
+
+export function dbInsertAgentSession(row: AgentSessionRow): void {
+  getDb().insert(schema.agentSessions).values(row as never).run();
+}
+
+export function dbUpdateAgentSession(id: string, patch: Record<string, unknown>): void {
+  getDb().update(schema.agentSessions).set(patch as never).where(eq(schema.agentSessions.id, id)).run();
+}
+
+export function dbDeleteAgentSession(id: string): void {
+  getDb().delete(schema.agentSessions).where(eq(schema.agentSessions.id, id)).run();
+}
+
+// ── Messages ──
+
+export function dbLoadAgentMessages(sessionId: string, limit = 100, offset = 0): AgentMessageRow[] {
+  try {
+    return getDb().select().from(schema.agentMessages)
+      .where(eq(schema.agentMessages.sessionId, sessionId))
+      .orderBy(schema.agentMessages.seq)
+      .limit(limit).offset(offset).all() as unknown as AgentMessageRow[];
+  } catch { return []; }
+}
+
+export function dbInsertAgentMessage(row: AgentMessageRow): void {
+  getDb().insert(schema.agentMessages).values(row as never).run();
+}
+
+export function dbDeleteAgentMessages(sessionId: string): void {
+  getDb().delete(schema.agentMessages).where(eq(schema.agentMessages.sessionId, sessionId)).run();
+}
+
+// ── Logs ──
+
+export function dbLoadAgentLogs(sessionId: string, limit = 100, offset = 0): AgentLogRow[] {
+  try {
+    return getDb().select().from(schema.agentLogs)
+      .where(eq(schema.agentLogs.sessionId, sessionId))
+      .orderBy(schema.agentLogs.seq)
+      .limit(limit).offset(offset).all() as unknown as AgentLogRow[];
+  } catch { return []; }
+}
+
+export function dbInsertAgentLog(row: AgentLogRow): void {
+  getDb().insert(schema.agentLogs).values(row as never).run();
+}
+
+export function dbDeleteAgentLogs(sessionId: string): void {
+  getDb().delete(schema.agentLogs).where(eq(schema.agentLogs.sessionId, sessionId)).run();
+}
+
+// ── Proposals ──
+
+export function dbLoadAgentProposals(sessionId: string): AgentProposalRow[] {
+  try {
+    return getDb().select().from(schema.agentProposals)
+      .where(eq(schema.agentProposals.sessionId, sessionId))
+      .orderBy(schema.agentProposals.seq).all() as unknown as AgentProposalRow[];
+  } catch { return []; }
+}
+
+export function dbInsertAgentProposal(row: AgentProposalRow): void {
+  getDb().insert(schema.agentProposals).values(row as never).run();
+}
+
+export function dbUpdateAgentProposal(id: string, patch: Record<string, unknown>): void {
+  getDb().update(schema.agentProposals).set(patch as never).where(eq(schema.agentProposals.id, id)).run();
+}
+
+export function dbDeleteAgentProposals(sessionId: string): void {
+  getDb().delete(schema.agentProposals).where(eq(schema.agentProposals.sessionId, sessionId)).run();
+}
+
+// ── Tasks (for persistence and restart recovery) ──
+
+export function dbUpsertAgentTask(row: AgentTaskRow): void {
+  // INSERT OR REPLACE
+  getDb().delete(schema.agentTasks).where(eq(schema.agentTasks.taskId, row.taskId)).run();
+  getDb().insert(schema.agentTasks).values(row as never).run();
+}
+
+export function dbLoadAgentTasks(sessionId?: string): AgentTaskRow[] {
+  try {
+    if (sessionId) {
+      return getDb().select().from(schema.agentTasks)
+        .where(eq(schema.agentTasks.sessionId, sessionId))
+        .orderBy(desc(schema.agentTasks.createdAt)).all() as unknown as AgentTaskRow[];
+    }
+    return getDb().select().from(schema.agentTasks)
+      .orderBy(desc(schema.agentTasks.createdAt)).all() as unknown as AgentTaskRow[];
+  } catch { return []; }
+}
+
+export function dbLoadRecoverableTasks(): AgentTaskRow[] {
+  try {
+    return getDb().select().from(schema.agentTasks)
+      .where(
+        eq(schema.agentTasks.state, "queued")
+      ).all() as unknown as AgentTaskRow[];
+  } catch { return []; }
+}
+
+export function dbDeleteAgentTask(taskId: string): void {
+  getDb().delete(schema.agentTasks).where(eq(schema.agentTasks.taskId, taskId)).run();
+}
+
+export function dbDeleteAgentTasksBySession(sessionId: string): void {
+  getDb().delete(schema.agentTasks).where(eq(schema.agentTasks.sessionId, sessionId)).run();
+}
+
+// ── Schema version ──
+
+export function dbGetSchemaVersion(): number {
+  try {
+    const rows = getDb().select().from(schema.schemaVersion).all();
+    if (rows.length === 0) return 0;
+    return (rows[rows.length - 1] as unknown as { version: number }).version;
+  } catch { return 0; }
+}
+
+export function dbSetSchemaVersion(version: number, description = ""): void {
+  getDb().insert(schema.schemaVersion).values({
+    version, appliedAt: Date.now(), description
+  } as never).run();
+}
+
 export function dbSaveChatSessions(sessions: unknown): void {
   dbSetSetting(CHAT_SESSIONS_KEY, JSON.stringify(sessions));
+}
+
+
+// ═══════════════════════════════════════════
+// Migration from localStorage to SQLite
+// ═══════════════════════════════════════════
+
+const MIGRATION_VERSION = 1;
+
+export function needsMigration(): boolean {
+  return dbGetSchemaVersion() < MIGRATION_VERSION;
+}
+
+export function migrateFromLocalStorage(): { success: boolean; migrated: number; error?: string } {
+  const currentVersion = dbGetSchemaVersion();
+  if (currentVersion >= MIGRATION_VERSION) return { success: true, migrated: 0 };
+
+  let migrated = 0;
+  try {
+    // Migrate agent sessions
+    const sessionsRaw = localStorage.getItem("code-editor.agent-sessions.v1");
+    if (sessionsRaw) {
+      const sessions = JSON.parse(sessionsRaw) as Array<Record<string, unknown>>;
+      for (const s of sessions) {
+        dbInsertAgentSession({
+          id: String(s.id ?? ""), title: String(s.title ?? ""),
+          status: String(s.status ?? "active"),
+          instruction: String(s.instruction ?? ""),
+          worktreePath: s.worktree ? String((s.worktree as Record<string,unknown>).path ?? "") : null,
+          worktreeBranch: s.worktree ? String((s.worktree as Record<string,unknown>).branch ?? "") : null,
+          worktreeHead: s.worktree ? ((s.worktree as Record<string,unknown>).head as string) ?? null : null,
+          worktreeDirty: s.worktree ? ((s.worktree as Record<string,unknown>).dirty ? 1 : 0) : 0,
+          isPinned: s.pinned ? 1 : 0, parentSessionId: null, tokenBudget: null,
+          createdAt: Number(s.createdAt ?? Date.now()),
+          updatedAt: Number(s.updatedAt ?? Date.now()),
+          archivedAt: s.archivedAt ? Number(s.archivedAt) : null,
+        });
+        migrated++;
+      }
+    }
+
+    // Migrate agent logs
+    const logsRaw = localStorage.getItem("code-editor.agent-logs.v1");
+    if (logsRaw) {
+      const logs = JSON.parse(logsRaw) as Record<string, Array<{ id: string; timestamp: number; level: string; message: string }>>;
+      let seq = 0;
+      for (const [sid, entries] of Object.entries(logs)) {
+        for (const e of entries) {
+          dbInsertAgentLog({ id: e.id ?? "log-" + seq, sessionId: sid, level: e.level ?? "info", message: e.message ?? "", seq: seq++, timestamp: e.timestamp ?? Date.now() });
+        }
+      }
+    }
+
+    // Migrate conversations
+    const convRaw = localStorage.getItem("code-editor.ai-conversations.v1");
+    if (convRaw) {
+      const convs = JSON.parse(convRaw) as Record<string, Array<{ role: string; content: string; timestamp?: number }>>;
+      let seq = 0;
+      for (const [key, msgs] of Object.entries(convs)) {
+        const sid = key.split("::")[1] ?? key;
+        for (const m of msgs) {
+          dbInsertAgentMessage({ id: "msg-" + sid + "-" + seq, sessionId: sid, role: m.role ?? "user", content: m.content ?? "", seq: seq++, timestamp: m.timestamp ?? Date.now() });
+        }
+      }
+    }
+
+    // Migrate proposals (drafts)
+    const draftsRaw = localStorage.getItem("code-editor.ai-drafts.v1");
+    if (draftsRaw) {
+      const drafts = JSON.parse(draftsRaw) as Record<string, { proposals: Array<{ path: string; original: string; modified: string; language: string; previousPath?: string }> }>;
+      let seq = 0;
+      for (const [key, draft] of Object.entries(drafts)) {
+        const sid = key.split("::")[1] ?? key;
+        for (const p of (draft.proposals ?? [])) {
+          dbInsertAgentProposal({ id: "prop-" + sid + "-" + seq, sessionId: sid, path: p.path ?? "", original: p.original ?? "", modified: p.modified ?? "", language: p.language ?? "", previousPath: p.previousPath ?? null, accepted: null, acceptedAt: null, seq: seq++, createdAt: Date.now() });
+        }
+      }
+    }
+
+    // Record version and flush
+    dbSetSchemaVersion(MIGRATION_VERSION, "Initial migration from localStorage");
+    flushDbToDisk();
+    return { success: true, migrated };
+  } catch (error) {
+    return { success: false, migrated, error: error instanceof Error ? error.message : String(error) };
+  }
 }

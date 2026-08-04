@@ -85,7 +85,33 @@ export class AgentTaskService extends EventEmitter {
     return () => { this.off('event', listener); };
   }
 
-  shutdown(): AgentTaskRecord[] {
+  // Restore tasks from persisted state (call on app startup)
+  restore(tasks: AgentTaskRecord[]): number {
+    let count = 0;
+    for (const t of tasks) {
+      if (this.tasks.has(t.taskId)) continue;
+      if (t.state === "running" || t.state === "cancelling") {
+        t.state = "interrupted";
+        t.endedAt = Date.now();
+        t.error = "Recovered after restart";
+      }
+      this.tasks.set(t.taskId, t);
+      if (t.state === "queued") {
+        this.queue.push(t.taskId);
+        this.emitEvent(t.taskId, "queued");
+        count++;
+      }
+    }
+    if (count > 0) this.drainQueue();
+    return count;
+  }
+
+  // Get all tasks for persistence
+  snapshot(): AgentTaskRecord[] {
+    return [...this.tasks.values()];
+  }
+
+    shutdown(): AgentTaskRecord[] {
     const interrupted: AgentTaskRecord[] = [];
     for (const c of this.controllers.values()) c.abort();
     this.controllers.clear();

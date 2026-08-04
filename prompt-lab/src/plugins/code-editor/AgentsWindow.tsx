@@ -18,6 +18,8 @@ interface AgentsWindowProps {
   aiPendingRequest: { instruction: string; status: 'running' | 'interrupted' } | null;
   aiExecutionStage: AiExecutionStage;
   aiExecutionMetrics: AiExecutionMetrics | null;
+  aiMode: "analyze" | "modify";
+  onModeChange: (mode: "analyze" | "modify") => void;
   aiMultiFile: boolean;
   aiMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }>;
   aiProposals: AiFileProposal[];
@@ -47,6 +49,10 @@ interface AgentsWindowProps {
   onCancelValidation: () => void;
   onValidationConfigChange: (taskNames: string[], autoValidate: boolean) => void;
   onFixValidationFailure: () => void;
+  aiTokenBudget: number;
+  onTokenBudgetChange: (value: number) => void;
+  taskQueueCount: number;
+  taskRunningCount: number;
   worktreeBusy: boolean;
   onCreateWorktree: () => void;
   onRefreshWorktree: () => void;
@@ -141,12 +147,12 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span>{props.aiExecutionMetrics && <><span>· {props.aiExecutionMetrics.receivedChars.toLocaleString()} 字符</span>{props.aiExecutionMetrics.firstChunkAt && <span>· 首字节 {props.aiExecutionMetrics.firstChunkAt - props.aiExecutionMetrics.startedAt}ms</span>}<span>· {(((props.aiExecutionMetrics.endedAt ?? Date.now()) - props.aiExecutionMetrics.startedAt) / 1000).toFixed(1)}s</span></>}</div>}
           <textarea value={props.aiInstruction} disabled={!props.activeSession || props.aiEditing} onChange={(event) => props.onInstructionChange(event.target.value)} placeholder="描述一个代码任务…" className="min-h-24 w-full resize-none rounded-md border bg-background p-3 text-xs outline-none" />
           <div className="mt-2 flex items-center gap-3 text-xs">
-            <label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件 Agent</label>
+            <div className="flex items-center gap-2"><button className={"rounded px-2 py-0.5 text-[10px] " + (props.aiMode === "analyze" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-accent")} disabled={props.aiEditing} onClick={() => props.onModeChange("analyze")}>分析</button><button className={"rounded px-2 py-0.5 text-[10px] " + (props.aiMode === "modify" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-accent")} disabled={props.aiEditing} onClick={() => props.onModeChange("modify")}>修改</button></div><label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件</label>
             <span className="truncate text-muted-foreground">{props.activeDocumentPath ? `当前文件：${props.activeDocumentPath}` : '未打开文件'}</span>
             <div className="flex-1" />
             {props.aiEditing
               ? <Button size="sm" variant="destructive" onClick={props.onCancel}>取消运行</Button>
-              : <Button size="sm" disabled={!props.activeSession || !props.activeDocumentPath || !props.aiInstruction.trim()} onClick={props.onGenerate}>{props.aiPendingRequest?.status === 'interrupted' ? '重新运行' : '运行 Agent'}</Button>}
+              : <Button size="sm" disabled={!props.activeSession || !props.aiInstruction.trim()} onClick={props.onGenerate}>{props.aiPendingRequest?.status === 'interrupted' ? '重新运行' : '运行 Agent'}</Button>}
           </div>
         </div>}
       </section>
@@ -169,6 +175,29 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             return <><div className="max-h-24 overflow-auto rounded border p-1">{props.workspaceTasks.map((task) => <label key={task.name} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] hover:bg-accent"><input type="checkbox" checked={selected.includes(task.name)} disabled={!props.activeSession || running} onChange={(event) => props.onValidationConfigChange(event.target.checked ? [...selected, task.name] : selected.filter((name) => name !== task.name), Boolean(props.activeSession?.autoValidate))} /><span className="truncate">{task.name}</span></label>)}</div><div className="mt-2 flex gap-1">{running ? <Button size="sm" variant="destructive" className="h-7 flex-1 px-2 text-[10px]" onClick={props.onCancelValidation}>取消流水线</Button> : <Button size="sm" variant="outline" className="h-7 flex-1 px-2 text-[10px]" disabled={!props.activeSession || selected.length === 0} onClick={() => props.onRunValidation(selected)}>运行 {selected.length} 项</Button>}<Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={!props.activeLogs.some((entry) => entry.level === 'error' && entry.message.startsWith('验证失败'))} onClick={() => { props.onFixValidationFailure(); setContentView('conversation'); }}>修复失败</Button></div><label className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground"><input type="checkbox" checked={Boolean(props.activeSession?.autoValidate)} disabled={!props.activeSession || selected.length === 0} onChange={(event) => props.onValidationConfigChange(selected, event.target.checked)} />接受修改后自动运行流水线</label></>;
           })()}
           {props.validationRun && <div className="mt-2 text-[10px] text-muted-foreground">{props.validationRun.name} · {props.validationRun.state}</div>}
+        </div>
+        <div className="border-t p-3">
+          <div className="mb-2 text-[10px] font-semibold">TOKEN BUDGET</div>
+          <div className="space-y-1 text-[10px]">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: Math.min(100, (props.aiExecutionMetrics ? props.aiExecutionMetrics.receivedChars / props.aiTokenBudget * 100 : 0)) + "%", backgroundColor: (props.aiExecutionMetrics && props.aiExecutionMetrics.receivedChars > props.aiTokenBudget * 0.8) ? "var(--warning)" : "var(--primary)" }} />
+              </div>
+              <span className="text-muted-foreground">{props.aiTokenBudget.toLocaleString()} tokens</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input type="range" min={4000} max={64000} step={1000} value={props.aiTokenBudget} disabled={props.aiEditing} onChange={(e) => props.onTokenBudgetChange(Number(e.target.value))} className="flex-1 h-1" />
+              <span className="w-14 text-right text-muted-foreground">{props.aiTokenBudget >= 1000 ? (props.aiTokenBudget / 1000).toFixed(0) + "k" : props.aiTokenBudget}</span>
+            </div>
+          </div>
+        </div>
+        <div className="border-t p-3">
+          <div className="mb-2 text-[10px] font-semibold">QUEUE</div>
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span>排队 {props.taskQueueCount} · 运行中 {props.taskRunningCount}</span>
+            <div className="flex-1" />
+            <span className="text-success">并发上限 2</span>
+          </div>
         </div>
         <div className="border-t p-3">
           <div className="mb-2 text-[10px] font-semibold">ISOLATION</div>

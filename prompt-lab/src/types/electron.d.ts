@@ -118,6 +118,7 @@ export interface ElectronAPI {
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo | null>>;
     discardAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<void>>;
     previewAgentWorktreeMerge: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeMergePreview>>;
+    getAgentWorktreeConflictVersions: (rootPath: string, sessionId: string, filePath: string) => Promise<WorkspaceResult<AgentWorktreeConflictFile>>;
     mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => Promise<WorkspaceResult<AgentWorktreeMergeResult>>;
     // Agent task operations
     agentTaskCreate: (config: AgentTaskConfig) => Promise<WorkspaceResult<AgentTaskRecord>>;
@@ -125,6 +126,8 @@ export interface ElectronAPI {
     agentTaskList: (sessionId?: string) => Promise<WorkspaceResult<AgentTaskRecord[]>>;
     agentTaskCancel: (taskId: string) => Promise<WorkspaceResult<boolean>>;
     agentTaskRetry: (taskId: string) => Promise<WorkspaceResult<AgentTaskRecord>>;
+    agentTaskSnapshot: () => Promise<WorkspaceResult<AgentTaskRecord[]>>;
+    agentTaskRestore: (tasks: AgentTaskRecord[]) => Promise<WorkspaceResult<number>>;
     agentTaskSubscribe: (taskId: string) => void;
     onAgentTaskEvent: (handler: (event: AgentTaskEvent) => void) => () => void;
     gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
@@ -251,6 +254,14 @@ export interface AgentWorktreeInfo {
   branch: string;
   head?: string;
   dirty: boolean;
+}
+
+export interface AgentWorktreeConflictFile {
+  path: string;
+  base: string;
+  main: string;
+  agent: string;
+  conflictType: 'content' | 'add/add' | 'delete/modify' | 'modify/delete' | 'rename/rename';
 }
 
 export interface AgentWorktreeMergePreview {

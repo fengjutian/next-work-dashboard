@@ -149,6 +149,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [worktreeBusy, setWorktreeBusy] = useState(false);
+  const [aiMode, setAiMode] = useState<"analyze" | "modify">("modify");
+  const [taskQueueCount, setTaskQueueCount] = useState(0);
+  const [taskRunningCount, setTaskRunningCount] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
   const [explorerFilter, setExplorerFilter] = useState('');
   const [explorerSort, setExplorerSort] = useState<'name' | 'type'>(() => (localStorage.getItem('code-editor.explorer-sort') as 'name' | 'type') || 'name');
@@ -306,7 +309,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     aiInstruction,
     aiMessages,
     setAiMessages,
-    aiMultiFile,
+    aiMode,
+        aiMultiFile,
     aiTokenBudget,
     inlineEdit,
     setInlineEdit,
@@ -1305,6 +1309,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiPendingRequest={aiPendingRequest}
         aiExecutionStage={aiExecutionStage === 'review' && aiProposals.length === 0 ? 'idle' : aiExecutionStage}
         aiExecutionMetrics={aiExecutionMetrics}
+        aiMode={aiMode}
+        onModeChange={setAiMode}
         aiMultiFile={aiMultiFile}
         aiMessages={aiMessages}
         aiProposals={aiProposals}
@@ -1350,6 +1356,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
           setAiInstruction(`修复以下验证失败。分析根因并生成最小、完整的代码修改；不要绕过或删除测试。\n\n${context}`);
           appendAgentLog(activeAgentSession.id, 'info', '已根据验证失败创建继续修复指令');
         }}
+        taskQueueCount={taskQueueCount}
+        taskRunningCount={taskRunningCount}
         worktreeBusy={worktreeBusy}
         onCreateWorktree={() => { void (async () => {
           if (!workspace || !activeAgentSession) return;
@@ -1383,7 +1391,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
             await refreshGitStatus();
           } finally { setWorktreeBusy(false); }
         })(); }}
-        onDiscardWorktree={() => { void (async () => {
+        aiTokenBudget={aiTokenBudget}
+        onTokenBudgetChange={setAiTokenBudget}
+                onDiscardWorktree={() => { void (async () => {
           if (!workspace || !activeAgentSession || !await appConfirm('放弃并永久删除此 Agent worktree、分支及其中未提交修改？此操作无法撤销。')) return;
           setWorktreeBusy(true);
           try {

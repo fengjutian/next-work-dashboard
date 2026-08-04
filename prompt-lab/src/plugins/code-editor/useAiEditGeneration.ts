@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, ty
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { createOpenAIProvider } from '../../core/llm';
 import { fitContextToTokenBudget } from './ai-context';
+import { checkTokenBudget } from './ai-token-budget';
 import { applyConversationSummary, conversationNeedsSummary, isAbortError, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
 import { languageIdFromName } from './editor-utils';
 import type { OpenDocument } from './editor-types';
@@ -23,6 +24,7 @@ interface UseAiEditGenerationOptions {
   aiInstruction: string;
   aiMessages: AiConversationMessage[];
   setAiMessages: Dispatch<SetStateAction<AiConversationMessage[]>>;
+  aiMode: "analyze" | "modify";
   aiMultiFile: boolean;
   aiTokenBudget: number;
   inlineEdit: { instruction: string; visible: boolean };
@@ -119,7 +121,7 @@ function parseProposals(response: string, contexts: AiFileProposal[]): AiFilePro
 export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   const {
     aiApi, workspace, isolated = false, documents, activeDocument, editorRef, aiInstruction, aiMessages,
-    setAiMessages, aiMultiFile, aiTokenBudget, inlineEdit, setInlineEdit, setAiEditing,
+    setAiMessages, aiMode, aiMultiFile, aiTokenBudget, inlineEdit, setInlineEdit, setAiEditing,
     setAiPendingRequest, setAiProposals, setDiffView, setDocuments, recordAiSession,
     appendOutput, setStatus,
   } = options;
@@ -148,7 +150,8 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   }, [setStatus]);
 
   const generateAiEdit = useCallback(async () => {
-    if (!activeDocument || !aiInstruction.trim()) return;
+    if (aiMode === "modify" && !activeDocument && !aiMultiFile) { setStatus("修改模式需要打开文件或启用多文件"); return; }
+    if (!aiInstruction.trim()) return;
     if (!aiApi.apiKey) { setStatus('请先在设置中配置 AI API'); return; }
     if (requestAbortRef.current) return;
     const abortController = new AbortController();
@@ -156,14 +159,13 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     metricsRef.current = { startedAt: Date.now(), receivedChars: 0 };
     lastMetricsPublishRef.current = 0;
     setAiExecutionMetrics({ ...metricsRef.current });
-    setAiExecutionStage(aiMultiFile ? 'collecting-context' : 'generating');
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
     setAiEditing(true);
     setStatus(`AI 正在修改 ${activeDocument.name}…`);
     try {
       let executionDocument = activeDocument;
-      if (isolated && workspace) {
+      if (isolated && workspace && activeDocument) {
         const read = await window.electronAPI.workspace.readTextFile(workspace.path, activeDocument.path);
         if (!read.success || !read.data) throw new Error(read.error ?? 'ISOLATED_FILE_READ_FAILED');
         executionDocument = {
@@ -195,11 +197,12 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       if (aiMultiFile && workspace) {
         setAiExecutionStage('collecting-context');
         const executionDocuments = isolated ? [] : documents;
-        const contexts = await collectContexts(workspace.path, executionDocuments, executionDocument, aiInstruction);
+        const fallbackDoc = executionDocument || { path: "", name: "workspace", content: "", savedContent: "", language: "plaintext", encoding: "utf8" as const, lineEnding: "LF" as const, modifiedAt: Date.now(), readOnly: false, pinned: false, mixedLineEndings: false };
+        const contexts = await collectContexts(workspace.path, executionDocuments, fallbackDoc, aiInstruction);
         abortController.signal.throwIfAborted();
         const fitted = fitContextToTokenBudget(contexts.map((context) => ({
           path: context.path, content: context.original,
-          priority: context.path === executionDocument.path ? 100 : executionDocuments.some((document) => document.path === context.path) ? 50 : 0,
+          priority: (executionDocument && context.path === executionDocument.path) ? 100 : executionDocuments.some((document) => document.path === context.path) ? 50 : 0,
         })), aiTokenBudget);
         if (fitted.omitted.length) appendOutput(`Token 预算压缩：省略 ${fitted.omitted.length} 个低优先级文件（约 ${fitted.estimatedTokens} tokens）`);
         const messages = [

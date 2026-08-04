@@ -91,5 +91,9 @@ typings/
 # Electron-Forge
 out/
 
-
 dist/
+
+# Project analysis
+analysis/
+*.report.json
+*.report.html

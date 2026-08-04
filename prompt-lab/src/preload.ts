@@ -162,6 +162,7 @@ const electronAPI: ElectronAPI = {
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:getAgentWorktreeStatus', rootPath, sessionId),
     discardAgentWorktree: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:discardAgentWorktree', rootPath, sessionId),
     previewAgentWorktreeMerge: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:previewAgentWorktreeMerge', rootPath, sessionId),
+    getAgentWorktreeConflictVersions: (rootPath: string, sessionId: string, filePath: string) => ipcRenderer.invoke('workspace:getAgentWorktreeConflictVersions', rootPath, sessionId, filePath),
     mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => ipcRenderer.invoke('workspace:mergeAgentWorktree', rootPath, sessionId, message),
     // Agent task operations
     agentTaskCreate: (config: import("./types/electron").AgentTaskConfig) => ipcRenderer.invoke("agent-task:create", config),
@@ -169,6 +170,8 @@ const electronAPI: ElectronAPI = {
     agentTaskList: (sessionId?: string) => ipcRenderer.invoke("agent-task:list", sessionId),
     agentTaskCancel: (taskId: string) => ipcRenderer.invoke("agent-task:cancel", taskId),
     agentTaskRetry: (taskId: string) => ipcRenderer.invoke("agent-task:retry", taskId),
+    agentTaskSnapshot: () => ipcRenderer.invoke("agent-task:snapshot"),
+    agentTaskRestore: (tasks: any[]) => ipcRenderer.invoke("agent-task:restore", tasks),
     agentTaskSubscribe: (taskId: string) => { ipcRenderer.send("agent-task:subscribe", taskId); },
     onAgentTaskEvent: (handler: (event: import("./types/electron").AgentTaskEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: import("./types/electron").AgentTaskEvent) => handler(data);
