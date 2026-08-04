@@ -40,6 +40,8 @@ import { EditorDocumentHeader } from './EditorDocumentHeader';
 import { EditorWorkspaceBody } from './EditorWorkspaceBody';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EditorTabMenu } from './EditorTabMenu';
+import { AgentsWindow } from './AgentsWindow';
+import { useAgentSessions } from './useAgentSessions';
 import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import {
@@ -143,6 +145,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     source?: 'external' | 'git' | 'merge' | 'ai' | 'search';
   } | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
   const [explorerFilter, setExplorerFilter] = useState('');
   const [explorerSort, setExplorerSort] = useState<'name' | 'type'>(() => (localStorage.getItem('code-editor.explorer-sort') as 'name' | 'type') || 'name');
@@ -194,6 +197,15 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     aiMessages, setAiMessages, aiPendingRequest, setAiPendingRequest,
     recordAiSession, updateSessionAcceptCount,
   } = useAiSessionState({ workspace, appendOutput });
+  const agentSessions = useAgentSessions(workspace);
+
+  useEffect(() => {
+    const session = agentSessions.activeSession;
+    if (!session) return;
+    const nextStatus = aiEditing ? 'running' : aiProposals.length ? 'review' : 'idle';
+    if (session.status === nextStatus && session.filesChanged === aiProposals.length) return;
+    agentSessions.updateSession(session.id, { status: nextStatus, filesChanged: aiProposals.length });
+  }, [agentSessions.activeSession, agentSessions.updateSession, aiEditing, aiProposals.length]);
 
   const openExternalDiff = useCallback((value: { path: string; name: string; modified: string }) => {
     setDiffView({ ...value, original: '', language: 'diff', source: 'external' });
@@ -1125,6 +1137,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         hasDirtyDocuments={hasDirtyDocuments}
         autoSave={autoSave}
         bottomPanelOpen={bottomPanel.open}
+        agentsOpen={agentsOpen}
         onToggleSidebar={() => setSidebarVisible((value) => !value)}
         onOpenWorkspace={(add) => { void openWorkspace(add); }}
         onOpenFile={() => { void openStandaloneFile(); }}
@@ -1133,12 +1146,37 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onEditorAction={(id, message) => { void runEditorAction(id, message); }}
         onFormat={() => { void formatActiveDocument(); }}
         onTogglePanel={() => setBottomPanel((previous) => ({ ...previous, open: !previous.open }))}
+        onToggleAgents={() => setAgentsOpen((value) => !value)}
         onToggleAutoSave={() => setAutoSave((value) => !value)}
         onSave={() => { void saveActive(); }}
         onSaveAll={() => { void saveAll(); }}
       />
 
-      <div className="flex min-h-0 flex-1">
+      {agentsOpen ? <AgentsWindow
+        workspace={workspace}
+        sessions={agentSessions.sessions}
+        activeSession={agentSessions.activeSession}
+        aiInstruction={aiInstruction}
+        aiEditing={aiEditing}
+        aiMultiFile={aiMultiFile}
+        aiMessages={aiMessages}
+        aiProposals={aiProposals}
+        activeDocumentPath={activeDocument?.path}
+        onClose={() => setAgentsOpen(false)}
+        onCreateSession={() => { agentSessions.createSession(); }}
+        onSelectSession={agentSessions.selectSession}
+        onRenameSession={(id) => { void (async () => {
+          const title = await appPrompt('重命名 Agent 会话', agentSessions.activeSession?.title ?? '');
+          if (title?.trim()) agentSessions.updateSession(id, { title: title.trim().slice(0, 80) });
+        })(); }}
+        onArchiveSession={(id) => { void (async () => {
+          if (await appConfirm('归档这个 Agent 会话？')) agentSessions.archiveSession(id);
+        })(); }}
+        onInstructionChange={setAiInstruction}
+        onMultiFileChange={setAiMultiFile}
+        onGenerate={() => { void generateAiEdit(); }}
+        onOpenProposal={(proposal) => setDiffView({ path: proposal.path, name: proposal.path, original: proposal.original, modified: proposal.modified, language: proposal.language, source: 'ai' })}
+      /> : <div className="flex min-h-0 flex-1">
         {sidebarVisible && <WorkspaceExplorer
           width={sidebarWidth}
           workspace={workspace}
@@ -1221,9 +1259,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
           />
 
         </main>
-      </div>
+      </div>}
 
-      <BottomPanel
+      {!agentsOpen && <BottomPanel
         bottomPanel={bottomPanel} setBottomPanel={setBottomPanel}
         terminalTabs={terminalTabs} setTerminalTabs={setTerminalTabs}
         activeTerminalId={activeTerminalId} setActiveTerminalId={setActiveTerminalId}
@@ -1266,7 +1304,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         preferences={preferences} setPreferences={setPreferences}
         showEnvValues={showEnvValues} setShowEnvValues={setShowEnvValues}
         terminalEnvText={terminalEnvText} setTerminalEnvText={setTerminalEnvText}
-      />
+      />}
 
       <EditorStatusBar
         workspaceName={workspace?.name}

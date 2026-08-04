@@ -27,6 +27,7 @@
 |---|---|---|
 | [代码编辑器需求](./code-editor-requirements.md) | 编辑器目标、接口和验收标准 | 持续更新 |
 | [代码编辑器未完成功能](./code-editor-remaining-features.md) | Git、AI 编辑、终端和搜索待办 | 规划 |
+| [代码编辑器 Agents Window](./code-editor-agents-window.md) | Agent 会话视图、数据模型、分阶段计划和验收标准 | 开发中 |
 | [终端功能](./terminal-features.md) | 终端架构、功能和已知问题 | 持续更新 |
 | [Excel 插件方案](./excel-plugin-plan.md) | Excel 插件技术选型与阶段计划 | 方案 |
 | [设计规范](../design/DESIGN.md) | UI 与视觉设计规范 | 参考 |
@@ -45,4 +46,3 @@
 - 历史方案不应继续写成当前能力；需要保留时标注“历史”。
 - 命令示例默认从 `prompt-lab` 目录运行。
 - 插件 API 以 `plugin-architecture.md` 和源码类型为准。
-

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, FolderOpen, PanelLeft, Plus, Search } from '../../components/icons';
+import { Bot, FileText, FolderOpen, PanelLeft, Plus, Search } from '../../components/icons';
 import { Button } from '../../components/ui/button';
 import type { OpenDocument } from './editor-types';
 
@@ -9,6 +9,7 @@ interface WorkspaceToolbarProps {
   hasDirtyDocuments: boolean;
   autoSave: boolean;
   bottomPanelOpen: boolean;
+  agentsOpen: boolean;
   onToggleSidebar: () => void;
   onOpenWorkspace: (add: boolean) => void;
   onOpenFile: () => void;
@@ -17,15 +18,16 @@ interface WorkspaceToolbarProps {
   onEditorAction: (id: string, unavailable: string) => void;
   onFormat: () => void;
   onTogglePanel: () => void;
+  onToggleAgents: () => void;
   onToggleAutoSave: () => void;
   onSave: () => void;
   onSaveAll: () => void;
 }
 
 export const WorkspaceToolbar: React.FC<WorkspaceToolbarProps> = ({
-  workspaceOpen, activeDocument, hasDirtyDocuments, autoSave, bottomPanelOpen,
+  workspaceOpen, activeDocument, hasDirtyDocuments, autoSave, bottomPanelOpen, agentsOpen,
   onToggleSidebar, onOpenWorkspace, onOpenFile, onOpenSearch, onSemanticSearch,
-  onEditorAction, onFormat, onTogglePanel, onToggleAutoSave, onSave, onSaveAll,
+  onEditorAction, onFormat, onTogglePanel, onToggleAgents, onToggleAutoSave, onSave, onSaveAll,
 }) => (
   <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onToggleSidebar} title="切换资源管理器 (Ctrl+B)">
@@ -45,6 +47,9 @@ export const WorkspaceToolbar: React.FC<WorkspaceToolbarProps> = ({
     </Button>
     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!workspaceOpen} onClick={onSemanticSearch} title="跨工作区搜索定义、引用和 import">语义搜索</Button>
     <div className="flex-1" />
+    <Button size="sm" variant={agentsOpen ? 'secondary' : 'ghost'} className="h-7 gap-1.5 px-2 text-xs" onClick={onToggleAgents} title="打开 Agents Window">
+      <Bot className="h-4 w-4" /> Agents
+    </Button>
     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => onEditorAction('editor.action.revealDefinition', '当前位置没有可跳转的定义')} title="转到定义 (F12)">定义</Button>
     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={() => onEditorAction('editor.action.referenceSearch.trigger', '当前位置没有可查找的引用')} title="查找所有引用 (Shift+F12)">引用</Button>
     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!activeDocument} onClick={onFormat} title="格式化文档 (Shift+Alt+F)">格式化</Button>
