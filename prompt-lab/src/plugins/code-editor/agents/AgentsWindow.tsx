@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { XMarkdown } from '@ant-design/x-markdown';
-import { Bot, Copy, Edit3, Pin, Plus, Search, X } from '@/components/icons';
+import { Bot, ChevronDown, Copy, Edit3, PanelLeft, PanelRight, Pin, Plus, Search, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentLogEntry, AgentSession } from './agent-sessions';
@@ -86,6 +86,9 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
   const [sessionView, setSessionView] = useState<'active' | 'archived'>('active');
   const [contentView, setContentView] = useState<'conversation' | 'logs'>('conversation');
   const [sessionQuery, setSessionQuery] = useState('');
+  const [reasoningOpen, setReasoningOpen] = useState(true);
+  const [sessionsOpen, setSessionsOpen] = useState(true);
+  const [changesOpen, setChangesOpen] = useState(true);
   if (!props.workspace) return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
       <Bot className="h-14 w-14 opacity-40" />
@@ -100,12 +103,12 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
 
   return (
     <div className="flex min-h-0 flex-1 bg-background">
-      <aside className="flex w-60 shrink-0 flex-col border-r">
-        <div className="flex h-10 items-center gap-2 border-b px-3">
-          <Bot className="h-4 w-4" /><span className="text-xs font-semibold">AGENT SESSIONS</span>
-          <div className="flex-1" />
-          <button title="新建会话" className="rounded p-1 hover:bg-accent" onClick={props.onCreateSession}><Plus className="h-4 w-4" /></button>
+      <aside className={`flex shrink-0 flex-col overflow-hidden border-r transition-[width] duration-300 ease-in-out ${sessionsOpen ? 'w-60' : 'w-10'}`}>
+        <div className={`flex h-10 shrink-0 items-center border-b transition-all duration-300 ${sessionsOpen ? 'gap-2 px-3' : 'justify-center px-1'}`}>
+          {sessionsOpen && <><Bot className="h-4 w-4 shrink-0" /><span className="whitespace-nowrap text-xs font-semibold">AGENT SESSIONS</span><div className="flex-1" /><button title="新建会话" className="rounded p-1 hover:bg-accent" onClick={props.onCreateSession}><Plus className="h-4 w-4" /></button></>}
+          <button type="button" title={sessionsOpen ? '折叠会话列表' : '展开会话列表'} aria-label={sessionsOpen ? '折叠会话列表' : '展开会话列表'} aria-expanded={sessionsOpen} className="rounded p-1 transition-colors duration-200 hover:bg-accent" onClick={() => setSessionsOpen((open) => !open)}><PanelLeft className={`h-4 w-4 transition-transform duration-300 ${sessionsOpen ? '' : 'rotate-180'}`} /></button>
         </div>
+        <div aria-hidden={!sessionsOpen} className={`flex min-h-0 w-60 flex-1 flex-col transition-opacity duration-200 ${sessionsOpen ? 'opacity-100 delay-100' : 'pointer-events-none opacity-0'}`}>
         <div className="border-b px-2 py-1.5">
           <div className="mb-1 px-1 text-[10px] text-muted-foreground">{props.workspace.name}</div>
           <div className="relative mb-1"><Search className="absolute left-2 top-1.5 h-3 w-3 text-muted-foreground" /><input value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="搜索会话" className="h-6 w-full rounded border bg-background pl-6 pr-2 text-[10px] outline-none" /></div>
@@ -129,6 +132,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             <div className="mt-2 flex justify-end gap-1"><Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => { props.onRestoreSession(session.id); setSessionView('active'); }}>恢复</Button><Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive" onClick={() => props.onDeleteSession(session.id)}>永久删除</Button></div>
           </div>)}
         </div>
+        </div>
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -150,7 +154,20 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             : props.aiMessages.map((message, index) => <div key={`${message.timestamp}-${index}`} className={`mb-3 max-w-3xl rounded-lg border p-3 text-xs ${message.role === 'user' ? 'ml-auto bg-primary/5' : 'mr-auto bg-muted/30'}`}><div className="mb-1 text-[10px] font-semibold text-muted-foreground">{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Agent' : '系统'}</div>{message.role === 'user' ? <div className="whitespace-pre-wrap">{message.content}</div> : <XMarkdown content={message.content} className="text-xs" />}</div>)}
         </div>
         {contentView === 'conversation' && <div className="border-t p-3">
-          {props.aiMode === 'analyze' && props.aiEditing && props.aiReasoningText && <details open className="mb-2 rounded border bg-muted/20 p-2 text-xs"><summary className="cursor-pointer font-medium">公开分析过程</summary><XMarkdown content={props.aiReasoningText} streaming={{ hasNextChunk: true }} className="mt-2 text-xs" /></details>}
+          {props.aiMode === 'analyze' && props.aiEditing && props.aiReasoningText && <div className="mb-2 overflow-hidden rounded border bg-muted/20 text-xs transition-colors duration-200 hover:border-primary/30">
+            <button type="button" aria-expanded={reasoningOpen} className="flex w-full items-center gap-2 px-2 py-2 text-left font-medium transition-colors duration-200 hover:bg-accent/40" onClick={() => setReasoningOpen((open) => !open)}>
+              <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform duration-300 ease-out ${reasoningOpen ? 'rotate-0' : '-rotate-90'}`} />
+              <span className="flex-1">公开分析过程</span>
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+            </button>
+            <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${reasoningOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+              <div className="min-h-0 overflow-hidden">
+                <div className="max-h-[40vh] overflow-auto border-t px-3 py-2">
+                  <XMarkdown content={props.aiReasoningText} streaming={{ hasNextChunk: true }} className="text-xs" />
+                </div>
+              </div>
+            </div>
+          </div>}
           {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span>{props.aiExecutionMetrics && <><span>· {props.aiExecutionMetrics.receivedChars.toLocaleString()} 字符</span>{props.aiExecutionMetrics.firstChunkAt && <span>· 首字节 {props.aiExecutionMetrics.firstChunkAt - props.aiExecutionMetrics.startedAt}ms</span>}<span>· {(((props.aiExecutionMetrics.endedAt ?? Date.now()) - props.aiExecutionMetrics.startedAt) / 1000).toFixed(1)}s</span></>}</div>}
           <textarea value={props.aiInstruction} disabled={!props.activeSession || props.aiEditing} onChange={(event) => props.onInstructionChange(event.target.value)} placeholder="描述一个代码任务…" className="min-h-24 w-full resize-none rounded-md border bg-background p-3 text-xs outline-none" />
           <div className="mt-2 flex items-center gap-3 text-xs">
@@ -166,8 +183,12 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
         </div>}
       </section>
 
-      <aside className="flex w-72 shrink-0 flex-col border-l">
-        <div className="flex h-10 items-center border-b px-3 text-xs font-semibold">CHANGES <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">{props.aiProposals.length}</span><div className="flex-1" />{props.aiProposals.length > 0 && <><button className="rounded px-1.5 py-1 text-[10px] font-normal text-primary hover:bg-accent" onClick={props.onAcceptAll}>{props.activeSession?.worktree ? '写入 worktree' : '全部接受'}</button><button className="rounded px-1.5 py-1 text-[10px] font-normal text-destructive hover:bg-accent" onClick={props.onRejectAll}>全部拒绝</button></>}</div>
+      <aside className={`flex shrink-0 flex-col overflow-hidden border-l transition-[width] duration-300 ease-in-out ${changesOpen ? 'w-72' : 'w-10'}`}>
+        <div className={`flex h-10 shrink-0 items-center border-b text-xs font-semibold transition-all duration-300 ${changesOpen ? 'px-3' : 'justify-center px-1'}`}>
+          {changesOpen && <>CHANGES <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">{props.aiProposals.length}</span><div className="flex-1" />{props.aiProposals.length > 0 && <><button className="rounded px-1.5 py-1 text-[10px] font-normal text-primary hover:bg-accent" onClick={props.onAcceptAll}>{props.activeSession?.worktree ? '写入 worktree' : '全部接受'}</button><button className="rounded px-1.5 py-1 text-[10px] font-normal text-destructive hover:bg-accent" onClick={props.onRejectAll}>全部拒绝</button></>}</>}
+          <button type="button" title={changesOpen ? '折叠右侧面板' : '展开右侧面板'} aria-label={changesOpen ? '折叠右侧面板' : '展开右侧面板'} aria-expanded={changesOpen} className="rounded p-1 transition-colors duration-200 hover:bg-accent" onClick={() => setChangesOpen((open) => !open)}><PanelRight className={`h-4 w-4 transition-transform duration-300 ${changesOpen ? '' : 'rotate-180'}`} /></button>
+        </div>
+        <div aria-hidden={!changesOpen} className={`flex min-h-0 w-72 flex-1 flex-col transition-opacity duration-200 ${changesOpen ? 'opacity-100 delay-100' : 'pointer-events-none opacity-0'}`}>
         <div className="min-h-0 flex-1 overflow-auto p-2">
           {props.aiProposals.length === 0 && <p className="p-3 text-xs text-muted-foreground">Agent 生成修改后会显示在这里。</p>}
           {props.aiProposals.map((proposal) => {
@@ -213,6 +234,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           {props.activeSession?.worktree ? <div className="space-y-1 text-[10px]"><div className="truncate text-muted-foreground" title={props.activeSession.worktree.path}>{props.activeSession.worktree.branch}</div><div className="flex items-center gap-2"><span className={props.activeSession.worktree.dirty ? 'text-warning' : 'text-success'}>{props.activeSession.worktree.dirty ? '有未提交修改' : '工作区干净'}</span><div className="flex-1" /><button className="rounded px-1 py-0.5 hover:bg-accent" disabled={props.worktreeBusy} onClick={props.onRefreshWorktree}>刷新</button><button className="rounded px-1 py-0.5 text-primary hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onMergeWorktree}>合并</button><button className="rounded px-1 py-0.5 text-primary hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onDeliverWorktree}>创建 PR</button><button className="rounded px-1 py-0.5 text-destructive hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onDiscardWorktree}>放弃</button></div><p className="text-success">AI 读取、候选写入和验证均在隔离 worktree 执行。</p></div> : <Button size="sm" variant="outline" className="h-7 w-full text-[10px]" disabled={!props.activeSession || props.worktreeBusy || props.aiEditing} onClick={props.onCreateWorktree}>{props.worktreeBusy ? '准备中…' : '准备独立 worktree'}</Button>}
         </div>
         <div className="border-t p-3 text-[10px] text-muted-foreground">{props.activeSession?.worktree ? '隔离模式：审阅后原子写入 worktree，不修改主工作区。' : '所有修改都需要通过 Diff 审阅，不会自动保存。'}</div>
+        </div>
       </aside>
     </div>
   );

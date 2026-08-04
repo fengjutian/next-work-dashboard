@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, RefreshCw, ArrowLeft, ArrowRight, Send } from '@/components/icons';
+import { X, RefreshCw, ArrowLeft, ArrowRight, Edit3, MessageSquare, Plus, Send } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
@@ -116,6 +116,10 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
   const tab = useStore((s) => s.tabs.find((t) => t.id === tabId));
   const injectMode = useStore((s) => s.injectMode);
   const injectStrategy = useStore((s) => s.injectStrategy);
+  const setInjectMode = useStore((s) => s.setInjectMode);
+  const setInjectStrategy = useStore((s) => s.setInjectStrategy);
+  const promptDrawerOpen = useStore((s) => s.promptDrawerOpen);
+  const setPromptDrawerOpen = useStore((s) => s.setPromptDrawerOpen);
   const setLastInjectResult = useStore((s) => s.setLastInjectResult);
   const selectedPromptId = useStore((s) => s.selectedPromptId);
   const selectPrompt = useStore((s) => s.selectPrompt);
@@ -344,6 +348,16 @@ const WebViewPanel: React.FC<{ tabId: string }> = ({ tabId }) => {
         <div className="flex-1 text-xs text-muted-foreground truncate px-2">
           {tab.url}
         </div>
+
+        <div className="flex h-7 shrink-0 items-center rounded-lg border border-border/70 bg-muted/60 p-0.5" role="group" aria-label="发送方式">
+          <button type="button" className={`flex h-5 items-center gap-1 rounded-md px-2 text-xs transition-all ${injectMode === 'fill-only' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60'}`} aria-pressed={injectMode === 'fill-only'} title="仅填充输入框" onClick={() => setInjectMode('fill-only')}><Edit3 className="h-3 w-3" /><span className="hidden xl:inline">仅填充</span></button>
+          <button type="button" className={`flex h-5 items-center gap-1 rounded-md px-2 text-xs transition-all ${injectMode === 'fill-and-submit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60'}`} aria-pressed={injectMode === 'fill-and-submit'} title="填充输入框并立即发送" onClick={() => setInjectMode('fill-and-submit')}><Send className="h-3 w-3" /><span className="hidden xl:inline">填充并发送</span></button>
+        </div>
+        <div className="flex h-7 shrink-0 items-center rounded-lg border border-border/70 bg-muted/60 p-0.5" role="group" aria-label="内容处理方式">
+          <button type="button" className={`flex h-5 items-center gap-1 rounded-md px-2 text-xs transition-all ${injectStrategy === 'replace' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60'}`} aria-pressed={injectStrategy === 'replace'} title="替换输入框中的现有内容" onClick={() => setInjectStrategy('replace')}><Edit3 className="h-3 w-3" /><span className="hidden xl:inline">替换</span></button>
+          <button type="button" className={`flex h-5 items-center gap-1 rounded-md px-2 text-xs transition-all ${injectStrategy === 'append' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60'}`} aria-pressed={injectStrategy === 'append'} title="追加到输入框的现有内容后" onClick={() => setInjectStrategy('append')}><Plus className="h-3 w-3" /><span className="hidden xl:inline">追加</span></button>
+        </div>
+        <Button variant="ghost" size="icon" className={`h-7 w-7 shrink-0 ${promptDrawerOpen ? 'bg-primary/10 text-primary' : 'text-muted-foreground'}`} onClick={() => setPromptDrawerOpen(!promptDrawerOpen)} title="提示词" aria-label="打开提示词" aria-pressed={promptDrawerOpen}><MessageSquare className="h-4 w-4" /></Button>
 
         {/* 保存对话按钮 */}
         <Button

@@ -33,6 +33,7 @@ export const WorkspaceToolbar: React.FC<WorkspaceToolbarProps> = ({
   onEditorAction, onFormat, onTogglePanel, onToggleAgents, onToggleAutoSave, onSave, onSaveAll,
 }) => (
   <header className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
+    {!agentsOpen && <>
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onToggleSidebar} title="切换资源管理器 (Ctrl+B)" aria-label="切换资源管理器">
       <PanelLeft className="h-4 w-4" />
     </Button>
@@ -50,11 +51,13 @@ export const WorkspaceToolbar: React.FC<WorkspaceToolbarProps> = ({
     </Button>
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={!workspaceOpen} onClick={onSemanticSearch} title="语义搜索：定义、引用和 import" aria-label="语义搜索"><Network className="h-4 w-4" /></Button>
     <div className="mx-1 h-4 w-px bg-border" />
+    </>}
     <div className="flex-1" />
     <Button size="sm" variant={agentsOpen ? 'secondary' : 'ghost'} className="relative h-7 w-7 p-0" onClick={onToggleAgents} title={agentsOpen ? '关闭 Agents' : '打开 Agents'} aria-label={agentsOpen ? '关闭 Agents' : '打开 Agents'} aria-pressed={agentsOpen}>
       <Bot className="h-4 w-4" />
       {agentsOpen && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />}
     </Button>
+    {!agentsOpen && <>
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={!activeDocument} onClick={() => onEditorAction('editor.action.revealDefinition', '当前位置没有可跳转的定义')} title="转到定义 (F12)" aria-label="转到定义"><Code className="h-4 w-4" /></Button>
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={!activeDocument} onClick={() => onEditorAction('editor.action.referenceSearch.trigger', '当前位置没有可查找的引用')} title="查找所有引用 (Shift+F12)" aria-label="查找所有引用"><BookOpen className="h-4 w-4" /></Button>
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={!activeDocument} onClick={onFormat} title="格式化文档 (Shift+Alt+F)" aria-label="格式化文档"><Sparkles className="h-4 w-4" /></Button>
@@ -63,5 +66,6 @@ export const WorkspaceToolbar: React.FC<WorkspaceToolbarProps> = ({
     <div className="mx-1 h-4 w-px bg-border" />
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={!activeDocument || activeDocument.content === activeDocument.savedContent} onClick={onSave} title="保存当前文件 (Ctrl+S)" aria-label="保存当前文件"><Save className="h-4 w-4" /></Button>
     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={!hasDirtyDocuments} onClick={onSaveAll} title="保存全部文件" aria-label="保存全部文件"><SaveAll className="h-4 w-4" /></Button>
+    </>}
   </header>
 );

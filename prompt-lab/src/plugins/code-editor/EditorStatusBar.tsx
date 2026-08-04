@@ -14,7 +14,7 @@ interface Props {
 
 export const EditorStatusBar: React.FC<Props> = ({
   workspaceName, status, document, line, column, tabSize, onOpenSettings,
-}) => <footer className="flex h-7 shrink-0 items-center gap-3 border-t bg-primary px-3 text-[11px] text-primary-foreground">
+}) => <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-primary/20 bg-primary/10 px-3 text-[11px] text-foreground">
   <span className="max-w-48 truncate">{workspaceName ?? '无工作区'}</span>
   <span className="flex-1 truncate opacity-90">{status}</span>
   {document && <>
