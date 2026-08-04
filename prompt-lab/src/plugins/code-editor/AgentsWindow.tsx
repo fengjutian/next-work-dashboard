@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Bot, Edit3, Plus, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
@@ -8,6 +8,7 @@ import type { AiExecutionStage } from './useAiEditGeneration';
 interface AgentsWindowProps {
   workspace: { path: string; name: string } | null;
   sessions: AgentSession[];
+  archivedSessions: AgentSession[];
   activeSession: AgentSession | null;
   aiInstruction: string;
   aiEditing: boolean;
@@ -22,6 +23,8 @@ interface AgentsWindowProps {
   onSelectSession: (id: string) => void;
   onRenameSession: (id: string) => void;
   onArchiveSession: (id: string) => void;
+  onRestoreSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
   onInstructionChange: (value: string) => void;
   onMultiFileChange: (value: boolean) => void;
   onGenerate: () => void;
@@ -46,6 +49,7 @@ const stageLabel: Record<AiExecutionStage, string> = {
 };
 
 export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
+  const [sessionView, setSessionView] = useState<'active' | 'archived'>('active');
   if (!props.workspace) return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
       <Bot className="h-14 w-14 opacity-40" />
@@ -63,15 +67,27 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           <div className="flex-1" />
           <button title="新建会话" className="rounded p-1 hover:bg-accent" onClick={props.onCreateSession}><Plus className="h-4 w-4" /></button>
         </div>
-        <div className="border-b px-3 py-2 text-[10px] text-muted-foreground">{props.workspace.name}</div>
+        <div className="border-b px-2 py-1.5">
+          <div className="mb-1 px-1 text-[10px] text-muted-foreground">{props.workspace.name}</div>
+          <div className="grid grid-cols-2 rounded bg-muted/40 p-0.5 text-[10px]">
+            <button className={`rounded px-2 py-1 ${sessionView === 'active' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} onClick={() => setSessionView('active')}>进行中 {props.sessions.length}</button>
+            <button className={`rounded px-2 py-1 ${sessionView === 'archived' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} disabled={props.aiEditing} onClick={() => setSessionView('archived')}>已归档 {props.archivedSessions.length}</button>
+          </div>
+        </div>
         <div className="min-h-0 flex-1 overflow-auto p-2">
-          {props.sessions.length === 0 && <button className="w-full rounded border border-dashed p-4 text-xs text-muted-foreground hover:bg-accent" onClick={props.onCreateSession}>创建第一个 Agent 会话</button>}
-          {props.sessions.map((session) => (
+          {sessionView === 'active' && props.sessions.length === 0 && <button className="w-full rounded border border-dashed p-4 text-xs text-muted-foreground hover:bg-accent" onClick={props.onCreateSession}>创建第一个 Agent 会话</button>}
+          {sessionView === 'active' && props.sessions.map((session) => (
             <button key={session.id} disabled={props.aiEditing && props.activeSession?.id !== session.id} className={`group mb-1 w-full rounded px-2 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${props.activeSession?.id === session.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'}`} onClick={() => props.onSelectSession(session.id)}>
               <div className="flex items-center gap-1"><span className="min-w-0 flex-1 truncate font-medium">{session.title}</span><span className="text-[9px] text-muted-foreground">{statusLabel[session.status]}</span></div>
               <div className="mt-1 flex items-center gap-2 text-[9px] text-muted-foreground"><span>{session.filesChanged} 文件</span><span>{new Date(session.updatedAt).toLocaleTimeString()}</span></div>
             </button>
           ))}
+          {sessionView === 'archived' && props.archivedSessions.length === 0 && <p className="p-4 text-center text-xs text-muted-foreground">暂无已归档会话</p>}
+          {sessionView === 'archived' && props.archivedSessions.map((session) => <div key={session.id} className="mb-1 rounded border px-2 py-2 text-xs">
+            <div className="truncate font-medium">{session.title}</div>
+            <div className="mt-1 text-[9px] text-muted-foreground">归档于 {new Date(session.archivedAt ?? session.updatedAt).toLocaleString()}</div>
+            <div className="mt-2 flex justify-end gap-1"><Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => { props.onRestoreSession(session.id); setSessionView('active'); }}>恢复</Button><Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive" onClick={() => props.onDeleteSession(session.id)}>永久删除</Button></div>
+          </div>)}
         </div>
       </aside>
 

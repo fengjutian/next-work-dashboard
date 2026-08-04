@@ -192,11 +192,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
   const {
     sessions: agentSessionList,
+    archivedSessions: archivedAgentSessionList,
     activeSession: activeAgentSession,
     createSession: createAgentSession,
     selectSession: selectAgentSession,
     updateSession: updateAgentSession,
     archiveSession: archiveAgentSession,
+    restoreSession: restoreAgentSession,
+    deleteSession: deleteAgentSession,
   } = useAgentSessions(workspace);
   const {
     aiInstruction, setAiInstruction, aiEditing, setAiEditing, inlineEdit, setInlineEdit,
@@ -1161,6 +1164,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
       {agentsOpen ? <AgentsWindow
         workspace={workspace}
         sessions={agentSessionList}
+        archivedSessions={archivedAgentSessionList}
         activeSession={activeAgentSession}
         aiInstruction={aiInstruction}
         aiEditing={aiEditing}
@@ -1179,6 +1183,10 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         })(); }}
         onArchiveSession={(id) => { void (async () => {
           if (await appConfirm('归档这个 Agent 会话？')) archiveAgentSession(id);
+        })(); }}
+        onRestoreSession={restoreAgentSession}
+        onDeleteSession={(id) => { void (async () => {
+          if (await appConfirm('永久删除这个 Agent 会话及其本地对话和待审候选？此操作无法撤销。')) deleteAgentSession(id);
         })(); }}
         onInstructionChange={setAiInstruction}
         onMultiFileChange={setAiMultiFile}

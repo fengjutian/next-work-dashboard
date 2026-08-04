@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createAgentSession, sessionsForWorkspace, type AgentSession } from '../src/plugins/code-editor/agent-sessions';
+import { archivedSessionsForWorkspace, createAgentSession, sessionsForWorkspace, type AgentSession } from '../src/plugins/code-editor/agent-sessions';
 
 describe('agent sessions', () => {
   it('creates a workspace-bound idle session', () => {
@@ -21,6 +21,6 @@ describe('agent sessions', () => {
       { ...base, id: 'other', workspacePath: '/other', updatedAt: 40 },
     ];
     expect(sessionsForWorkspace(sessions, '/app').map((session) => session.id)).toEqual(['new', 'old']);
+    expect(archivedSessionsForWorkspace(sessions, '/app').map((session) => session.id)).toEqual(['archived']);
   });
 });
-

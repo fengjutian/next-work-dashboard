@@ -37,3 +37,9 @@ export function sessionsForWorkspace(sessions: AgentSession[], workspacePath?: s
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
+export function archivedSessionsForWorkspace(sessions: AgentSession[], workspacePath?: string): AgentSession[] {
+  if (!workspacePath) return [];
+  return sessions
+    .filter((session) => session.workspacePath === workspacePath && Boolean(session.archivedAt))
+    .sort((left, right) => (right.archivedAt ?? 0) - (left.archivedAt ?? 0));
+}

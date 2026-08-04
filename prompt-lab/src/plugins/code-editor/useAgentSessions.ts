@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createAgentSession, sessionsForWorkspace, type AgentSession } from './agent-sessions';
+import { archivedSessionsForWorkspace, createAgentSession, sessionsForWorkspace, type AgentSession } from './agent-sessions';
 
 const STORAGE_KEY = 'code-editor.agent-sessions.v1';
 const ACTIVE_KEY = 'code-editor.active-agent-sessions.v1';
@@ -13,6 +13,10 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
   const [activeByWorkspace, setActiveByWorkspace] = useState<Record<string, string>>(() => readStored(ACTIVE_KEY, {}));
   const visibleSessions = useMemo(
     () => sessionsForWorkspace(sessions, workspace?.path),
+    [sessions, workspace?.path],
+  );
+  const archivedSessions = useMemo(
+    () => archivedSessionsForWorkspace(sessions, workspace?.path),
     [sessions, workspace?.path],
   );
   const activeSessionId = workspace ? activeByWorkspace[workspace.path] : undefined;
@@ -51,6 +55,25 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
       : session));
   }, []);
 
-  return { sessions: visibleSessions, activeSession, createSession, selectSession, updateSession, archiveSession };
-}
+  const restoreSession = useCallback((id: string) => {
+    const now = Date.now();
+    setSessions((previous) => previous.map((session) => session.id === id
+      ? { ...session, archivedAt: undefined, updatedAt: now }
+      : session));
+    if (workspace) setActiveByWorkspace((previous) => ({ ...previous, [workspace.path]: id }));
+  }, [workspace]);
 
+  const deleteSession = useCallback((id: string) => {
+    const session = sessions.find((item) => item.id === id);
+    if (!session) return;
+    setSessions((previous) => previous.filter((item) => item.id !== id));
+    const persistenceKey = `${session.workspacePath}::${session.id}`;
+    for (const storageKey of ['code-editor.ai-conversations.v1', 'code-editor.ai-pending.v1', 'code-editor.ai-drafts.v1']) {
+      const stored = readStored<Record<string, unknown>>(storageKey, {});
+      delete stored[persistenceKey];
+      localStorage.setItem(storageKey, JSON.stringify(stored));
+    }
+  }, [sessions]);
+
+  return { sessions: visibleSessions, archivedSessions, activeSession, createSession, selectSession, updateSession, archiveSession, restoreSession, deleteSession };
+}
