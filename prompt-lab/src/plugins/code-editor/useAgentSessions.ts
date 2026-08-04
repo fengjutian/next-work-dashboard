@@ -95,5 +95,31 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
     setLogsBySession((previous) => ({ ...previous, [sessionId]: [] }));
   }, []);
 
-  return { sessions: visibleSessions, archivedSessions, activeSession, activeLogs, createSession, selectSession, updateSession, archiveSession, restoreSession, deleteSession, appendLog, clearLogs };
+  const forkSession = useCallback((id: string) => {
+    const source = sessions.find((session) => session.id === id);
+    if (!source || !workspace) return null;
+    const fork = {
+      ...createAgentSession(workspace),
+      title: `${source.title}（分叉）`.slice(0, 80),
+      validationTask: source.validationTask,
+      validationTasks: source.validationTasks,
+      autoValidate: source.autoValidate,
+    };
+    setSessions((previous) => [...previous, fork]);
+    setActiveByWorkspace((previous) => ({ ...previous, [workspace.path]: fork.id }));
+    const conversations = readStored<Record<string, unknown>>('code-editor.ai-conversations.v1', {});
+    const sourceKey = `${source.workspacePath}::${source.id}`;
+    const forkKey = `${fork.workspacePath}::${fork.id}`;
+    if (conversations[sourceKey]) {
+      conversations[forkKey] = conversations[sourceKey];
+      localStorage.setItem('code-editor.ai-conversations.v1', JSON.stringify(conversations));
+    }
+    setLogsBySession((previous) => ({
+      ...previous,
+      [fork.id]: [createAgentLogEntry('info', `从会话“${source.title}”分叉；未复制待审修改和中断请求`)],
+    }));
+    return fork;
+  }, [sessions, workspace]);
+
+  return { sessions: visibleSessions, archivedSessions, activeSession, activeLogs, createSession, selectSession, updateSession, archiveSession, restoreSession, deleteSession, appendLog, clearLogs, forkSession };
 }

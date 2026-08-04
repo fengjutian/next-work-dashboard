@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, Copy, Edit3, Plus, X } from '@/components/icons';
+import { Bot, Copy, Edit3, Pin, Plus, Search, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentLogEntry, AgentSession } from './agent-sessions';
@@ -32,6 +32,8 @@ interface AgentsWindowProps {
   onRestoreSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
   onClearLogs: (id: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
+  onForkSession: (id: string) => void;
   onInstructionChange: (value: string) => void;
   onMultiFileChange: (value: boolean) => void;
   onGenerate: () => void;
@@ -41,9 +43,10 @@ interface AgentsWindowProps {
   onRejectProposal: (path: string) => void;
   onAcceptAll: () => void;
   onRejectAll: () => void;
-  onRunValidation: (taskName: string) => void;
+  onRunValidation: (taskNames: string[]) => void;
   onCancelValidation: () => void;
-  onValidationConfigChange: (taskName: string, autoValidate: boolean) => void;
+  onValidationConfigChange: (taskNames: string[], autoValidate: boolean) => void;
+  onFixValidationFailure: () => void;
 }
 
 const statusLabel: Record<AgentSession['status'], string> = {
@@ -65,7 +68,7 @@ const stageLabel: Record<AiExecutionStage, string> = {
 export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
   const [sessionView, setSessionView] = useState<'active' | 'archived'>('active');
   const [contentView, setContentView] = useState<'conversation' | 'logs'>('conversation');
-  const [validationTask, setValidationTask] = useState('');
+  const [sessionQuery, setSessionQuery] = useState('');
   if (!props.workspace) return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
       <Bot className="h-14 w-14 opacity-40" />
@@ -74,6 +77,9 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
       <Button size="sm" variant="outline" onClick={props.onClose}>返回编辑器</Button>
     </div>
   );
+  const normalizedQuery = sessionQuery.trim().toLocaleLowerCase();
+  const displayedSessions = normalizedQuery ? props.sessions.filter((session) => session.title.toLocaleLowerCase().includes(normalizedQuery)) : props.sessions;
+  const displayedArchivedSessions = normalizedQuery ? props.archivedSessions.filter((session) => session.title.toLocaleLowerCase().includes(normalizedQuery)) : props.archivedSessions;
 
   return (
     <div className="flex min-h-0 flex-1 bg-background">
@@ -85,21 +91,22 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
         </div>
         <div className="border-b px-2 py-1.5">
           <div className="mb-1 px-1 text-[10px] text-muted-foreground">{props.workspace.name}</div>
+          <div className="relative mb-1"><Search className="absolute left-2 top-1.5 h-3 w-3 text-muted-foreground" /><input value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="搜索会话" className="h-6 w-full rounded border bg-background pl-6 pr-2 text-[10px] outline-none" /></div>
           <div className="grid grid-cols-2 rounded bg-muted/40 p-0.5 text-[10px]">
             <button className={`rounded px-2 py-1 ${sessionView === 'active' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} onClick={() => setSessionView('active')}>进行中 {props.sessions.length}</button>
             <button className={`rounded px-2 py-1 ${sessionView === 'archived' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} disabled={props.aiEditing} onClick={() => setSessionView('archived')}>已归档 {props.archivedSessions.length}</button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-2">
-          {sessionView === 'active' && props.sessions.length === 0 && <button className="w-full rounded border border-dashed p-4 text-xs text-muted-foreground hover:bg-accent" onClick={props.onCreateSession}>创建第一个 Agent 会话</button>}
-          {sessionView === 'active' && props.sessions.map((session) => (
+          {sessionView === 'active' && displayedSessions.length === 0 && (sessionQuery ? <p className="p-4 text-center text-xs text-muted-foreground">没有匹配的会话</p> : <button className="w-full rounded border border-dashed p-4 text-xs text-muted-foreground hover:bg-accent" onClick={props.onCreateSession}>创建第一个 Agent 会话</button>)}
+          {sessionView === 'active' && displayedSessions.map((session) => (
             <button key={session.id} disabled={props.aiEditing && props.activeSession?.id !== session.id} className={`group mb-1 w-full rounded px-2 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${props.activeSession?.id === session.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'}`} onClick={() => props.onSelectSession(session.id)}>
-              <div className="flex items-center gap-1"><span className="min-w-0 flex-1 truncate font-medium">{session.title}</span><span className="text-[9px] text-muted-foreground">{statusLabel[session.status]}</span></div>
+              <div className="flex items-center gap-1">{session.pinned && <Pin className="h-2.5 w-2.5 shrink-0 text-primary" />}<span className="min-w-0 flex-1 truncate font-medium">{session.title}</span><span className="text-[9px] text-muted-foreground">{statusLabel[session.status]}</span></div>
               <div className="mt-1 flex items-center gap-2 text-[9px] text-muted-foreground"><span>{session.filesChanged} 文件</span><span>已接受 {session.accepted}</span><span>{new Date(session.updatedAt).toLocaleTimeString()}</span></div>
             </button>
           ))}
-          {sessionView === 'archived' && props.archivedSessions.length === 0 && <p className="p-4 text-center text-xs text-muted-foreground">暂无已归档会话</p>}
-          {sessionView === 'archived' && props.archivedSessions.map((session) => <div key={session.id} className="mb-1 rounded border px-2 py-2 text-xs">
+          {sessionView === 'archived' && displayedArchivedSessions.length === 0 && <p className="p-4 text-center text-xs text-muted-foreground">{sessionQuery ? '没有匹配的会话' : '暂无已归档会话'}</p>}
+          {sessionView === 'archived' && displayedArchivedSessions.map((session) => <div key={session.id} className="mb-1 rounded border px-2 py-2 text-xs">
             <div className="truncate font-medium">{session.title}</div>
             <div className="mt-1 text-[9px] text-muted-foreground">归档于 {new Date(session.archivedAt ?? session.updatedAt).toLocaleString()}</div>
             <div className="mt-2 flex justify-end gap-1"><Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => { props.onRestoreSession(session.id); setSessionView('active'); }}>恢复</Button><Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive" onClick={() => props.onDeleteSession(session.id)}>永久删除</Button></div>
@@ -112,6 +119,8 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{props.activeSession?.title ?? '选择或创建会话'}</span>
           <div className="flex rounded bg-muted/40 p-0.5 text-[10px]"><button className={`rounded px-2 py-1 ${contentView === 'conversation' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} onClick={() => setContentView('conversation')}>对话</button><button className={`rounded px-2 py-1 ${contentView === 'logs' ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} onClick={() => setContentView('logs')}>日志 {props.activeLogs.length}</button></div>
           {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => props.activeSession && props.onRenameSession(props.activeSession.id)}><Edit3 className="mr-1 h-3 w-3" />重命名</Button>}
+          {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={props.aiEditing} onClick={() => props.activeSession && props.onTogglePin(props.activeSession.id, !props.activeSession.pinned)}><Pin className="mr-1 h-3 w-3" />{props.activeSession.pinned ? '取消置顶' : '置顶'}</Button>}
+          {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={props.aiEditing} onClick={() => props.activeSession && props.onForkSession(props.activeSession.id)}><Copy className="mr-1 h-3 w-3" />分叉</Button>}
           {props.activeSession && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={props.aiEditing} onClick={() => props.activeSession && props.onArchiveSession(props.activeSession.id)}>归档</Button>}
           <button title="关闭 Agents" className="rounded p-1 hover:bg-accent" onClick={props.onClose}><X className="h-4 w-4" /></button>
         </header>
@@ -149,7 +158,11 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
         </div>
         <div className="border-t p-3">
           <div className="mb-2 text-[10px] font-semibold">VALIDATION</div>
-          {props.workspaceTasks.length === 0 ? <p className="text-[10px] text-muted-foreground">未发现工作区任务</p> : <><div className="flex gap-1"><select className="h-7 min-w-0 flex-1 rounded border bg-background px-1 text-[10px]" value={validationTask || props.activeSession?.validationTask || props.workspaceTasks[0]?.name || ''} disabled={Boolean(props.validationRun && (props.validationRun.state === 'running' || props.validationRun.state === 'background'))} onChange={(event) => { setValidationTask(event.target.value); props.onValidationConfigChange(event.target.value, Boolean(props.activeSession?.autoValidate)); }}>{props.workspaceTasks.map((task) => <option key={task.name} value={task.name}>{task.name}</option>)}</select>{props.validationRun && (props.validationRun.state === 'running' || props.validationRun.state === 'background') ? <Button size="sm" variant="destructive" className="h-7 px-2 text-[10px]" onClick={props.onCancelValidation}>取消</Button> : <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={!props.activeSession} onClick={() => props.onRunValidation(validationTask || props.activeSession?.validationTask || props.workspaceTasks[0]?.name || '')}>运行</Button>}</div><label className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground"><input type="checkbox" checked={Boolean(props.activeSession?.autoValidate)} disabled={!props.activeSession} onChange={(event) => props.onValidationConfigChange(validationTask || props.activeSession?.validationTask || props.workspaceTasks[0]?.name || '', event.target.checked)} />接受修改后自动运行</label></>}
+          {props.workspaceTasks.length === 0 ? <p className="text-[10px] text-muted-foreground">未发现工作区任务</p> : (() => {
+            const selected = props.activeSession?.validationTasks ?? (props.activeSession?.validationTask ? [props.activeSession.validationTask] : []);
+            const running = Boolean(props.validationRun && (props.validationRun.state === 'running' || props.validationRun.state === 'background'));
+            return <><div className="max-h-24 overflow-auto rounded border p-1">{props.workspaceTasks.map((task) => <label key={task.name} className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] hover:bg-accent"><input type="checkbox" checked={selected.includes(task.name)} disabled={!props.activeSession || running} onChange={(event) => props.onValidationConfigChange(event.target.checked ? [...selected, task.name] : selected.filter((name) => name !== task.name), Boolean(props.activeSession?.autoValidate))} /><span className="truncate">{task.name}</span></label>)}</div><div className="mt-2 flex gap-1">{running ? <Button size="sm" variant="destructive" className="h-7 flex-1 px-2 text-[10px]" onClick={props.onCancelValidation}>取消流水线</Button> : <Button size="sm" variant="outline" className="h-7 flex-1 px-2 text-[10px]" disabled={!props.activeSession || selected.length === 0} onClick={() => props.onRunValidation(selected)}>运行 {selected.length} 项</Button>}<Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={!props.activeLogs.some((entry) => entry.level === 'error' && entry.message.startsWith('验证失败'))} onClick={() => { props.onFixValidationFailure(); setContentView('conversation'); }}>修复失败</Button></div><label className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground"><input type="checkbox" checked={Boolean(props.activeSession?.autoValidate)} disabled={!props.activeSession || selected.length === 0} onChange={(event) => props.onValidationConfigChange(selected, event.target.checked)} />接受修改后自动运行流水线</label></>;
+          })()}
           {props.validationRun && <div className="mt-2 text-[10px] text-muted-foreground">{props.validationRun.name} · {props.validationRun.state}</div>}
         </div>
         <div className="border-t p-3 text-[10px] text-muted-foreground">所有修改都需要通过 Diff 审阅，不会自动保存。</div>

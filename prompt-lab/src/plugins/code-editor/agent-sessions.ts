@@ -12,7 +12,9 @@ export interface AgentSession {
   filesChanged: number;
   accepted: number;
   validationTask?: string;
+  validationTasks?: string[];
   autoValidate?: boolean;
+  pinned?: boolean;
 }
 
 export interface AgentLogEntry {
@@ -43,7 +45,7 @@ export function sessionsForWorkspace(sessions: AgentSession[], workspacePath?: s
   if (!workspacePath) return [];
   return sessions
     .filter((session) => session.workspacePath === workspacePath && !session.archivedAt)
-    .sort((left, right) => right.updatedAt - left.updatedAt);
+    .sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || right.updatedAt - left.updatedAt);
 }
 
 export function archivedSessionsForWorkspace(sessions: AgentSession[], workspacePath?: string): AgentSession[] {

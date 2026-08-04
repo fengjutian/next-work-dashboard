@@ -17,10 +17,11 @@ describe('agent sessions', () => {
     const sessions: AgentSession[] = [
       { ...base, id: 'old', workspacePath: '/app', updatedAt: 10 },
       { ...base, id: 'new', workspacePath: '/app', updatedAt: 20 },
+      { ...base, id: 'pinned', workspacePath: '/app', updatedAt: 5, pinned: true },
       { ...base, id: 'archived', workspacePath: '/app', updatedAt: 30, archivedAt: 30 },
       { ...base, id: 'other', workspacePath: '/other', updatedAt: 40 },
     ];
-    expect(sessionsForWorkspace(sessions, '/app').map((session) => session.id)).toEqual(['new', 'old']);
+    expect(sessionsForWorkspace(sessions, '/app').map((session) => session.id)).toEqual(['pinned', 'new', 'old']);
     expect(archivedSessionsForWorkspace(sessions, '/app').map((session) => session.id)).toEqual(['archived']);
   });
 

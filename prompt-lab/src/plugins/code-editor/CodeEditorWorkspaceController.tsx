@@ -205,6 +205,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     deleteSession: deleteAgentSession,
     appendLog: appendAgentLog,
     clearLogs: clearAgentLogs,
+    forkSession: forkAgentSession,
   } = useAgentSessions(workspace);
   const {
     aiInstruction, setAiInstruction, aiEditing, setAiEditing, inlineEdit, setInlineEdit,
@@ -312,7 +313,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setStatus,
   });
 
-  const agentValidationRunsRef = useRef(new Map<string, { sessionId: string; taskName: string }>());
+  const agentValidationRunsRef = useRef(new Map<string, { sessionId: string; taskName: string; remainingTasks: string[] }>());
+  const runWorkspaceTaskRef = useRef<(taskName: string) => string | null>(() => null);
   const [agentValidationRunId, setAgentValidationRunId] = useState<string | null>(null);
   const handleAgentTaskEvent = useCallback((event: WorkspaceTaskEvent) => {
     const validation = agentValidationRunsRef.current.get(event.runId);
@@ -330,6 +332,16 @@ export const CodeEditorWorkspaceController: React.FC = () => {
       const level = event.state === 'completed' ? 'success' : event.state === 'failed' ? 'error' : 'warning';
       appendAgentLog(validation.sessionId, level, `验证${event.state === 'completed' ? '通过' : event.state === 'failed' ? '失败' : '已取消'}：${validation.taskName}（${(duration / 1000).toFixed(1)}s${event.exitCode === undefined ? '' : `，退出码 ${event.exitCode}`}）`);
       agentValidationRunsRef.current.delete(event.runId);
+      if (event.state === 'completed' && validation.remainingTasks.length > 0) {
+        const [nextTask, ...remainingTasks] = validation.remainingTasks;
+        const nextRunId = runWorkspaceTaskRef.current(nextTask);
+        if (nextRunId) {
+          agentValidationRunsRef.current.set(nextRunId, { sessionId: validation.sessionId, taskName: nextTask, remainingTasks });
+          setAgentValidationRunId(nextRunId);
+          appendAgentLog(validation.sessionId, 'info', `验证流水线继续：${nextTask}（剩余 ${remainingTasks.length} 项）`);
+          return;
+        }
+      }
       setAgentValidationRunId((current) => current === event.runId ? null : current);
     }
   }, [appendAgentLog]);
@@ -348,13 +360,15 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     createTerminalTab, closeTerminalTab, restartTerminalTab,
     handleTerminalOutput, runWorkspaceTask, cancelWorkspaceTask,
   } = terminalTasks;
-  const startAgentValidation = useCallback((taskName: string, session = activeAgentSession) => {
+  runWorkspaceTaskRef.current = runWorkspaceTask;
+  const startAgentValidation = useCallback((taskNames: string[], session = activeAgentSession) => {
+    const [taskName, ...remainingTasks] = taskNames;
     if (!session || !taskName) return;
     const runId = runWorkspaceTask(taskName);
     if (!runId) return;
-    agentValidationRunsRef.current.set(runId, { sessionId: session.id, taskName });
+    agentValidationRunsRef.current.set(runId, { sessionId: session.id, taskName, remainingTasks });
     setAgentValidationRunId(runId);
-    appendAgentLog(session.id, 'info', `已提交验证任务：${taskName}`);
+    appendAgentLog(session.id, 'info', `已提交验证流水线：${taskNames.join(' → ')}`);
   }, [activeAgentSession, appendAgentLog, runWorkspaceTask]);
   const autoValidationSeenRef = useRef(new Map<string, number>());
   useEffect(() => {
@@ -362,8 +376,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     const previous = autoValidationSeenRef.current.get(activeAgentSession.id);
     autoValidationSeenRef.current.set(activeAgentSession.id, activeAgentSession.accepted);
     if (previous === undefined || activeAgentSession.accepted <= previous) return;
-    if (activeAgentSession.autoValidate && activeAgentSession.validationTask && !agentValidationRunId) {
-      startAgentValidation(activeAgentSession.validationTask, activeAgentSession);
+    const validationTasks = activeAgentSession.validationTasks ?? (activeAgentSession.validationTask ? [activeAgentSession.validationTask] : []);
+    if (activeAgentSession.autoValidate && validationTasks.length > 0 && !agentValidationRunId) {
+      startAgentValidation(validationTasks, activeAgentSession);
     }
   }, [activeAgentSession, agentValidationRunId, startAgentValidation]);
 
@@ -1290,6 +1305,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onClearLogs={(id) => { void (async () => {
           if (await appConfirm('清空这个 Agent 会话的全部日志？')) clearAgentLogs(id);
         })(); }}
+        onTogglePin={(id, pinned) => updateAgentSession(id, { pinned })}
+        onForkSession={(id) => { forkAgentSession(id); }}
         onInstructionChange={setAiInstruction}
         onMultiFileChange={setAiMultiFile}
         onGenerate={() => { void runAgentEdit(); }}
@@ -1301,8 +1318,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onRejectAll={() => { void (async () => { if (await appConfirm(`拒绝全部 ${aiProposals.length} 个修改候选？`)) rejectAllAiEdits(); })(); }}
         onRunValidation={startAgentValidation}
         onCancelValidation={cancelWorkspaceTask}
-        onValidationConfigChange={(taskName, autoValidate) => {
-          if (activeAgentSession) updateAgentSession(activeAgentSession.id, { validationTask: taskName, autoValidate });
+        onValidationConfigChange={(validationTasks, autoValidate) => {
+          if (activeAgentSession) updateAgentSession(activeAgentSession.id, { validationTasks, validationTask: validationTasks[0], autoValidate });
+        }}
+        onFixValidationFailure={() => {
+          if (!activeAgentSession) return;
+          const context = activeAgentLogs.slice(-20).map((entry) => `[${entry.level}] ${entry.message}`).join('\n');
+          setAiInstruction(`修复以下验证失败。分析根因并生成最小、完整的代码修改；不要绕过或删除测试。\n\n${context}`);
+          appendAgentLog(activeAgentSession.id, 'info', '已根据验证失败创建继续修复指令');
         }}
       /> : <div className="flex min-h-0 flex-1">
         {sidebarVisible && <WorkspaceExplorer
