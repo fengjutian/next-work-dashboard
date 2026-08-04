@@ -29,4 +29,12 @@ describe('pluginStorage', () => {
     expect(pluginStorage.isCrashDisabled('demo')).toBe(true);
     expect(pluginStorage.isSafeMode()).toBe(true);
   });
+
+  it('revokes grants without changing the plugin definition', () => {
+    pluginStorage.saveDefinitions([{ id: 'permissions', permissions: ['data' as const, 'clipboard' as const] }]);
+    pluginStorage.setGrants('permissions', ['data']);
+
+    expect(pluginStorage.getGrants('permissions')).toEqual(['data']);
+    expect(pluginStorage.loadDefinitions<{ id: string }>()[0]).toMatchObject({ id: 'permissions' });
+  });
 });
