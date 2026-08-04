@@ -3,7 +3,7 @@ import { Bot, Copy, Edit3, Pin, Plus, Search, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentLogEntry, AgentSession } from './agent-sessions';
-import type { AiExecutionMetrics, AiExecutionStage } from './useAiEditGeneration';
+import type { AgentEditScope, AiExecutionMetrics, AiExecutionStage } from './useAiEditGeneration';
 import { summarizeAiProposal } from './ai-proposal-summary';
 import type { WorkspaceTask } from '@/types/electron';
 
@@ -24,6 +24,8 @@ interface AgentsWindowProps {
   aiMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }>;
   aiProposals: AiFileProposal[];
   activeDocumentPath?: string;
+  agentScope: AgentEditScope;
+  onAgentScopeChange: (kind: AgentEditScope['kind']) => void;
   workspaceTasks: WorkspaceTask[];
   validationRun: { name: string; state: 'running' | 'background' | 'completed' | 'failed' | 'cancelled' } | null;
   onClose: () => void;
@@ -148,12 +150,14 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span>{props.aiExecutionMetrics && <><span>· {props.aiExecutionMetrics.receivedChars.toLocaleString()} 字符</span>{props.aiExecutionMetrics.firstChunkAt && <span>· 首字节 {props.aiExecutionMetrics.firstChunkAt - props.aiExecutionMetrics.startedAt}ms</span>}<span>· {(((props.aiExecutionMetrics.endedAt ?? Date.now()) - props.aiExecutionMetrics.startedAt) / 1000).toFixed(1)}s</span></>}</div>}
           <textarea value={props.aiInstruction} disabled={!props.activeSession || props.aiEditing} onChange={(event) => props.onInstructionChange(event.target.value)} placeholder="描述一个代码任务…" className="min-h-24 w-full resize-none rounded-md border bg-background p-3 text-xs outline-none" />
           <div className="mt-2 flex items-center gap-3 text-xs">
-            <div className="flex items-center gap-2"><button className={"rounded px-2 py-0.5 text-[10px] " + (props.aiMode === "analyze" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-accent")} disabled={props.aiEditing} onClick={() => props.onModeChange("analyze")}>分析</button><button className={"rounded px-2 py-0.5 text-[10px] " + (props.aiMode === "modify" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-accent")} disabled={props.aiEditing} onClick={() => props.onModeChange("modify")}>修改</button></div><label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件</label>
-            <span className="truncate text-muted-foreground">{props.activeDocumentPath ? `当前文件：${props.activeDocumentPath}` : '未打开文件'}</span>
+            <div className="flex items-center gap-2"><button className={"rounded px-2 py-0.5 text-[10px] " + (props.aiMode === "analyze" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-accent")} disabled={props.aiEditing} onClick={() => props.onModeChange("analyze")}>分析</button><button className={"rounded px-2 py-0.5 text-[10px] " + (props.aiMode === "modify" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-accent")} disabled={props.aiEditing} onClick={() => props.onModeChange("modify")}>修改</button></div>
+            <div className="flex rounded bg-muted/40 p-0.5 text-[10px]">{([['workspace', '工作区'], ['directory', '选中目录'], ['files', '选中文件']] as const).map(([kind, label]) => <button key={kind} disabled={props.aiEditing} className={`rounded px-2 py-1 ${props.agentScope.kind === kind ? 'bg-background shadow-sm' : 'text-muted-foreground'}`} onClick={() => props.onAgentScopeChange(kind)}>{label}</button>)}</div>
+            <label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件</label>
+            <span className="truncate text-muted-foreground" title={props.agentScope.paths.join(', ')}>范围：{props.agentScope.label}</span>
             <div className="flex-1" />
             {props.aiEditing
               ? <Button size="sm" variant="destructive" onClick={props.onCancel}>取消运行</Button>
-              : <Button size="sm" disabled={!props.activeSession || !props.aiInstruction.trim()} onClick={props.onGenerate}>{props.aiPendingRequest?.status === 'interrupted' ? '重新运行' : '运行 Agent'}</Button>}
+              : <Button size="sm" disabled={!props.activeSession || (props.agentScope.kind !== 'workspace' && props.agentScope.paths.length === 0) || (props.agentScope.kind === 'workspace' && !props.activeDocumentPath && !props.aiMultiFile && props.aiMode === 'modify') || !props.aiInstruction.trim()} onClick={props.onGenerate}>{props.aiPendingRequest?.status === 'interrupted' ? '重新运行' : '运行 Agent'}</Button>}
           </div>
         </div>}
       </section>

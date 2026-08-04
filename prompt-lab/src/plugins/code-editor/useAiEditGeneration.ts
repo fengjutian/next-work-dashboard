@@ -10,12 +10,14 @@ import type { EditorDiffView } from './useGitDiffMerge';
 import type { AgentTaskConfig, AgentTaskRecord } from '@/types/electron';
 
 interface AiApiConfig { apiKey: string; baseUrl: string; model: string }
+export interface AgentEditScope { kind: 'workspace' | 'directory' | 'files'; paths: string[]; label: string }
 
 export type AiExecutionStage = 'idle' | 'collecting-context' | 'summarizing' | 'generating' | 'parsing' | 'review' | 'cancelling' | 'interrupted' | 'failed';
 export interface AiExecutionMetrics { startedAt: number; firstChunkAt?: number; endedAt?: number; receivedChars: number }
 
 interface UseAiEditGenerationOptions {
   sessionId?: string;
+  scope: AgentEditScope;
   aiApi: AiApiConfig;
   workspace: { path: string } | null;
   isolated?: boolean;
@@ -88,16 +90,29 @@ async function collectContexts(
   documents: OpenDocument[],
   activeDocument: OpenDocument,
   instruction: string,
+  scope: AgentEditScope,
 ) {
   const listed = await window.electronAPI.workspace.listFiles(workspacePath);
   const terms = instruction.toLocaleLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 2);
-  const candidates = (listed.data ?? []).filter((file) => SOURCE_FILE.test(file.name)).sort((left, right) => {
+  const normalize = (value: string) => value.replace(/\\/g, '/');
+  const inScope = (filePath: string) => {
+    const normalized = normalize(filePath);
+    if (scope.kind === 'workspace') return true;
+    if (scope.kind === 'directory') {
+      const directory = normalize(scope.paths[0] ?? '').replace(/\/$/, '');
+      return Boolean(directory) && (normalized === directory || normalized.startsWith(`${directory}/`));
+    }
+    const selected = new Set(scope.paths.map(normalize));
+    return selected.has(normalized);
+  };
+  const candidates = (listed.data ?? []).filter((file) => inScope(file.path) && SOURCE_FILE.test(file.name)).sort((left, right) => {
     const score = (path: string) => terms.reduce((total, term) => total + (path.toLocaleLowerCase().includes(term) ? 1 : 0), 0);
     return score(right.path) - score(left.path);
   });
   const paths = [...new Set([
-    activeDocument.path,
-    ...documents.filter((document) => !document.standalone).map((document) => document.path),
+    ...(inScope(activeDocument.path) ? [activeDocument.path] : []),
+    ...documents.filter((document) => !document.standalone && inScope(document.path)).map((document) => document.path),
+    ...(scope.kind === 'files' ? scope.paths : []),
     ...candidates.slice(0, 8).map((file) => file.path),
   ])].slice(0, 10);
   const importPattern = /(?:from\s+['"]|require\s*\(\s*['"]|import\s+['"])([./][^'"]+)/g;
@@ -140,15 +155,24 @@ async function collectContexts(
   return contexts;
 }
 
-function parseProposals(response: string, contexts: AiFileProposal[]): AiFileProposal[] {
+function parseProposals(response: string, contexts: AiFileProposal[], scope: AgentEditScope): AiFileProposal[] {
   const json = response.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   const parsed = JSON.parse(json) as { files?: Array<{ path: string; oldPath?: string; content: string }> };
   const allowed = new Map(contexts.map((context) => [context.path.replace(/\\/g, '/'), context]));
+  const inScope = (filePath: string) => {
+    const normalized = filePath.replace(/\\/g, '/');
+    if (scope.kind === 'workspace') return true;
+    if (scope.kind === 'directory') {
+      const directory = (scope.paths[0] ?? '').replace(/\\/g, '/').replace(/\/$/, '');
+      return Boolean(directory) && normalized.startsWith(`${directory}/`);
+    }
+    return scope.paths.map((path) => path.replace(/\\/g, '/')).includes(normalized);
+  };
   return (parsed.files ?? []).flatMap((file) => {
     const path = file.path.replace(/\\/g, '/');
     const previousPath = file.oldPath?.replace(/\\/g, '/');
     const context = allowed.get(previousPath ?? path);
-    if (typeof file.content !== 'string' || !SAFE_PATH.test(file.path) || file.path.includes('..')) return [];
+    if (typeof file.content !== 'string' || !SAFE_PATH.test(file.path) || file.path.includes('..') || !inScope(path) || (previousPath && !inScope(previousPath))) return [];
     if (previousPath) {
       if (!context || !file.content || previousPath === path) return [];
       return [{ ...context, path, previousPath, modified: file.content, language: languageIdFromName(path) }];
@@ -161,7 +185,7 @@ function parseProposals(response: string, contexts: AiFileProposal[]): AiFilePro
 
 export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   const {
-    sessionId, aiApi, workspace, isolated = false, documents, activeDocument, editorRef, aiInstruction, aiMessages,
+    sessionId, scope, aiApi, workspace, isolated = false, documents, activeDocument, editorRef, aiInstruction, aiMessages,
     setAiMessages, aiMode, aiMultiFile, aiTokenBudget, inlineEdit, setInlineEdit, setAiEditing,
     setAiPendingRequest, setAiProposals, setDiffView, setDocuments, recordAiSession,
     appendOutput, setStatus,
@@ -191,7 +215,9 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   }, [setStatus]);
 
   const generateAiEdit = useCallback(async () => {
-    if (aiMode === "modify" && !activeDocument && !aiMultiFile) { setStatus("修改模式需要打开文件或启用多文件"); return; }
+    const scopedMultiFile = aiMultiFile || scope.kind !== 'workspace';
+    if (aiMode === "modify" && !activeDocument && !scopedMultiFile) { setStatus("修改模式需要打开文件或选择目录/文件范围"); return; }
+    if (scope.kind !== 'workspace' && scope.paths.length === 0) { setStatus(`请先在 Explorer 中选择${scope.kind === 'directory' ? '目录' : '文件'}`); return; }
     if (!aiInstruction.trim()) return;
     if (!aiApi.apiKey) { setStatus('请先在设置中配置 AI API'); return; }
     if (requestAbortRef.current) return;
@@ -239,7 +265,14 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       const history = conversation.slice(-12).map(({ role, content }) => ({ role, content }));
       let response = '';
       if (aiMode === 'analyze') {
-        const context = executionDocument ? `\n\n当前文件：${executionDocument.path}\n${executionDocument.content}` : '';
+        let context = executionDocument ? `\n\n当前文件：${executionDocument.path}\n${executionDocument.content}` : '';
+        if (workspace && scope.kind !== 'workspace') {
+          setAiExecutionStage('collecting-context');
+          const fallbackDoc = executionDocument ?? { path: '', name: 'workspace', content: '', savedContent: '', language: 'plaintext', encoding: 'utf8' as const, lineEnding: 'LF' as const, modifiedAt: Date.now(), readOnly: false, pinned: false, mixedLineEndings: false };
+          const contexts = await collectContexts(workspace.path, isolated ? [] : documents, fallbackDoc, aiInstruction, scope);
+          const fitted = fitContextToTokenBudget(contexts.map((item) => ({ path: item.path, content: item.original, priority: scope.kind === 'files' ? 100 : 50 })), aiTokenBudget);
+          context = `\n\n范围内文件：\n${fitted.files.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}`;
+        }
         const messages = [
           { role: 'system', content: '你是代码分析助手。分析问题、风险和可行方案，不要生成可直接应用的文件候选。' },
           ...history,
@@ -260,11 +293,11 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
         setAiExecutionStage('review');
         setStatus('Agent 分析已完成');
         return;
-      } else if (aiMultiFile && workspace) {
+      } else if (scopedMultiFile && workspace) {
         setAiExecutionStage('collecting-context');
         const executionDocuments = isolated ? [] : documents;
         const fallbackDoc = executionDocument || { path: "", name: "workspace", content: "", savedContent: "", language: "plaintext", encoding: "utf8" as const, lineEnding: "LF" as const, modifiedAt: Date.now(), readOnly: false, pinned: false, mixedLineEndings: false };
-        const contexts = await collectContexts(workspace.path, executionDocuments, fallbackDoc, aiInstruction);
+        const contexts = await collectContexts(workspace.path, executionDocuments, fallbackDoc, aiInstruction, scope);
         abortController.signal.throwIfAborted();
         const fitted = fitContextToTokenBudget(contexts.map((context) => ({
           path: context.path, content: context.original,
@@ -285,7 +318,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
         response = task.result?.rawResponse ?? '';
         trackResponseChunk(response);
         setAiExecutionStage('parsing');
-        const proposals = parseProposals(response, contexts);
+        const proposals = parseProposals(response, contexts, scope);
         if (!proposals.length) { setAiPendingRequest(null); setStatus('AI 未生成有效的多文件修改'); return; }
         setAiProposals(proposals);
         recordAiSession(proposals.length);
@@ -341,7 +374,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       if (requestAbortRef.current === abortController) requestAbortRef.current = null;
       setAiEditing(false);
     }
-  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, isolated, recordAiSession, sessionId, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
+  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMode, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, isolated, recordAiSession, scope, sessionId, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
 
   const runInlineEdit = useCallback(async () => {
     if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;

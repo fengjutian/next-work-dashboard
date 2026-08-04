@@ -30,7 +30,7 @@ import { useEditorIntelligence } from './useEditorIntelligence';
 import { useAiSessionState, type AiFileProposal } from './useAiSessionState';
 import { useGitDiffMerge } from './useGitDiffMerge';
 import { useAiProposalReview } from './useAiProposalReview';
-import { useAiEditGeneration } from './useAiEditGeneration';
+import { useAiEditGeneration, type AgentEditScope } from './useAiEditGeneration';
 import { useExplorerTree } from './useExplorerTree';
 import { useExplorerMutations } from './useExplorerMutations';
 import { useFileOpening } from './useFileOpening';
@@ -63,6 +63,7 @@ export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor
 export { type BottomPanelTab, type EditorPreferences, type EditorProblem, type EditorSymbol, type OpenDocument, type TreeNode, type TreeEditState, DEFAULT_PREFERENCES, displayError, encodingLabel } from './editor-types';
 
 loader.config({ monaco });
+const flattenAgentScopeNodes = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => [node, ...flattenAgentScopeNodes(node.children ?? [])]);
 if (typeof self !== 'undefined') {
   (self as typeof self & {
     MonacoEnvironment?: { getWorker: (_moduleId: string, label: string) => Worker };
@@ -150,6 +151,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [worktreeBusy, setWorktreeBusy] = useState(false);
   const [aiMode, setAiMode] = useState<"analyze" | "modify">("modify");
+  const [agentScopeKind, setAgentScopeKind] = useState<AgentEditScope['kind']>('workspace');
   const [taskQueueCount, setTaskQueueCount] = useState(0);
   const [taskRunningCount, setTaskRunningCount] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
@@ -235,6 +237,20 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     ? { path: activeAgentSession.worktree.path, name: workspace.name }
     : workspace;
   const agentIsolated = Boolean(activeAgentSession?.worktree);
+  const agentScope = useMemo<AgentEditScope>(() => {
+    if (agentScopeKind === 'directory') {
+      const directory = selectedNode?.type === 'directory' ? selectedNode.path : '';
+      return { kind: 'directory', paths: directory ? [directory] : [], label: directory || '请在 Explorer 选择目录' };
+    }
+    if (agentScopeKind === 'files') {
+      const nodes = flattenAgentScopeNodes(tree);
+      const selectedFiles = nodes.filter((node) => node.type === 'file' && selectedPaths.has(node.path)).map((node) => node.path);
+      const fallback = selectedNode?.type === 'file' ? [selectedNode.path] : activePath ? [activePath] : [];
+      const paths = selectedFiles.length ? selectedFiles : fallback;
+      return { kind: 'files', paths, label: paths.length ? (paths.length === 1 ? paths[0] : `${paths.length} 个文件`) : '请在 Explorer 选择文件' };
+    }
+    return { kind: 'workspace', paths: [], label: workspace?.name ?? '当前工作区' };
+  }, [activePath, agentScopeKind, selectedNode, selectedPaths, tree, workspace?.name]);
 
   useEffect(() => {
     if (!activeAgentSession) return;
@@ -314,6 +330,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
   const { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics } = useAiEditGeneration({
     sessionId: activeAgentSession?.id,
+    scope: agentScope,
     aiApi,
     workspace: agentExecutionWorkspace,
     isolated: agentIsolated,
@@ -1329,6 +1346,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiMessages={aiMessages}
         aiProposals={aiProposals}
         activeDocumentPath={activeDocument?.path}
+        agentScope={agentScope}
+        onAgentScopeChange={setAgentScopeKind}
         workspaceTasks={workspaceTasks}
         validationRun={taskRun && taskRun.runId === agentValidationRunId ? taskRun : null}
         onClose={() => setAgentsOpen(false)}
@@ -1579,6 +1598,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
             style={{ left: treeMenu.x, top: treeMenu.y }}
             onMouseDown={(event) => event.stopPropagation()}
           >
+            <button type="button" className="w-full px-3 py-1.5 text-left font-medium text-primary hover:bg-accent" onClick={() => {
+              setSelectedNode(treeMenu.node);
+              setSelectedPaths(new Set([treeMenu.node.path]));
+              setAgentScopeKind(treeMenu.node.type === 'directory' ? 'directory' : 'files');
+              setAgentsOpen(true);
+              setTreeMenu(null);
+            }}>在 Agents 中打开</button>
+            <div className="my-1 border-t" />
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => beginRename(treeMenu.node)}>重命名</button>
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: false }); setTreeMenu(null); }}>复制{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
             <button type="button" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { const nodes = visibleTreeNodes.filter((node) => selectedPaths.has(node.path)); setTreeClipboard({ nodes: nodes.length ? nodes : [treeMenu.node], cut: true }); setTreeMenu(null); }}>剪切{selectedPaths.size > 1 ? ` (${selectedPaths.size})` : ''}</button>
