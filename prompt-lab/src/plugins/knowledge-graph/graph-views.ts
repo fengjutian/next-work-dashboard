@@ -10,7 +10,7 @@ export function sanitizeGraph(graph: GraphData): GraphData {
   };
 }
 
-function moduleName(node: GraphNode): string {
+export function graphModuleName(node: GraphNode): string {
   if (node.category === '模块') return '外部模块';
   const path = (node.sourcePath || node.label).replace(/\\/g, '/');
   const parts = path.split('/').filter(Boolean);
@@ -22,7 +22,7 @@ export function aggregateGraph(graph: GraphData): GraphData {
   const groups = new Map<string, GraphNode>();
   const nodeGroups = new Map<string, string>();
   graph.nodes.forEach((node) => {
-    const name = moduleName(node);
+    const name = graphModuleName(node);
     const id = `group:${name}`;
     nodeGroups.set(node.id, id);
     const current = groups.get(id);

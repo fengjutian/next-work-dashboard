@@ -3,8 +3,9 @@ import { Graph, type IEvent } from '@antv/g6';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, GitBranch } from '@/components/icons';
 import type { GraphData, GraphNode } from './graph-types';
 import { aggregateGraph, dependencyMatrix, localGraph, sanitizeGraph } from './graph-views';
+import { SankeyView } from './SankeyView';
 
-type GraphView = 'relation' | 'layered' | 'aggregate' | 'local' | 'matrix';
+type GraphView = 'relation' | 'layered' | 'aggregate' | 'local' | 'matrix' | 'sankey';
 
 // ── 调色板 ──
 
@@ -49,7 +50,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
 
   // ── 渲染 G6 ──
   useEffect(() => {
-    if (!displayGraph || view === 'matrix' || !containerRef.current) return;
+    if (!displayGraph || view === 'matrix' || view === 'sankey' || !containerRef.current) return;
 
     const container = containerRef.current;
     const { clientWidth: w, clientHeight: h } = container;
@@ -245,9 +246,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
 
   return (
     <>
-      <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border bg-background/90 p-1 shadow-sm backdrop-blur">
+      <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border border-border bg-background/95 p-1 shadow-sm backdrop-blur">
         <select className="h-7 rounded bg-transparent px-2 text-xs outline-none" value={view} onChange={(event) => setView(event.target.value as GraphView)}>
-          <option value="aggregate">模块聚合</option><option value="layered">分层依赖</option><option value="local">局部关系</option><option value="matrix">依赖矩阵</option><option value="relation">完整关系</option>
+          <option value="aggregate">模块聚合</option><option value="layered">分层依赖</option><option value="local">局部关系</option><option value="sankey">桑基图</option><option value="matrix">依赖矩阵</option><option value="relation">完整关系</option>
         </select>
         {view === 'local' && <select className="h-7 max-w-56 rounded border-l border-border bg-transparent px-2 text-xs outline-none" value={selectedNodeId ?? fallbackNodeId ?? ''} onChange={(event) => setSelectedNodeId(event.target.value)}>
           {(validGraph?.nodes ?? []).slice().sort((a, b) => a.label.localeCompare(b.label)).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
@@ -255,7 +256,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       </div>
 
       {/* G6 画布 */}
-      {view === 'matrix' && matrix ? <div className="h-full w-full overflow-auto p-16">
+      {view === 'sankey' && validGraph ? <SankeyView graph={validGraph} /> : view === 'matrix' && matrix ? <div className="h-full w-full overflow-auto p-16">
         <table className="border-collapse text-[10px]">
           <thead><tr><th className="sticky left-0 bg-background p-1" />{matrix.labels.map((label) => <th key={label} className="max-w-20 rotate-[-45deg] whitespace-nowrap p-2 text-left font-normal">{label}</th>)}</tr></thead>
           <tbody>{matrix.labels.map((label, row) => <tr key={label}><th className="sticky left-0 z-[1] whitespace-nowrap bg-background p-1 text-right font-normal">{label}</th>{matrix.values[row].map((value, column) => <td key={column} className="h-7 w-7 border border-border text-center" title={`${label} → ${matrix.labels[column]}: ${value}`} style={{ backgroundColor: value ? `rgba(109, 40, 105, ${Math.min(.15 + value / 20, .9)})` : undefined, color: value ? 'white' : undefined }}>{value || ''}</td>)}</tr>)}</tbody>
@@ -263,7 +264,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       </div> : <div ref={containerRef} className="h-full w-full flex-1" />}
 
       {/* 工具栏浮层 */}
-      {view !== 'matrix' && <div className="absolute top-3 right-3 flex flex-col gap-1 z-10">
+      {view !== 'matrix' && view !== 'sankey' && <div className="absolute top-3 right-3 flex flex-col gap-1 z-10">
         {[
           { icon: ZoomIn, label: '放大', onClick: zoomIn },
           { icon: ZoomOut, label: '缩小', onClick: zoomOut },
@@ -282,7 +283,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       </div>}
 
       {/* 图例浮层 */}
-      {view !== 'matrix' && <div className="absolute bottom-3 left-3 z-10 bg-white/90 bg-muted/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-sm text-[10px] text-muted-foreground space-y-1">
+      {view !== 'matrix' && view !== 'sankey' && <div className="absolute bottom-3 left-3 z-10 bg-white/90 bg-muted/90 backdrop-blur border border-border rounded-md px-3 py-2 shadow-sm text-[10px] text-muted-foreground space-y-1">
         <div className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/40" /> 节点大小 = 关联强度
         </div>
