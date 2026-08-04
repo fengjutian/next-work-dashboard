@@ -4,6 +4,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { deleteToken, getToken } from '../../auth/token-store';
+import { resolveSecretReferences } from '../../plugins/terminal/backend/environment';
+import { validateMcpServerConfig } from './mcp-config';
 import type {
   McpAuditRecord,
   McpOperationResult,
@@ -15,11 +19,9 @@ import type {
 
 interface ActiveConnection {
   client: Client;
-  transport: StdioClientTransport;
+  transport: StdioClientTransport | StreamableHTTPClientTransport;
   tools: McpToolDescriptor[];
 }
-
-const SERVER_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -72,18 +74,20 @@ export class McpManager {
     if (!fs.existsSync(file)) return [];
     try {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { servers?: McpServerConfig[] };
-      return (parsed.servers ?? []).filter((config) => config.transport === 'stdio');
+      return (parsed.servers ?? []).filter((config) => config.transport === 'stdio' || config.transport === 'streamable-http');
     } catch {
       return [];
     }
   }
 
   saveConfig(config: McpServerConfig): McpOperationResult {
-    if (!SERVER_ID_PATTERN.test(config.id)) return { success: false, error: 'Server id must contain only letters, numbers, _ or -.' };
-    if (!config.name.trim() || !config.command.trim()) return { success: false, error: 'Server name and command are required.' };
+    const validationError = validateMcpServerConfig(config);
+    if (validationError) return { success: false, error: validationError };
     const configs = this.listConfigs();
     const index = configs.findIndex((item) => item.id === config.id);
-    const normalized = { ...config, name: config.name.trim(), command: config.command.trim() };
+    const normalized: McpServerConfig = config.transport === 'stdio'
+      ? { ...config, name: config.name.trim(), command: config.command.trim() }
+      : { ...config, name: config.name.trim(), url: config.url.trim() };
     if (index >= 0) configs[index] = normalized;
     else configs.push(normalized);
     fs.mkdirSync(path.dirname(this.configPath()), { recursive: true });
@@ -93,6 +97,7 @@ export class McpManager {
 
   async removeConfig(serverId: string): Promise<McpOperationResult> {
     await this.disconnect(serverId);
+    deleteToken(`mcp-http-${serverId}`);
     const servers = this.listConfigs().filter((item) => item.id !== serverId);
     fs.writeFileSync(this.configPath(), `${JSON.stringify({ servers }, null, 2)}\n`, 'utf8');
     this.states.delete(serverId);
@@ -122,15 +127,19 @@ export class McpManager {
     if (!config) return { success: false, error: `Unknown MCP server: ${serverId}` };
     this.states.set(serverId, { state: 'connecting' });
     const client = new Client({ name: 'next-work-dashboard', version: '0.1.0' });
-    const transport = new StdioClientTransport({
-      command: config.command,
-      args: config.args ?? [],
-      cwd: config.cwd,
-      env: processEnvironment(config.env),
-      stderr: 'pipe',
-    });
+    const transport = config.transport === 'stdio'
+      ? new StdioClientTransport({
+        command: config.command,
+        args: config.args ?? [],
+        cwd: config.cwd,
+        env: resolveSecretReferences(processEnvironment(config.env), getToken),
+        stderr: 'pipe',
+      })
+      : new StreamableHTTPClientTransport(new URL(config.url), {
+        requestInit: { headers: resolveSecretReferences(config.headers ?? {}, getToken) },
+      });
     try {
-      await client.connect(transport);
+      await client.connect(transport, { timeout: Math.max(1_000, Math.min(config.connectionTimeoutMs ?? 15_000, 120_000)) });
       const tools: McpToolDescriptor[] = [];
       let cursor: string | undefined;
       do {
@@ -164,6 +173,7 @@ export class McpManager {
   async disconnect(serverId: string): Promise<McpOperationResult> {
     await this.connecting.get(serverId)?.catch(() => undefined);
     const connection = this.connections.get(serverId);
+    if (connection?.transport instanceof StreamableHTTPClientTransport) await connection.transport.terminateSession().catch(() => undefined);
     if (connection) await connection.client.close().catch(() => undefined);
     this.connections.delete(serverId);
     this.states.set(serverId, { state: 'disconnected' });

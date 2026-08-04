@@ -8,9 +8,21 @@ export interface McpStdioServerConfig {
   env?: Record<string, string>;
   autoConnect?: boolean;
   trustAnnotations?: boolean;
+  connectionTimeoutMs?: number;
 }
 
-export type McpServerConfig = McpStdioServerConfig;
+export interface McpHttpServerConfig {
+  id: string;
+  name: string;
+  transport: 'streamable-http';
+  url: string;
+  headers?: Record<string, string>;
+  autoConnect?: boolean;
+  trustAnnotations?: boolean;
+  connectionTimeoutMs?: number;
+}
+
+export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;
 export type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export interface McpServerStatus {
