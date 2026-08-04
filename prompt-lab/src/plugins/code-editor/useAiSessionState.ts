@@ -113,7 +113,7 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
       if (isDbReady() && aiMessages.length > 0) {
         const last = aiMessages[aiMessages.length - 1];
         const sid = persistenceKey.split("::")[1] ?? persistenceKey;
-        try { dbInsertAgentMessage({ id: "msg-" + sid + "-" + aiMessages.length, sessionId: sid, role: last.role, content: last.content, seq: aiMessages.length, timestamp: last.timestamp }); } catch {}
+        try { dbInsertAgentMessage({ id: "msg-" + sid + "-" + aiMessages.length, sessionId: sid, role: last.role, content: last.content, seq: aiMessages.length, timestamp: last.timestamp }); } catch { /* localStorage remains the compatibility fallback */ }
       }
   }, [aiMessages, persistenceKey]);
 
@@ -143,7 +143,7 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
             const p = aiProposals[i];
             dbInsertAgentProposal({ id: "prop-" + sid + "-" + i, sessionId: sid, path: p.path, original: p.original, modified: p.modified, language: p.language, previousPath: p.previousPath ?? null, accepted: null, acceptedAt: null, seq: i, createdAt: Date.now() });
           }
-        } catch {}
+        } catch { /* localStorage remains the compatibility fallback */ }
       }
     } catch (error) {
       appendOutput(`AI 待审候选持久化失败：${error instanceof Error ? error.message : String(error)}`);

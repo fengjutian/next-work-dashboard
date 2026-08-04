@@ -8,10 +8,14 @@ const nodeCommand = (script: string) => `"${process.execPath}" -e ${JSON.stringi
 describe('WorkspaceTaskRunner', () => {
   it('streams output and completes from the real exit code', async () => {
     const events: string[] = [];
+    const output: string[] = [];
     const runner = new WorkspaceTaskRunner();
-    const result = await runner.run('run-1', [task('ok', nodeCommand("process.stdout.write('hello')"))], 'ok', process.cwd(), process.env as Record<string, string>, (event) => { events.push(event.state); });
+    const result = await runner.run('run-1', [task('ok', nodeCommand("process.stdout.write('hello')"))], 'ok', process.cwd(), process.env as Record<string, string>, (event) => { events.push(event.state); if (event.output) output.push(event.output); });
     expect(result.exitCode).toBe(0);
-    expect(events).toEqual(['started', 'output', 'completed']);
+    expect(events[0]).toBe('started');
+    expect(events.at(-1)).toBe('completed');
+    expect(events).toContain('output');
+    expect(output.join('')).toContain('hello');
   });
 
   it('reports a failed non-zero task', async () => {

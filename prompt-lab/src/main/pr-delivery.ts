@@ -25,12 +25,12 @@ export async function pushAgentBranch(rootPath: string, branch: string, remote: 
 }
 
 export async function createGitHubPR(
-  rootPath: string, branch: string, baseBranch: string, title: string, body: string, token: string,
+  rootPath: string, branch: string, baseBranch: string, title: string, body: string, token: string, remote = 'origin',
 ) {
   try {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
-    const r = await promisify(execFile)("git", ["config", "--get", "remote.origin.url"], {
+    const r = await promisify(execFile)("git", ["remote", "get-url", remote], {
       cwd: rootPath, encoding: "utf8", windowsHide: true,
     });
     const url = r.stdout.trim();
@@ -58,6 +58,6 @@ export async function deliverAgentPR(
 ): Promise<PRDeliveryResult> {
   const push = await pushAgentBranch(rootPath, branch, config.remote);
   if (!push.pushed) return { branch, remote: config.remote, pushed: false, error: push.error };
-  const pr = await createGitHubPR(rootPath, branch, config.baseBranch, title, body, token);
+  const pr = await createGitHubPR(rootPath, branch, config.baseBranch, title, body, token, config.remote);
   return { branch, remote: config.remote, pushed: true, prUrl: pr.url || undefined, prNumber: pr.number, error: pr.error };
 }

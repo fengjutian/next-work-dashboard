@@ -82,7 +82,7 @@ export function createLocalWorktreeEnv(
         fs.mkdirSync(path.dirname(target), { recursive: true });
       }
       applyWorkspaceFileMutations(worktreePath, files.map((file) => ({
-        kind: fs.existsSync(resolveWorkspacePath(worktreePath, file.path)) ? 'write' as const : 'create' as const,
+        kind: fs.existsSync(path.resolve(root, file.path)) ? 'write' as const : 'create' as const,
         path: file.path,
         content: file.content,
       })));
@@ -143,7 +143,7 @@ export function listExecutionEnvs(): ExecutionEnv[] {
 
 export async function destroyAllEnvs(): Promise<void> {
   for (const env of envs.values()) {
-    try { await env.destroy(); } catch {}
+    try { await env.destroy(); } catch { /* best-effort cleanup */ }
   }
   envs.clear();
 }
@@ -227,14 +227,14 @@ export function startHeartbeatMonitor(env: ExecutionEnv, onTimeout: (envId: stri
       await env.heartbeat();
       const status = env.status();
       if (Date.now() - status.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
-        try { await env.destroy(); } catch {}
+        try { await env.destroy(); } catch { /* timeout cleanup is best effort */ }
         clearInterval(timer);
         heartbeatTimers.delete(env.id);
         onTimeout(env.id);
       }
     } catch {
       // heartbeat failed — consider disconnected
-      try { await env.destroy(); } catch {}
+      try { await env.destroy(); } catch { /* preserve heartbeat failure handling */ }
       clearInterval(timer);
       heartbeatTimers.delete(env.id);
       onTimeout(env.id);

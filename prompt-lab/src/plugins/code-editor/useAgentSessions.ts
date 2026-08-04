@@ -70,7 +70,7 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
           archivedAt: s.archivedAt ?? null,
         });
       }
-    } catch {}
+    } catch { /* localStorage remains the compatibility fallback */ }
   }, [sessions]);
   useEffect(() => localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeByWorkspace)), [activeByWorkspace]);
   useEffect(() => localStorage.setItem(LOGS_KEY, JSON.stringify(logsBySession)), [logsBySession]);
@@ -79,7 +79,7 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
     for (const [sid, logs] of Object.entries(logsBySession)) {
       if (logs.length === 0) continue;
       const last = logs[logs.length - 1];
-      try { dbInsertAgentLog({ id: last.id, sessionId: sid, level: last.level, message: last.message, seq: logs.length, timestamp: last.timestamp }); } catch {}
+      try { dbInsertAgentLog({ id: last.id, sessionId: sid, level: last.level, message: last.message, seq: logs.length, timestamp: last.timestamp }); } catch { /* retry on the next state update */ }
     }
   }, [logsBySession]);
   useEffect(() => {
@@ -136,7 +136,7 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
       delete next[id];
       return next;
     });
-    if (isDbReady()) { try { dbDeleteAgentSession(id); dbDeleteAgentLogs(id); } catch {} }
+    if (isDbReady()) { try { dbDeleteAgentSession(id); dbDeleteAgentLogs(id); } catch { /* local deletion must still succeed */ } }
   }, [sessions]);
 
   const appendLog = useCallback((sessionId: string, level: AgentLogEntry['level'], message: string) => {
