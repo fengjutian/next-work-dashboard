@@ -10,6 +10,7 @@ interface AgentsWindowProps {
   activeSession: AgentSession | null;
   aiInstruction: string;
   aiEditing: boolean;
+  aiPendingRequest: { instruction: string; status: 'running' | 'interrupted' } | null;
   aiMultiFile: boolean;
   aiMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }>;
   aiProposals: AiFileProposal[];
@@ -22,6 +23,7 @@ interface AgentsWindowProps {
   onInstructionChange: (value: string) => void;
   onMultiFileChange: (value: boolean) => void;
   onGenerate: () => void;
+  onCancel: () => void;
   onOpenProposal: (proposal: AiFileProposal) => void;
 }
 
@@ -77,7 +79,9 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件 Agent</label>
             <span className="truncate text-muted-foreground">{props.activeDocumentPath ? `当前文件：${props.activeDocumentPath}` : '未打开文件'}</span>
             <div className="flex-1" />
-            <Button size="sm" disabled={!props.activeSession || !props.activeDocumentPath || !props.aiInstruction.trim() || props.aiEditing} onClick={props.onGenerate}>{props.aiEditing ? '运行中…' : '运行 Agent'}</Button>
+            {props.aiEditing
+              ? <Button size="sm" variant="destructive" onClick={props.onCancel}>取消运行</Button>
+              : <Button size="sm" disabled={!props.activeSession || !props.activeDocumentPath || !props.aiInstruction.trim()} onClick={props.onGenerate}>{props.aiPendingRequest?.status === 'interrupted' ? '重新运行' : '运行 Agent'}</Button>}
           </div>
         </div>
       </section>

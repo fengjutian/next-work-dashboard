@@ -81,6 +81,11 @@ export interface ElectronAPI {
   deleteConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   revealConversation: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openConversationFolder: () => Promise<{ success: boolean; error?: string }>;
+  /** 手动记忆管理 */
+  listMemories: () => Promise<MemoryFile[]>;
+  readMemory: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  writeMemory: (filePath: string, content: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  deleteMemory: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   getWebviewPreloadPath: () => Promise<string>;
   /** 打开文件选择对话框，返回文件信息(base64 content) */
   pickFile: (options?: { accept?: string; multiple?: boolean }) => Promise<FilePickResult | FilePickResult[] | null>;
@@ -178,6 +183,14 @@ export interface ConversationFile {
   modifiedAt: number;
   title?: string;
   notes?: string;
+}
+
+export interface MemoryFile {
+  fileName: string;
+  path: string;
+  size: number;
+  modifiedAt: number;
+  title: string;
 }
 
 export interface ConversationSearchResult {

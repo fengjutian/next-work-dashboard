@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, clipboard } from 'electron';
-import type { ElectronAPI } from './types/electron';
+import type { ElectronAPI, MemoryFile } from './types/electron';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
@@ -79,6 +79,12 @@ const electronAPI: ElectronAPI = {
   deleteConversation: (filePath: string) => ipcRenderer.invoke('delete-conversation', filePath),
   revealConversation: (filePath: string) => ipcRenderer.invoke('reveal-conversation', filePath),
   openConversationFolder: () => ipcRenderer.invoke('open-conversation-folder'),
+
+  // 手动记忆管理
+  listMemories: () => ipcRenderer.invoke('list-memories') as Promise<MemoryFile[]>,
+  readMemory: (filePath: string) => ipcRenderer.invoke('read-memory', filePath) as Promise<{ success: boolean; content?: string; error?: string }>,
+  writeMemory: (filePath: string, content: string) => ipcRenderer.invoke('write-memory', filePath, content) as Promise<{ success: boolean; filePath?: string; error?: string }>,
+  deleteMemory: (filePath: string) => ipcRenderer.invoke('delete-memory', filePath) as Promise<{ success: boolean; error?: string }>,
 
   // 剪贴板（绕过 web 层，避免焦点问题）
   copyText: (text: string) => clipboard.writeText(text),

@@ -16,6 +16,7 @@ export interface MemorySource {
   score: number;
   documentModifiedAt: number;
   excerptHash: string;
+  sourceType: 'manual' | 'conversation';
 }
 
 /** Lightweight citation persisted with chat messages; content remains in the original Markdown file. */
@@ -230,7 +231,7 @@ function mergeAdjacentChunks(chunks: Array<IndexedChunk & { score: number }>): A
   return merged;
 }
 
-export function splitConversationDocument(file: ConversationFile, content: string): IndexedChunk[] {
+export function splitConversationDocument(file: ConversationFile, content: string, sourceType: 'manual' | 'conversation' = 'conversation'): IndexedChunk[] {
   const lines = content.split(/\r?\n/);
   const chunks: IndexedChunk[] = [];
   let start = 0;
@@ -256,6 +257,7 @@ export function splitConversationDocument(file: ConversationFile, content: strin
         content: chunkContent,
         documentModifiedAt: file.modifiedAt,
         excerptHash: hashMemoryText(chunkContent),
+        sourceType,
         ...encoded,
       });
     }
@@ -415,7 +417,18 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       this.documentSignatures = {};
       this.chunks = [];
     }
-    const files = await window.electronAPI.listConversations();
+    const convFiles = await window.electronAPI.listConversations();
+    const memFilesRaw = await window.electronAPI.listMemories();
+    const memFiles: ConversationFile[] = memFilesRaw.map((m) => ({
+      site: 'manual',
+      date: new Date(m.modifiedAt).toISOString().slice(0, 10),
+      fileName: m.fileName,
+      path: m.path,
+      size: m.size,
+      modifiedAt: m.modifiedAt,
+      title: m.title,
+    }));
+    const files = [...convFiles, ...memFiles];
     const identity = this.embeddingIdentity();
     const currentSignatures = Object.fromEntries(files.map((file) => [file.path, `${file.modifiedAt}:${file.size}:${identity}`]));
     let signature = files.map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
@@ -437,8 +450,12 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       const file = changedFiles[index];
       options.onProgress?.({ phase: 'reading', completed: index, total: changedFiles.length, fileName: file.fileName });
       if (options.signal?.aborted) throw new Error('INDEX_CANCELLED');
-      const result = await window.electronAPI.readConversation(file.path);
-      documents.push(result.success ? { path: file.path, chunks: splitConversationDocument(file, result.content ?? '') } : null);
+      const isManual = file.site === 'manual';
+      const result = isManual
+        ? await window.electronAPI.readMemory(file.path)
+        : await window.electronAPI.readConversation(file.path);
+      const sourceType = isManual ? 'manual' : 'conversation';
+      documents.push(result.success ? { path: file.path, chunks: splitConversationDocument(file, result.content ?? '', sourceType) } : null);
     }
     options.onProgress?.({ phase: 'reading', completed: changedFiles.length, total: changedFiles.length });
     const failedFiles = changedFiles.filter((file) => !documents.some((document) => document?.path === file.path));

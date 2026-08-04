@@ -208,10 +208,10 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
   useEffect(() => {
     if (!activeAgentSession) return;
-    const nextStatus = aiEditing ? 'running' : aiProposals.length ? 'review' : 'idle';
+    const nextStatus = aiEditing ? 'running' : aiPendingRequest?.status === 'interrupted' ? 'interrupted' : aiProposals.length ? 'review' : 'idle';
     if (activeAgentSession.status === nextStatus && activeAgentSession.filesChanged === aiProposals.length) return;
     updateAgentSession(activeAgentSession.id, { status: nextStatus, filesChanged: aiProposals.length });
-  }, [activeAgentSession, aiEditing, aiProposals.length, updateAgentSession]);
+  }, [activeAgentSession, aiEditing, aiPendingRequest?.status, aiProposals.length, updateAgentSession]);
 
   const openExternalDiff = useCallback((value: { path: string; name: string; modified: string }) => {
     setDiffView({ ...value, original: '', language: 'diff', source: 'external' });
@@ -267,7 +267,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setStatus,
   });
 
-  const { generateAiEdit, runInlineEdit } = useAiEditGeneration({
+  const { generateAiEdit, cancelAiEdit, runInlineEdit } = useAiEditGeneration({
     aiApi,
     workspace,
     documents,
@@ -1164,6 +1164,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         activeSession={activeAgentSession}
         aiInstruction={aiInstruction}
         aiEditing={aiEditing}
+        aiPendingRequest={aiPendingRequest}
         aiMultiFile={aiMultiFile}
         aiMessages={aiMessages}
         aiProposals={aiProposals}
@@ -1181,6 +1182,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onInstructionChange={setAiInstruction}
         onMultiFileChange={setAiMultiFile}
         onGenerate={() => { void generateAiEdit(); }}
+        onCancel={cancelAiEdit}
         onOpenProposal={(proposal) => setDiffView({ path: proposal.path, name: proposal.path, original: proposal.original, modified: proposal.modified, language: proposal.language, source: 'ai' })}
       /> : <div className="flex min-h-0 flex-1">
         {sidebarVisible && <WorkspaceExplorer
@@ -1306,7 +1308,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiMessages={aiMessages} aiPendingRequest={aiPendingRequest}
         undoLastAiEdit={undoLastAiEdit}
         aiInstruction={aiInstruction} aiEditing={aiEditing}
-        activeDocument={activeDocument} generateAiEdit={generateAiEdit}
+        activeDocument={activeDocument} generateAiEdit={generateAiEdit} cancelAiEdit={cancelAiEdit}
         preferences={preferences} setPreferences={setPreferences}
         showEnvValues={showEnvValues} setShowEnvValues={setShowEnvValues}
         terminalEnvText={terminalEnvText} setTerminalEnvText={setTerminalEnvText}

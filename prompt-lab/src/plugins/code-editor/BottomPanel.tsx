@@ -96,6 +96,7 @@ export interface BottomPanelProps {
   aiEditing: boolean;
   activeDocument: { path?: string } | null;
   generateAiEdit: () => Promise<void>;
+  cancelAiEdit: () => void;
   // settings
   preferences: EditorPreferences;
   setPreferences: React.Dispatch<React.SetStateAction<EditorPreferences>>;
@@ -335,7 +336,9 @@ const AiTabContent: React.FC<BottomPanelProps> = (p) => (
     <textarea value={p.aiInstruction} onChange={(e) => p.setAiInstruction(e.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
     <div className="flex justify-end">
       <Button size="sm" variant="ghost" className="mr-2" disabled={!p.activeDocument} onClick={() => { p.setAiMultiFile(true); p.setAiInstruction(`为 ${p.activeDocument?.path ?? '当前模块'} 生成或完善单元测试，复用项目现有测试框架和约定`); }}>生成测试</Button>
-      <Button size="sm" disabled={!p.activeDocument || !p.aiInstruction.trim() || p.aiEditing} onClick={() => void p.generateAiEdit()}>{p.aiEditing ? '生成中…' : '生成修改并预览'}</Button>
+      {p.aiEditing
+        ? <Button size="sm" variant="destructive" onClick={p.cancelAiEdit}>取消生成</Button>
+        : <Button size="sm" disabled={!p.activeDocument || !p.aiInstruction.trim()} onClick={() => void p.generateAiEdit()}>{p.aiPendingRequest?.status === 'interrupted' ? '重新生成' : '生成修改并预览'}</Button>}
     </div>
   </div>
 );

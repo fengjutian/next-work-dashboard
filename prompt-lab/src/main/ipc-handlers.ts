@@ -590,6 +590,68 @@ export function setupIPC(webviewPreloadPath: string) {
     return { success: true };
   });
 
+  // ── 手动记忆管理 ──
+  const memoriesDir = path.join(app.getPath('documents'), 'next-work-dashboard', 'memories');
+
+  const resolveMemoryPath = (filePath: string): string | null => {
+    const root = path.resolve(memoriesDir);
+    const resolved = path.resolve(filePath);
+    const relative = path.relative(root, resolved);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? resolved : null;
+  };
+
+  ipcMain.handle('list-memories', async () => {
+    try {
+      if (!fs.existsSync(memoriesDir)) return [];
+      const files = fs.readdirSync(memoriesDir).filter((f) => f.endsWith('.md'));
+      return files.map((file) => {
+        const filePath = path.join(memoriesDir, file);
+        const stat = fs.statSync(filePath);
+        let title: string | undefined;
+        try {
+          const head = fs.readFileSync(filePath, 'utf-8').slice(0, 1024);
+          title = head.match(/^# (.+)$/m)?.[1].trim();
+        } catch { /* keep undefined */ }
+        return {
+          fileName: file, path: filePath, size: stat.size, modifiedAt: stat.mtimeMs,
+          title: title || file.replace(/\.md$/, ''),
+        };
+      }).sort((a, b) => b.modifiedAt - a.modifiedAt);
+    } catch { return []; }
+  });
+
+  ipcMain.handle('read-memory', async (_event, filePath: string) => {
+    try {
+      const resolved = resolveMemoryPath(filePath);
+      if (!resolved) return { success: false, error: 'ACCESS_DENIED' };
+      if (!fs.existsSync(resolved)) return { success: false, error: 'NOT_FOUND' };
+      const content = fs.readFileSync(resolved, 'utf-8');
+      return { success: true, content };
+    } catch (err) { return { success: false, error: String(err) }; }
+  });
+
+  ipcMain.handle('write-memory', async (_event, filePath: string, content: string) => {
+    try {
+      if (!fs.existsSync(memoriesDir)) fs.mkdirSync(memoriesDir, { recursive: true });
+      const resolved = resolveMemoryPath(filePath);
+      if (!resolved || path.extname(resolved).toLowerCase() !== '.md') {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      if (typeof content !== 'string') return { success: false, error: 'INVALID_CONTENT' };
+      fs.writeFileSync(resolved, content, 'utf-8');
+      return { success: true, filePath: resolved };
+    } catch (err) { return { success: false, error: String(err) }; }
+  });
+
+  ipcMain.handle('delete-memory', async (_event, filePath: string) => {
+    try {
+      const resolved = resolveMemoryPath(filePath);
+      if (!resolved) return { success: false, error: 'ACCESS_DENIED' };
+      if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+      return { success: true };
+    } catch (err) { return { success: false, error: String(err) }; }
+  });
+
   // ── 按路径读取文件（供 AI 工具使用） ──
   ipcMain.handle('dialog:readFileBuffer', async (_event, filePath: string) => {
     try {

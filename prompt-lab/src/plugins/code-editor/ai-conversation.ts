@@ -14,3 +14,9 @@ export function applyConversationSummary(messages: AiConversationMessage[], summ
 export function recoverInterruptedRequest(request?: AiPendingRequest): AiPendingRequest | undefined {
   return request?.status === 'running' ? { ...request, status: 'interrupted' } : request;
 }
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError';
+}

@@ -5,7 +5,7 @@ import type { BubbleProps } from '@ant-design/x';
 import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
-  BookOpen, Bot, Copy, Download, ExternalLink, MessageSquare, PanelLeft,
+  BookOpen, Bot, Copy, Database, Download, ExternalLink, MessageSquare, PanelLeft,
   Paperclip, Plus, Robot, RotateCcw, Settings, SlidersHorizontal, Trash2,
   Wrench, X,
 } from '@/components/icons';
@@ -18,6 +18,7 @@ import { ToolManagerDialog } from './ToolManagerDialog';
 import { McpApprovalDialog } from './McpApprovalDialog';
 import { PromptManagerDialog } from './PromptManagerDialog';
 import { RoleManagerDialog } from './RoleManagerDialog';
+import { MemoryManagerDialog } from './MemoryManagerDialog';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
 import { buildAttachmentContext, parseAttachment } from './attachment-parser';
 import type { MemoryCitation } from '@/core/conversation-memory';
@@ -75,6 +76,7 @@ export const ChatPanel: React.FC = () => {
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
+  const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [memoryPreview, setMemoryPreview] = useState<MemoryDocumentPreview | null>(null);
@@ -432,6 +434,8 @@ export const ChatPanel: React.FC = () => {
                 onClick={() => setMemoryEnabled((value) => !value)} title="检索知识库并附带原文来源">
                 <BookOpen className="h-3 w-3" /><span>{memoryEnabled ? '知识库 ✓' : '知识库'}</span>
               </button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"
+                onClick={() => setMemoryManagerOpen(true)} title="记忆管理"><Database className="h-3.5 w-3.5" /></Button>
               <button onClick={() => setRoleManagerOpen(true)}
                 className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">
                 <Bot className="h-3 w-3" /><span>{activeRole ? activeRole.name : '角色'}</span></button>
@@ -646,6 +650,7 @@ export const ChatPanel: React.FC = () => {
           <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)}
             boundPromptIds={boundPromptIds} onToggleBound={toggleBoundPrompt} />
           <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />
+          <MemoryManagerDialog open={memoryManagerOpen} onClose={() => setMemoryManagerOpen(false)} />
           {pendingInputPrompt && (
             <VariableFillDialog
               content={pendingInputPrompt.content}
