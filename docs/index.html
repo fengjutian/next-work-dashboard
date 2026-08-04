@@ -1,115 +1,194 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>next-work-dashboard — AI 提示词注入桌面应用</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Next Work Dashboard 文档中心：快速开始、使用指南、架构设计与开发参考。">
+  <title>文档中心 · Next Work Dashboard</title>
   <style>
-    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#fff;color:#111827;line-height:1.6;min-height:100vh}
-    .hero{text-align:center;padding:80px 24px 48px;background:linear-gradient(180deg,#f9fafb 0%,#fff 100%)}
-    .hero h1{font-size:2.5rem;font-weight:700;margin-bottom:12px;background:linear-gradient(135deg,#7c3aed,#2563eb);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-    .hero p{font-size:1.1rem;color:#6b7280;max-width:640px;margin:0 auto}
-    .container{max-width:900px;margin:0 auto;padding:0 24px 80px}
-    h2{font-size:1.4rem;font-weight:600;margin:40px 0 16px;color:#111827}
-    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
-    .card{padding:24px;border-radius:12px;background:#f9fafb;border:1px solid #e5e7eb}
-    .card h3{font-size:1rem;margin-bottom:8px;color:#111827}
-    .card p{font-size:.9rem;color:#6b7280}
-    .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:16px 0}
-    .feature{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:8px;background:#f9fafb;border:1px solid #e5e7eb;font-size:.9rem}
-    .feature .icon{font-size:1.2rem;flex-shrink:0}
-    .links{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
-    .links a{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:.9rem;font-weight:500;transition:all .15s}
-    .links .primary{background:#2563eb;color:#fff}
-    .links .primary:hover{background:#1d4ed8}
-    .links .secondary{background:#f3f4f6;color:#374151}
-    .links .secondary:hover{background:#e5e7eb}
-    table{width:100%;border-collapse:collapse;margin:16px 0}
-    th,td{padding:10px 14px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:.9rem}
-    th{color:#6b7280;font-weight:500}
-    td{color:#374151}
-    code{background:#f3f4f6;color:#1f2937;padding:2px 6px;border-radius:4px;font-size:.85em}
-    .tag{display:inline-flex;padding:2px 10px;border-radius:9999px;font-size:.75rem;font-weight:600}
-    .tag-green{background:#d1fae5;color:#065f46}
-    .tag-yellow{background:#fef3c7;color:#92400e}
-    footer{text-align:center;padding:32px;color:#9ca3af;font-size:.8rem;border-top:1px solid #e5e7eb}
-    pre{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:20px;font-size:.85rem;overflow-x:auto}
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8f6;
+      --panel: rgba(255, 255, 255, .82);
+      --panel-solid: #fff;
+      --text: #17201b;
+      --muted: #647068;
+      --line: #dfe5df;
+      --brand: #176b4d;
+      --brand-dark: #0c4d37;
+      --brand-soft: #dff3e9;
+      --warm: #f1eadc;
+      --shadow: 0 22px 70px rgba(31, 49, 39, .09);
+      --radius: 22px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101512;
+        --panel: rgba(24, 31, 27, .86);
+        --panel-solid: #181f1b;
+        --text: #edf3ef;
+        --muted: #9fac9f;
+        --line: #303b34;
+        --brand: #67cea5;
+        --brand-dark: #a8e5cc;
+        --brand-soft: #183c2e;
+        --warm: #302a20;
+        --shadow: 0 22px 70px rgba(0, 0, 0, .24);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 82% 6%, rgba(229, 186, 105, .18), transparent 27rem),
+        radial-gradient(circle at 8% 21%, rgba(58, 151, 113, .13), transparent 23rem),
+        var(--bg);
+      font: 15px/1.7 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    a { color: inherit; }
+    .shell { width: min(1160px, calc(100% - 40px)); margin: 0 auto; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+      background: color-mix(in srgb, var(--bg) 84%, transparent);
+      backdrop-filter: blur(18px);
+    }
+    nav { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .brand { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; font-weight: 760; letter-spacing: -.02em; }
+    .mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; color: #fff; background: var(--brand-dark); box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); }
+    .navlinks { display: flex; align-items: center; gap: 6px; }
+    .navlinks a { padding: 8px 12px; border-radius: 9px; color: var(--muted); text-decoration: none; font-size: 14px; }
+    .navlinks a:hover { color: var(--text); background: var(--panel); }
+    .navlinks .github { margin-left: 6px; color: var(--text); border: 1px solid var(--line); background: var(--panel); }
+    .hero { padding: 88px 0 66px; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 56px; align-items: center; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px; padding: 6px 11px; border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--line)); border-radius: 999px; color: var(--brand-dark); background: var(--brand-soft); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { max-width: 720px; margin: 0; font-size: clamp(42px, 6.2vw, 72px); line-height: 1.04; letter-spacing: -.055em; font-weight: 790; }
+    .hero h1 span { color: var(--brand); }
+    .lead { max-width: 680px; margin: 26px 0 0; color: var(--muted); font-size: clamp(17px, 2vw, 20px); line-height: 1.75; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 45px; padding: 0 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-solid); text-decoration: none; font-weight: 680; transition: transform .18s ease, box-shadow .18s ease; }
+    .button:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(20, 50, 36, .1); }
+    .button.primary { color: #fff; border-color: var(--brand-dark); background: var(--brand-dark); }
+    .terminal { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: #17201b; box-shadow: var(--shadow); transform: rotate(1.5deg); }
+    .terminal-head { display: flex; gap: 7px; padding: 14px 16px; border-bottom: 1px solid #2d3932; }
+    .terminal-head i { width: 9px; height: 9px; border-radius: 50%; background: #718078; }
+    .terminal-head i:first-child { background: #e59673; }
+    .terminal-head i:nth-child(2) { background: #e3c26e; }
+    .terminal pre { margin: 0; padding: 24px; color: #d8e7de; font: 13px/1.9 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; }
+    .terminal .prompt { color: #77d3ac; }
+    section { padding: 34px 0 58px; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .section-head h2 { margin: 0; font-size: clamp(27px, 3vw, 36px); line-height: 1.2; letter-spacing: -.035em; }
+    .section-head p { max-width: 520px; margin: 0; color: var(--muted); }
+    .start-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .start-card, .doc-card { position: relative; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 1px 0 rgba(255,255,255,.42); }
+    .start-card { padding: 25px; border-radius: 18px; }
+    .step { width: 32px; height: 32px; display: grid; place-items: center; margin-bottom: 28px; border-radius: 10px; color: var(--brand-dark); background: var(--brand-soft); font-size: 13px; font-weight: 800; }
+    .start-card h3, .doc-card h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -.015em; }
+    .start-card p, .doc-card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .docs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .doc-card { min-height: 176px; padding: 26px 58px 24px 26px; border-radius: 18px; text-decoration: none; transition: border-color .18s ease, transform .18s ease, background .18s ease; }
+    .doc-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--brand) 42%, var(--line)); background: var(--panel-solid); }
+    .doc-card::after { content: "↗"; position: absolute; top: 23px; right: 24px; color: var(--brand); font-size: 18px; }
+    .doc-card .label { display: inline-block; margin-bottom: 22px; color: var(--brand); font-size: 12px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+    .stack { display: grid; grid-template-columns: .7fr 1.3fr; gap: 16px; padding: 30px; border: 1px solid var(--line); border-radius: var(--radius); background: linear-gradient(135deg, var(--panel-solid), var(--warm)); }
+    .stack-copy h2 { margin: 0 0 10px; font-size: 28px; letter-spacing: -.03em; }
+    .stack-copy p { margin: 0; color: var(--muted); }
+    .chips { display: flex; flex-wrap: wrap; align-content: center; gap: 10px; }
+    .chip { padding: 9px 13px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--panel-solid) 76%, transparent); font-size: 13px; font-weight: 650; }
+    footer { margin-top: 42px; border-top: 1px solid var(--line); }
+    .footer-inner { min-height: 110px; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: var(--muted); font-size: 13px; }
+    .footer-inner a { color: var(--text); text-decoration: none; }
+    @media (max-width: 800px) {
+      .navlinks a:not(.github) { display: none; }
+      .hero { grid-template-columns: 1fr; padding-top: 62px; }
+      .terminal { max-width: 520px; transform: none; }
+      .start-grid { grid-template-columns: 1fr; }
+      .docs-grid, .stack { grid-template-columns: 1fr; }
+      .section-head { align-items: start; flex-direction: column; }
+    }
+    @media (max-width: 520px) {
+      .shell { width: min(100% - 28px, 1160px); }
+      .brand span:last-child { display: none; }
+      .hero { padding: 50px 0 44px; gap: 38px; }
+      h1 { font-size: 42px; }
+      section { padding-bottom: 42px; }
+      .docs-grid { grid-template-columns: 1fr; }
+      .footer-inner { align-items: flex-start; flex-direction: column; justify-content: center; }
+    }
   </style>
 </head>
 <body>
+  <header class="topbar">
+    <nav class="shell" aria-label="主导航">
+      <a class="brand" href="index.html"><span class="mark">N</span><span>Next Work Dashboard</span></a>
+      <div class="navlinks">
+        <a href="#start">快速开始</a><a href="#guides">文档导航</a><a href="#stack">技术栈</a>
+        <a class="github" href="https://github.com/fengjutian/next-work-dashboard" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </div>
+    </nav>
+  </header>
 
-<div class="hero">
-  <h1>next-work-dashboard</h1>
-  <p>基于 Electron 的 AI 提示词注入桌面应用 — 打开任意 AI 网站，一键注入预设提示词，提升 AI 交互效率。</p>
-  <div class="links" style="justify-content:center;margin-top:32px">
-    <a class="primary" href="https://github.com/fengjutian/next-work-dashboard" target="_blank">GitHub 仓库</a>
-    <a class="secondary" href="project-intro-and-deploy.html">项目介绍 &amp; 部署</a>
-    <a class="secondary" href="plugin-architecture.html">插件架构</a>
-  </div>
-</div>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Documentation · v0.1</div>
+        <h1>把工作流，装进一个<span>桌面工作台</span></h1>
+        <p class="lead">Next Work Dashboard 是面向 AI 协作的 Electron 桌面应用。这里汇集安装部署、功能使用、插件架构、安全规范与开发参考。</p>
+        <div class="actions">
+          <a class="button primary" href="user-guide.md">开始使用 <span>→</span></a>
+          <a class="button" href="project-intro-and-deploy.html">了解项目</a>
+        </div>
+      </div>
+      <div class="terminal" aria-label="快速安装命令">
+        <div class="terminal-head"><i></i><i></i><i></i></div>
+        <pre><span class="prompt">$</span> git clone https://github.com/fengjutian/next-work-dashboard.git
+<span class="prompt">$</span> cd next-work-dashboard/prompt-lab
+<span class="prompt">$</span> npm install
+<span class="prompt">$</span> npm start
 
-<div class="container">
+<span class="prompt">✓</span> Electron workspace is ready</pre>
+      </div>
+    </section>
 
-<h2>核心能力</h2>
-<div class="features">
-  <div class="feature"><span class="icon">🌐</span> 多站点 WebView — 同时打开 DeepSeek、ChatGPT、Kimi 等</div>
-  <div class="feature"><span class="icon">⚡</span> 一键注入 — 点击提示词自动填入 AI 输入框</div>
-  <div class="feature"><span class="icon">📦</span> 提示词管理 — CRUD + 分类/标签/变量模板</div>
-  <div class="feature"><span class="icon">🔍</span> Spotlight 面板 — Ctrl+K 全局搜索</div>
-  <div class="feature"><span class="icon">🧩</span> 插件系统 — 18 个内置插件，支持 Sandbox / Kernel 扩展</div>
-  <div class="feature"><span class="icon">🔒</span> 纯本地 — 无需 API Key，数据不上传</div>
-</div>
+    <section id="start">
+      <div class="section-head"><h2>从这里开始</h2><p>无论你是第一次使用、准备参与开发，还是正在排查问题，都可以快速找到入口。</p></div>
+      <div class="start-grid">
+        <article class="start-card"><div class="step">01</div><h3>安装与启动</h3><p>准备开发环境，启动 Electron 应用，并了解不同平台的构建方式。</p></article>
+        <article class="start-card"><div class="step">02</div><h3>配置工作台</h3><p>添加 AI 站点、管理提示词、启用知识库与常用内置插件。</p></article>
+        <article class="start-card"><div class="step">03</div><h3>扩展与贡献</h3><p>理解插件运行模式、权限边界和贡献流程，安全地扩展能力。</p></article>
+      </div>
+    </section>
 
-<h2>技术栈</h2>
-<table>
-  <tr><th>层</th><th>选型</th></tr>
-  <tr><td>框架</td><td>Electron 35</td></tr>
-  <tr><td>渲染</td><td>React 18 + TypeScript 5.4</td></tr>
-  <tr><td>UI</td><td>shadcn/ui + Tailwind CSS 3</td></tr>
-  <tr><td>状态管理</td><td>Zustand 5</td></tr>
-  <tr><td>持久化</td><td>sql.js + drizzle-orm</td></tr>
-  <tr><td>构建</td><td>electron-forge 7 + Vite 5</td></tr>
-</table>
+    <section id="guides">
+      <div class="section-head"><h2>文档导航</h2><p>按任务组织，而不是按代码目录组织。选择与你当前目标最接近的主题。</p></div>
+      <div class="docs-grid">
+        <a class="doc-card" href="user-guide.md"><span class="label">使用指南</span><h3>用户指南</h3><p>界面、快捷键、提示词、AI 会话、知识库和常用插件的完整用法。</p></a>
+        <a class="doc-card" href="project-intro-and-deploy.html"><span class="label">Getting started</span><h3>项目介绍与部署</h3><p>了解产品定位、目录结构、开发环境、数据位置及打包发布。</p></a>
+        <a class="doc-card" href="plugin-architecture.html"><span class="label">Architecture</span><h3>插件架构</h3><p>运行模式、生命周期、注册表、Sandbox 协议、权限与 SDK API。</p></a>
+        <a class="doc-card" href="function-and-principles.md"><span class="label">Engineering</span><h3>功能与实现原理</h3><p>应用关键能力的实现方式、状态管理、数据持久化和工程约定。</p></a>
+        <a class="doc-card" href="security.md"><span class="label">Security</span><h3>安全模型</h3><p>了解 WebView 隔离、令牌存储、文件访问和插件权限边界。</p></a>
+        <a class="doc-card" href="troubleshooting.md"><span class="label">Support</span><h3>故障排查</h3><p>启动、构建、数据、WebView 与平台相关问题的快速诊断清单。</p></a>
+        <a class="doc-card" href="contributing.md"><span class="label">Community</span><h3>参与贡献</h3><p>开发流程、代码规范、测试要求以及提交 Pull Request 的约定。</p></a>
+        <a class="doc-card" href="architecture-roadmap.md"><span class="label">Roadmap</span><h3>架构路线图</h3><p>查看当前架构演进重点、阶段性目标与后续能力规划。</p></a>
+      </div>
+    </section>
 
-<h2>功能完成度</h2>
-<div class="cards">
-  <div class="card">
-    <h3>浏览器 / 注入 <span class="tag tag-green">100%</span></h3>
-    <p>多标签 WebView、选择器注入、事件模拟、自动发送、Session 持久化</p>
-  </div>
-  <div class="card">
-    <h3>提示词管理 <span class="tag tag-green">88%</span></h3>
-    <p>CRUD、分类/标签、变量模板 {{占位符}}、导入导出、收藏/置顶</p>
-  </div>
-  <div class="card">
-    <h3>设置模块 <span class="tag tag-yellow">40%</span></h3>
-    <p>站点配置、主题切换、快捷键、窗口置顶、开机启动</p>
-  </div>
-</div>
+    <section id="stack">
+      <div class="stack">
+        <div class="stack-copy"><h2>本地优先的技术栈</h2><p>围绕桌面体验、数据所有权与可扩展能力构建。</p></div>
+        <div class="chips" aria-label="项目技术栈">
+          <span class="chip">Electron 35</span><span class="chip">React 18</span><span class="chip">TypeScript</span><span class="chip">Vite 5</span><span class="chip">Tailwind CSS</span><span class="chip">Zustand</span><span class="chip">Drizzle ORM</span><span class="chip">SQLite</span><span class="chip">LanceDB</span>
+        </div>
+      </div>
+    </section>
+  </main>
 
-<h2>文档</h2>
-<table>
-  <tr><td><a href="project-intro-and-deploy.html">📖 项目介绍与部署文档</a></td><td>技术架构、开发环境、构建部署、数据存储</td></tr>
-  <tr><td><a href="plugin-architecture.html">🧩 插件架构设计文档</a></td><td>运行模式、生命周期、PluginRegistry、沙箱协议与 SDK API</td></tr>
-  <tr><td><a href="https://github.com/fengjutian/next-work-dashboard/blob/main/REQUIREMENTS.md">📋 需求文档</a></td><td>完整功能需求、竞品分析、版本规划</td></tr>
-  <tr><td><a href="https://github.com/fengjutian/next-work-dashboard/blob/main/FEATURE_CHECKLIST.md">✅ 功能对照表</a></td><td>44 项需求的实现状态追踪</td></tr>
-</table>
-
-<h2>快速开始</h2>
-<pre><code>git clone https://github.com/fengjutian/next-work-dashboard.git
-cd next-work-dashboard/prompt-lab
-npm install
-npm start</code></pre>
-
-<h2>构建分发</h2>
-<pre><code>npm run make  # 产出 Windows .exe / macOS .zip / Linux .deb .rpm</code></pre>
-
-</div>
-
-<footer>
-  next-work-dashboard v0.1.0 · MIT License · <a href="https://github.com/fengjutian/next-work-dashboard" style="color:#9ca3af">github.com/fengjutian/next-work-dashboard</a>
-</footer>
-
+  <footer><div class="shell footer-inner"><span>Next Work Dashboard · 本地优先的 AI 工作台</span><span><a href="contributing.md">参与贡献</a>　·　MIT License</span></div></footer>
 </body>
 </html>
