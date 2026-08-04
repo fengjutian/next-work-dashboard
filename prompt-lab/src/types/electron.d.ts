@@ -117,6 +117,16 @@ export interface ElectronAPI {
     createAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo>>;
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo | null>>;
     discardAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<void>>;
+    previewAgentWorktreeMerge: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeMergePreview>>;
+    mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => Promise<WorkspaceResult<AgentWorktreeMergeResult>>;
+    // Agent task operations
+    agentTaskCreate: (config: AgentTaskConfig) => Promise<WorkspaceResult<AgentTaskRecord>>;
+    agentTaskGet: (taskId: string) => Promise<WorkspaceResult<AgentTaskRecord | null>>;
+    agentTaskList: (sessionId?: string) => Promise<WorkspaceResult<AgentTaskRecord[]>>;
+    agentTaskCancel: (taskId: string) => Promise<WorkspaceResult<boolean>>;
+    agentTaskRetry: (taskId: string) => Promise<WorkspaceResult<AgentTaskRecord>>;
+    agentTaskSubscribe: (taskId: string) => void;
+    onAgentTaskEvent: (handler: (event: AgentTaskEvent) => void) => () => void;
     gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
     gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
     gitUnstage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
@@ -242,6 +252,81 @@ export interface AgentWorktreeInfo {
   head?: string;
   dirty: boolean;
 }
+
+export interface AgentWorktreeMergePreview {
+  canMerge: boolean;
+  changedPaths: string[];
+  conflictingPaths: string[];
+  mainDirty: boolean;
+  base: string;
+  mainHead: string;
+  agentHead: string;
+}
+
+export interface AgentWorktreeMergeResult { commit: string; changedPaths: string[] }
+
+// ── Agent Task types ──
+
+export type AgentTaskState = 'queued' | 'running' | 'cancelling' | 'interrupted' | 'failed' | 'review' | 'completed';
+
+export interface AgentTaskConfig {
+  sessionId: string;
+  workspaceRoot: string;
+  executionRoot?: string;
+  instruction: string;
+  modelConfig: { apiKey: string; baseUrl: string; model: string };
+  multiFile: boolean;
+  tokenBudget: number;
+  messages?: Array<{ role: string; content: string }>;
+  contextFiles?: string[];
+  recovery?: { checkpoint: string; contextPaths: string[] };
+}
+
+export interface AgentTaskProgress {
+  taskId: string;
+  seq: number;
+  stage: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface AgentTaskRecord {
+  taskId: string;
+  sessionId: string;
+  workspaceRoot: string;
+  executionRoot?: string;
+  instruction: string;
+  modelConfig: { apiKey: string; baseUrl: string; model: string };
+  multiFile: boolean;
+  tokenBudget: number;
+  messages?: Array<{ role: string; content: string }>;
+  state: AgentTaskState;
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  progress?: AgentTaskProgress;
+  error?: string;
+  recovery?: { checkpoint: string; contextPaths: string[] };
+  result?: {
+    proposals: Array<{
+      path: string;
+      original: string;
+      modified: string;
+      language: string;
+      previousPath?: string;
+    }>;
+    rawResponse: string;
+  };
+}
+
+export interface AgentTaskEvent {
+  taskId: string;
+  sessionId: string;
+  state: AgentTaskState;
+  progress?: AgentTaskProgress;
+  error?: string;
+}
+
 
 export type WorkspaceGitOperation = 'overview' | 'diagnostics' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'compareCommits' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'stageConflictResult' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
 

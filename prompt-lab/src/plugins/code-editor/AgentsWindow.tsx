@@ -50,6 +50,7 @@ interface AgentsWindowProps {
   worktreeBusy: boolean;
   onCreateWorktree: () => void;
   onRefreshWorktree: () => void;
+  onMergeWorktree: () => void;
   onDiscardWorktree: () => void;
 }
 
@@ -171,7 +172,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
         </div>
         <div className="border-t p-3">
           <div className="mb-2 text-[10px] font-semibold">ISOLATION</div>
-          {props.activeSession?.worktree ? <div className="space-y-1 text-[10px]"><div className="truncate text-muted-foreground" title={props.activeSession.worktree.path}>{props.activeSession.worktree.branch}</div><div className="flex items-center gap-2"><span className={props.activeSession.worktree.dirty ? 'text-warning' : 'text-success'}>{props.activeSession.worktree.dirty ? '有未提交修改' : '工作区干净'}</span><div className="flex-1" /><button className="rounded px-1 py-0.5 hover:bg-accent" disabled={props.worktreeBusy} onClick={props.onRefreshWorktree}>刷新</button><button className="rounded px-1 py-0.5 text-destructive hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onDiscardWorktree}>放弃</button></div><p className="text-success">AI 读取、候选写入和验证均在隔离 worktree 执行。</p></div> : <Button size="sm" variant="outline" className="h-7 w-full text-[10px]" disabled={!props.activeSession || props.worktreeBusy || props.aiEditing} onClick={props.onCreateWorktree}>{props.worktreeBusy ? '准备中…' : '准备独立 worktree'}</Button>}
+          {props.activeSession?.worktree ? <div className="space-y-1 text-[10px]"><div className="truncate text-muted-foreground" title={props.activeSession.worktree.path}>{props.activeSession.worktree.branch}</div><div className="flex items-center gap-2"><span className={props.activeSession.worktree.dirty ? 'text-warning' : 'text-success'}>{props.activeSession.worktree.dirty ? '有未提交修改' : '工作区干净'}</span><div className="flex-1" /><button className="rounded px-1 py-0.5 hover:bg-accent" disabled={props.worktreeBusy} onClick={props.onRefreshWorktree}>刷新</button><button className="rounded px-1 py-0.5 text-primary hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onMergeWorktree}>合并</button><button className="rounded px-1 py-0.5 text-destructive hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onDiscardWorktree}>放弃</button></div><p className="text-success">AI 读取、候选写入和验证均在隔离 worktree 执行。</p></div> : <Button size="sm" variant="outline" className="h-7 w-full text-[10px]" disabled={!props.activeSession || props.worktreeBusy || props.aiEditing} onClick={props.onCreateWorktree}>{props.worktreeBusy ? '准备中…' : '准备独立 worktree'}</Button>}
         </div>
         <div className="border-t p-3 text-[10px] text-muted-foreground">{props.activeSession?.worktree ? '隔离模式：审阅后原子写入 worktree，不修改主工作区。' : '所有修改都需要通过 Diff 审阅，不会自动保存。'}</div>
       </aside>

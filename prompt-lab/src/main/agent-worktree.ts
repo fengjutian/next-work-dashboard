@@ -15,6 +15,16 @@ export interface AgentWorktreeInfo {
 }
 
 export interface AgentWorktreeSpec { sessionId: string; path: string; branch: string }
+export interface AgentWorktreeMergePreview {
+  canMerge: boolean;
+  changedPaths: string[];
+  conflictingPaths: string[];
+  mainDirty: boolean;
+  base: string;
+  mainHead: string;
+  agentHead: string;
+}
+export interface AgentWorktreeMergeResult { commit: string; changedPaths: string[] }
 type GitRunner = (cwd: string, args: string[]) => Promise<string>;
 
 function validateSessionId(sessionId: string): string {
@@ -41,6 +51,26 @@ export function parseWorktreeList(output: string): Array<{ path: string; head?: 
     }));
     return { path: values.get('worktree') ?? '', head: values.get('HEAD'), branch: values.get('branch')?.replace(/^refs\/heads\//, '') };
   }).filter((item) => Boolean(item.path));
+}
+
+export function parsePorcelainPaths(output: string): string[] {
+  const records = output.split('\0').filter(Boolean);
+  const paths: string[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    const status = record.slice(0, 2);
+    const filePath = record.slice(3);
+    if (filePath) paths.push(filePath.replace(/\\/g, '/'));
+    if ((status[0] === 'R' || status[0] === 'C') && records[index + 1]) {
+      paths.push(records[index + 1].replace(/\\/g, '/'));
+      index += 1;
+    }
+  }
+  return [...new Set(paths)].sort();
+}
+
+function parseNullPaths(output: string): string[] {
+  return [...new Set(output.split('\0').map((value) => value.trim()).filter(Boolean).map((value) => value.replace(/\\/g, '/')))].sort();
 }
 
 const defaultRunner: GitRunner = async (cwd, args) => {
@@ -85,3 +115,52 @@ export async function discardAgentWorktree(rootPath: string, storageRoot: string
   try { await runGit(root, ['branch', '-D', spec.branch]); } catch { /* worktree is already removed; stale/missing branch is harmless */ }
 }
 
+export async function previewAgentWorktreeMerge(rootPath: string, storageRoot: string, sessionId: string, runGit: GitRunner = defaultRunner): Promise<AgentWorktreeMergePreview> {
+  const root = fs.realpathSync(path.resolve(rootPath));
+  const spec = buildAgentWorktreeSpec(root, storageRoot, sessionId);
+  const existing = parseWorktreeList(await runGit(root, ['worktree', 'list', '--porcelain']))
+    .find((item) => path.resolve(item.path) === spec.path);
+  if (!existing) throw new Error('AGENT_WORKTREE_NOT_FOUND');
+  const [mainStatus, agentStatus, mainHead, agentHead] = await Promise.all([
+    runGit(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']),
+    runGit(spec.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all']),
+    runGit(root, ['rev-parse', 'HEAD']),
+    runGit(spec.path, ['rev-parse', 'HEAD']),
+  ]);
+  const base = await runGit(root, ['merge-base', mainHead, agentHead]);
+  const [mainCommitted, agentCommitted] = await Promise.all([
+    runGit(root, ['diff', '--name-only', '-z', `${base}..${mainHead}`]),
+    runGit(spec.path, ['diff', '--name-only', '-z', `${base}..${agentHead}`]),
+  ]);
+  const mainPaths = new Set([...parseNullPaths(mainCommitted), ...parsePorcelainPaths(mainStatus)]);
+  const changedPaths = [...new Set([...parseNullPaths(agentCommitted), ...parsePorcelainPaths(agentStatus)])].sort();
+  const conflictingPaths = changedPaths.filter((filePath) => mainPaths.has(filePath));
+  const mainDirty = Boolean(mainStatus);
+  return { canMerge: !mainDirty && changedPaths.length > 0 && conflictingPaths.length === 0, changedPaths, conflictingPaths, mainDirty, base, mainHead, agentHead };
+}
+
+export async function mergeAgentWorktree(rootPath: string, storageRoot: string, sessionId: string, message: string, runGit: GitRunner = defaultRunner): Promise<AgentWorktreeMergeResult> {
+  const root = fs.realpathSync(path.resolve(rootPath));
+  const spec = buildAgentWorktreeSpec(root, storageRoot, sessionId);
+  const preview = await previewAgentWorktreeMerge(root, storageRoot, sessionId, runGit);
+  if (preview.mainDirty) throw new Error('MAIN_WORKSPACE_DIRTY');
+  if (preview.conflictingPaths.length > 0) throw new Error(`AGENT_MERGE_CONFLICT:${preview.conflictingPaths.join(',')}`);
+  if (preview.changedPaths.length === 0) throw new Error('AGENT_WORKTREE_NO_CHANGES');
+
+  const agentDirty = await runGit(spec.path, ['status', '--porcelain=v1', '--untracked-files=all']);
+  if (agentDirty) {
+    await runGit(spec.path, ['add', '-A']);
+    await runGit(spec.path, ['-c', 'user.name=Next Work Agent', '-c', 'user.email=agent@next-work.local', 'commit', '-m', message]);
+  }
+  try {
+    await runGit(root, ['merge', '--squash', '--no-commit', spec.branch]);
+    await runGit(root, ['-c', 'user.name=Next Work Agent', '-c', 'user.email=agent@next-work.local', 'commit', '-m', message]);
+  } catch (error) {
+    try { await runGit(root, ['reset', '--merge', 'HEAD']); } catch { /* preserve the original merge error */ }
+    throw error;
+  }
+  const commit = await runGit(root, ['rev-parse', 'HEAD']);
+  await runGit(root, ['worktree', 'remove', '--force', spec.path]);
+  await runGit(root, ['branch', '-D', spec.branch]);
+  return { commit, changedPaths: preview.changedPaths };
+}

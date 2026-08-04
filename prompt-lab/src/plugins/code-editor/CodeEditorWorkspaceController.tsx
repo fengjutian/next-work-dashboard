@@ -1362,6 +1362,27 @@ export const CodeEditorWorkspaceController: React.FC = () => {
           } finally { setWorktreeBusy(false); }
         })(); }}
         onRefreshWorktree={() => { void refreshAgentWorktree(); }}
+        onMergeWorktree={() => { void (async () => {
+          if (!workspace || !activeAgentSession?.worktree) return;
+          setWorktreeBusy(true);
+          try {
+            const preview = await window.electronAPI.workspace.previewAgentWorktreeMerge(workspace.path, activeAgentSession.id);
+            if (!preview.success || !preview.data) { setStatus(`合并预检失败：${displayError(preview.error)}`); return; }
+            if (preview.data.mainDirty) { setStatus('主工作区存在未提交修改，请先提交或暂存后再合并'); return; }
+            if (preview.data.conflictingPaths.length > 0) { setStatus(`检测到重叠修改，已阻止合并：${preview.data.conflictingPaths.join(', ')}`); return; }
+            if (!preview.data.canMerge) { setStatus('worktree 没有可合并的修改'); return; }
+            const fileSummary = preview.data.changedPaths.slice(0, 8).join('\n');
+            const suffix = preview.data.changedPaths.length > 8 ? `\n…另有 ${preview.data.changedPaths.length - 8} 个文件` : '';
+            if (!await appConfirm(`将 ${preview.data.changedPaths.length} 个文件合并回主工作区并创建提交？\n\n${fileSummary}${suffix}`)) return;
+            const result = await window.electronAPI.workspace.mergeAgentWorktree(workspace.path, activeAgentSession.id, `Agent: ${activeAgentSession.title}`);
+            if (!result.success || !result.data) { setStatus(`合并失败：${displayError(result.error)}`); return; }
+            updateAgentSession(activeAgentSession.id, { worktree: undefined, status: 'completed' });
+            appendAgentLog(activeAgentSession.id, 'success', `已安全合并 ${result.data.changedPaths.length} 个文件，提交 ${result.data.commit.slice(0, 8)}`);
+            setStatus(`Agent 修改已合并：${result.data.commit.slice(0, 8)}`);
+            await refreshWorkspaceTree();
+            await refreshGitStatus();
+          } finally { setWorktreeBusy(false); }
+        })(); }}
         onDiscardWorktree={() => { void (async () => {
           if (!workspace || !activeAgentSession || !await appConfirm('放弃并永久删除此 Agent worktree、分支及其中未提交修改？此操作无法撤销。')) return;
           setWorktreeBusy(true);

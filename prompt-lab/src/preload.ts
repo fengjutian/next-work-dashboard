@@ -161,6 +161,20 @@ const electronAPI: ElectronAPI = {
     createAgentWorktree: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:createAgentWorktree', rootPath, sessionId),
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:getAgentWorktreeStatus', rootPath, sessionId),
     discardAgentWorktree: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:discardAgentWorktree', rootPath, sessionId),
+    previewAgentWorktreeMerge: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:previewAgentWorktreeMerge', rootPath, sessionId),
+    mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => ipcRenderer.invoke('workspace:mergeAgentWorktree', rootPath, sessionId, message),
+    // Agent task operations
+    agentTaskCreate: (config: import("./types/electron").AgentTaskConfig) => ipcRenderer.invoke("agent-task:create", config),
+    agentTaskGet: (taskId: string) => ipcRenderer.invoke("agent-task:get", taskId),
+    agentTaskList: (sessionId?: string) => ipcRenderer.invoke("agent-task:list", sessionId),
+    agentTaskCancel: (taskId: string) => ipcRenderer.invoke("agent-task:cancel", taskId),
+    agentTaskRetry: (taskId: string) => ipcRenderer.invoke("agent-task:retry", taskId),
+    agentTaskSubscribe: (taskId: string) => { ipcRenderer.send("agent-task:subscribe", taskId); },
+    onAgentTaskEvent: (handler: (event: import("./types/electron").AgentTaskEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: import("./types/electron").AgentTaskEvent) => handler(data);
+      ipcRenderer.on("agent-task:event", listener);
+      return () => { ipcRenderer.removeListener("agent-task:event", listener); };
+    },
     gitShowHead: (rootPath: string, relativePath: string) => ipcRenderer.invoke('workspace:gitShowHead', rootPath, relativePath),
     gitStage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitStage', rootPath, relativePaths),
     gitUnstage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitUnstage', rootPath, relativePaths),
