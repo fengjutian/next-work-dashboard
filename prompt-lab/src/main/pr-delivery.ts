@@ -54,10 +54,10 @@ export async function createGitHubPR(
 }
 
 export async function deliverAgentPR(
-  rootPath: string, branch: string, config: PRDeliveryConfig, title: string, body: string,
+  rootPath: string, branch: string, config: PRDeliveryConfig, title: string, body: string, token: string,
 ): Promise<PRDeliveryResult> {
   const push = await pushAgentBranch(rootPath, branch, config.remote);
   if (!push.pushed) return { branch, remote: config.remote, pushed: false, error: push.error };
-  const pr = await createGitHubPR(rootPath, branch, config.baseBranch, title, body, process.env.GITHUB_TOKEN || "");
+  const pr = await createGitHubPR(rootPath, branch, config.baseBranch, title, body, token);
   return { branch, remote: config.remote, pushed: true, prUrl: pr.url || undefined, prNumber: pr.number, error: pr.error };
 }

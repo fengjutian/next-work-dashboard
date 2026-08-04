@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { initDb, isDbReady, flushDbToDisk } from '@/db';
+import { initDb, isDbReady, flushDbToDisk, migrateFromLocalStorage } from '@/db';
 import { useStore } from '@/store';
 
 let _initialized = false;
@@ -26,6 +26,8 @@ export function useDbPersistence() {
 
       // 2. 初始化 sql.js（含 auto-migrate schema）
       await initDb(buffer ?? undefined);
+      const agentMigration = migrateFromLocalStorage();
+      if (!agentMigration.success) console.warn('Agent data migration failed:', agentMigration.error);
 
       // 3. 如果 DB 是全新的（之前没有文件），尝试从旧 JSON 迁移
       if (!buffer) {

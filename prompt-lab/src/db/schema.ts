@@ -62,6 +62,7 @@ export const agentSessions = sqliteTable("agent_sessions", {
   isPinned: integer("is_pinned").notNull().default(0),
   parentSessionId: text("parent_session_id"),
   tokenBudget: integer("token_budget"),
+  payload: text("payload").notNull().default("{}"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   archivedAt: integer("archived_at"),

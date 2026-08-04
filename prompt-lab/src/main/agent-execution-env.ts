@@ -1,6 +1,11 @@
 // ── Agent Execution Environment Interface ──
 // Abstraction over where agent code runs: local worktree, container, SSH remote, etc.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { authorizeWorkspace, resolveWorkspacePath } from './workspace-path';
+import { applyWorkspaceFileMutations } from './workspace-transaction';
+
 export type ExecutionEnvState = "preparing" | "ready" | "running" | "disconnected" | "cleanup_failed" | "destroyed";
 
 export interface ExecutionEnvStatus {
@@ -46,6 +51,7 @@ export interface ExecutionEnv {
 export function createLocalWorktreeEnv(
   worktreePath: string,
 ): ExecutionEnv {
+  authorizeWorkspace(worktreePath);
   let state: ExecutionEnvState = "ready";
   let startedAt = Date.now();
   let lastHeartbeat = Date.now();
@@ -62,28 +68,30 @@ export function createLocalWorktreeEnv(
     },
 
     async readFile(relativePath: string) {
-      const { readFileSync } = await import("node:fs");
-      const { join } = await import("node:path");
-      const fullPath = join(worktreePath, relativePath);
-      const content = readFileSync(fullPath, "utf-8");
+      const fullPath = resolveWorkspacePath(worktreePath, relativePath);
+      const content = fs.readFileSync(fullPath, "utf-8");
       return { content, encoding: "utf8" };
     },
 
     async writeFiles(files: Array<{ path: string; content: string }>) {
-      const { writeFileSync, mkdirSync } = await import("node:fs");
-      const { join, dirname } = await import("node:path");
-      for (const f of files) {
-        const fullPath = join(worktreePath, f.path);
-        mkdirSync(dirname(fullPath), { recursive: true });
-        writeFileSync(fullPath, f.content, "utf-8");
+      const root = fs.realpathSync(worktreePath);
+      for (const file of files) {
+        const target = path.resolve(root, file.path);
+        const relative = path.relative(root, target);
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('ACCESS_DENIED');
+        fs.mkdirSync(path.dirname(target), { recursive: true });
       }
+      applyWorkspaceFileMutations(worktreePath, files.map((file) => ({
+        kind: fs.existsSync(resolveWorkspacePath(worktreePath, file.path)) ? 'write' as const : 'create' as const,
+        path: file.path,
+        content: file.content,
+      })));
     },
 
     async *runCommand(command: string, opts?: { cwd?: string; env?: Record<string, string>; timeout?: number }) {
       const { spawn } = await import("node:child_process");
       controller = new AbortController();
-      const { join } = await import("node:path");
-      const cwd = opts?.cwd ? join(worktreePath, opts.cwd) : worktreePath;
+      const cwd = opts?.cwd ? resolveWorkspacePath(worktreePath, opts.cwd) : resolveWorkspacePath(worktreePath);
       const child = spawn(command, {
         cwd, shell: true, windowsHide: true,
         env: { ...process.env, ...opts?.env },

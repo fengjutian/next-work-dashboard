@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
-import { isDbReady, dbInsertAgentMessage, dbInsertAgentProposal } from '@/db';
+import { isDbReady, dbInsertAgentMessage, dbInsertAgentProposal, dbDeleteAgentProposals, dbLoadAgentMessages, dbLoadAgentProposals } from '@/db';
 import type { AiHunk, OpenDocument } from './editor-types';
 
 export interface AiFileProposal {
@@ -62,6 +62,20 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
     setAiInstruction(draft?.instruction ?? '');
     restoredDraftWorkspace.current = persistenceKey;
     if (draft?.proposals.length) appendOutput(`已恢复 ${draft.proposals.length} 个待审 AI 修改候选`);
+    const restoreFromDb = () => {
+      if (!isDbReady()) return false;
+      const sid = persistenceKey.split('::')[1] ?? persistenceKey;
+      const rows = dbLoadAgentProposals(sid);
+      if (rows.length > 0) setAiProposals(rows.map((row) => ({
+        path: row.path, original: row.original, modified: row.modified,
+        language: row.language, previousPath: row.previousPath ?? undefined,
+      })));
+      return true;
+    };
+    if (!restoreFromDb()) {
+      const timer = window.setTimeout(restoreFromDb, 500);
+      return () => window.clearTimeout(timer);
+    }
   }, [appendOutput, persistenceKey, workspace]);
 
   useEffect(() => {
@@ -74,6 +88,19 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
     if (recovered) {
       setAiInstruction(recovered.instruction);
       appendOutput(`已恢复中断的 AI 请求：${recovered.instruction.slice(0, 80)}`);
+    }
+    const restoreFromDb = () => {
+      if (!isDbReady()) return false;
+      const sid = persistenceKey.split('::')[1] ?? persistenceKey;
+      const rows = dbLoadAgentMessages(sid, 100, 0);
+      if (rows.length > 0) setAiMessages(rows.map((row) => ({
+        role: row.role as AiConversationMessage['role'], content: row.content, timestamp: row.timestamp,
+      })));
+      return true;
+    };
+    if (!restoreFromDb()) {
+      const timer = window.setTimeout(restoreFromDb, 500);
+      return () => window.clearTimeout(timer);
     }
   }, [appendOutput, persistenceKey, workspace]);
 
@@ -107,13 +134,14 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
       };
       else delete drafts[persistenceKey];
       localStorage.setItem('code-editor.ai-drafts.v1', JSON.stringify(drafts));
-      // Also persist to SQLite
-      if (isDbReady() && aiProposals.length > 0) {
+      // Also persist to SQLite as a per-session replacement set.
+      if (isDbReady()) {
         const sid = persistenceKey.split("::")[1] ?? persistenceKey;
         try {
+          dbDeleteAgentProposals(sid);
           for (let i = 0; i < aiProposals.length; i++) {
             const p = aiProposals[i];
-            dbInsertAgentProposal({ id: "prop-" + sid + "-" + Date.now() + "-" + i, sessionId: sid, path: p.path, original: p.original, modified: p.modified, language: p.language, previousPath: p.previousPath ?? null, accepted: null, acceptedAt: null, seq: i, createdAt: Date.now() });
+            dbInsertAgentProposal({ id: "prop-" + sid + "-" + i, sessionId: sid, path: p.path, original: p.original, modified: p.modified, language: p.language, previousPath: p.previousPath ?? null, accepted: null, acceptedAt: null, seq: i, createdAt: Date.now() });
           }
         } catch {}
       }

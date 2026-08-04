@@ -159,6 +159,19 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     try { return JSON.parse(localStorage.getItem('code-editor.recent-workspaces') ?? '[]'); } catch { return []; }
   });
   const [autoSave, setAutoSave] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    const refreshCounts = async () => {
+      const result = await window.electronAPI.workspace.agentTaskList();
+      if (disposed || !result.success || !result.data) return;
+      setTaskQueueCount(result.data.filter((task) => task.state === 'queued').length);
+      setTaskRunningCount(result.data.filter((task) => task.state === 'running' || task.state === 'cancelling').length);
+    };
+    void refreshCounts();
+    const unsubscribe = window.electronAPI.workspace.onAgentTaskEvent(() => { void refreshCounts(); });
+    return () => { disposed = true; unsubscribe(); };
+  }, []);
   const [preferences, setPreferences] = useState<EditorPreferences>(() => {
     try {
       return { ...DEFAULT_PREFERENCES, ...JSON.parse(localStorage.getItem('code-editor.preferences.v1') ?? '{}') };
@@ -300,6 +313,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   });
 
   const { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics } = useAiEditGeneration({
+    sessionId: activeAgentSession?.id,
     aiApi,
     workspace: agentExecutionWorkspace,
     isolated: agentIsolated,
@@ -1393,6 +1407,21 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         })(); }}
         aiTokenBudget={aiTokenBudget}
         onTokenBudgetChange={setAiTokenBudget}
+        onDeliverWorktree={() => { void (async () => {
+          if (!workspace || !activeAgentSession?.worktree) return;
+          const remote = (await appPrompt('推送到哪个 Git remote？', 'origin'))?.trim();
+          const baseBranch = (await appPrompt('Pull Request 的目标分支', 'main'))?.trim();
+          const token = (await appPrompt('GitHub Token（仅用于本次请求，不会保存）', ''))?.trim();
+          if (!remote || !baseBranch || !token) { setStatus('创建 PR 已取消'); return; }
+          if (!await appConfirm(`推送 ${activeAgentSession.worktree.branch} 并创建目标为 ${baseBranch} 的 Pull Request？`)) return;
+          setWorktreeBusy(true);
+          try {
+            const result = await window.electronAPI.workspace.deliverAgentPR(workspace.path, activeAgentSession.worktree.branch, { provider: 'github', remote, baseBranch }, activeAgentSession.title, `由 Agent 会话“${activeAgentSession.title}”生成。`, token);
+            if (!result.success || !result.data) { setStatus(`创建 PR 失败：${displayError(result.error)}`); return; }
+            appendAgentLog(activeAgentSession.id, 'success', `已推送 ${result.data.branch}${result.data.prUrl ? `，PR：${result.data.prUrl}` : ''}`);
+            setStatus(result.data.prUrl ? `Pull Request 已创建：${result.data.prUrl}` : 'Agent 分支已推送');
+          } finally { setWorktreeBusy(false); }
+        })(); }}
                 onDiscardWorktree={() => { void (async () => {
           if (!workspace || !activeAgentSession || !await appConfirm('放弃并永久删除此 Agent worktree、分支及其中未提交修改？此操作无法撤销。')) return;
           setWorktreeBusy(true);

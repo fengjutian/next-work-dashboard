@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { createOpenAIProvider } from '../../core/llm';
 import { fitContextToTokenBudget } from './ai-context';
 import { checkTokenBudget } from './ai-token-budget';
 import { applyConversationSummary, conversationNeedsSummary, isAbortError, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
@@ -8,6 +7,7 @@ import { languageIdFromName } from './editor-utils';
 import type { OpenDocument } from './editor-types';
 import type { AiFileProposal } from './useAiSessionState';
 import type { EditorDiffView } from './useGitDiffMerge';
+import type { AgentTaskConfig, AgentTaskRecord } from '@/types/electron';
 
 interface AiApiConfig { apiKey: string; baseUrl: string; model: string }
 
@@ -15,6 +15,7 @@ export type AiExecutionStage = 'idle' | 'collecting-context' | 'summarizing' | '
 export interface AiExecutionMetrics { startedAt: number; firstChunkAt?: number; endedAt?: number; receivedChars: number }
 
 interface UseAiEditGenerationOptions {
+  sessionId?: string;
   aiApi: AiApiConfig;
   workspace: { path: string } | null;
   isolated?: boolean;
@@ -37,6 +38,46 @@ interface UseAiEditGenerationOptions {
   recordAiSession: (fileCount: number) => void;
   appendOutput: (message: string) => void;
   setStatus: Dispatch<SetStateAction<string>>;
+}
+
+async function executeAgentTask(
+  config: AgentTaskConfig,
+  signal: AbortSignal,
+  onProgress: (stage: string, message: string) => void,
+): Promise<AgentTaskRecord> {
+  let activeTaskId = '';
+  let settled = false;
+  return new Promise<AgentTaskRecord>((resolve, reject) => {
+    const cleanupEvents = window.electronAPI.workspace.onAgentTaskEvent((event) => {
+      if (!activeTaskId || event.taskId !== activeTaskId) return;
+      if (event.progress) onProgress(event.progress.stage, event.progress.message);
+      if (!['review', 'failed', 'interrupted'].includes(event.state) || settled) return;
+      settled = true;
+      cleanupEvents();
+      signal.removeEventListener('abort', abort);
+      void window.electronAPI.workspace.agentTaskGet(activeTaskId).then((result) => {
+        if (event.state === 'review' && result.success && result.data) resolve(result.data);
+        else if (event.state === 'interrupted') reject(new DOMException('Agent task cancelled', 'AbortError'));
+        else reject(new Error(event.error ?? result.error ?? 'AGENT_TASK_FAILED'));
+      });
+    });
+    const abort = () => {
+      if (activeTaskId) void window.electronAPI.workspace.agentTaskCancel(activeTaskId);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    void window.electronAPI.workspace.agentTaskCreate(config).then((created) => {
+      if (!created.success || !created.data) throw new Error(created.error ?? 'AGENT_TASK_CREATE_FAILED');
+      activeTaskId = created.data.taskId;
+      window.electronAPI.workspace.agentTaskSubscribe(activeTaskId);
+      if (signal.aborted) abort();
+    }).catch((error) => {
+      if (settled) return;
+      settled = true;
+      cleanupEvents();
+      signal.removeEventListener('abort', abort);
+      reject(error);
+    });
+  });
 }
 
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|json|css|scss|html|md|py|go|rs|java|vue|svelte)$/i;
@@ -120,7 +161,7 @@ function parseProposals(response: string, contexts: AiFileProposal[]): AiFilePro
 
 export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   const {
-    aiApi, workspace, isolated = false, documents, activeDocument, editorRef, aiInstruction, aiMessages,
+    sessionId, aiApi, workspace, isolated = false, documents, activeDocument, editorRef, aiInstruction, aiMessages,
     setAiMessages, aiMode, aiMultiFile, aiTokenBudget, inlineEdit, setInlineEdit, setAiEditing,
     setAiPendingRequest, setAiProposals, setDiffView, setDocuments, recordAiSession,
     appendOutput, setStatus,
@@ -162,7 +203,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
     setAiEditing(true);
-    setStatus(`AI 正在修改 ${activeDocument.name}…`);
+    setStatus(aiMode === 'analyze' ? 'Agent 正在分析…' : `AI 正在修改 ${activeDocument?.name ?? '工作区'}…`);
     try {
       let executionDocument = activeDocument;
       if (isolated && workspace && activeDocument) {
@@ -178,23 +219,48 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           readOnly: read.data.readOnly,
         };
       }
-      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       let conversation = aiMessages;
       if (conversationNeedsSummary(conversation, aiTokenBudget) && conversation.length > 4) {
         setAiExecutionStage('summarizing');
-        let summary = '';
         const prompt = [
           ...conversation.map(({ role, content }) => ({ role, content })),
           { role: 'user' as const, content: '请压缩以上代码编辑会话：保留用户目标、已决定的方案、修改过的文件、未解决问题和约束。只返回简洁摘要。' },
         ];
-        for await (const chunk of provider.chat(prompt, { model: aiApi.model, temperature: 0.1, maxTokens: 2000, signal: abortController.signal })) { summary += chunk.delta; trackResponseChunk(chunk.delta); }
+        const summaryTask = await executeAgentTask({
+          sessionId: sessionId ?? requestId, workspaceRoot: workspace?.path ?? '', executionRoot: isolated ? workspace?.path : undefined,
+          instruction: '压缩代码编辑会话', modelConfig: aiApi, multiFile: false, tokenBudget: 4_000, messages: prompt,
+        }, abortController.signal, (stage, message) => { setAiExecutionStage(stage === 'generating' ? 'summarizing' : 'parsing'); appendOutput(message); });
+        const summary = summaryTask.result?.rawResponse ?? '';
+        trackResponseChunk(summary);
         conversation = applyConversationSummary(conversation, summary);
         setAiMessages(conversation);
         appendOutput(`AI 长会话已压缩为摘要，保留最近 ${Math.min(4, aiMessages.length)} 条消息`);
       }
       const history = conversation.slice(-12).map(({ role, content }) => ({ role, content }));
       let response = '';
-      if (aiMultiFile && workspace) {
+      if (aiMode === 'analyze') {
+        const context = executionDocument ? `\n\n当前文件：${executionDocument.path}\n${executionDocument.content}` : '';
+        const messages = [
+          { role: 'system', content: '你是代码分析助手。分析问题、风险和可行方案，不要生成可直接应用的文件候选。' },
+          ...history,
+          { role: 'user', content: `${aiInstruction.trim()}${context}` },
+        ];
+        setAiExecutionStage('generating');
+        const task = await executeAgentTask({
+          sessionId: sessionId ?? requestId, workspaceRoot: workspace?.path ?? '', executionRoot: isolated ? workspace?.path : undefined,
+          instruction: aiInstruction.trim(), modelConfig: aiApi, multiFile: false, tokenBudget: aiTokenBudget, messages,
+        }, abortController.signal, (stage) => setAiExecutionStage(stage === 'parsing' ? 'parsing' : 'generating'));
+        response = task.result?.rawResponse ?? '';
+        trackResponseChunk(response);
+        setAiMessages((previous) => [...previous,
+          { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() },
+          { role: 'assistant' as const, content: response, timestamp: Date.now() },
+        ].slice(-100));
+        setAiPendingRequest(null);
+        setAiExecutionStage('review');
+        setStatus('Agent 分析已完成');
+        return;
+      } else if (aiMultiFile && workspace) {
         setAiExecutionStage('collecting-context');
         const executionDocuments = isolated ? [] : documents;
         const fallbackDoc = executionDocument || { path: "", name: "workspace", content: "", savedContent: "", language: "plaintext", encoding: "utf8" as const, lineEnding: "LF" as const, modifiedAt: Date.now(), readOnly: false, pinned: false, mixedLineEndings: false };
@@ -211,7 +277,13 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fitted.files.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}` },
         ];
         setAiExecutionStage('generating');
-        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) { response += chunk.delta; trackResponseChunk(chunk.delta); }
+        const task = await executeAgentTask({
+          sessionId: sessionId ?? requestId, workspaceRoot: workspace.path, executionRoot: isolated ? workspace.path : undefined,
+          instruction: aiInstruction.trim(), modelConfig: aiApi, multiFile: true, tokenBudget: aiTokenBudget, messages,
+          contextFiles: fitted.files.map((file) => file.path), recovery: { checkpoint: 'context-collected', contextPaths: fitted.files.map((file) => file.path) },
+        }, abortController.signal, (stage) => setAiExecutionStage(stage === 'parsing' ? 'parsing' : 'generating'));
+        response = task.result?.rawResponse ?? '';
+        trackResponseChunk(response);
         setAiExecutionStage('parsing');
         const proposals = parseProposals(response, contexts);
         if (!proposals.length) { setAiPendingRequest(null); setStatus('AI 未生成有效的多文件修改'); return; }
@@ -229,7 +301,13 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           { role: 'user' as const, content: `文件名：${executionDocument.name}\n语言：${executionDocument.language}\n修改要求：${aiInstruction.trim()}${selected ? `\n重点关注的选中代码：\n${selected}` : ''}\n\n当前完整文件：\n${executionDocument.content}` },
         ];
         setAiExecutionStage('generating');
-        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) { response += chunk.delta; trackResponseChunk(chunk.delta); }
+        const task = await executeAgentTask({
+          sessionId: sessionId ?? requestId, workspaceRoot: workspace?.path ?? '', executionRoot: isolated ? workspace?.path : undefined,
+          instruction: aiInstruction.trim(), modelConfig: aiApi, multiFile: false, tokenBudget: aiTokenBudget, messages,
+          contextFiles: [executionDocument.path], recovery: { checkpoint: 'context-collected', contextPaths: [executionDocument.path] },
+        }, abortController.signal, (stage) => setAiExecutionStage(stage === 'parsing' ? 'parsing' : 'generating'));
+        response = task.result?.rawResponse ?? '';
+        trackResponseChunk(response);
         setAiExecutionStage('parsing');
         const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
         const modified = (fenced?.[1] ?? response).trimEnd();
@@ -263,7 +341,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       if (requestAbortRef.current === abortController) requestAbortRef.current = null;
       setAiEditing(false);
     }
-  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, isolated, recordAiSession, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
+  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, isolated, recordAiSession, sessionId, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
 
   const runInlineEdit = useCallback(async () => {
     if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
@@ -272,14 +350,16 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     setAiEditing(true);
     setStatus('AI 正在生成内联修改…');
     try {
-      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       const selection = editorRef.current?.getSelection();
       const selected = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
-      let response = '';
-      for await (const chunk of provider.chat([
+      const task = await executeAgentTask({
+        sessionId: sessionId ?? `inline-${Date.now()}`, workspaceRoot: workspace?.path ?? '', executionRoot: isolated ? workspace?.path : undefined,
+        instruction, modelConfig: aiApi, multiFile: false, tokenBudget: 8_000, messages: [
         { role: 'system', content: '你是内联代码助手。在光标处或选中代码处进行修改。只返回要插入的代码片段，不要解释，不要 Markdown。如果选中了代码，返回替换该选区的代码。' },
         { role: 'user', content: `${selected ? `选中代码：\n${selected}\n\n` : ''}${activeDocument.name} (${activeDocument.language})\n修改指令：${instruction}` },
-      ], { model: aiApi.model, temperature: 0.1, maxTokens: 4000 })) response += chunk.delta;
+        ],
+      }, new AbortController().signal, () => undefined);
+      const response = task.result?.rawResponse ?? '';
       const snippet = response.replace(/```[\s\S]*?\n?/g, '').trim();
       if (!snippet) { setStatus('AI 未生成有效代码'); return; }
       editorRef.current?.focus();
@@ -295,7 +375,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       setStatus('AI 内联修改已应用');
     } catch (error) { setStatus(`内联修改失败：${error instanceof Error ? error.message : String(error)}`); }
     finally { setAiEditing(false); }
-  }, [activeDocument, aiApi, appendOutput, editorRef, inlineEdit.instruction, setAiEditing, setDocuments, setInlineEdit, setStatus]);
+  }, [activeDocument, aiApi, appendOutput, editorRef, inlineEdit.instruction, isolated, sessionId, setAiEditing, setDocuments, setInlineEdit, setStatus, workspace?.path]);
 
   return { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics };
 }

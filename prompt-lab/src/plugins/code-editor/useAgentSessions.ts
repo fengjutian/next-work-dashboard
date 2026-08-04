@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, type AgentLogEntry, type AgentSession } from './agent-sessions';
-import { isDbReady, dbInsertAgentSession, dbUpdateAgentSession, dbDeleteAgentSession, dbInsertAgentLog, dbDeleteAgentLogs } from '@/db';
+import { isDbReady, dbInsertAgentSession, dbUpdateAgentSession, dbDeleteAgentSession, dbInsertAgentLog, dbDeleteAgentLogs, dbLoadAgentSessions, dbLoadAgentLogs } from '@/db';
 
 const STORAGE_KEY = 'code-editor.agent-sessions.v1';
 const ACTIVE_KEY = 'code-editor.active-agent-sessions.v1';
@@ -26,6 +26,30 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
   const activeSession = visibleSessions.find((session) => session.id === activeSessionId) ?? visibleSessions[0] ?? null;
   const activeLogs = activeSession ? logsBySession[activeSession.id] ?? [] : [];
 
+  useEffect(() => {
+    let cancelled = false;
+    const restore = () => {
+      if (!isDbReady()) return false;
+      const restored = dbLoadAgentSessions().flatMap((row) => {
+        try { return [JSON.parse(row.payload) as AgentSession]; } catch { return []; }
+      });
+      if (!cancelled && restored.length > 0) {
+        setSessions((current) => [...new Map([...current, ...restored].map((session) => [session.id, session])).values()]);
+        const restoredLogs: Record<string, AgentLogEntry[]> = {};
+        for (const session of restored) restoredLogs[session.id] = dbLoadAgentLogs(session.id, 500, 0).map((row) => ({
+          id: row.id, timestamp: row.timestamp, level: row.level as AgentLogEntry['level'], message: row.message,
+        }));
+        setLogsBySession((current) => ({ ...restoredLogs, ...current }));
+      }
+      return true;
+    };
+    if (!restore()) {
+      const timer = window.setTimeout(restore, 500);
+      return () => { cancelled = true; window.clearTimeout(timer); };
+    }
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.slice(-200))), [sessions]);
   // Also persist to SQLite
   useEffect(() => {
@@ -41,6 +65,7 @@ export function useAgentSessions(workspace: { path: string; name: string } | nul
           worktreeDirty: s.worktree?.dirty ? 1 : 0,
           isPinned: s.pinned ? 1 : 0, parentSessionId: null,
           tokenBudget: null,
+          payload: JSON.stringify(s),
           createdAt: s.createdAt, updatedAt: s.updatedAt,
           archivedAt: s.archivedAt ?? null,
         });

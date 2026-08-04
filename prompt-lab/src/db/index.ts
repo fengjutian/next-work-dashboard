@@ -80,6 +80,7 @@ function ensureSchema(): void {
       is_pinned INTEGER NOT NULL DEFAULT 0,
       parent_session_id TEXT,
       token_budget INTEGER,
+      payload TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       archived_at INTEGER
@@ -169,6 +170,8 @@ function ensureSchema(): void {
       value TEXT NOT NULL
     );
   `);
+  const sessionColumns = new Set((_sqlDb.exec('PRAGMA table_info(agent_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
+  if (!sessionColumns.has('payload')) _sqlDb.run("ALTER TABLE agent_sessions ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'");
 }
 
 // ═══════════════════════════════════════════
@@ -391,12 +394,13 @@ export function dbLoadChatSessions<T = unknown>(): T | null {
 // Agent Sessions CRUD
 // ═══════════════════════════════════════════
 
-interface AgentSessionRow {
+export interface AgentSessionRow {
   id: string; title: string; status: string; instruction: string;
   worktreePath: string | null; worktreeBranch: string | null;
   worktreeHead: string | null; worktreeDirty: number;
   isPinned: number; parentSessionId: string | null;
   tokenBudget: number | null;
+  payload: string;
   createdAt: number; updatedAt: number; archivedAt: number | null;
 }
 
@@ -436,7 +440,10 @@ export function dbLoadAgentSessions(): AgentSessionRow[] {
 }
 
 export function dbInsertAgentSession(row: AgentSessionRow): void {
-  getDb().insert(schema.agentSessions).values(row as never).run();
+  getDb().insert(schema.agentSessions).values(row as never).onConflictDoUpdate({
+    target: schema.agentSessions.id,
+    set: row as never,
+  }).run();
 }
 
 export function dbUpdateAgentSession(id: string, patch: Record<string, unknown>): void {
@@ -459,7 +466,10 @@ export function dbLoadAgentMessages(sessionId: string, limit = 100, offset = 0):
 }
 
 export function dbInsertAgentMessage(row: AgentMessageRow): void {
-  getDb().insert(schema.agentMessages).values(row as never).run();
+  getDb().insert(schema.agentMessages).values(row as never).onConflictDoUpdate({
+    target: schema.agentMessages.id,
+    set: row as never,
+  }).run();
 }
 
 export function dbDeleteAgentMessages(sessionId: string): void {
@@ -478,7 +488,10 @@ export function dbLoadAgentLogs(sessionId: string, limit = 100, offset = 0): Age
 }
 
 export function dbInsertAgentLog(row: AgentLogRow): void {
-  getDb().insert(schema.agentLogs).values(row as never).run();
+  getDb().insert(schema.agentLogs).values(row as never).onConflictDoUpdate({
+    target: schema.agentLogs.id,
+    set: row as never,
+  }).run();
 }
 
 export function dbDeleteAgentLogs(sessionId: string): void {
@@ -496,7 +509,10 @@ export function dbLoadAgentProposals(sessionId: string): AgentProposalRow[] {
 }
 
 export function dbInsertAgentProposal(row: AgentProposalRow): void {
-  getDb().insert(schema.agentProposals).values(row as never).run();
+  getDb().insert(schema.agentProposals).values(row as never).onConflictDoUpdate({
+    target: schema.agentProposals.id,
+    set: row as never,
+  }).run();
 }
 
 export function dbUpdateAgentProposal(id: string, patch: Record<string, unknown>): void {
@@ -595,6 +611,7 @@ export function migrateFromLocalStorage(): { success: boolean; migrated: number;
           worktreeHead: s.worktree ? ((s.worktree as Record<string,unknown>).head as string) ?? null : null,
           worktreeDirty: s.worktree ? ((s.worktree as Record<string,unknown>).dirty ? 1 : 0) : 0,
           isPinned: s.pinned ? 1 : 0, parentSessionId: null, tokenBudget: null,
+          payload: JSON.stringify(s),
           createdAt: Number(s.createdAt ?? Date.now()),
           updatedAt: Number(s.updatedAt ?? Date.now()),
           archivedAt: s.archivedAt ? Number(s.archivedAt) : null,

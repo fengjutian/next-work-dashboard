@@ -1325,11 +1325,6 @@ export function setupIPC(webviewPreloadPath: string) {
   });
 
 
-  ipcMain.handle('agent-task:restore', async (_event, tasks: AgentTaskConfig[]) => {    try {      const count = agentTaskService.restore(tasks as any);      return { success: true, data: count };    } catch (error) {      return { success: false, error: error instanceof Error ? error.message : String(error) };    }  });
-
-  // Progress subscription: renderer sends subscribe, main pushes via webContents  ipcMain.on('agent-task:subscribe', (event, taskId: string) => {    const unsubscribe = agentTaskService.subscribe(taskId, (taskEvent) => {      if (!event.sender.isDestroyed()) event.sender.send('agent-task:event', taskEvent);    });    event.sender.once('destroyed', unsubscribe);  });
-  ipcMain.handle('workspace:getAgentWorktreeConflictVersions', async (_event, rootPath: string, sessionId: string, filePath: string) => {    try {      const root = resolveWorkspacePath(rootPath);      const data = await getAgentWorktreeConflictVersions(root, path.join(app.getPath('userData'), 'agent-worktrees'), sessionId, filePath);      return { success: true, data };    } catch (error) {      return { success: false, error: error instanceof Error ? error.message : String(error) };    }  });
-
   ipcMain.handle('workspace:previewAgentWorktreeMerge', async (_event, rootPath: string, sessionId: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
@@ -1417,7 +1412,7 @@ export function setupIPC(webviewPreloadPath: string) {
       const root = resolveWorkspacePath(rootPath);
       const githubToken = token || process.env.GITHUB_TOKEN || "";
       if (!githubToken) return { success: false, error: "GitHub token not configured" };
-      const result = await deliverAgentPR(root, branch, config, title, body);
+      const result = await deliverAgentPR(root, branch, config, title, body, githubToken);
       return { success: result.pushed && !result.error, data: result, error: result.error };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };

@@ -1,6 +1,7 @@
 // Agent Task Service - Main-process AI task execution
 import { EventEmitter } from 'node:events';
 import { createOpenAIProvider } from '../core/llm';
+import type { LLMProvider } from '../core/llm';
 import type {
   AgentTaskConfig,
   AgentTaskEvent,
@@ -22,7 +23,7 @@ export class AgentTaskService extends EventEmitter {
   private maxConcurrent = 2;
   private worktreeLocks = new Map<string, string>();
 
-  constructor(maxConcurrent = 2) { super(); this.maxConcurrent = maxConcurrent; }
+  constructor(maxConcurrent = 2, private readonly providerFactory: (config: AgentTaskConfig['modelConfig']) => LLMProvider = createOpenAIProvider) { super(); this.maxConcurrent = maxConcurrent; }
 
   create(config: AgentTaskConfig): AgentTaskRecord {
     if (!config.sessionId || !config.workspaceRoot || !config.instruction.trim()) throw new Error('INVALID_TASK_CONFIG');
@@ -31,6 +32,7 @@ export class AgentTaskService extends EventEmitter {
       executionRoot: config.executionRoot, instruction: config.instruction.trim(),
       modelConfig: { ...config.modelConfig }, multiFile: config.multiFile,
       tokenBudget: config.tokenBudget, state: 'queued', createdAt: Date.now(),
+      messages: config.messages?.map((message) => ({ ...message })),
       recovery: config.recovery,
     };
     this.tasks.set(record.taskId, record);
@@ -108,7 +110,11 @@ export class AgentTaskService extends EventEmitter {
 
   // Get all tasks for persistence
   snapshot(): AgentTaskRecord[] {
-    return [...this.tasks.values()];
+    return [...this.tasks.values()].map((task) => ({
+      ...task,
+      modelConfig: { ...task.modelConfig, apiKey: '' },
+      messages: task.messages?.map((message) => ({ ...message })),
+    }));
   }
 
     shutdown(): AgentTaskRecord[] {
@@ -158,7 +164,7 @@ export class AgentTaskService extends EventEmitter {
     try {
       record.state = 'running'; record.startedAt = Date.now();
       this.emitEvent(record.taskId, 'running');
-      const provider = createOpenAIProvider(record.modelConfig);
+      const provider = this.providerFactory(record.modelConfig);
       const signal = controller.signal;
       let response = '';
       if (record.messages && record.messages.length > 0) {
