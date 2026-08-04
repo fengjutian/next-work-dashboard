@@ -42,6 +42,13 @@ export interface KnowledgeTemplate {
   fileName: string;
   content: string;
   defaults?: Record<string, string>;
+  variables?: Array<{
+    name: string;
+    label?: string;
+    description?: string;
+    defaultValue?: string;
+    required?: boolean;
+  }>;
 }
 
 export interface KnowledgeContentRule {

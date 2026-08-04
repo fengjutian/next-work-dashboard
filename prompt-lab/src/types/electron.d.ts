@@ -118,6 +118,10 @@ export interface ElectronAPI {
     createFromTemplate: (rootPath: string, templateId: string, values: Record<string, string>) => Promise<WorkspaceResult<{
       path: string; modifiedAt: number; diagnostics: import('../core/knowledge').KnowledgeDiagnostic[];
     }>>;
+    readDocument: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<{ content: string; modifiedAt: number }>>;
+    searchWorkspace: (rootPath: string, query: string, limit?: number) => Promise<WorkspaceResult<Array<{
+      uri: string; path: string; title: string; score: number; snippets: Array<{ line: number; text: string }>;
+    }>>>;
   };
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;

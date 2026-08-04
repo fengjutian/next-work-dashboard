@@ -4,6 +4,7 @@ import {
   createKnowledgeProposal,
   extractWikiLinks,
   instantiateKnowledgeTemplate,
+  getKnowledgeTemplateVariables,
   parseKnowledgeDocument,
   validateKnowledgeDocument,
 } from '../src/core/knowledge';
@@ -40,6 +41,20 @@ describe('knowledge templates and review', () => {
     expect(validateKnowledgeDocument(document, created.content, [{
       include: 'decisions/**', requiredFrontmatter: ['status'], requiredSections: ['Decision'], allowedTypes: ['spec'],
     }]).map((item) => item.code)).toEqual(['MISSING_FRONTMATTER', 'MISSING_SECTION']);
+  });
+
+  it('derives declared and implicit template variables and enforces required values', () => {
+    const template = {
+      id: 'meeting', name: 'Meeting', directory: 'meetings', fileName: '{{date}}-{{title}}',
+      content: '# {{title}}\nOwner: {{owner}}', defaults: { owner: 'team' },
+      variables: [{ name: 'date', label: '日期', required: true }],
+    };
+    expect(getKnowledgeTemplateVariables(template)).toEqual([
+      expect.objectContaining({ name: 'date', label: '日期', required: true }),
+      expect.objectContaining({ name: 'title', required: true }),
+      expect.objectContaining({ name: 'owner', defaultValue: 'team', required: false }),
+    ]);
+    expect(() => instantiateKnowledgeTemplate(template, { date: '', title: 'Sync' })).toThrow('TEMPLATE_VARIABLE_REQUIRED:date');
   });
 
   it('rejects traversal and duplicate proposal paths', () => {

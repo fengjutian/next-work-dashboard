@@ -175,6 +175,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     scanWorkspace: (rootPath: string) => ipcRenderer.invoke('knowledge:scanWorkspace', rootPath),
     createFromTemplate: (rootPath: string, templateId: string, values: Record<string, string>) =>
       ipcRenderer.invoke('knowledge:createFromTemplate', rootPath, templateId, values),
+    readDocument: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('knowledge:readDocument', rootPath, relativePath),
+    searchWorkspace: (rootPath: string, query: string, limit?: number) =>
+      ipcRenderer.invoke('knowledge:searchWorkspace', rootPath, query, limit),
   },
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),

@@ -15,6 +15,7 @@ type KnowledgeWorkspaceView = KnowledgeIndex & {
   diagnostics: KnowledgeDiagnostic[];
   skipped: Array<{ path: string; reason: 'too-large' | 'unreadable' }>;
 };
+type KnowledgeSearchMatch = { uri: string; path: string; title: string; score: number; snippets: Array<{ line: number; text: string }> };
 
 // ── 常量 ──
 
@@ -47,6 +48,10 @@ export const KnowledgeGraph: React.FC = () => {
   const [knowledgeWorkspace, setKnowledgeWorkspace] = useState<string | null>(null);
   const [knowledgeIndex, setKnowledgeIndex] = useState<KnowledgeWorkspaceView | null>(null);
   const [templateTitle, setTemplateTitle] = useState('');
+  const [selectedKnowledgeUri, setSelectedKnowledgeUri] = useState<string | null>(null);
+  const [selectedKnowledgeContent, setSelectedKnowledgeContent] = useState('');
+  const [knowledgeQuery, setKnowledgeQuery] = useState('');
+  const [knowledgeMatches, setKnowledgeMatches] = useState<KnowledgeSearchMatch[]>([]);
 
   // ── 加载对话文件列表 ──
 
@@ -252,6 +257,29 @@ export const KnowledgeGraph: React.FC = () => {
     }
   }, [knowledgeWorkspace, scanKnowledgeWorkspace, templateTitle, toast]);
 
+  const selectKnowledgeDocument = useCallback((uri: string) => {
+    setSelectedKnowledgeUri(uri);
+  }, []);
+
+  useEffect(() => {
+    const document = knowledgeIndex?.documents.find((item) => item.uri === selectedKnowledgeUri);
+    if (!knowledgeWorkspace || !document) { setSelectedKnowledgeContent(''); return; }
+    void window.electronAPI.knowledge.readDocument(knowledgeWorkspace, document.path).then((result) => {
+      setSelectedKnowledgeContent(result.success ? result.data?.content ?? '' : '');
+    });
+  }, [knowledgeIndex, knowledgeWorkspace, selectedKnowledgeUri]);
+
+  const searchKnowledge = useCallback(async () => {
+    if (!knowledgeWorkspace || !knowledgeQuery.trim()) { setKnowledgeMatches([]); return; }
+    const result = await window.electronAPI.knowledge.searchWorkspace(knowledgeWorkspace, knowledgeQuery.trim(), 20);
+    if (!result.success) { toast(`知识搜索失败：${result.error ?? 'SEARCH_FAILED'}`, 'error'); return; }
+    setKnowledgeMatches(result.data ?? []);
+  }, [knowledgeQuery, knowledgeWorkspace, toast]);
+
+  const selectedKnowledgeDocument = knowledgeIndex?.documents.find((item) => item.uri === selectedKnowledgeUri);
+  const selectedBacklinks = selectedKnowledgeUri ? knowledgeIndex?.backlinks[selectedKnowledgeUri] ?? [] : [];
+  const selectedOutgoing = selectedKnowledgeUri ? knowledgeIndex?.links.filter((link) => link.sourceUri === selectedKnowledgeUri) ?? [] : [];
+
   // ── 渲染 ──
 
   return (
@@ -269,6 +297,25 @@ export const KnowledgeGraph: React.FC = () => {
           {knowledgeWorkspace && <p className="mt-2 truncate text-xs text-muted-foreground" title={knowledgeWorkspace}>{knowledgeWorkspace}</p>}
           {knowledgeIndex && (
             <div className="mt-3 space-y-2">
+              <div className="flex gap-1">
+                <input
+                  className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs"
+                  value={knowledgeQuery}
+                  onChange={(event) => setKnowledgeQuery(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void searchKnowledge(); }}
+                  placeholder="搜索知识工作区"
+                />
+                <button className="rounded border px-2 text-xs hover:bg-accent" onClick={() => void searchKnowledge()}>搜索</button>
+              </div>
+              {knowledgeMatches.length > 0 && (
+                <div className="max-h-32 space-y-1 overflow-auto rounded border p-1">
+                  {knowledgeMatches.map((match) => (
+                    <button key={match.uri} className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent" title={match.path} onClick={() => selectKnowledgeDocument(match.uri)}>
+                      {match.title}
+                    </button>
+                  ))}
+                </div>
+              )}
               <input
                 className="h-8 w-full rounded-md border bg-background px-2 text-xs"
                 value={templateTitle}
@@ -333,7 +380,39 @@ export const KnowledgeGraph: React.FC = () => {
 
       {/* 右侧图谱区 */}
       <div className="flex-1 flex flex-col bg-card overflow-hidden relative">
-        <GraphCanvas graphData={graphData} />
+        <GraphCanvas graphData={graphData} onNodeSelect={knowledgeIndex ? selectKnowledgeDocument : undefined} />
+        {selectedKnowledgeDocument && (
+          <aside className="absolute bottom-3 right-14 top-3 z-20 flex w-80 flex-col overflow-hidden rounded-lg border bg-background/95 shadow-xl backdrop-blur">
+            <div className="flex items-start justify-between border-b p-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-semibold">{selectedKnowledgeDocument.title}</h3>
+                <p className="truncate text-xs text-muted-foreground" title={selectedKnowledgeDocument.path}>{selectedKnowledgeDocument.path}</p>
+              </div>
+              <button className="ml-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setSelectedKnowledgeUri(null)}>×</button>
+            </div>
+            <div className="flex-1 space-y-4 overflow-auto p-3 text-xs">
+              <section>
+                <h4 className="mb-1 font-medium">反向链接（{selectedBacklinks.length}）</h4>
+                {selectedBacklinks.length === 0 ? <p className="text-muted-foreground">暂无文档引用此页</p> : selectedBacklinks.map((link, index) => {
+                  const source = knowledgeIndex?.documents.find((document) => document.uri === link.sourceUri);
+                  return <button key={`${link.sourceUri}:${link.line}:${index}`} className="block w-full rounded px-2 py-1 text-left hover:bg-accent" onClick={() => selectKnowledgeDocument(link.sourceUri)}>{source?.title ?? link.sourceUri} · L{link.line}</button>;
+                })}
+              </section>
+              <section>
+                <h4 className="mb-1 font-medium">正向链接（{selectedOutgoing.length}）</h4>
+                {selectedOutgoing.length === 0 ? <p className="text-muted-foreground">此页没有 Wiki Link</p> : selectedOutgoing.map((link, index) => (
+                  <button key={`${link.target}:${link.line}:${index}`} disabled={!link.targetUri} className="block w-full rounded px-2 py-1 text-left hover:bg-accent disabled:text-destructive" onClick={() => link.targetUri && selectKnowledgeDocument(link.targetUri)}>
+                    {link.target} · {link.status} · L{link.line}
+                  </button>
+                ))}
+              </section>
+              <section>
+                <h4 className="mb-1 font-medium">内容预览</h4>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px]">{selectedKnowledgeContent.slice(0, 6000)}</pre>
+              </section>
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

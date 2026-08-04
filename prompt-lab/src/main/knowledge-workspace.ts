@@ -23,9 +23,18 @@ export interface KnowledgeWorkspaceScanResult extends KnowledgeIndex {
   diagnostics: KnowledgeDiagnostic[];
 }
 
+export interface KnowledgeSearchResult {
+  uri: string;
+  path: string;
+  title: string;
+  score: number;
+  snippets: Array<{ line: number; text: string }>;
+}
+
 const BUILTIN_TEMPLATES: KnowledgeTemplate[] = [{
   id: 'note', name: '普通笔记', directory: '.', fileName: '{{title}}.md',
   content: '---\ntitle: {{title}}\ntype: note\ntags: []\n---\n\n# {{title}}\n',
+  variables: [{ name: 'title', label: '标题', required: true }],
 }];
 
 function readJson<T>(filePath: string, fallback: T): T {
@@ -101,4 +110,30 @@ export function createKnowledgeDocumentFromTemplate(
   if (diagnostics.some((item) => item.severity === 'error')) throw new Error(`CONTENT_RULE_FAILED:${diagnostics.map((item) => item.code).join(',')}`);
   fs.writeFileSync(absolutePath, rendered.content, { encoding: 'utf8', flag: 'wx' });
   return { path: rendered.path, modifiedAt: fs.statSync(absolutePath).mtimeMs, diagnostics };
+}
+
+export function readKnowledgeDocument(rootPath: string, relativePath: string): { content: string; modifiedAt: number } {
+  const absolutePath = resolveWorkspacePath(rootPath, relativePath);
+  if (!/\.mdx?$/i.test(absolutePath) || !fs.statSync(absolutePath).isFile()) throw new Error('NOT_A_KNOWLEDGE_DOCUMENT');
+  const stat = fs.statSync(absolutePath);
+  if (stat.size > MAX_DOCUMENT_SIZE) throw new Error('FILE_TOO_LARGE');
+  return { content: fs.readFileSync(absolutePath, 'utf8'), modifiedAt: stat.mtimeMs };
+}
+
+export function searchKnowledgeWorkspace(rootPath: string, query: string, limit = 30): KnowledgeSearchResult[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [];
+  const index = scanKnowledgeWorkspace(rootPath);
+  return index.documents.flatMap((document) => {
+    const { content } = readKnowledgeDocument(rootPath, document.path);
+    const lines = content.split(/\r?\n/);
+    const snippets = lines.flatMap((line, index) => line.toLocaleLowerCase().includes(normalizedQuery)
+      ? [{ line: index + 1, text: line.trim().slice(0, 240) }]
+      : []).slice(0, 3);
+    let score = snippets.length;
+    if (document.title.toLocaleLowerCase().includes(normalizedQuery)) score += 10;
+    if (document.tags.some((tag) => tag.toLocaleLowerCase().includes(normalizedQuery))) score += 6;
+    if (document.path.toLocaleLowerCase().includes(normalizedQuery)) score += 3;
+    return score ? [{ uri: document.uri, path: document.path, title: document.title, score, snippets }] : [];
+  }).sort((a, b) => b.score - a.score || a.path.localeCompare(b.path)).slice(0, Math.max(1, Math.min(100, limit)));
 }

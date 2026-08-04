@@ -2,6 +2,32 @@ import type { KnowledgeContentRule, KnowledgeDiagnostic, KnowledgeDocument, Know
 
 const SAFE_VARIABLE = /^[A-Za-z][\w-]*$/;
 
+export interface ResolvedKnowledgeTemplateVariable {
+  name: string;
+  label: string;
+  description?: string;
+  defaultValue: string;
+  required: boolean;
+}
+
+export function getKnowledgeTemplateVariables(template: KnowledgeTemplate): ResolvedKnowledgeTemplateVariable[] {
+  const names = new Set<string>();
+  for (const text of [template.directory, template.fileName, template.content]) {
+    for (const match of text.matchAll(/\{\{\s*([A-Za-z][\w-]*)\s*\}\}/g)) names.add(match[1]);
+  }
+  template.variables?.forEach((variable) => names.add(variable.name));
+  return [...names].map((name) => {
+    const declared = template.variables?.find((variable) => variable.name === name);
+    return {
+      name,
+      label: declared?.label ?? name,
+      description: declared?.description,
+      defaultValue: declared?.defaultValue ?? template.defaults?.[name] ?? '',
+      required: declared?.required ?? !(name in (template.defaults ?? {})),
+    };
+  });
+}
+
 export function slugifyKnowledgeValue(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[\\/:*?"<>|.]+/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
@@ -17,6 +43,12 @@ function render(text: string, values: Record<string, string>, fileName = false):
 export function instantiateKnowledgeTemplate(template: KnowledgeTemplate, input: Record<string, string>): { path: string; content: string } {
   if (!/^[A-Za-z0-9][\w.-]*$/.test(template.id)) throw new Error('INVALID_TEMPLATE_ID');
   const values = { ...(template.defaults ?? {}), ...input };
+  for (const variable of getKnowledgeTemplateVariables(template)) {
+    if (variable.required && !(values[variable.name] ?? variable.defaultValue).trim()) {
+      throw new Error(`TEMPLATE_VARIABLE_REQUIRED:${variable.name}`);
+    }
+    if (!(variable.name in values)) values[variable.name] = variable.defaultValue;
+  }
   const directory = template.directory.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!directory || directory.split('/').some((part) => part === '..')) throw new Error('INVALID_TEMPLATE_DIRECTORY');
   const fileName = render(template.fileName, values, true);

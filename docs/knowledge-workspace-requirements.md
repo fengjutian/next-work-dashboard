@@ -137,7 +137,9 @@ src/core/tools           Agent 工具适配
 - [x] 知识图谱工作区入口、显式链接图和诊断统计
 - [x] 通用 `KnowledgeChangeProposal` 领域模型
 - [x] 复用现有 AI Diff、分块接受、外部修改检测与原子回滚能力
-- [ ] 诊断详情跳转和反向链接侧栏
+- [x] 图节点选择、正文预览、正向链接和反向链接侧栏
+- [x] 工作区标题/路径/标签/正文搜索与文档定位
+- [ ] 独立诊断详情列表和编辑器行号跳转
 - [ ] 模板变量动态表单（当前 UI 首先支持 `title`）
 - [ ] 知识检索迁移为统一 `KnowledgeDocument` Provider
 - [ ] 只读 CLI/MCP 与 Agent Skill

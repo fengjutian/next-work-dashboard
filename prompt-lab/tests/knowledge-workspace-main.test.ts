@@ -3,7 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { authorizeWorkspace } from '../src/main/workspace-path';
-import { createKnowledgeDocumentFromTemplate, scanKnowledgeWorkspace } from '../src/main/knowledge-workspace';
+import {
+  createKnowledgeDocumentFromTemplate,
+  readKnowledgeDocument,
+  scanKnowledgeWorkspace,
+  searchKnowledgeWorkspace,
+} from '../src/main/knowledge-workspace';
 
 const temporaryDirectories: string[] = [];
 
@@ -47,5 +52,15 @@ describe('knowledge workspace filesystem boundary', () => {
     expect(created.path).toBe('decisions/store-locally.md');
     expect(fs.existsSync(path.join(root, created.path))).toBe(true);
     expect(() => createKnowledgeDocumentFromTemplate(root, 'adr', { title: 'Store locally' })).toThrow('ALREADY_EXISTS');
+  });
+
+  it('reads and ranks matching knowledge without escaping the workspace', () => {
+    const root = createWorkspace();
+    fs.writeFileSync(path.join(root, 'architecture.md'), '---\ntags: [storage]\n---\n# Local Architecture\nSQLite stores metadata.', 'utf8');
+    fs.writeFileSync(path.join(root, 'other.md'), '# Other\nArchitecture is mentioned once.', 'utf8');
+    const matches = searchKnowledgeWorkspace(root, 'architecture');
+    expect(matches.map((match) => match.path)).toEqual(['architecture.md', 'other.md']);
+    expect(readKnowledgeDocument(root, 'architecture.md').content).toContain('SQLite');
+    expect(() => readKnowledgeDocument(root, '../outside.md')).toThrow('ACCESS_DENIED');
   });
 });

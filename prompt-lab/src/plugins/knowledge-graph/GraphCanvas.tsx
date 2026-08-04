@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Graph } from '@antv/g6';
+import { Graph, type IEvent } from '@antv/g6';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, GitBranch } from '@/components/icons';
 import type { GraphData } from './graph-types';
 
@@ -13,9 +13,10 @@ const NODE_COLORS = [
 
 interface GraphCanvasProps {
   graphData: GraphData | null;
+  onNodeSelect?: (nodeId: string) => void;
 }
 
-export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
+export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelect }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
 
@@ -170,6 +171,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
       animation: true,
     });
 
+    if (onNodeSelect) graph.on('node:click', (event: IEvent) => {
+      if ('target' in event && event.target && 'id' in event.target) onNodeSelect(String(event.target.id));
+    });
     graph.render();
     graphRef.current = graph;
 
@@ -184,7 +188,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData }) => {
       graph.destroy();
       graphRef.current = null;
     };
-  }, [graphData]);
+  }, [graphData, onNodeSelect]);
 
   // ── 空状态 ──
   if (!graphData) {
