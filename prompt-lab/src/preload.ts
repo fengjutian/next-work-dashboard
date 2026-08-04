@@ -212,6 +212,9 @@ const electronAPI: ElectronAPI = {
     disconnect: (serverId) => ipcRenderer.invoke('mcp:disconnect', serverId),
     listTools: (serverId) => ipcRenderer.invoke('mcp:list-tools', serverId),
     callTool: (serverId, name, args) => ipcRenderer.invoke('mcp:call-tool', serverId, name, args),
+    recordDenial: (serverId, name, args) => ipcRenderer.invoke('mcp:record-denial', serverId, name, args),
+    listAudit: (limit) => ipcRenderer.invoke('mcp:list-audit', limit),
+    clearAudit: () => ipcRenderer.invoke('mcp:clear-audit'),
   },
 
   // ── 终端 (Terminal) ──

@@ -1544,6 +1544,9 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('mcp:call-tool', (_event, serverId: string, name: string, args: Record<string, unknown>) => (
     mcpManager.callTool(serverId, name, args)
   ));
+  ipcMain.handle('mcp:record-denial', (_event, serverId: string, name: string, args: Record<string, unknown>) => mcpManager.recordDenial(serverId, name, args));
+  ipcMain.handle('mcp:list-audit', (_event, limit?: number) => mcpManager.listAudit(limit));
+  ipcMain.handle('mcp:clear-audit', () => mcpManager.clearAudit());
   void mcpManager.connectAutoServers();
 
   // ── 终端 ──

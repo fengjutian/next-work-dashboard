@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Wrench, X } from '@/components/icons';
 import { listTools, isToolEnabled, setToolEnabled, syncMcpTools } from '@/core/tools';
 import type { ToolDefinition } from '@/core/tools';
-import type { McpServerStatus } from '@/types/mcp';
+import type { McpAuditRecord, McpServerStatus } from '@/types/mcp';
 
 /**
  * 工具管理器弹层
@@ -17,8 +17,9 @@ export const ToolManagerDialog: React.FC<{
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [enabledState, setEnabledState] = useState<Record<string, boolean>>({});
   const [servers, setServers] = useState<McpServerStatus[]>([]);
-  const [mcpForm, setMcpForm] = useState({ id: '', name: '', command: '', args: '[]' });
+  const [mcpForm, setMcpForm] = useState({ id: '', name: '', command: '', args: '[]', trustAnnotations: false });
   const [mcpError, setMcpError] = useState('');
+  const [audit, setAudit] = useState<McpAuditRecord[]>([]);
 
   const refreshTools = () => {
     const allTools = listTools();
@@ -26,7 +27,14 @@ export const ToolManagerDialog: React.FC<{
     setEnabledState(Object.fromEntries(allTools.map((tool) => [tool.name, isToolEnabled(tool.name)])));
   };
 
-  const refreshServers = async () => setServers(await window.electronAPI.mcp.listServers());
+  const refreshServers = async () => {
+    const [nextServers, nextAudit] = await Promise.all([
+      window.electronAPI.mcp.listServers(),
+      window.electronAPI.mcp.listAudit(10),
+    ]);
+    setServers(nextServers);
+    setAudit(nextAudit);
+  };
 
   // 加载工具列表和启用状态
   useEffect(() => {
@@ -56,6 +64,7 @@ export const ToolManagerDialog: React.FC<{
         command: mcpForm.command,
         args,
         autoConnect: true,
+        trustAnnotations: mcpForm.trustAnnotations,
       });
       if (!saved.success) throw new Error(saved.error);
       const connected = await window.electronAPI.mcp.connect(mcpForm.id);
@@ -63,7 +72,7 @@ export const ToolManagerDialog: React.FC<{
       await syncMcpTools(false);
       refreshTools();
       await refreshServers();
-      setMcpForm({ id: '', name: '', command: '', args: '[]' });
+      setMcpForm({ id: '', name: '', command: '', args: '[]', trustAnnotations: false });
     } catch (error) {
       setMcpError(error instanceof Error ? error.message : String(error));
       await refreshServers();
@@ -140,11 +149,33 @@ export const ToolManagerDialog: React.FC<{
               <input className="rounded border bg-background px-2 py-1 text-xs" placeholder="命令，例如 npx" value={mcpForm.command} onChange={(event) => setMcpForm({ ...mcpForm, command: event.target.value })} />
               <input className="rounded border bg-background px-2 py-1 text-xs font-mono" placeholder='参数 JSON，例如 ["-y","server"]' value={mcpForm.args} onChange={(event) => setMcpForm({ ...mcpForm, args: event.target.value })} />
             </div>
+            <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+              <input type="checkbox" checked={mcpForm.trustAnnotations} onChange={(event) => setMcpForm({ ...mcpForm, trustAnnotations: event.target.checked })} />
+              信任此 Server 的只读标注（readOnlyHint 工具免确认）
+            </label>
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-destructive">{mcpError}</span>
               <button className="rounded bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50" disabled={!mcpForm.id || !mcpForm.name || !mcpForm.command} onClick={() => void saveMcpServer()}>添加并连接</button>
             </div>
           </div>
+
+          {audit.length > 0 && (
+            <div className="rounded-lg border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-foreground">最近 MCP 调用</h3>
+                <button className="text-[10px] text-muted-foreground hover:underline" onClick={() => void window.electronAPI.mcp.clearAudit().then(refreshServers)}>清空</button>
+              </div>
+              <div className="space-y-1">
+                {audit.slice(0, 5).map((record) => (
+                  <div key={record.id} className="flex gap-2 text-[10px]">
+                    <span className={record.status === 'success' ? 'text-success' : 'text-destructive'}>{record.status}</span>
+                    <code className="flex-1 truncate">{record.serverId}/{record.toolName}</code>
+                    <span className="text-muted-foreground">{record.durationMs}ms</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 内置工具 */}
           <div>

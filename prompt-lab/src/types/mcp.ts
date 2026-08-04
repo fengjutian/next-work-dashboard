@@ -7,6 +7,7 @@ export interface McpStdioServerConfig {
   cwd?: string;
   env?: Record<string, string>;
   autoConnect?: boolean;
+  trustAnnotations?: boolean;
 }
 
 export type McpServerConfig = McpStdioServerConfig;
@@ -24,6 +25,28 @@ export interface McpToolDescriptor {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  annotations?: McpToolAnnotations;
+  trustAnnotations: boolean;
+}
+
+export interface McpToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
+export interface McpAuditRecord {
+  id: string;
+  serverId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  startedAt: number;
+  durationMs: number;
+  status: 'success' | 'failed' | 'denied';
+  resultPreview?: string;
+  error?: string;
 }
 
 export interface McpToolCallResult {

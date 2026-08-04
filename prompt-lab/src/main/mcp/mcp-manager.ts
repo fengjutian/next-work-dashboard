@@ -1,9 +1,11 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {
+  McpAuditRecord,
   McpOperationResult,
   McpServerConfig,
   McpServerStatus,
@@ -37,6 +39,32 @@ export class McpManager {
 
   private configPath(): string {
     return path.join(app.getPath('userData'), 'mcp-servers.json');
+  }
+
+  private auditPath(): string {
+    return path.join(app.getPath('userData'), 'mcp-audit.jsonl');
+  }
+
+  private appendAudit(record: McpAuditRecord): void {
+    fs.mkdirSync(path.dirname(this.auditPath()), { recursive: true });
+    fs.appendFileSync(this.auditPath(), `${JSON.stringify(record)}\n`, 'utf8');
+  }
+
+  listAudit(limit = 100): McpAuditRecord[] {
+    if (!fs.existsSync(this.auditPath())) return [];
+    return fs.readFileSync(this.auditPath(), 'utf8').trim().split(/\r?\n/).filter(Boolean)
+      .slice(-Math.max(1, Math.min(limit, 500))).reverse().flatMap((line) => {
+        try { return [JSON.parse(line) as McpAuditRecord]; } catch { return []; }
+      });
+  }
+
+  clearAudit(): McpOperationResult {
+    if (fs.existsSync(this.auditPath())) fs.writeFileSync(this.auditPath(), '', 'utf8');
+    return { success: true };
+  }
+
+  recordDenial(serverId: string, toolName: string, args: Record<string, unknown>): void {
+    this.appendAudit({ id: randomUUID(), serverId, toolName, arguments: args, startedAt: Date.now(), durationMs: 0, status: 'denied' });
   }
 
   listConfigs(): McpServerConfig[] {
@@ -112,6 +140,8 @@ export class McpManager {
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema as Record<string, unknown>,
+          annotations: tool.annotations,
+          trustAnnotations: config.trustAnnotations === true,
         })));
         cursor = page.nextCursor;
       } while (cursor);
@@ -149,12 +179,20 @@ export class McpManager {
     const connection = this.connections.get(serverId);
     if (!connection) throw new Error(`MCP server is not connected: ${serverId}`);
     if (!connection.tools.some((tool) => tool.name === name)) throw new Error(`Unknown MCP tool: ${serverId}/${name}`);
-    const result = await connection.client.callTool({ name, arguments: args }, undefined, { timeout: 60_000 });
-    return {
-      isError: result.isError === true,
-      content: result.content as unknown[],
-      structuredContent: result.structuredContent as Record<string, unknown> | undefined,
-    };
+    const startedAt = Date.now();
+    try {
+      const result = await connection.client.callTool({ name, arguments: args }, undefined, { timeout: 60_000 });
+      const normalized: McpToolCallResult = {
+        isError: result.isError === true,
+        content: result.content as unknown[],
+        structuredContent: result.structuredContent as Record<string, unknown> | undefined,
+      };
+      this.appendAudit({ id: randomUUID(), serverId, toolName: name, arguments: args, startedAt, durationMs: Date.now() - startedAt, status: normalized.isError ? 'failed' : 'success', resultPreview: JSON.stringify(normalized.content).slice(0, 500) });
+      return normalized;
+    } catch (error) {
+      this.appendAudit({ id: randomUUID(), serverId, toolName: name, arguments: args, startedAt, durationMs: Date.now() - startedAt, status: 'failed', error: errorMessage(error) });
+      throw error;
+    }
   }
 
   async connectAutoServers(): Promise<void> {

@@ -59,6 +59,9 @@ export interface ElectronAPI {
     disconnect: (serverId: string) => Promise<McpOperationResult>;
     listTools: (serverId?: string) => Promise<McpToolDescriptor[]>;
     callTool: (serverId: string, name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>;
+    recordDenial: (serverId: string, name: string, args: Record<string, unknown>) => Promise<void>;
+    listAudit: (limit?: number) => Promise<McpAuditRecord[]>;
+    clearAudit: () => Promise<McpOperationResult>;
   };
   saveConversation: (payload: {
     site: string;
@@ -351,6 +354,7 @@ declare global {
   }
 }
 import type {
+  McpAuditRecord,
   McpOperationResult,
   McpServerConfig,
   McpServerStatus,

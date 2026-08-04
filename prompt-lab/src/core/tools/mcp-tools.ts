@@ -24,7 +24,18 @@ export function toMcpToolDefinition(tool: McpToolDescriptor): ToolDefinition {
     name: toolName(tool.serverId, tool.name),
     description: `[MCP: ${tool.serverId}] ${tool.description ?? tool.name}`,
     parameters: tool.inputSchema as ToolParameterSchema,
-    execute: async (args) => resultText(await window.electronAPI.mcp.callTool(tool.serverId, tool.name, args)),
+    execute: async (args) => {
+      const trustedReadOnly = tool.trustAnnotations && tool.annotations?.readOnlyHint === true;
+      if (!trustedReadOnly) {
+        const risk = tool.annotations?.destructiveHint === true ? '此工具可能执行破坏性修改。' : '此工具可能修改数据或访问外部系统。';
+        const approved = window.confirm(`${risk}\n\nMCP: ${tool.serverId}\n工具: ${tool.name}\n参数: ${JSON.stringify(args, null, 2)}\n\n是否允许执行？`);
+        if (!approved) {
+          await window.electronAPI.mcp.recordDenial(tool.serverId, tool.name, args);
+          throw new Error('MCP tool call denied by user');
+        }
+      }
+      return resultText(await window.electronAPI.mcp.callTool(tool.serverId, tool.name, args));
+    },
   };
 }
 
