@@ -70,7 +70,9 @@ if (!toolsRegistered) {
   registerTools(pluginTools);
   registerTools(conversationMemoryTools);
   registerTools(knowledgeTools);
-  void syncMcpTools().catch((error) => console.warn('[mcp] Failed to synchronize tools', error));
+  if (typeof window !== 'undefined' && window.electronAPI?.mcp) {
+    void syncMcpTools().catch((error) => console.warn('[mcp] Failed to synchronize tools', error));
+  }
   toolsRegistered = true;
 }
 
