@@ -61,6 +61,11 @@ describe('knowledge workspace filesystem boundary', () => {
     const matches = searchKnowledgeWorkspace(root, 'architecture');
     expect(matches.map((match) => match.path)).toEqual(['architecture.md', 'other.md']);
     expect(readKnowledgeDocument(root, 'architecture.md').content).toContain('SQLite');
+    fs.writeFileSync(path.join(root, 'architecture.md'), '# Replaced\nPostgreSQL only.', 'utf8');
+    expect(searchKnowledgeWorkspace(root, 'SQLite')).toEqual([]);
+    expect(searchKnowledgeWorkspace(root, 'PostgreSQL', 20, { pathPrefix: 'architecture', types: ['document'] })[0].path).toBe('architecture.md');
+    fs.unlinkSync(path.join(root, 'architecture.md'));
+    expect(searchKnowledgeWorkspace(root, 'PostgreSQL')).toEqual([]);
     expect(() => readKnowledgeDocument(root, '../outside.md')).toThrow('ACCESS_DENIED');
   });
 });
