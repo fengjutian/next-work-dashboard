@@ -170,21 +170,21 @@ export class AgentTaskService extends EventEmitter {
       if (record.messages && record.messages.length > 0) {
         this.emitProgress(record.taskId, 'generating', 'AI generating response...');
         const msgs = record.messages.map((m) => ({ role: m.role as "system" | "user" | "assistant", content: m.content }));
-        for await (const chunk of provider.chat(msgs, { model: record.modelConfig.model, temperature: 0.15, maxTokens: Math.min(24000, Math.max(2000, Math.floor(record.tokenBudget / 2))), signal })) response += chunk.delta;
+        for await (const chunk of provider.chat(msgs, { model: record.modelConfig.model, temperature: 0.15, maxTokens: Math.min(24000, Math.max(2000, Math.floor(record.tokenBudget / 2))), signal })) { response += chunk.delta; this.emitDelta(record.taskId, chunk.delta); }
       } else if (record.multiFile) {
         this.emitProgress(record.taskId, 'generating', 'AI generating multi-file edits...');
         const msgs = [
           { role: 'system' as const, content: 'You are a multi-file code editor. Return strict JSON. Only changed files. No markdown.' },
           { role: 'user' as const, content: 'Instruction: ' + record.instruction },
         ];
-        for await (const chunk of provider.chat(msgs, { model: record.modelConfig.model, temperature: 0.15, maxTokens: Math.min(24000, Math.max(2000, Math.floor(record.tokenBudget / 2))), signal })) response += chunk.delta;
+        for await (const chunk of provider.chat(msgs, { model: record.modelConfig.model, temperature: 0.15, maxTokens: Math.min(24000, Math.max(2000, Math.floor(record.tokenBudget / 2))), signal })) { response += chunk.delta; this.emitDelta(record.taskId, chunk.delta); }
       } else {
         this.emitProgress(record.taskId, 'generating', 'AI generating single-file edit...');
         const msgs = [
           { role: 'system' as const, content: 'You are a code editor. Return only the modified file. No explanations.' },
           { role: 'user' as const, content: 'Instruction: ' + record.instruction },
         ];
-        for await (const chunk of provider.chat(msgs, { model: record.modelConfig.model, temperature: 0.2, maxTokens: Math.min(16000, Math.max(2000, Math.floor(record.tokenBudget / 2))), signal })) response += chunk.delta;
+        for await (const chunk of provider.chat(msgs, { model: record.modelConfig.model, temperature: 0.2, maxTokens: Math.min(16000, Math.max(2000, Math.floor(record.tokenBudget / 2))), signal })) { response += chunk.delta; this.emitDelta(record.taskId, chunk.delta); }
       }
       signal.throwIfAborted();
       this.emitProgress(record.taskId, 'parsing', 'Parsing AI response...');
@@ -231,6 +231,14 @@ export class AgentTaskService extends EventEmitter {
     if (!record) return;
     record.progress = { taskId, seq: nextSeq(), stage, message, timestamp: Date.now() };
     this.emit('event', { taskId, sessionId: record.sessionId, state: record.state, progress: record.progress });
+  }
+
+  private emitDelta(taskId: string, delta: string): void {
+    const record = this.tasks.get(taskId);
+    if (!record || !delta) return;
+    const progress = { taskId, seq: nextSeq(), stage: 'generating', message: 'AI 正在生成公开分析…', delta, timestamp: Date.now() };
+    record.progress = progress;
+    this.emit('event', { taskId, sessionId: record.sessionId, state: record.state, progress });
   }
 }
 

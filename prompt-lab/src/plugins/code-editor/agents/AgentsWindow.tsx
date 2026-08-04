@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { XMarkdown } from '@ant-design/x-markdown';
 import { Bot, Copy, Edit3, Pin, Plus, Search, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
@@ -19,6 +20,7 @@ interface AgentsWindowProps {
   aiPendingRequest: { instruction: string; status: 'running' | 'interrupted' } | null;
   aiExecutionStage: AiExecutionStage;
   aiExecutionMetrics: AiExecutionMetrics | null;
+  aiReasoningText: string;
   aiMode: "analyze" | "modify";
   onModeChange: (mode: "analyze" | "modify") => void;
   aiMultiFile: boolean;
@@ -145,9 +147,10 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             {props.activeLogs.length === 0 ? <p className="py-10 text-center text-muted-foreground">当前会话暂无日志</p> : props.activeLogs.map((entry) => <div key={entry.id} className="grid grid-cols-[80px_58px_1fr] gap-2 border-b py-1.5"><span className="text-muted-foreground">{new Date(entry.timestamp).toLocaleTimeString()}</span><span className={entry.level === 'error' ? 'text-destructive' : entry.level === 'warning' ? 'text-warning' : entry.level === 'success' ? 'text-success' : 'text-muted-foreground'}>{entry.level.toUpperCase()}</span><span className="whitespace-pre-wrap break-words">{entry.message}</span></div>)}
           </div> : !props.activeSession ? <div className="flex h-full items-center justify-center text-xs text-muted-foreground">新建会话后开始任务</div> : props.aiMessages.length === 0
             ? <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground"><Bot className="h-10 w-10 opacity-40" /><p className="text-sm text-foreground">Agent 已准备好</p><p className="text-xs">描述要完成的代码任务，结果会先进入 Diff 审阅。</p></div>
-            : props.aiMessages.map((message, index) => <div key={`${message.timestamp}-${index}`} className={`mb-3 max-w-3xl rounded-lg border p-3 text-xs ${message.role === 'user' ? 'ml-auto bg-primary/5' : 'mr-auto bg-muted/30'}`}><div className="mb-1 text-[10px] font-semibold text-muted-foreground">{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Agent' : '系统'}</div><div className="whitespace-pre-wrap">{message.content}</div></div>)}
+            : props.aiMessages.map((message, index) => <div key={`${message.timestamp}-${index}`} className={`mb-3 max-w-3xl rounded-lg border p-3 text-xs ${message.role === 'user' ? 'ml-auto bg-primary/5' : 'mr-auto bg-muted/30'}`}><div className="mb-1 text-[10px] font-semibold text-muted-foreground">{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Agent' : '系统'}</div>{message.role === 'user' ? <div className="whitespace-pre-wrap">{message.content}</div> : <XMarkdown content={message.content} className="text-xs" />}</div>)}
         </div>
         {contentView === 'conversation' && <div className="border-t p-3">
+          {props.aiMode === 'analyze' && props.aiEditing && props.aiReasoningText && <details open className="mb-2 rounded border bg-muted/20 p-2 text-xs"><summary className="cursor-pointer font-medium">公开分析过程</summary><XMarkdown content={props.aiReasoningText} streaming={{ hasNextChunk: true }} className="mt-2 text-xs" /></details>}
           {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span>{props.aiExecutionMetrics && <><span>· {props.aiExecutionMetrics.receivedChars.toLocaleString()} 字符</span>{props.aiExecutionMetrics.firstChunkAt && <span>· 首字节 {props.aiExecutionMetrics.firstChunkAt - props.aiExecutionMetrics.startedAt}ms</span>}<span>· {(((props.aiExecutionMetrics.endedAt ?? Date.now()) - props.aiExecutionMetrics.startedAt) / 1000).toFixed(1)}s</span></>}</div>}
           <textarea value={props.aiInstruction} disabled={!props.activeSession || props.aiEditing} onChange={(event) => props.onInstructionChange(event.target.value)} placeholder="描述一个代码任务…" className="min-h-24 w-full resize-none rounded-md border bg-background p-3 text-xs outline-none" />
           <div className="mt-2 flex items-center gap-3 text-xs">

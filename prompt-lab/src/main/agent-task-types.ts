@@ -35,6 +35,7 @@ export interface AgentTaskProgress {
   seq: number;
   stage: string;
   message: string;
+  delta?: string;
   timestamp: number;
 }
 

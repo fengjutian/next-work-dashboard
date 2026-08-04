@@ -18,21 +18,25 @@ const config = {
 };
 
 async function waitForReview(service: AgentTaskService, taskId: string) {
+  const deltas: string[] = [];
   await new Promise<void>((resolve, reject) => {
     const unsubscribe = service.subscribe(taskId, (event) => {
+      if (event.progress?.delta) deltas.push(event.progress.delta);
       if (event.state === 'review') { unsubscribe(); resolve(); }
       if (event.state === 'failed') { unsubscribe(); reject(new Error(event.error)); }
     });
   });
+  return deltas;
 }
 
 describe('AgentTaskService', () => {
   it('executes supplied messages in the main-process queue and returns a review result', async () => {
     const service = new AgentTaskService(2, () => provider());
     const task = service.create({ ...config, messages: [{ role: 'user', content: 'full context' }] });
-    await waitForReview(service, task.taskId);
+    const deltas = await waitForReview(service, task.taskId);
     expect(service.get(task.taskId)?.result?.rawResponse).toBe('updated');
     expect(service.get(task.taskId)?.messages?.[0].content).toBe('full context');
+    expect(deltas.join('')).toContain('updated');
   });
 
   it('removes API keys from persistence snapshots', async () => {

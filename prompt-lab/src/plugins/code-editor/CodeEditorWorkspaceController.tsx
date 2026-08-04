@@ -326,7 +326,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setStatus,
   });
 
-  const { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics } = useAiEditGeneration({
+  const { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics, aiReasoningText } = useAiEditGeneration({
     sessionId: activeAgentSession?.id,
     scope: agentScope,
     aiApi,
@@ -1338,6 +1338,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiPendingRequest={aiPendingRequest}
         aiExecutionStage={aiExecutionStage === 'review' && aiProposals.length === 0 ? 'idle' : aiExecutionStage}
         aiExecutionMetrics={aiExecutionMetrics}
+        aiReasoningText={aiReasoningText}
         aiMode={aiMode}
         onModeChange={setAiMode}
         aiMultiFile={aiMultiFile}

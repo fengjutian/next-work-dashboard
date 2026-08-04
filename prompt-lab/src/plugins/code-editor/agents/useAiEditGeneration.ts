@@ -45,14 +45,18 @@ interface UseAiEditGenerationOptions {
 async function executeAgentTask(
   config: AgentTaskConfig,
   signal: AbortSignal,
-  onProgress: (stage: string, message: string) => void,
+  onProgress: (stage: string, message: string, delta?: string) => void,
 ): Promise<AgentTaskRecord> {
   let activeTaskId = '';
   let settled = false;
+  let lastProgressSeq = 0;
   return new Promise<AgentTaskRecord>((resolve, reject) => {
     const cleanupEvents = window.electronAPI.workspace.onAgentTaskEvent((event) => {
       if (!activeTaskId || event.taskId !== activeTaskId) return;
-      if (event.progress) onProgress(event.progress.stage, event.progress.message);
+      if (event.progress && event.progress.seq > lastProgressSeq) {
+        lastProgressSeq = event.progress.seq;
+        onProgress(event.progress.stage, event.progress.message, event.progress.delta);
+      }
       if (!['review', 'failed', 'interrupted'].includes(event.state) || settled) return;
       settled = true;
       cleanupEvents();
@@ -175,6 +179,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   const metricsRef = useRef<AiExecutionMetrics | null>(null);
   const lastMetricsPublishRef = useRef(0);
   const [aiExecutionMetrics, setAiExecutionMetrics] = useState<AiExecutionMetrics | null>(null);
+  const [aiReasoningText, setAiReasoningText] = useState('');
   const trackResponseChunk = useCallback((delta: string) => {
     const current = metricsRef.current;
     if (!current || !delta) return;
@@ -204,6 +209,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
     metricsRef.current = { startedAt: Date.now(), receivedChars: 0 };
+    setAiReasoningText('');
     lastMetricsPublishRef.current = 0;
     setAiExecutionMetrics({ ...metricsRef.current });
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -246,15 +252,17 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       let response = '';
       if (aiMode === 'analyze') {
         let context = executionDocument ? `\n\n当前文件：${executionDocument.path}\n${executionDocument.content}` : '';
-        if (workspace && scope.kind !== 'workspace') {
+        if (workspace) {
           setAiExecutionStage('collecting-context');
           const fallbackDoc = executionDocument ?? { path: '', name: 'workspace', content: '', savedContent: '', language: 'plaintext', encoding: 'utf8' as const, lineEnding: 'LF' as const, modifiedAt: Date.now(), readOnly: false, pinned: false, mixedLineEndings: false };
           const contexts = await collectContexts(workspace.path, isolated ? [] : documents, fallbackDoc, aiInstruction, scope);
+          if (contexts.length === 0) throw new Error(`所选${scope.kind === 'workspace' ? '工作区' : scope.kind === 'directory' ? '目录' : '文件'}中没有可读取的文本文件`);
           const fitted = fitContextToTokenBudget(contexts.map((item) => ({ path: item.path, content: item.original, priority: scope.kind === 'files' ? 100 : 50 })), aiTokenBudget);
-          context = `\n\n范围内文件：\n${fitted.files.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}`;
+          context = `\n\n分析范围：${scope.label}\n范围内文件：\n${fitted.files.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}`;
+          if (fitted.omitted.length > 0) appendOutput(`分析上下文受 Token 预算限制，省略 ${fitted.omitted.length} 个低优先级文件`);
         }
         const messages = [
-          { role: 'system', content: '你是代码分析助手。分析问题、风险和可行方案，不要生成可直接应用的文件候选。' },
+          { role: 'system', content: '你是代码分析助手。用户已授权并由应用附加了所选范围内的项目文件；必须基于消息中的“范围内文件”进行分析，不要声称无法访问项目。使用 Markdown 输出，并按“## 分析过程”、“## 依据”、“## 风险”、“## 建议”组织内容。“分析过程”应是可公开审查的简明推理摘要，不输出隐藏思维链。不要生成可直接应用的文件候选。若上下文不足，请准确列出还需要读取的相对路径。' },
           ...history,
           { role: 'user', content: `${aiInstruction.trim()}${context}` },
         ];
@@ -262,7 +270,10 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
         const task = await executeAgentTask({
           sessionId: sessionId ?? requestId, workspaceRoot: workspace?.path ?? '', executionRoot: isolated ? workspace?.path : undefined,
           instruction: aiInstruction.trim(), modelConfig: aiApi, multiFile: false, tokenBudget: aiTokenBudget, messages,
-        }, abortController.signal, (stage) => setAiExecutionStage(stage === 'parsing' ? 'parsing' : 'generating'));
+        }, abortController.signal, (stage, _message, delta) => {
+          setAiExecutionStage(stage === 'parsing' ? 'parsing' : 'generating');
+          if (delta) setAiReasoningText((previous) => previous + delta);
+        });
         response = task.result?.rawResponse ?? '';
         trackResponseChunk(response);
         setAiMessages((previous) => [...previous,
@@ -390,5 +401,5 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     finally { setAiEditing(false); }
   }, [activeDocument, aiApi, appendOutput, editorRef, inlineEdit.instruction, isolated, sessionId, setAiEditing, setDocuments, setInlineEdit, setStatus, workspace?.path]);
 
-  return { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics };
+  return { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics, aiReasoningText };
 }
