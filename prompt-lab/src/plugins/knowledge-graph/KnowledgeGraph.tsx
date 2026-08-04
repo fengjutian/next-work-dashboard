@@ -8,6 +8,7 @@ import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
+import { CodeExtractControls } from './CodeExtractControls';
 import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
@@ -43,7 +44,7 @@ function loadPersistedGraph(): { nodes: GraphNode[]; graphData: GraphData | null
       return { nodes: makeDefaultNodes(), graphData: null };
     }
     const nodes = parsed.nodes.filter((node): node is GraphNode =>
-      Boolean(node && typeof node.id === 'string' && typeof node.label === 'string' && ['manual', 'extracted'].includes(node.source)),
+      Boolean(node && typeof node.id === 'string' && typeof node.label === 'string' && ['manual', 'extracted', 'code'].includes(node.source)),
     );
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edges = parsed.edges.filter((edge) =>
@@ -141,6 +142,12 @@ export const KnowledgeGraph: React.FC = () => {
 
   const resetDefaultNodes = useCallback(() => {
     setNodes(makeDefaultNodes());
+  }, []);
+
+  const applyCodeGraph = useCallback((graph: GraphData) => {
+    setNodes(graph.nodes);
+    setGraphData(graph);
+    setKnowledgeIndex(null);
   }, []);
 
   // ── 获取选中文件内容（供 AI 抽取使用） ──
@@ -485,6 +492,7 @@ export const KnowledgeGraph: React.FC = () => {
           onRemoveNode={removeNode}
           onResetDefault={resetDefaultNodes}
         >
+          <CodeExtractControls onExtract={applyCodeGraph} />
           <ExtractControls
             existingLabels={nodes.map((n) => n.label)}
             getSelectedContents={getSelectedContents}

@@ -11,16 +11,21 @@ interface NodeTagProps {
 
 const NodeTag: React.FC<NodeTagProps> = ({ node, onRemove }) => {
   const isExtracted = node.source === 'extracted';
+  const isCode = node.source === 'code';
   return (
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full ${
         isExtracted
           ? 'bg-success/10 text-success'
+          : isCode
+            ? 'bg-warning/10 text-warning'
           : 'bg-primary-light text-primary'
       }`}
       title={
         isExtracted
           ? `AI 抽取${node.category ? ` · ${node.category}` : ''}${node.confidence != null ? ` · 置信度 ${Math.round(node.confidence * 100)}%` : ''}`
+          : isCode
+            ? `代码抽取${node.category ? ` · ${node.category}` : ''}${node.sourcePath ? ` · ${node.sourcePath}` : ''}`
           : '手动添加'
       }
     >

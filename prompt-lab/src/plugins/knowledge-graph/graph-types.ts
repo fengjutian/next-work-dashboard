@@ -5,18 +5,20 @@ export interface GraphNode {
   label: string;
   degree: number;
   /** 节点来源：manual=手动添加, extracted=AI抽取 */
-  source: 'manual' | 'extracted' | 'wiki-link';
+  source: 'manual' | 'extracted' | 'wiki-link' | 'code';
   /** 实体分类（extracted 时有效） */
   category?: string;
   /** 抽取置信度 0-1（extracted 时有效） */
   confidence?: number;
+  /** 代码节点所在的工作区相对路径。 */
+  sourcePath?: string;
 }
 
 export interface GraphEdge {
   source: string;
   target: string;
   weight: number;
-  kind?: 'co-occurrence' | 'inferred' | 'wiki-link';
+  kind?: 'co-occurrence' | 'inferred' | 'wiki-link' | 'code';
   sourcePath?: string;
   /** AI 抽取出的关系名称，例如“依赖”“调用” */
   label?: string;
