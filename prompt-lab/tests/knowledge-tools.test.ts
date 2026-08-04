@@ -30,4 +30,19 @@ describe('knowledge agent tools', () => {
     const tool = knowledgeTools.find((item) => item.name === 'search_knowledge')!;
     expect(JSON.parse(await tool.execute({ query: 'anything' })).error).toBe('KNOWLEDGE_WORKSPACE_NOT_OPEN');
   });
+
+  it('creates a review proposal without writing files', async () => {
+    const read = vi.spyOn(activeKnowledgeWorkspace, 'read').mockResolvedValue({ content: '# Before', modifiedAt: 42 });
+    const propose = vi.spyOn(activeKnowledgeWorkspace, 'propose').mockReturnValue({
+      id: 'proposal-1', instruction: 'Update note', createdAt: 1, status: 'ready-for-review',
+      mutations: [{ kind: 'write', path: 'note.md', before: '# Before', content: '# After', expectedModifiedAt: 42 }],
+    });
+    const tool = knowledgeTools.find((item) => item.name === 'propose_knowledge_change')!;
+    const output = JSON.parse(await tool.execute({
+      instruction: 'Update note', changesJson: JSON.stringify([{ kind: 'write', path: 'note.md', content: '# After' }]),
+    }));
+    expect(output).toMatchObject({ proposalId: 'proposal-1', status: 'ready-for-review' });
+    expect(read).toHaveBeenCalledWith('note.md');
+    expect(propose).toHaveBeenCalledWith('Update note', [expect.objectContaining({ before: '# Before', expectedModifiedAt: 42 })]);
+  });
 });

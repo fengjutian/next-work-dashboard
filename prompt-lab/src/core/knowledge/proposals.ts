@@ -1,5 +1,7 @@
 import type { KnowledgeChangeProposal, KnowledgeMutation } from './types';
 
+let proposalSequence = 0;
+
 export function createKnowledgeProposal(instruction: string, mutations: KnowledgeMutation[], now = Date.now()): KnowledgeChangeProposal {
   if (!instruction.trim()) throw new Error('INSTRUCTION_REQUIRED');
   if (!mutations.length) throw new Error('MUTATIONS_REQUIRED');
@@ -9,7 +11,8 @@ export function createKnowledgeProposal(instruction: string, mutations: Knowledg
     if (seen.has(key)) throw new Error(`DUPLICATE_MUTATION_PATH:${mutation.path}`);
     seen.add(key);
   }
-  return { id: `knowledge-change-${now}`, instruction: instruction.trim(), createdAt: now, status: 'ready-for-review', mutations };
+  proposalSequence += 1;
+  return { id: `knowledge-change-${now}-${proposalSequence}`, instruction: instruction.trim(), createdAt: now, status: 'ready-for-review', mutations };
 }
 
 export function rejectKnowledgeProposal(proposal: KnowledgeChangeProposal): KnowledgeChangeProposal {

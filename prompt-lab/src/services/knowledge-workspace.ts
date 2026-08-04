@@ -22,6 +22,7 @@ class ActiveKnowledgeWorkspaceService {
   private listeners = new Set<(proposals: KnowledgeChangeProposal[]) => void>();
 
   get activeRoot(): string | null { return this.rootPath; }
+  get documents(): KnowledgeIndex['documents'] { return this.index?.documents ?? []; }
 
   setActive(rootPath: string, index?: KnowledgeIndex): void {
     this.rootPath = rootPath;

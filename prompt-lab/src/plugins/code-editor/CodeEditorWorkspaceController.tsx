@@ -40,6 +40,8 @@ import { EditorDocumentHeader } from './EditorDocumentHeader';
 import { EditorWorkspaceBody } from './EditorWorkspaceBody';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EditorTabMenu } from './EditorTabMenu';
+import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
+import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -160,6 +162,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   });
   const [outputLines, setOutputLines] = useState<string[]>(['代码编辑器已就绪']);
   const [status, setStatus] = useState('就绪');
+  const [knowledgeBacklinks, setKnowledgeBacklinks] = useState<Array<{ sourcePath?: string; sourceTitle?: string; line: number }>>([]);
   const [dialog, setDialog] = useState<{ type: 'prompt'; title: string; defaultValue?: string; resolve: (value: string | null) => void } | { type: 'confirm'; message: string; resolve: (ok: boolean) => void } | null>(null);
   const appPrompt = useCallback((title: string, defaultValue = ''): Promise<string | null> => new Promise((resolve) => {
     setDialog({ type: 'prompt', title, defaultValue, resolve });
@@ -418,6 +421,77 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     revealWorkspacePath,
     setStatus,
   });
+
+  useEffect(() => subscribeEditorNavigation((request) => {
+    void (async () => {
+      const authorization = await window.electronAPI.workspace.reauthorize(request.rootPath);
+      if (!authorization.success) { setStatus('知识文档工作区授权失败'); return; }
+      if (workspace?.path !== request.rootPath) {
+        const entries = await loadDirectory(request.rootPath);
+        const name = request.rootPath.split(/[\\/]/).filter(Boolean).at(-1) ?? request.rootPath;
+        const id = `knowledge-${Date.now()}`;
+        setWorkspace({ path: request.rootPath, name });
+        setWorkspaceFolders((previous) => previous.some((folder) => folder.path === request.rootPath)
+          ? previous
+          : [...previous, { id, path: request.rootPath, name }]);
+        setActiveFolderId(id);
+        setTree(entries);
+        setExpandedPaths(new Set());
+      }
+      const result = await window.electronAPI.workspace.readTextFile(request.rootPath, request.path);
+      if (!result.success || !result.data) { setStatus(`打开知识文档失败：${displayError(result.error)}`); return; }
+      const data = result.data;
+      setDocuments((previous) => {
+        const existing = previous.find((document) => document.path === request.path && !document.standalone);
+        if (existing) return previous.map((document) => document === existing ? { ...document, pinned: true } : document);
+        return [...previous, {
+          path: request.path, name: request.path.split(/[\\/]/).at(-1) ?? request.path,
+          content: data.content, savedContent: data.content, language: languageIdFromName(request.path),
+          encoding: data.encoding, lineEnding: data.lineEnding, mixedLineEndings: data.mixedLineEndings,
+          modifiedAt: data.modifiedAt, readOnly: data.readOnly, pinned: true,
+        }];
+      });
+      pendingRevealRef.current = { path: request.path, line: Math.max(1, request.line ?? 1), column: Math.max(1, request.column ?? 1) };
+      setActivePath(request.path);
+      setStatus(`已打开知识文档 ${request.path}`);
+    })();
+  }), [loadDirectory, setStatus, workspace?.path]);
+
+  useEffect(() => {
+    if (!workspace || !activeDocument || !/\.mdx?$/i.test(activeDocument.path)) { setKnowledgeBacklinks([]); return; }
+    activeKnowledgeWorkspace.setActive(workspace.path);
+    void activeKnowledgeWorkspace.backlinks(activeDocument.path)
+      .then(setKnowledgeBacklinks)
+      .catch(() => setKnowledgeBacklinks([]));
+  }, [activeDocument, workspace]);
+
+  useEffect(() => {
+    const providers = ['markdown', 'plaintext'].map((language) => monaco.languages.registerCompletionItemProvider(language, {
+      triggerCharacters: ['['],
+      provideCompletionItems: (model, position) => {
+        if (!activePath || !/\.mdx?$/i.test(activePath)) return { suggestions: [] };
+        const prefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+        const match = prefix.match(/\[\[([^\]]*)$/);
+        if (!match) return { suggestions: [] };
+        const query = match[1].toLocaleLowerCase();
+        const startColumn = position.column - match[1].length;
+        return {
+          suggestions: activeKnowledgeWorkspace.documents
+            .filter((document) => document.path !== activePath)
+            .filter((document) => !query || document.title.toLocaleLowerCase().includes(query) || document.path.toLocaleLowerCase().includes(query))
+            .slice(0, 50)
+            .map((document) => ({
+              label: document.title,
+              detail: document.path,
+              kind: monaco.languages.CompletionItemKind.Reference,
+              insertText: `${document.title}]]`,
+              range: new monaco.Range(position.lineNumber, startColumn, position.lineNumber, position.column),
+            })),
+        };
+      },
+    }));
+    return () => providers.forEach((provider) => provider.dispose());
+  }, [activePath]);
   const { toggleDirectory, handleTreeKeyDown } = useExplorerNavigation({
     workspace,
     visibleTreeNodes,
@@ -1113,6 +1187,21 @@ export const CodeEditorWorkspaceController: React.FC = () => {
             onCompare={(document) => { void compareExternalDocument(document); }}
             onForceSave={(document) => { void saveDocument(document, true); }}
           />
+          {activeDocument && /\.mdx?$/i.test(activeDocument.path) && (
+            <div className="flex min-h-8 shrink-0 items-center gap-1 overflow-x-auto border-b bg-muted/20 px-3 text-[11px]">
+              <span className="shrink-0 font-medium text-muted-foreground">反向链接 {knowledgeBacklinks.length}</span>
+              {knowledgeBacklinks.length === 0 ? <span className="text-muted-foreground">暂无引用</span> : knowledgeBacklinks.map((link, index) => (
+                <button
+                  key={`${link.sourcePath}:${link.line}:${index}`}
+                  className="shrink-0 rounded border px-2 py-1 hover:bg-accent"
+                  disabled={!link.sourcePath}
+                  onClick={() => link.sourcePath && requestEditorNavigation({ rootPath: workspace!.path, path: link.sourcePath, line: link.line, column: 1 })}
+                >
+                  {link.sourceTitle ?? link.sourcePath} · L{link.line}
+                </button>
+              ))}
+            </div>
+          )}
           <EditorWorkspaceBody
             activeDocument={activeDocument}
             secondaryDocument={secondaryDocument}

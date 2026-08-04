@@ -8,8 +8,9 @@ import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
-import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
+import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
+import { requestEditorNavigation } from '@/services/editor-navigation';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
@@ -38,6 +39,7 @@ const makeDefaultNodes = (): GraphNode[] =>
 
 export const KnowledgeGraph: React.FC = () => {
   const { toast } = useToast();
+  const setActiveActivity = useStore((state) => state.setActiveActivity);
   const conversationSavedAt = useStore((s) => s.conversationSavedAt);
 
   const [files, setFiles] = useState<ConversationFile[]>([]);
@@ -56,6 +58,8 @@ export const KnowledgeGraph: React.FC = () => {
   const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState('');
   const [knowledgeTagFilter, setKnowledgeTagFilter] = useState('');
   const [knowledgeMatches, setKnowledgeMatches] = useState<KnowledgeSearchMatch[]>([]);
+  const [knowledgeProposals, setKnowledgeProposals] = useState<KnowledgeChangeProposal[]>(activeKnowledgeWorkspace.changeProposals);
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
 
   // ── 加载对话文件列表 ──
 
@@ -300,6 +304,26 @@ export const KnowledgeGraph: React.FC = () => {
     try { templatePreviewPath = instantiateKnowledgeTemplate(selectedTemplate, templateValues).path; } catch { templatePreviewPath = ''; }
   }
 
+  useEffect(() => activeKnowledgeWorkspace.subscribe(setKnowledgeProposals), []);
+
+  const selectedProposal = knowledgeProposals.find((proposal) => proposal.id === selectedProposalId);
+
+  const acceptKnowledgeProposal = useCallback(async (id: string) => {
+    try {
+      await activeKnowledgeWorkspace.acceptProposal(id);
+      toast('知识变更已通过审查并写入', 'success');
+      if (knowledgeWorkspace) await scanKnowledgeWorkspace(knowledgeWorkspace);
+    } catch (error) {
+      toast(`应用知识变更失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    }
+  }, [knowledgeWorkspace, scanKnowledgeWorkspace, toast]);
+
+  const openInEditor = useCallback((path: string, line = 1) => {
+    if (!knowledgeWorkspace) return;
+    requestEditorNavigation({ rootPath: knowledgeWorkspace, path, line, column: 1 });
+    setActiveActivity('code-editor');
+  }, [knowledgeWorkspace, setActiveActivity]);
+
   // ── 渲染 ──
 
   return (
@@ -388,6 +412,16 @@ export const KnowledgeGraph: React.FC = () => {
                   })}
                 </div>
               )}
+              {knowledgeProposals.length > 0 && (
+                <div className="space-y-1 rounded border p-1">
+                  <p className="px-2 py-1 text-xs font-medium">Agent 待审查变更</p>
+                  {knowledgeProposals.slice().reverse().slice(0, 10).map((proposal) => (
+                    <button key={proposal.id} className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent" title={proposal.instruction} onClick={() => setSelectedProposalId(proposal.id)}>
+                      {proposal.status} · {proposal.mutations.length} 文件 · {proposal.instruction}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -435,6 +469,7 @@ export const KnowledgeGraph: React.FC = () => {
               <div className="min-w-0">
                 <h3 className="truncate text-sm font-semibold">{selectedKnowledgeDocument.title}</h3>
                 <p className="truncate text-xs text-muted-foreground" title={selectedKnowledgeDocument.path}>{selectedKnowledgeDocument.path}</p>
+                <button className="mt-1 rounded border px-2 py-1 text-[11px] hover:bg-accent" onClick={() => openInEditor(selectedKnowledgeDocument.path)}>在编辑器打开</button>
               </div>
               <button className="ml-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setSelectedKnowledgeUri(null)}>×</button>
             </div>
@@ -443,7 +478,7 @@ export const KnowledgeGraph: React.FC = () => {
                 <h4 className="mb-1 font-medium">反向链接（{selectedBacklinks.length}）</h4>
                 {selectedBacklinks.length === 0 ? <p className="text-muted-foreground">暂无文档引用此页</p> : selectedBacklinks.map((link, index) => {
                   const source = knowledgeIndex?.documents.find((document) => document.uri === link.sourceUri);
-                  return <button key={`${link.sourceUri}:${link.line}:${index}`} className="block w-full rounded px-2 py-1 text-left hover:bg-accent" onClick={() => selectKnowledgeDocument(link.sourceUri)}>{source?.title ?? link.sourceUri} · L{link.line}</button>;
+                  return <button key={`${link.sourceUri}:${link.line}:${index}`} className="block w-full rounded px-2 py-1 text-left hover:bg-accent" onClick={() => source && openInEditor(source.path, link.line)}>{source?.title ?? link.sourceUri} · L{link.line}</button>;
                 })}
               </section>
               <section>
@@ -459,6 +494,38 @@ export const KnowledgeGraph: React.FC = () => {
                 <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-[11px]">{selectedKnowledgeContent.slice(0, 6000)}</pre>
               </section>
             </div>
+          </aside>
+        )}
+        {selectedProposal && (
+          <aside className="absolute bottom-3 left-3 right-14 top-3 z-30 flex flex-col overflow-hidden rounded-lg border bg-background/95 shadow-xl backdrop-blur">
+            <div className="flex items-start justify-between border-b p-3">
+              <div>
+                <h3 className="text-sm font-semibold">Agent 知识变更审查</h3>
+                <p className="text-xs text-muted-foreground">{selectedProposal.instruction}</p>
+              </div>
+              <button className="text-sm text-muted-foreground hover:text-foreground" onClick={() => setSelectedProposalId(null)}>×</button>
+            </div>
+            <div className="flex-1 space-y-3 overflow-auto p-3">
+              {selectedProposal.mutations.map((mutation, index) => {
+                const before = mutation.kind === 'create' ? '' : mutation.before;
+                const after = mutation.kind === 'delete' ? '' : mutation.kind === 'rename' ? mutation.content ?? mutation.before : mutation.content;
+                return (
+                  <section key={`${mutation.kind}:${mutation.path}:${index}`} className="overflow-hidden rounded border">
+                    <header className="border-b bg-muted px-3 py-2 text-xs font-medium">
+                      {mutation.kind} · {mutation.path}{mutation.kind === 'rename' ? ` → ${mutation.targetPath}` : ''}
+                    </header>
+                    <div className="grid grid-cols-2 divide-x">
+                      <div><p className="border-b px-2 py-1 text-[11px] text-muted-foreground">修改前</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap p-2 text-[11px]">{before || '∅'}</pre></div>
+                      <div><p className="border-b px-2 py-1 text-[11px] text-muted-foreground">修改后</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap p-2 text-[11px]">{after || '∅'}</pre></div>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            <footer className="flex justify-end gap-2 border-t p-3">
+              <button className="h-8 rounded border px-3 text-xs hover:bg-accent" disabled={selectedProposal.status === 'accepted' || selectedProposal.status === 'rejected'} onClick={() => activeKnowledgeWorkspace.rejectProposal(selectedProposal.id)}>拒绝</button>
+              <button className="h-8 rounded bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50" disabled={selectedProposal.status !== 'ready-for-review' && selectedProposal.status !== 'partially-accepted'} onClick={() => void acceptKnowledgeProposal(selectedProposal.id)}>接受全部并写入</button>
+            </footer>
           </aside>
         )}
       </div>
