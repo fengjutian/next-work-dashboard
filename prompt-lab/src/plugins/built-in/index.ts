@@ -3,27 +3,29 @@
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
 import { Sparkles, MessageSquare, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code } from '@/components/icons';
-import { AIPanel } from '../ai';
-import { PromptSidebar } from '../prompts';
-import { ConversationHistory } from '../history';
-import { KnowledgeGraph } from '../knowledge-graph';
-import { NotesPanel } from '../notes';
-import { WordPreviewPanel } from '../word-preview';
-import { ExcelPreviewPanel } from '../excel-preview';
-import { PptPreviewPanel } from '../ppt-preview';
-import { PdfPreviewPanel } from '../pdf-preview';
-import { ExcalidrawPanel } from '../excalidraw';
-import { PluginManagerPanel } from '../plugin-manager';
-import { WereadPanel } from '../weread';
-import { TranslationPanel } from '../translation';
-import { WindyPanel } from '../windy';
-import { TerminalPluginPanel } from '../terminal';
-import { DatabaseBrowser } from '../database';
-import { ChatPanel } from '../chat';
-import { CodeEditorPanel } from '../code-editor';
+import { lazy } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
 import { EXCEL_PREVIEW_DEFAULT_ENABLED } from '../defaults';
+
+const AIPanel = lazy(() => import('../ai').then((m) => ({ default: m.AIPanel })));
+const ChatPanel = lazy(() => import('../chat').then((m) => ({ default: m.ChatPanel })));
+const PromptSidebar = lazy(() => import('../prompts').then((m) => ({ default: m.PromptSidebar })));
+const ConversationHistory = lazy(() => import('../history').then((m) => ({ default: m.ConversationHistory })));
+const KnowledgeGraph = lazy(() => import('../knowledge-graph').then((m) => ({ default: m.KnowledgeGraph })));
+const NotesPanel = lazy(() => import('../notes').then((m) => ({ default: m.NotesPanel })));
+const WordPreviewPanel = lazy(() => import('../word-preview').then((m) => ({ default: m.WordPreviewPanel })));
+const ExcelPreviewPanel = lazy(() => import('../excel-preview').then((m) => ({ default: m.ExcelPreviewPanel })));
+const PptPreviewPanel = lazy(() => import('../ppt-preview').then((m) => ({ default: m.PptPreviewPanel })));
+const PdfPreviewPanel = lazy(() => import('../pdf-preview').then((m) => ({ default: m.PdfPreviewPanel })));
+const ExcalidrawPanel = lazy(() => import('../excalidraw').then((m) => ({ default: m.ExcalidrawPanel })));
+const PluginManagerPanel = lazy(() => import('../plugin-manager').then((m) => ({ default: m.PluginManagerPanel })));
+const WereadPanel = lazy(() => import('../weread').then((m) => ({ default: m.WereadPanel })));
+const TranslationPanel = lazy(() => import('../translation').then((m) => ({ default: m.TranslationPanel })));
+const WindyPanel = lazy(() => import('../windy').then((m) => ({ default: m.WindyPanel })));
+const TerminalPluginPanel = lazy(() => import('../terminal').then((m) => ({ default: m.TerminalPluginPanel })));
+const DatabaseBrowser = lazy(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
+const CodeEditorPanel = lazy(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
 
 const builtInPlugins: Plugin[] = [
   {

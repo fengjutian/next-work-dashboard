@@ -90,9 +90,8 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
 
     // 构建清单
     const isKernel = activeTab === 'kernel' && formBundle.trim().length > 0;
-    if (isKernel && !window.confirm(
-      '内核插件会在宿主环境中直接执行代码，并可访问应用数据和 Electron API。确认创建并立即启用这个插件吗？',
-    )) {
+    if (isKernel) {
+      alert('用户 Kernel 插件已关闭，请使用 Sandbox 模式。');
       return;
     }
     const manifest: PluginManifest = {

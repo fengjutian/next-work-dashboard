@@ -1,4 +1,4 @@
-import type { ComponentType, FC } from 'react';
+import type { ComponentType } from 'react';
 
 export type PluginDisposable = () => void;
 
@@ -38,6 +38,36 @@ export interface StatusBarItemDef {
   command?: string;
 }
 
+export interface PluginViewDef {
+  id: string;
+  title: string;
+  component: ComponentType;
+  location?: 'main' | 'sidebar' | 'panel';
+}
+
+export interface PluginMenuItemDef {
+  id: string;
+  label: string;
+  command: string;
+  location: 'file' | 'modules' | 'view' | 'context';
+  order?: number;
+}
+
+export interface PluginSettingDef {
+  key: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean';
+  default?: string | number | boolean;
+  description?: string;
+}
+
+export interface PluginFileEditorDef {
+  id: string;
+  extensions: string[];
+  viewId: string;
+  priority?: number;
+}
+
 // ── 插件贡献声明 ──
 
 export interface PluginContributions {
@@ -46,7 +76,10 @@ export interface PluginContributions {
   /** 状态栏项 */
   statusBarItems?: StatusBarItemDef[];
   /** 附加视图（key = viewId，用于未来扩展侧边栏/面板区域） */
-  views?: Record<string, FC>;
+  views?: PluginViewDef[];
+  menus?: PluginMenuItemDef[];
+  settings?: PluginSettingDef[];
+  fileEditors?: PluginFileEditorDef[];
 }
 
 /**
@@ -68,13 +101,16 @@ export interface Plugin {
   icon: ComponentType<{ className?: string }>;
 
   /** 主面板 React 组件 */
-  component: FC;
+  component: ComponentType;
 
   /** 用户是否启用此插件 */
   enabled: boolean;
 
   /** ActivityBar 中的排序权重，越小越靠前 */
   order: number;
+
+  /** Keep the panel mounted after first activation. Defaults to false. */
+  keepAlive?: boolean;
 
   /** 插件贡献声明（命令、状态栏项、附加视图等） */
   contributions?: PluginContributions;

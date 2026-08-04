@@ -114,10 +114,8 @@ export async function importPlugin(file: File): Promise<{ ok: boolean; message: 
     const style = typeof pluginBundle.style === 'string' ? pluginBundle.style : '';
     const kernelBundle = typeof pluginBundle.kernelBundle === 'string' ? pluginBundle.kernelBundle : '';
 
-    if (isKernel && !window.confirm(
-      `内核插件“${manifest.name}”将在宿主环境中执行代码，并可访问应用数据和 Electron API。仅在你完全信任其来源时继续。`,
-    )) {
-      return { ok: false, message: '已取消导入内核插件' };
+    if (isKernel) {
+      return { ok: false, message: '用户 Kernel 插件已关闭；请将插件迁移到 Sandbox runtime' };
     }
 
     if (pluginRegistry.get(id)) {
