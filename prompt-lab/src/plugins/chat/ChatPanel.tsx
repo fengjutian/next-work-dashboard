@@ -5,9 +5,9 @@ import type { BubbleProps } from '@ant-design/x';
 import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
-  BookOpen, Bot, Copy, Database, Download, ExternalLink, MessageSquare, PanelLeft,
-  Paperclip, Plus, Robot, RotateCcw, Settings, SlidersHorizontal, Trash2,
-  Wrench, X,
+  BookOpen, Bot, Check, ChevronDown, Copy, Database, Download, ExternalLink,
+  FileText, Globe, MessageSquare, PanelLeft, Paperclip, Plus, RefreshCw, Robot,
+  RotateCcw, Settings, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
@@ -44,16 +44,16 @@ const ALL_TOOLS = [
 ];
 
 const WELCOME_PROMPTS = [
-  { key: '1', label: '📝 帮我写一份项目周报', value: '帮我写一份项目周报' },
-  { key: '2', label: '🔍 解释这段代码的逻辑', value: '解释这段代码的逻辑' },
-  { key: '3', label: '🌐 将以下内容翻译成英文', value: '将以下内容翻译成英文' },
-  { key: '4', label: '🐛 帮我调试一个错误', value: '帮我调试一个错误' },
+  { key: '1', icon: <FileText className="h-4 w-4" />, label: '帮我写一份项目周报', value: '帮我写一份项目周报' },
+  { key: '2', icon: <Sparkles className="h-4 w-4" />, label: '解释这段代码的逻辑', value: '解释这段代码的逻辑' },
+  { key: '3', icon: <Globe className="h-4 w-4" />, label: '将以下内容翻译成英文', value: '将以下内容翻译成英文' },
+  { key: '4', icon: <Wrench className="h-4 w-4" />, label: '帮我调试一个错误', value: '帮我调试一个错误' },
 ];
 
 const SUGGESTION_ITEMS = [
-  { key: '1', label: '👍 详细展开', value: '请更详细地展开说明' },
-  { key: '2', label: '📋 总结要点', value: '请总结成要点列表' },
-  { key: '3', label: '🌐 翻译成英文', value: '请翻译成英文' },
+  { key: '1', icon: <Sparkles className="h-3.5 w-3.5" />, label: '详细展开', value: '请更详细地展开说明' },
+  { key: '2', icon: <FileText className="h-3.5 w-3.5" />, label: '总结要点', value: '请总结成要点列表' },
+  { key: '3', icon: <Globe className="h-3.5 w-3.5" />, label: '翻译成英文', value: '请翻译成英文' },
 ];
 
 function stableDate(ts: number): string {
@@ -369,8 +369,8 @@ export const ChatPanel: React.FC = () => {
             <div className="w-64 border-r shrink-0 flex flex-col bg-background overflow-hidden">
               <div className="flex items-center justify-between px-3 py-2 border-b">
                 <span className="text-xs font-semibold text-muted-foreground">对话历史</span>
-                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowHistory(false)}>
-                  <span className="text-xs">✕</span>
+                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowHistory(false)} title="收起历史" aria-label="收起对话历史">
+                  <X className="h-3.5 w-3.5" />
                 </Button>
               </div>
               <div className="flex-1 overflow-y-auto p-2">
@@ -402,7 +402,7 @@ export const ChatPanel: React.FC = () => {
               <div className="flex-1" />
               <div className="relative">
                 <button
-                  className={`h-6 text-[10px] rounded border px-2 ${
+                  className={`inline-flex h-6 items-center gap-1 rounded border px-2 text-[10px] ${
                     compareModels.length > 1
                       ? 'border-primary/40 bg-primary-light text-primary'
                       : 'border-border bg-card text-muted-foreground'
@@ -410,7 +410,9 @@ export const ChatPanel: React.FC = () => {
                   onClick={() => setModelPickerOpen((open) => !open)}
                   title="选择一个或多个模型"
                 >
+                  <Sparkles className="h-3 w-3" />
                   {compareModels.length > 1 ? `${compareModels.length} 个模型对比` : MODELS.find((m) => m.value === currentModel)?.label ?? currentModel}
+                  <ChevronDown className={`h-3 w-3 transition-transform ${modelPickerOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {modelPickerOpen && (
                   <div className="absolute right-0 top-7 z-40 min-w-48 rounded-md border bg-card p-2 shadow-lg">
@@ -428,11 +430,13 @@ export const ChatPanel: React.FC = () => {
                   </div>
                 )}
               </div>
-              <button className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors ${agentMode ? 'bg-warning/10 bg-warning/10 text-warning text-warning' : 'bg-muted text-muted-foreground'}`}
-                onClick={() => setAgentMode((v) => !v)}>{agentMode ? 'Agent ✓' : 'Agent'}</button>
+              <button className={`flex h-6 items-center gap-1 rounded-full px-1.5 text-[10px] font-medium transition-colors ${agentMode ? 'bg-warning/10 text-warning' : 'bg-muted text-muted-foreground'}`}
+                onClick={() => setAgentMode((v) => !v)} title="切换 Agent 模式" aria-pressed={agentMode}>
+                <Bot className="h-3 w-3" /><span>Agent</span>{agentMode && <Check className="h-3 w-3" />}
+              </button>
               <button className={`h-6 rounded-full px-1.5 text-[10px] font-medium transition-colors flex items-center gap-1 ${memoryEnabled ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}`}
                 onClick={() => setMemoryEnabled((value) => !value)} title="检索知识库并附带原文来源">
-                <BookOpen className="h-3 w-3" /><span>{memoryEnabled ? '知识库 ✓' : '知识库'}</span>
+                <BookOpen className="h-3 w-3" /><span>知识库</span>{memoryEnabled && <Check className="h-3 w-3" />}
               </button>
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${memoryManagerOpen ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:text-primary'}`}
                 onClick={() => setMemoryManagerOpen(true)} title="记忆管理"><Database className="h-3.5 w-3.5" /></Button>
@@ -555,7 +559,9 @@ export const ChatPanel: React.FC = () => {
                 {error && (
                   <div className="flex items-center justify-center gap-2 py-2">
                     <p className="text-xs text-destructive">{error}</p>
-                    <button className="text-xs text-primary hover:text-primary underline" onClick={handleRetry}>重试</button>
+                    <button className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary" onClick={handleRetry} title="重新发送">
+                      <RefreshCw className="h-3.5 w-3.5" />重试
+                    </button>
                   </div>
                 )}
 
@@ -588,10 +594,10 @@ export const ChatPanel: React.FC = () => {
                     <span>已添加 {attachments.length} 个文件</span>
                     <div className="flex items-center gap-2">
                       <button
-                        className="text-primary hover:text-primary"
+                        className="inline-flex items-center gap-1 text-primary hover:text-primary"
                         onClick={() => fileInputRef.current?.click()}
                       >
-                        + 添加文件
+                        <Plus className="h-3 w-3" />添加文件
                       </button>
                     </div>
                   </div>

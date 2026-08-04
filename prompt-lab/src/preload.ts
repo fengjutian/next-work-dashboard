@@ -163,7 +163,8 @@ const electronAPI: ElectronAPI = {
     discardAgentWorktree: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:discardAgentWorktree', rootPath, sessionId),
     previewAgentWorktreeMerge: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:previewAgentWorktreeMerge', rootPath, sessionId),
     getAgentWorktreeConflictVersions: (rootPath: string, sessionId: string, filePath: string) => ipcRenderer.invoke('workspace:getAgentWorktreeConflictVersions', rootPath, sessionId, filePath),
-    mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => ipcRenderer.invoke('workspace:mergeAgentWorktree', rootPath, sessionId, message),
+    deliverAgentPR: (rootPath: string, branch: string, config: any, title: string, body: string, token?: string) => ipcRenderer.invoke("agent:deliverPR", rootPath, branch, config, title, body, token),
+        mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => ipcRenderer.invoke('workspace:mergeAgentWorktree', rootPath, sessionId, message),
     // Agent task operations
     agentTaskCreate: (config: import("./types/electron").AgentTaskConfig) => ipcRenderer.invoke("agent-task:create", config),
     agentTaskGet: (taskId: string) => ipcRenderer.invoke("agent-task:get", taskId),

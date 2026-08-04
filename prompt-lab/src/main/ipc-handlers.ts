@@ -44,6 +44,7 @@ import { mcpManager } from './mcp/mcp-manager';
 import type { McpServerConfig } from '../types/mcp';
 import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getAgentWorktreeConflictVersions, mergeAgentWorktree, previewAgentWorktreeMerge } from './agent-worktree';
 import { agentTaskService } from './agent-task-service';
+import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, type PRDeliveryConfig } from './pr-delivery';
 import type { AgentTaskConfig } from './agent-task-types';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
@@ -1290,7 +1291,6 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-// ── Agent task IPC ──  ipcMain.handle('agent-task:create', async (_event, config: AgentTaskConfig) => {    try {      const record = agentTaskService.create(config);      return { success: true, data: record };    } catch (error) {      return { success: false, error: error instanceof Error ? error.message : String(error) };    }  });  ipcMain.handle('agent-task:get', async (_event, taskId: string) => {    const record = agentTaskService.get(taskId);    return { success: true, data: record ?? null };  });  ipcMain.handle('agent-task:list', async (_event, sessionId?: string) => {    const records = agentTaskService.list(sessionId || undefined);    return { success: true, data: records };  });  ipcMain.handle('agent-task:cancel', async (_event, taskId: string) => {    const ok = agentTaskService.cancel(taskId);    return { success: ok, error: ok ? undefined : 'TASK_NOT_CANCELLABLE' };  });  ipcMain.handle('agent-task:retry', async (_event, taskId: string) => {    try {      const record = agentTaskService.retry(taskId);      if (!record) return { success: false, error: 'TASK_NOT_RETRYABLE' };      return { success: true, data: record };    } catch (error) {      return { success: false, error: error instanceof Error ? error.message : String(error) };    }  });  ipcMain.handle('agent-task:snapshot', async () => {    return { success: true, data: agentTaskService.snapshot() };  });
 
   ipcMain.handle('agent-task:restore', async (_event, tasks: AgentTaskConfig[]) => {    try {      const count = agentTaskService.restore(tasks as any);      return { success: true, data: count };    } catch (error) {      return { success: false, error: error instanceof Error ? error.message : String(error) };    }  });
 
@@ -1307,7 +1307,92 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  ipcMain.handle('workspace:mergeAgentWorktree', async (_event, rootPath: string, sessionId: string, message: string) => {
+
+
+  // ── Agent tasks ──
+
+  ipcMain.handle("agent-task:create", async (_event, config: AgentTaskConfig) => {
+    try {
+      const record = agentTaskService.create(config);
+      return { success: true, data: record };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle("agent-task:get", async (_event, taskId: string) => {
+    const record = agentTaskService.get(taskId);
+    return { success: true, data: record ?? null };
+  });
+
+  ipcMain.handle("agent-task:list", async (_event, sessionId?: string) => {
+    const records = agentTaskService.list(sessionId || undefined);
+    return { success: true, data: records };
+  });
+
+  ipcMain.handle("agent-task:cancel", async (_event, taskId: string) => {
+    const ok = agentTaskService.cancel(taskId);
+    return { success: ok, error: ok ? undefined : "TASK_NOT_CANCELLABLE" };
+  });
+
+  ipcMain.handle("agent-task:retry", async (_event, taskId: string) => {
+    try {
+      const record = agentTaskService.retry(taskId);
+      if (!record) return { success: false, error: "TASK_NOT_RETRYABLE" };
+      return { success: true, data: record };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle("agent-task:snapshot", async () => {
+    return { success: true, data: agentTaskService.snapshot() };
+  });
+
+  ipcMain.handle("agent-task:restore", async (_event, tasks: AgentTaskConfig[]) => {
+    try {
+      const count = agentTaskService.restore(tasks as any);
+      return { success: true, data: count };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.on("agent-task:subscribe", (event, taskId: string) => {
+    const unsubscribe = agentTaskService.subscribe(taskId, (taskEvent) => {
+      if (!event.sender.isDestroyed()) event.sender.send("agent-task:event", taskEvent);
+    });
+    event.sender.once("destroyed", unsubscribe);
+  });
+
+  // ── Agent worktree conflicts ──
+
+  ipcMain.handle("workspace:getAgentWorktreeConflictVersions", async (_event, rootPath: string, sessionId: string, filePath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const data = await getAgentWorktreeConflictVersions(root, path.join(app.getPath("userData"), "agent-worktrees"), sessionId, filePath);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  // ── PR delivery ──
+
+  ipcMain.handle("agent:deliverPR", async (_event, rootPath: string, branch: string, config: PRDeliveryConfig, title: string, body: string, token?: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const githubToken = token || process.env.GITHUB_TOKEN || "";
+      if (!githubToken) return { success: false, error: "GitHub token not configured" };
+      const result = await deliverAgentPR(root, branch, config, title, body);
+      return { success: result.pushed && !result.error, data: result, error: result.error };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+
+    ipcMain.handle('workspace:mergeAgentWorktree', async (_event, rootPath: string, sessionId: string, message: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
       const safeMessage = message.trim().slice(0, 200) || `Merge Agent ${sessionId}`;

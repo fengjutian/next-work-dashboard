@@ -120,6 +120,7 @@ export interface ElectronAPI {
     previewAgentWorktreeMerge: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeMergePreview>>;
     getAgentWorktreeConflictVersions: (rootPath: string, sessionId: string, filePath: string) => Promise<WorkspaceResult<AgentWorktreeConflictFile>>;
     mergeAgentWorktree: (rootPath: string, sessionId: string, message: string) => Promise<WorkspaceResult<AgentWorktreeMergeResult>>;
+    deliverAgentPR: (rootPath: string, branch: string, config: { provider: string; remote: string; baseBranch: string }, title: string, body: string, token?: string) => Promise<WorkspaceResult<{ branch: string; remote: string; prUrl?: string; prNumber?: number; pushed: boolean; error?: string }>>;
     // Agent task operations
     agentTaskCreate: (config: AgentTaskConfig) => Promise<WorkspaceResult<AgentTaskRecord>>;
     agentTaskGet: (taskId: string) => Promise<WorkspaceResult<AgentTaskRecord | null>>;
