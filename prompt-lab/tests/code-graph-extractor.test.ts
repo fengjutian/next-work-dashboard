@@ -17,4 +17,12 @@ describe('code graph extractor', () => {
     expect(isSupportedCodePath('src/app.tsx')).toBe(true);
     expect(isSupportedCodePath('README.md')).toBe(false);
   });
+
+  it('limits large graphs while keeping valid edges', () => {
+    const documents = Array.from({ length: 30 }, (_, index) => ({ path: `file-${index}.ts`, content: `export function fn${index}() {}` }));
+    const graph = extractCodeGraph(documents, { maxNodes: 20 });
+    expect(graph.nodes).toHaveLength(20);
+    const ids = new Set(graph.nodes.map((node) => node.id));
+    expect(graph.edges.every((edge) => ids.has(edge.source) && ids.has(edge.target))).toBe(true);
+  });
 });

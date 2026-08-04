@@ -42,6 +42,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
     const maxDegree = Math.max(...graphData.nodes.map((n) => n.degree), 1);
     const minSize = 28;
     const maxSize = 48;
+    const isLargeGraph = graphData.nodes.length > 180;
+    const incidentEdges = new Map<string, typeof graphData.edges>();
+    graphData.nodes.forEach((node) => incidentEdges.set(node.id, []));
+    graphData.edges.forEach((edge) => {
+      incidentEdges.get(edge.source)?.push(edge);
+      incidentEdges.get(edge.target)?.push(edge);
+    });
 
     // 按度数分配颜色
     const sortedByDegree = [...graphData.nodes].sort((a, b) => b.degree - a.degree);
@@ -59,21 +66,20 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       data: {
         nodes: graphData.nodes.map((n) => ({
           id: n.id,
-          data: { label: n.label, degree: n.degree, edges: graphData.edges.filter((e) => e.source === n.id || e.target === n.id) },
+          data: { label: n.label, degree: n.degree, edges: incidentEdges.get(n.id) ?? [] },
         })),
-        edges: graphData.edges.map((e) => ({
+        edges: graphData.edges.map((e, index) => ({
+          // G6 默认使用 source-target 作为边 ID；同一对节点的“定义/调用”等
+          // 平行关系会因此冲突。显式 ID 同时保留关系类型和原始序号。
+          id: `${e.source}->${e.target}:${e.kind ?? 'edge'}:${e.label ?? ''}:${index}`,
           source: e.source,
           target: e.target,
           data: { weight: e.weight, label: e.label, kind: e.kind },
         })),
       },
-      layout: {
-        type: 'd3-force',
-        linkDistance: 150,
-        nodeStrength: -300,
-        collide: { radius: 50 },
-        animate: true,
-      },
+      layout: isLargeGraph
+        ? { type: 'circular' }
+        : { type: 'd3-force', linkDistance: 150, nodeStrength: -300, collide: { radius: 50 }, animate: true },
       node: {
         style: {
           size: (d: any) => {
@@ -84,7 +90,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           stroke: (d: any) => colorMap.get(d.id) ?? '#3b82f6',
           lineWidth: 0,
           fillOpacity: 0.9,
-          labelText: (d: any) => d.data?.label ?? d.id,
+          labelText: (d: any) => isLargeGraph && (d.data?.degree ?? 0) < 2 ? '' : d.data?.label ?? d.id,
           labelPlacement: 'bottom',
           labelOffsetY: 4,
           labelFontSize: 11,
@@ -123,7 +129,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           endArrow: false,
           labelText: (d: any) => {
             const wgt: number = d.data?.weight ?? 0;
-            return d.data?.label || (wgt > 0 ? String(wgt) : '');
+            return isLargeGraph ? '' : d.data?.label || (wgt > 0 ? String(wgt) : '');
           },
           labelFontSize: 10,
           labelFill: '#94a3b8',
@@ -159,7 +165,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
             return '';
           },
         },
-        { type: 'minimap', size: [200, 140], padding: 8 },
+        ...(!isLargeGraph ? [{ type: 'minimap', size: [200, 140] as [number, number], padding: 8 }] : []),
       ],
       behaviors: [
         'drag-element',
@@ -168,7 +174,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
         'hover-activate',
         { type: 'scroll-canvas', sensitivity: 1 },
       ],
-      animation: true,
+      animation: !isLargeGraph,
     });
 
     if (onNodeSelect) graph.on('node:click', (event: IEvent) => {

@@ -63,6 +63,24 @@ export const NodePanel: React.FC<NodePanelProps> = ({
   onResetDefault,
   children,
 }) => {
+  const [showNodeList, setShowNodeList] = React.useState(false);
+  const [nodeQuery, setNodeQuery] = React.useState('');
+  const shouldCollapse = nodes.length > 20;
+  const filteredNodes = nodeQuery.trim()
+    ? nodes.filter((node) => `${node.label} ${node.category ?? ''} ${node.sourcePath ?? ''}`.toLowerCase().includes(nodeQuery.trim().toLowerCase()))
+    : nodes;
+
+  React.useEffect(() => {
+    // 首次进入大图模式时保持侧栏折叠。
+    if (shouldCollapse) setShowNodeList(false);
+  }, [shouldCollapse]);
+
+  React.useEffect(() => {
+    if (!showNodeList) { setNodeQuery(''); return undefined; }
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowNodeList(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [showNodeList]);
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') { e.preventDefault(); onAddNode(); }
   };
@@ -105,12 +123,60 @@ export const NodePanel: React.FC<NodePanelProps> = ({
 
       {/* 节点列表 */}
       {nodes.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {nodes.map((node) => (
-            <NodeTag key={node.id} node={node} onRemove={onRemoveNode} />
-          ))}
+        <div className="space-y-1">
+          {shouldCollapse && <button
+            type="button"
+            className="flex h-7 w-full items-center justify-between rounded border border-input px-2 text-[11px] text-muted-foreground hover:bg-accent"
+            onClick={() => setShowNodeList((value) => !value)}
+          >
+            <span>共 {nodes.length} 个节点</span>
+            <span>打开管理</span>
+          </button>}
+          {!shouldCollapse && <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto rounded border border-border p-1">
+            {nodes.map((node) => (
+              <NodeTag key={node.id} node={node} onRemove={onRemoveNode} />
+            ))}
+          </div>}
         </div>
       )}
+
+      {showNodeList && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onMouseDown={() => setShowNodeList(false)}>
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label="图谱节点管理"
+          className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <header className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h3 className="text-sm font-semibold">图谱节点管理</h3>
+              <p className="text-xs text-muted-foreground">共 {nodes.length} 个节点</p>
+            </div>
+            <button className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" title="关闭" onClick={() => setShowNodeList(false)}>
+              <X className="h-4 w-4" />
+            </button>
+          </header>
+          <div className="border-b border-border p-3">
+            <input
+              autoFocus
+              value={nodeQuery}
+              onChange={(event) => setNodeQuery(event.target.value)}
+              placeholder="搜索节点名称、类型或文件路径…"
+              className="h-8 w-full rounded border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            {filteredNodes.length > 0 ? <div className="flex flex-wrap gap-1.5">
+              {filteredNodes.map((node) => <NodeTag key={node.id} node={node} onRemove={onRemoveNode} />)}
+            </div> : <p className="py-10 text-center text-xs text-muted-foreground">没有匹配的节点</p>}
+          </div>
+          <footer className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            <span>显示 {filteredNodes.length} / {nodes.length}</span>
+            <button className="h-7 rounded border border-input px-3 hover:bg-accent" onClick={() => setShowNodeList(false)}>关闭</button>
+          </footer>
+        </section>
+      </div>}
     </div>
   );
 };

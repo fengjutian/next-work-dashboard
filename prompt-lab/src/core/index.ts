@@ -59,7 +59,7 @@ export type { AgentStep, AgentOptions } from './agent';
 export { extractFromDocuments, quickExtract } from './graph-extractor';
 export type { ExtractConfig } from './graph-extractor';
 export { extractCodeGraph, isSupportedCodePath } from './code-graph-extractor';
-export type { CodeDocument } from './code-graph-extractor';
+export type { CodeDocument, CodeGraphOptions } from './code-graph-extractor';
 export * from './knowledge';
 
 export { TencentDbMemoryAdapter } from './tencentdb-memory-adapter';

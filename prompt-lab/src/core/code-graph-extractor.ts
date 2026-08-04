@@ -2,6 +2,7 @@ import ts from 'typescript';
 import type { GraphData, GraphEdge, GraphNode } from '@/plugins/knowledge-graph/graph-types';
 
 export interface CodeDocument { path: string; content: string }
+export interface CodeGraphOptions { maxNodes?: number }
 
 const SCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -15,16 +16,19 @@ function nodeId(path: string, kind: string, name: string): string {
 }
 
 /** 静态抽取 JS/TS 文件、声明、导入和显式调用关系，不执行用户代码。 */
-export function extractCodeGraph(documents: CodeDocument[]): GraphData {
+export function extractCodeGraph(documents: CodeDocument[], options: CodeGraphOptions = {}): GraphData {
   const nodes = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
+  const edgeKeys = new Set<string>();
   const declarations = new Map<string, string[]>();
 
   const addNode = (id: string, label: string, category: string, sourcePath: string) => {
     if (!nodes.has(id)) nodes.set(id, { id, label, category, sourcePath, source: 'code', degree: 0 });
   };
   const addEdge = (source: string, target: string, label: string) => {
-    if (source !== target && !edges.some((edge) => edge.source === source && edge.target === target && edge.label === label)) {
+    const key = `${source}\0${target}\0${label}`;
+    if (source !== target && !edgeKeys.has(key)) {
+      edgeKeys.add(key);
       edges.push({ source, target, label, weight: 1, kind: 'code' });
     }
   };
@@ -81,7 +85,20 @@ export function extractCodeGraph(documents: CodeDocument[]): GraphData {
 
   const degree = new Map<string, number>();
   edges.forEach((edge) => { degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1); degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1); });
-  return { nodes: [...nodes.values()].map((node) => ({ ...node, degree: degree.get(node.id) ?? 0 })), edges };
+  const allNodes = [...nodes.values()].map((node) => ({ ...node, degree: degree.get(node.id) ?? 0 }));
+  const maxNodes = Math.max(10, options.maxNodes ?? 250);
+  if (allNodes.length <= maxNodes) return { nodes: allNodes, edges };
+
+  // 优先保留高关联节点；相同度数时，声明节点优先于文件和外部模块。
+  const categoryPriority = (node: GraphNode) => node.category === '模块' ? 0 : node.category === '文件' ? 1 : 2;
+  const kept = allNodes
+    .sort((a, b) => b.degree - a.degree || categoryPriority(b) - categoryPriority(a) || a.label.localeCompare(b.label))
+    .slice(0, maxNodes);
+  const keptIds = new Set(kept.map((node) => node.id));
+  const keptEdges = edges.filter((edge) => keptIds.has(edge.source) && keptIds.has(edge.target));
+  const keptDegree = new Map<string, number>();
+  keptEdges.forEach((edge) => { keptDegree.set(edge.source, (keptDegree.get(edge.source) ?? 0) + 1); keptDegree.set(edge.target, (keptDegree.get(edge.target) ?? 0) + 1); });
+  return { nodes: kept.map((node) => ({ ...node, degree: keptDegree.get(node.id) ?? 0 })), edges: keptEdges };
 }
 
 export function isSupportedCodePath(path: string): boolean { return SCRIPT_EXTENSIONS.has(extension(path)); }
