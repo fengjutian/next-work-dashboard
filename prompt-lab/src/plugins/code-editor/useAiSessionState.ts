@@ -114,10 +114,10 @@ export function useAiSessionState({ workspace, sessionId, appendOutput }: UseAiS
     }]);
   }, [aiInstruction, workspace]);
 
-  const updateSessionAcceptCount = useCallback(() => {
+  const updateSessionAcceptCount = useCallback((count = 1) => {
     setAiSessions((previous) => {
       const last = previous.at(-1);
-      return last ? [...previous.slice(0, -1), { ...last, accepted: last.accepted + 1 }] : previous;
+      return last ? [...previous.slice(0, -1), { ...last, accepted: last.accepted + count }] : previous;
     });
   }, []);
 

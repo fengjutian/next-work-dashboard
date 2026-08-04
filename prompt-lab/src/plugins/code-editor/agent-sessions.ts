@@ -43,3 +43,8 @@ export function archivedSessionsForWorkspace(sessions: AgentSession[], workspace
     .filter((session) => session.workspacePath === workspacePath && Boolean(session.archivedAt))
     .sort((left, right) => (right.archivedAt ?? 0) - (left.archivedAt ?? 0));
 }
+
+export function titleFromInstruction(instruction: string, maxLength = 50): string {
+  const firstLine = instruction.split(/\r?\n/, 1)[0].replace(/\s+/g, ' ').trim();
+  return firstLine.slice(0, maxLength) || 'Agent 任务';
+}

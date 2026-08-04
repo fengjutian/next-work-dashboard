@@ -42,6 +42,7 @@ import { EditorStatusBar } from './EditorStatusBar';
 import { EditorTabMenu } from './EditorTabMenu';
 import { AgentsWindow } from './AgentsWindow';
 import { useAgentSessions } from './useAgentSessions';
+import { titleFromInstruction } from './agent-sessions';
 import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import {
@@ -211,7 +212,15 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
   useEffect(() => {
     if (!activeAgentSession) return;
-    const nextStatus = aiEditing ? 'running' : aiPendingRequest?.status === 'interrupted' ? 'interrupted' : aiProposals.length ? 'review' : 'idle';
+    const nextStatus = aiEditing
+      ? 'running'
+      : aiPendingRequest?.status === 'interrupted'
+        ? 'interrupted'
+        : aiProposals.length
+          ? 'review'
+          : activeAgentSession.filesChanged > 0 && activeAgentSession.accepted > 0
+            ? 'completed'
+            : 'idle';
     if (activeAgentSession.status === nextStatus && activeAgentSession.filesChanged === aiProposals.length) return;
     updateAgentSession(activeAgentSession.id, { status: nextStatus, filesChanged: aiProposals.length });
   }, [activeAgentSession, aiEditing, aiPendingRequest?.status, aiProposals.length, updateAgentSession]);
@@ -265,7 +274,10 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     aiHunks,
     setAiHunks,
     computeDiffHunks,
-    updateSessionAcceptCount,
+    updateSessionAcceptCount: (count = 1) => {
+      updateSessionAcceptCount(count);
+      if (activeAgentSession) updateAgentSession(activeAgentSession.id, { accepted: activeAgentSession.accepted + count });
+    },
     appendOutput,
     setStatus,
   });
@@ -374,6 +386,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setDocuments,
     setActivePath,
   });
+
+  const runAgentEdit = useCallback(async () => {
+    const instruction = aiInstruction.trim();
+    if (activeAgentSession?.title === '新 Agent 会话' && instruction) {
+      updateAgentSession(activeAgentSession.id, { title: titleFromInstruction(instruction) });
+    }
+    await generateAiEdit();
+  }, [activeAgentSession, aiInstruction, generateAiEdit, updateAgentSession]);
 
   const selectTreeNode = useCallback((node: TreeNode, event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
     if (event?.shiftKey && selectedNode) {
@@ -1190,7 +1210,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         })(); }}
         onInstructionChange={setAiInstruction}
         onMultiFileChange={setAiMultiFile}
-        onGenerate={() => { void generateAiEdit(); }}
+        onGenerate={() => { void runAgentEdit(); }}
         onCancel={cancelAiEdit}
         onOpenProposal={(proposal) => setDiffView({ path: proposal.path, name: proposal.path, original: proposal.original, modified: proposal.modified, language: proposal.language, source: 'ai' })}
       /> : <div className="flex min-h-0 flex-1">
@@ -1317,7 +1337,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiMessages={aiMessages} aiPendingRequest={aiPendingRequest} aiExecutionStage={aiExecutionStage === 'review' && aiProposals.length === 0 ? 'idle' : aiExecutionStage}
         undoLastAiEdit={undoLastAiEdit}
         aiInstruction={aiInstruction} aiEditing={aiEditing}
-        activeDocument={activeDocument} generateAiEdit={generateAiEdit} cancelAiEdit={cancelAiEdit}
+        activeDocument={activeDocument} generateAiEdit={runAgentEdit} cancelAiEdit={cancelAiEdit}
         preferences={preferences} setPreferences={setPreferences}
         showEnvValues={showEnvValues} setShowEnvValues={setShowEnvValues}
         terminalEnvText={terminalEnvText} setTerminalEnvText={setTerminalEnvText}

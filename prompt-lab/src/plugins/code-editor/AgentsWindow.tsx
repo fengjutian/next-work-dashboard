@@ -79,7 +79,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           {sessionView === 'active' && props.sessions.map((session) => (
             <button key={session.id} disabled={props.aiEditing && props.activeSession?.id !== session.id} className={`group mb-1 w-full rounded px-2 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${props.activeSession?.id === session.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'}`} onClick={() => props.onSelectSession(session.id)}>
               <div className="flex items-center gap-1"><span className="min-w-0 flex-1 truncate font-medium">{session.title}</span><span className="text-[9px] text-muted-foreground">{statusLabel[session.status]}</span></div>
-              <div className="mt-1 flex items-center gap-2 text-[9px] text-muted-foreground"><span>{session.filesChanged} 文件</span><span>{new Date(session.updatedAt).toLocaleTimeString()}</span></div>
+              <div className="mt-1 flex items-center gap-2 text-[9px] text-muted-foreground"><span>{session.filesChanged} 文件</span><span>已接受 {session.accepted}</span><span>{new Date(session.updatedAt).toLocaleTimeString()}</span></div>
             </button>
           ))}
           {sessionView === 'archived' && props.archivedSessions.length === 0 && <p className="p-4 text-center text-xs text-muted-foreground">暂无已归档会话</p>}

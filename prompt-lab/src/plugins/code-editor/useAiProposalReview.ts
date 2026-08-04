@@ -17,7 +17,7 @@ interface UseAiProposalReviewOptions {
   aiHunks: AiHunk[];
   setAiHunks: Dispatch<SetStateAction<AiHunk[]>>;
   computeDiffHunks: (original: string, modified: string) => AiHunk[];
-  updateSessionAcceptCount: () => void;
+  updateSessionAcceptCount: (count?: number) => void;
   appendOutput: (message: string) => void;
   setStatus: Dispatch<SetStateAction<string>>;
 }
@@ -152,7 +152,7 @@ export function useAiProposalReview({
     const count = aiProposals.length;
     setAiProposals([]);
     setDiffView(null);
-    updateSessionAcceptCount();
+    updateSessionAcceptCount(count);
     appendOutput(`已原子应用 ${count} 个 AI 文件修改到磁盘`);
     setStatus(`已原子应用 ${count} 个文件`);
   }, [aiProposals, appendOutput, documents, setAiHistory, setAiProposals, setDiffView, setDocuments, setStatus, updateSessionAcceptCount, workspace]);
