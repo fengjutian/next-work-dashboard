@@ -5,6 +5,7 @@ import type { EditorDiffView } from './useGitDiffMerge';
 
 interface UseAiProposalReviewOptions {
   workspace: { path: string } | null;
+  isolated?: boolean;
   documents: OpenDocument[];
   setDocuments: Dispatch<SetStateAction<OpenDocument[]>>;
   setActivePath: Dispatch<SetStateAction<string | null>>;
@@ -30,7 +31,7 @@ function proposalDiff(proposal: AiFileProposal): EditorDiffView {
 }
 
 export function useAiProposalReview({
-  workspace, documents, setDocuments, setActivePath, diffView, setDiffView,
+  workspace, isolated = false, documents, setDocuments, setActivePath, diffView, setDiffView,
   aiProposals, setAiProposals, aiHistory, setAiHistory, aiHunks, setAiHunks,
   computeDiffHunks, updateSessionAcceptCount, appendOutput, setStatus,
 }: UseAiProposalReviewOptions) {
@@ -74,13 +75,15 @@ export function useAiProposalReview({
 
   const acceptAiEdit = useCallback(() => {
     if (!diffView || diffView.source !== 'ai') return;
+    if (isolated) { setStatus('隔离模式请使用“全部接受”，修改将原子写入 worktree'); return; }
     acceptProposalView(diffView);
-  }, [acceptProposalView, diffView]);
+  }, [acceptProposalView, diffView, isolated, setStatus]);
 
   const acceptAiProposal = useCallback((path: string) => {
+    if (isolated) { setStatus('隔离模式请使用“全部接受”，修改将原子写入 worktree'); return; }
     const proposal = aiProposals.find((item) => item.path === path);
     if (proposal) acceptProposalView(proposalDiff(proposal));
-  }, [acceptProposalView, aiProposals]);
+  }, [acceptProposalView, aiProposals, isolated, setStatus]);
 
   const rejectAiEdit = useCallback(() => {
     if (diffView?.source === 'ai') advance(diffView.path);
@@ -99,7 +102,7 @@ export function useAiProposalReview({
     if (!workspace || !aiProposals.length) return;
     for (const proposal of aiProposals) {
       const sourcePath = proposal.previousPath ?? proposal.path;
-      const opened = documents.find((document) => document.path === sourcePath);
+      const opened = isolated ? undefined : documents.find((document) => document.path === sourcePath);
       if (opened && opened.content !== proposal.original) {
         setStatus(`AI 候选已过期：${proposal.path} 在生成后被修改，未接受任何文件`);
         return;
@@ -137,7 +140,7 @@ export function useAiProposalReview({
       return;
     }
     const modifiedAt = new Map((diskResult.data ?? []).map((item) => [item.path, item.modifiedAt]));
-    setDocuments((previous) => {
+    if (!isolated) setDocuments((previous) => {
       const updated = previous
         .filter((document) => aiProposals.find((proposal) => (
           (proposal.previousPath ?? proposal.path) === document.path
@@ -173,10 +176,11 @@ export function useAiProposalReview({
     updateSessionAcceptCount(count);
     appendOutput(`已原子应用 ${count} 个 AI 文件修改到磁盘`);
     setStatus(`已原子应用 ${count} 个文件`);
-  }, [aiProposals, appendOutput, documents, setAiHistory, setAiProposals, setDiffView, setDocuments, setStatus, updateSessionAcceptCount, workspace]);
+  }, [aiProposals, appendOutput, documents, isolated, setAiHistory, setAiProposals, setDiffView, setDocuments, setStatus, updateSessionAcceptCount, workspace]);
 
   const applyAiHunk = useCallback((hunkIndex: number, accept: boolean) => {
     if (!diffView || diffView.source !== 'ai') return;
+    if (isolated) { setStatus('隔离模式不支持将单个 Hunk 应用到主编辑器，请审阅后全部接受到 worktree'); return; }
     const hunk = aiHunks.find((item) => item.index === hunkIndex);
     if (!hunk) return;
     const originalLines = diffView.original.split('\n');
@@ -204,7 +208,7 @@ export function useAiProposalReview({
     appendOutput(`已审阅 AI 对 ${diffView.name} 的修改（尚未保存）`);
     setStatus('AI 修改审阅完成，请检查后保存');
     advance(diffView.path);
-  }, [advance, aiHunks, aiProposals, appendOutput, computeDiffHunks, diffView, setAiHistory, setAiHunks, setDiffView, setDocuments, setStatus]);
+  }, [advance, aiHunks, aiProposals, appendOutput, computeDiffHunks, diffView, isolated, setAiHistory, setAiHunks, setDiffView, setDocuments, setStatus]);
 
   const undoLastAiEdit = useCallback(() => {
     const edit = aiHistory.at(-1);

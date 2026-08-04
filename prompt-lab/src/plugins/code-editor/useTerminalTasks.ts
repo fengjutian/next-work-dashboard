@@ -112,9 +112,9 @@ export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus
     if (found.length) setTaskProblems((previous) => [...previous.slice(-499), ...found]);
   }, []);
 
-  const runWorkspaceTask = useCallback((taskName: string) => {
+  const runWorkspaceTask = useCallback((taskName: string, rootPath = workspace?.path) => {
     const task = workspaceTasks.find((item) => item.name === taskName);
-    if (!task || !workspace) return null;
+    if (!task || !rootPath) return null;
     setTaskProblems([]);
     try { resolveTaskOrder(workspaceTasks, task.name); } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); return null; }
     activeMatcherRef.current = task.problemMatcher;
@@ -122,10 +122,10 @@ export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus
     setTaskRun({ runId, name: task.name, state: task.isBackground ? 'background' : 'running', startedAt: Date.now() });
     setBottomPanel((previous) => ({ ...previous, open: true, tab: 'terminal' }));
     const env = Object.fromEntries(terminalEnvText.split(/\r?\n/).map((line) => line.split('=')).filter((parts) => parts.length >= 2).map(([key, ...value]) => [key.trim(), value.join('=').trim()]));
-    void window.electronAPI.workspace.runTask(workspace.path, task.name, runId, env).then((result) => { if (!result.success) setStatus(`任务失败：${displayError(result.error)}`); });
+    void window.electronAPI.workspace.runTask(rootPath, task.name, runId, env).then((result) => { if (!result.success) setStatus(`任务失败：${displayError(result.error)}`); });
     setStatus(`正在运行任务：${task.name}`);
     return runId;
-  }, [setBottomPanel, setStatus, terminalEnvText, workspace, workspaceTasks]);
+  }, [setBottomPanel, setStatus, terminalEnvText, workspace?.path, workspaceTasks]);
 
   const cancelWorkspaceTask = useCallback(() => { if (taskRun) void window.electronAPI.workspace.cancelTask(taskRun.runId); }, [taskRun]);
 

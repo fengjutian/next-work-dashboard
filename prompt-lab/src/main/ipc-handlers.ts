@@ -42,6 +42,7 @@ import {
 } from './lancedb-memory';
 import { mcpManager } from './mcp/mcp-manager';
 import type { McpServerConfig } from '../types/mcp';
+import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus } from './agent-worktree';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -1249,6 +1250,39 @@ export function setupIPC(webviewPreloadPath: string) {
         path: record.slice(3).replace(/^.* -> /, ''),
       }));
       return { success: true, data: entries };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:createAgentWorktree', async (_event, rootPath: string, sessionId: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const storageRoot = path.join(app.getPath('userData'), 'agent-worktrees');
+      const data = await createAgentWorktree(root, storageRoot, sessionId);
+      authorizeWorkspace(data.path);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:getAgentWorktreeStatus', async (_event, rootPath: string, sessionId: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const data = await getAgentWorktreeStatus(root, path.join(app.getPath('userData'), 'agent-worktrees'), sessionId);
+      if (data) authorizeWorkspace(data.path);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:discardAgentWorktree', async (_event, rootPath: string, sessionId: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      await discardAgentWorktree(root, path.join(app.getPath('userData'), 'agent-worktrees'), sessionId);
+      return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

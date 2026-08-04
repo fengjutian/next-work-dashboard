@@ -15,6 +15,7 @@ export interface AgentSession {
   validationTasks?: string[];
   autoValidate?: boolean;
   pinned?: boolean;
+  worktree?: { path: string; branch: string; head?: string; dirty: boolean };
 }
 
 export interface AgentLogEntry {

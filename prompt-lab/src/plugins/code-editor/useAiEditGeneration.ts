@@ -16,6 +16,7 @@ export interface AiExecutionMetrics { startedAt: number; firstChunkAt?: number; 
 interface UseAiEditGenerationOptions {
   aiApi: AiApiConfig;
   workspace: { path: string } | null;
+  isolated?: boolean;
   documents: OpenDocument[];
   activeDocument: OpenDocument | null;
   editorRef: MutableRefObject<monaco.editor.IStandaloneCodeEditor | null>;
@@ -117,7 +118,7 @@ function parseProposals(response: string, contexts: AiFileProposal[]): AiFilePro
 
 export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   const {
-    aiApi, workspace, documents, activeDocument, editorRef, aiInstruction, aiMessages,
+    aiApi, workspace, isolated = false, documents, activeDocument, editorRef, aiInstruction, aiMessages,
     setAiMessages, aiMultiFile, aiTokenBudget, inlineEdit, setInlineEdit, setAiEditing,
     setAiPendingRequest, setAiProposals, setDiffView, setDocuments, recordAiSession,
     appendOutput, setStatus,
@@ -161,6 +162,20 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     setAiEditing(true);
     setStatus(`AI 正在修改 ${activeDocument.name}…`);
     try {
+      let executionDocument = activeDocument;
+      if (isolated && workspace) {
+        const read = await window.electronAPI.workspace.readTextFile(workspace.path, activeDocument.path);
+        if (!read.success || !read.data) throw new Error(read.error ?? 'ISOLATED_FILE_READ_FAILED');
+        executionDocument = {
+          ...activeDocument,
+          content: read.data.content,
+          savedContent: read.data.content,
+          encoding: read.data.encoding,
+          lineEnding: read.data.lineEnding,
+          modifiedAt: read.data.modifiedAt,
+          readOnly: read.data.readOnly,
+        };
+      }
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       let conversation = aiMessages;
       if (conversationNeedsSummary(conversation, aiTokenBudget) && conversation.length > 4) {
@@ -179,11 +194,12 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       let response = '';
       if (aiMultiFile && workspace) {
         setAiExecutionStage('collecting-context');
-        const contexts = await collectContexts(workspace.path, documents, activeDocument, aiInstruction);
+        const executionDocuments = isolated ? [] : documents;
+        const contexts = await collectContexts(workspace.path, executionDocuments, executionDocument, aiInstruction);
         abortController.signal.throwIfAborted();
         const fitted = fitContextToTokenBudget(contexts.map((context) => ({
           path: context.path, content: context.original,
-          priority: context.path === activeDocument.path ? 100 : documents.some((document) => document.path === context.path) ? 50 : 0,
+          priority: context.path === executionDocument.path ? 100 : executionDocuments.some((document) => document.path === context.path) ? 50 : 0,
         })), aiTokenBudget);
         if (fitted.omitted.length) appendOutput(`Token 预算压缩：省略 ${fitted.omitted.length} 个低优先级文件（约 ${fitted.estimatedTokens} tokens）`);
         const messages = [
@@ -202,22 +218,29 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
         setDiffView({ ...first, name: first.path, source: 'ai' });
         appendOutput(`AI 已生成 ${proposals.length} 个文件的修改候选`);
       } else {
-        const selection = editorRef.current?.getSelection();
+        const selection = isolated ? null : editorRef.current?.getSelection();
         const selected = selection && !selection.isEmpty() ? editorRef.current?.getModel()?.getValueInRange(selection) : '';
         const messages = [
           { role: 'system' as const, content: '你是代码编辑器中的修改助手。根据要求修改文件。只返回修改后的完整文件内容，不要解释，不要输出 diff。' },
           ...history,
-          { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selected ? `\n重点关注的选中代码：\n${selected}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
+          { role: 'user' as const, content: `文件名：${executionDocument.name}\n语言：${executionDocument.language}\n修改要求：${aiInstruction.trim()}${selected ? `\n重点关注的选中代码：\n${selected}` : ''}\n\n当前完整文件：\n${executionDocument.content}` },
         ];
         setAiExecutionStage('generating');
         for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) { response += chunk.delta; trackResponseChunk(chunk.delta); }
         setAiExecutionStage('parsing');
         const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
         const modified = (fenced?.[1] ?? response).trimEnd();
-        if (!modified || modified === activeDocument.content.trimEnd()) { setAiPendingRequest(null); setStatus('AI 未生成有效修改'); return; }
-        setDiffView({ path: activeDocument.path, name: activeDocument.name, original: activeDocument.content, modified, language: activeDocument.language, source: 'ai' });
+        if (!modified || modified === executionDocument.content.trimEnd()) { setAiPendingRequest(null); setStatus('AI 未生成有效修改'); return; }
+        setAiProposals([{
+          path: executionDocument.path,
+          original: executionDocument.content,
+          modified,
+          language: executionDocument.language,
+          metadata: executionDocument,
+        }]);
+        setDiffView({ path: executionDocument.path, name: executionDocument.name, original: executionDocument.content, modified, language: executionDocument.language, source: 'ai' });
         recordAiSession(1);
-        appendOutput(`AI 已生成 ${activeDocument.name} 的修改候选，等待确认`);
+        appendOutput(`AI 已生成 ${executionDocument.name} 的修改候选，等待确认`);
       }
       setAiMessages((previous) => [...previous,
         { role: 'user' as const, content: aiInstruction.trim(), timestamp: Date.now() },
@@ -237,7 +260,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       if (requestAbortRef.current === abortController) requestAbortRef.current = null;
       setAiEditing(false);
     }
-  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, recordAiSession, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
+  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, isolated, recordAiSession, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
 
   const runInlineEdit = useCallback(async () => {
     if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;

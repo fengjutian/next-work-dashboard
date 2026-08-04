@@ -148,6 +148,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   } | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [worktreeBusy, setWorktreeBusy] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(180, Math.min(520, Number(localStorage.getItem('code-editor.sidebar-width')) || 240)));
   const [explorerFilter, setExplorerFilter] = useState('');
   const [explorerSort, setExplorerSort] = useState<'name' | 'type'>(() => (localStorage.getItem('code-editor.explorer-sort') as 'name' | 'type') || 'name');
@@ -214,6 +215,10 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     aiMessages, setAiMessages, aiPendingRequest, setAiPendingRequest,
     recordAiSession, updateSessionAcceptCount,
   } = useAiSessionState({ workspace, sessionId: activeAgentSession?.id, appendOutput });
+  const agentExecutionWorkspace = activeAgentSession?.worktree && workspace
+    ? { path: activeAgentSession.worktree.path, name: workspace.name }
+    : workspace;
+  const agentIsolated = Boolean(activeAgentSession?.worktree);
 
   useEffect(() => {
     if (!activeAgentSession) return;
@@ -266,7 +271,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   const {
     acceptAiEdit, acceptAiProposal, rejectAiEdit, rejectAiProposal, rejectAllAiEdits, acceptAllAiEdits, applyAiHunk, undoLastAiEdit,
   } = useAiProposalReview({
-    workspace,
+    workspace: agentExecutionWorkspace,
+    isolated: agentIsolated,
     documents,
     setDocuments,
     setActivePath,
@@ -292,7 +298,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
 
   const { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics } = useAiEditGeneration({
     aiApi,
-    workspace,
+    workspace: agentExecutionWorkspace,
+    isolated: agentIsolated,
     documents,
     activeDocument: documents.find((document) => document.path === activePath) ?? null,
     editorRef,
@@ -313,8 +320,8 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setStatus,
   });
 
-  const agentValidationRunsRef = useRef(new Map<string, { sessionId: string; taskName: string; remainingTasks: string[] }>());
-  const runWorkspaceTaskRef = useRef<(taskName: string) => string | null>(() => null);
+  const agentValidationRunsRef = useRef(new Map<string, { sessionId: string; taskName: string; remainingTasks: string[]; rootPath: string }>());
+  const runWorkspaceTaskRef = useRef<(taskName: string, rootPath?: string) => string | null>(() => null);
   const [agentValidationRunId, setAgentValidationRunId] = useState<string | null>(null);
   const handleAgentTaskEvent = useCallback((event: WorkspaceTaskEvent) => {
     const validation = agentValidationRunsRef.current.get(event.runId);
@@ -334,9 +341,9 @@ export const CodeEditorWorkspaceController: React.FC = () => {
       agentValidationRunsRef.current.delete(event.runId);
       if (event.state === 'completed' && validation.remainingTasks.length > 0) {
         const [nextTask, ...remainingTasks] = validation.remainingTasks;
-        const nextRunId = runWorkspaceTaskRef.current(nextTask);
+        const nextRunId = runWorkspaceTaskRef.current(nextTask, validation.rootPath);
         if (nextRunId) {
-          agentValidationRunsRef.current.set(nextRunId, { sessionId: validation.sessionId, taskName: nextTask, remainingTasks });
+          agentValidationRunsRef.current.set(nextRunId, { sessionId: validation.sessionId, taskName: nextTask, remainingTasks, rootPath: validation.rootPath });
           setAgentValidationRunId(nextRunId);
           appendAgentLog(validation.sessionId, 'info', `验证流水线继续：${nextTask}（剩余 ${remainingTasks.length} 项）`);
           return;
@@ -363,13 +370,14 @@ export const CodeEditorWorkspaceController: React.FC = () => {
   runWorkspaceTaskRef.current = runWorkspaceTask;
   const startAgentValidation = useCallback((taskNames: string[], session = activeAgentSession) => {
     const [taskName, ...remainingTasks] = taskNames;
-    if (!session || !taskName) return;
-    const runId = runWorkspaceTask(taskName);
+    const rootPath = session?.worktree?.path ?? workspace?.path;
+    if (!session || !taskName || !rootPath) return;
+    const runId = runWorkspaceTask(taskName, rootPath);
     if (!runId) return;
-    agentValidationRunsRef.current.set(runId, { sessionId: session.id, taskName, remainingTasks });
+    agentValidationRunsRef.current.set(runId, { sessionId: session.id, taskName, remainingTasks, rootPath });
     setAgentValidationRunId(runId);
     appendAgentLog(session.id, 'info', `已提交验证流水线：${taskNames.join(' → ')}`);
-  }, [activeAgentSession, appendAgentLog, runWorkspaceTask]);
+  }, [activeAgentSession, appendAgentLog, runWorkspaceTask, workspace?.path]);
   const autoValidationSeenRef = useRef(new Map<string, number>());
   useEffect(() => {
     if (!activeAgentSession) return;
@@ -484,6 +492,21 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     if (activeAgentSession && instruction) appendAgentLog(activeAgentSession.id, 'info', `开始任务：${instruction}`);
     await generateAiEdit();
   }, [activeAgentSession, aiInstruction, appendAgentLog, generateAiEdit, updateAgentSession]);
+
+  const refreshAgentWorktree = useCallback(async () => {
+    if (!workspace || !activeAgentSession) return;
+    setWorktreeBusy(true);
+    try {
+      const result = await window.electronAPI.workspace.getAgentWorktreeStatus(workspace.path, activeAgentSession.id);
+      if (!result.success) { setStatus(`worktree 状态读取失败：${displayError(result.error)}`); return; }
+      updateAgentSession(activeAgentSession.id, { worktree: result.data ? { path: result.data.path, branch: result.data.branch, head: result.data.head, dirty: result.data.dirty } : undefined });
+    } finally { setWorktreeBusy(false); }
+  }, [activeAgentSession, updateAgentSession, workspace]);
+  useEffect(() => {
+    if (activeAgentSession?.worktree && workspace) void refreshAgentWorktree();
+    // Refresh once when selecting/restoring an isolated session; this also reauthorizes its path after app restart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAgentSession?.id, activeAgentSession?.worktree?.path, workspace?.path]);
 
   const selectTreeNode = useCallback((node: TreeNode, event?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
     if (event?.shiftKey && selectedNode) {
@@ -1314,7 +1337,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         onOpenProposal={(proposal) => setDiffView({ path: proposal.path, name: proposal.path, original: proposal.original, modified: proposal.modified, language: proposal.language, source: 'ai' })}
         onAcceptProposal={acceptAiProposal}
         onRejectProposal={rejectAiProposal}
-        onAcceptAll={() => { void (async () => { if (await appConfirm(`接受全部 ${aiProposals.length} 个修改并写入工作区？`)) await acceptAllAiEdits(); })(); }}
+        onAcceptAll={() => { void (async () => { if (await appConfirm(`接受全部 ${aiProposals.length} 个修改并写入${agentIsolated ? '隔离 worktree' : '工作区'}？`)) { await acceptAllAiEdits(); if (agentIsolated) await refreshAgentWorktree(); } })(); }}
         onRejectAll={() => { void (async () => { if (await appConfirm(`拒绝全部 ${aiProposals.length} 个修改候选？`)) rejectAllAiEdits(); })(); }}
         onRunValidation={startAgentValidation}
         onCancelValidation={cancelWorkspaceTask}
@@ -1327,6 +1350,28 @@ export const CodeEditorWorkspaceController: React.FC = () => {
           setAiInstruction(`修复以下验证失败。分析根因并生成最小、完整的代码修改；不要绕过或删除测试。\n\n${context}`);
           appendAgentLog(activeAgentSession.id, 'info', '已根据验证失败创建继续修复指令');
         }}
+        worktreeBusy={worktreeBusy}
+        onCreateWorktree={() => { void (async () => {
+          if (!workspace || !activeAgentSession) return;
+          setWorktreeBusy(true);
+          try {
+            const result = await window.electronAPI.workspace.createAgentWorktree(workspace.path, activeAgentSession.id);
+            if (!result.success || !result.data) { setStatus(`创建 worktree 失败：${displayError(result.error)}`); return; }
+            updateAgentSession(activeAgentSession.id, { worktree: { path: result.data.path, branch: result.data.branch, head: result.data.head, dirty: result.data.dirty } });
+            appendAgentLog(activeAgentSession.id, 'success', `已创建隔离 worktree：${result.data.branch}`);
+          } finally { setWorktreeBusy(false); }
+        })(); }}
+        onRefreshWorktree={() => { void refreshAgentWorktree(); }}
+        onDiscardWorktree={() => { void (async () => {
+          if (!workspace || !activeAgentSession || !await appConfirm('放弃并永久删除此 Agent worktree、分支及其中未提交修改？此操作无法撤销。')) return;
+          setWorktreeBusy(true);
+          try {
+            const result = await window.electronAPI.workspace.discardAgentWorktree(workspace.path, activeAgentSession.id);
+            if (!result.success) { setStatus(`放弃 worktree 失败：${displayError(result.error)}`); return; }
+            updateAgentSession(activeAgentSession.id, { worktree: undefined });
+            appendAgentLog(activeAgentSession.id, 'warning', '已放弃并清理隔离 worktree');
+          } finally { setWorktreeBusy(false); }
+        })(); }}
       /> : <div className="flex min-h-0 flex-1">
         {sidebarVisible && <WorkspaceExplorer
           width={sidebarWidth}

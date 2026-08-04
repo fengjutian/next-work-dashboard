@@ -47,6 +47,10 @@ interface AgentsWindowProps {
   onCancelValidation: () => void;
   onValidationConfigChange: (taskNames: string[], autoValidate: boolean) => void;
   onFixValidationFailure: () => void;
+  worktreeBusy: boolean;
+  onCreateWorktree: () => void;
+  onRefreshWorktree: () => void;
+  onDiscardWorktree: () => void;
 }
 
 const statusLabel: Record<AgentSession['status'], string> = {
@@ -147,13 +151,13 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
       </section>
 
       <aside className="flex w-72 shrink-0 flex-col border-l">
-        <div className="flex h-10 items-center border-b px-3 text-xs font-semibold">CHANGES <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">{props.aiProposals.length}</span><div className="flex-1" />{props.aiProposals.length > 0 && <><button className="rounded px-1.5 py-1 text-[10px] font-normal text-primary hover:bg-accent" onClick={props.onAcceptAll}>全部接受</button><button className="rounded px-1.5 py-1 text-[10px] font-normal text-destructive hover:bg-accent" onClick={props.onRejectAll}>全部拒绝</button></>}</div>
+        <div className="flex h-10 items-center border-b px-3 text-xs font-semibold">CHANGES <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px]">{props.aiProposals.length}</span><div className="flex-1" />{props.aiProposals.length > 0 && <><button className="rounded px-1.5 py-1 text-[10px] font-normal text-primary hover:bg-accent" onClick={props.onAcceptAll}>{props.activeSession?.worktree ? '写入 worktree' : '全部接受'}</button><button className="rounded px-1.5 py-1 text-[10px] font-normal text-destructive hover:bg-accent" onClick={props.onRejectAll}>全部拒绝</button></>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">
           {props.aiProposals.length === 0 && <p className="p-3 text-xs text-muted-foreground">Agent 生成修改后会显示在这里。</p>}
           {props.aiProposals.map((proposal) => {
             const summary = summarizeAiProposal(proposal);
             const kindLabel = { create: '新增', modify: '修改', delete: '删除', rename: '重命名' }[summary.kind];
-            return <div key={proposal.path} className="mb-1 rounded border px-2 py-2 text-xs hover:bg-accent/40"><button className="w-full text-left" onClick={() => props.onOpenProposal(proposal)}><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{proposal.path.split(/[\\/]/).pop()}</span><span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">{kindLabel}</span></div><div className="mt-1 truncate text-[10px] text-muted-foreground">{proposal.previousPath ? `${proposal.previousPath} → ${proposal.path}` : proposal.path}</div><div className="mt-1 text-[10px]"><span className="text-success">+{summary.additions}</span> <span className="text-destructive">-{summary.deletions}</span></div></button><div className="mt-1 flex justify-end gap-1"><button className="rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-accent" onClick={() => props.onAcceptProposal(proposal.path)}>接受</button><button className="rounded px-1.5 py-0.5 text-[10px] text-destructive hover:bg-accent" onClick={() => props.onRejectProposal(proposal.path)}>拒绝</button></div></div>;
+            return <div key={proposal.path} className="mb-1 rounded border px-2 py-2 text-xs hover:bg-accent/40"><button className="w-full text-left" onClick={() => props.onOpenProposal(proposal)}><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{proposal.path.split(/[\\/]/).pop()}</span><span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">{kindLabel}</span></div><div className="mt-1 truncate text-[10px] text-muted-foreground">{proposal.previousPath ? `${proposal.previousPath} → ${proposal.path}` : proposal.path}</div><div className="mt-1 text-[10px]"><span className="text-success">+{summary.additions}</span> <span className="text-destructive">-{summary.deletions}</span></div></button><div className="mt-1 flex justify-end gap-1">{!props.activeSession?.worktree && <button className="rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-accent" onClick={() => props.onAcceptProposal(proposal.path)}>接受</button>}<button className="rounded px-1.5 py-0.5 text-[10px] text-destructive hover:bg-accent" onClick={() => props.onRejectProposal(proposal.path)}>拒绝</button></div></div>;
           })}
         </div>
         <div className="border-t p-3">
@@ -165,7 +169,11 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
           })()}
           {props.validationRun && <div className="mt-2 text-[10px] text-muted-foreground">{props.validationRun.name} · {props.validationRun.state}</div>}
         </div>
-        <div className="border-t p-3 text-[10px] text-muted-foreground">所有修改都需要通过 Diff 审阅，不会自动保存。</div>
+        <div className="border-t p-3">
+          <div className="mb-2 text-[10px] font-semibold">ISOLATION</div>
+          {props.activeSession?.worktree ? <div className="space-y-1 text-[10px]"><div className="truncate text-muted-foreground" title={props.activeSession.worktree.path}>{props.activeSession.worktree.branch}</div><div className="flex items-center gap-2"><span className={props.activeSession.worktree.dirty ? 'text-warning' : 'text-success'}>{props.activeSession.worktree.dirty ? '有未提交修改' : '工作区干净'}</span><div className="flex-1" /><button className="rounded px-1 py-0.5 hover:bg-accent" disabled={props.worktreeBusy} onClick={props.onRefreshWorktree}>刷新</button><button className="rounded px-1 py-0.5 text-destructive hover:bg-accent" disabled={props.worktreeBusy || props.aiEditing} onClick={props.onDiscardWorktree}>放弃</button></div><p className="text-success">AI 读取、候选写入和验证均在隔离 worktree 执行。</p></div> : <Button size="sm" variant="outline" className="h-7 w-full text-[10px]" disabled={!props.activeSession || props.worktreeBusy || props.aiEditing} onClick={props.onCreateWorktree}>{props.worktreeBusy ? '准备中…' : '准备独立 worktree'}</Button>}
+        </div>
+        <div className="border-t p-3 text-[10px] text-muted-foreground">{props.activeSession?.worktree ? '隔离模式：审阅后原子写入 worktree，不修改主工作区。' : '所有修改都需要通过 Diff 审阅，不会自动保存。'}</div>
       </aside>
     </div>
   );

@@ -114,6 +114,9 @@ export interface ElectronAPI {
     semanticSearch: (rootPath: string, symbol: string) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
+    createAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo>>;
+    getAgentWorktreeStatus: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo | null>>;
+    discardAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<void>>;
     gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
     gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
     gitUnstage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
@@ -230,6 +233,14 @@ export interface WorkspaceSearchOptions {
 export interface WorkspaceGitStatus {
   path: string;
   status: string;
+}
+
+export interface AgentWorktreeInfo {
+  sessionId: string;
+  path: string;
+  branch: string;
+  head?: string;
+  dirty: boolean;
 }
 
 export type WorkspaceGitOperation = 'overview' | 'diagnostics' | 'createBranch' | 'deleteBranch' | 'renameBranch' | 'switchBranch' | 'fetch' | 'pull' | 'push' | 'sync' | 'log' | 'showCommit' | 'compareCommits' | 'fileDiff' | 'stagePatch' | 'conflictVersions' | 'stageConflictResult' | 'resolveConflict' | 'continueOperation' | 'abortOperation' | 'stashList' | 'stashShow' | 'stashPush' | 'stashApply' | 'stashPop' | 'stashDrop' | 'createTag' | 'deleteTag' | 'addRemote' | 'removeRemote';
