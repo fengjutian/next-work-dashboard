@@ -58,6 +58,7 @@ export type { AgentStep, AgentOptions } from './agent';
 // 知识图谱实体抽取
 export { extractFromDocuments, quickExtract } from './graph-extractor';
 export type { ExtractConfig } from './graph-extractor';
+export * from './knowledge';
 
 export { TencentDbMemoryAdapter } from './tencentdb-memory-adapter';
 export type {

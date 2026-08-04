@@ -27,6 +27,7 @@ import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-t
 import { WorkspaceTaskRunner } from './task-runner';
 import { detectRenameRename, parseUnmergedIndex } from './git-rename-conflict';
 import { createTypeScriptSemanticIndex } from './typescript-language-service';
+import { createKnowledgeDocumentFromTemplate, scanKnowledgeWorkspace } from './knowledge-workspace';
 import {
   clearLanceMemoryIndex,
   replaceLanceMemoryIndex,
@@ -709,6 +710,27 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('workspace:reauthorize', async (_event, rootPath: string) => {
     authorizeWorkspace(rootPath);
     return { success: true };
+  });
+
+  ipcMain.handle('knowledge:scanWorkspace', async (_event, rootPath: string) => {
+    try {
+      return { success: true, data: scanKnowledgeWorkspace(rootPath) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('knowledge:createFromTemplate', async (
+    _event,
+    rootPath: string,
+    templateId: string,
+    values: Record<string, string>,
+  ) => {
+    try {
+      return { success: true, data: createKnowledgeDocumentFromTemplate(rootPath, templateId, values) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 
   ipcMain.handle('workspace:listDirectory', async (

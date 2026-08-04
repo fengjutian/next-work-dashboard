@@ -171,6 +171,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('workspace:fileChanged', handler);
     },
   },
+  knowledge: {
+    scanWorkspace: (rootPath: string) => ipcRenderer.invoke('knowledge:scanWorkspace', rootPath),
+    createFromTemplate: (rootPath: string, templateId: string, values: Record<string, string>) =>
+      ipcRenderer.invoke('knowledge:createFromTemplate', rootPath, templateId, values),
+  },
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),
   writeTextFile: (filePath: string, content: string) =>

@@ -8,6 +8,13 @@ import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
+import type { KnowledgeDiagnostic, KnowledgeIndex, KnowledgeTemplate } from '@/core/knowledge';
+
+type KnowledgeWorkspaceView = KnowledgeIndex & {
+  templates: KnowledgeTemplate[];
+  diagnostics: KnowledgeDiagnostic[];
+  skipped: Array<{ path: string; reason: 'too-large' | 'unreadable' }>;
+};
 
 // ── 常量 ──
 
@@ -37,6 +44,9 @@ export const KnowledgeGraph: React.FC = () => {
   const [nodes, setNodes] = useState<GraphNode[]>(makeDefaultNodes);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [knowledgeWorkspace, setKnowledgeWorkspace] = useState<string | null>(null);
+  const [knowledgeIndex, setKnowledgeIndex] = useState<KnowledgeWorkspaceView | null>(null);
+  const [templateTitle, setTemplateTitle] = useState('');
 
   // ── 加载对话文件列表 ──
 
@@ -178,12 +188,114 @@ export const KnowledgeGraph: React.FC = () => {
     }
   }, [files, selectedPaths, nodes, toast]);
 
+  const applyKnowledgeIndex = useCallback((index: KnowledgeWorkspaceView) => {
+      const degree = new Map(index.documents.map((document) => [document.uri, 0]));
+      const edges = index.links.flatMap((link) => {
+        if (link.status !== 'resolved' || !link.targetUri) return [];
+        degree.set(link.sourceUri, (degree.get(link.sourceUri) ?? 0) + 1);
+        degree.set(link.targetUri, (degree.get(link.targetUri) ?? 0) + 1);
+        return [{
+          source: link.sourceUri, target: link.targetUri, weight: 1,
+          kind: 'wiki-link' as const,
+          sourcePath: index.documents.find((document) => document.uri === link.sourceUri)?.path,
+        }];
+      });
+      setGraphData({
+        nodes: index.documents.map((document) => ({
+          id: document.uri, label: document.title, degree: degree.get(document.uri) ?? 0,
+          source: 'wiki-link' as const, category: document.type,
+        })),
+        edges,
+      });
+      setKnowledgeIndex(index);
+      return edges.length;
+  }, []);
+
+  const scanKnowledgeWorkspace = useCallback(async (rootPath: string) => {
+      const result = await window.electronAPI.knowledge.scanWorkspace(rootPath);
+      if (!result.success || !result.data) throw new Error(result.error ?? 'SCAN_FAILED');
+      const index = result.data as KnowledgeWorkspaceView;
+      const edgeCount = applyKnowledgeIndex(index);
+      const unresolved = index.links.filter((link) => link.status !== 'resolved').length;
+      toast(`已索引 ${index.documents.length} 篇知识文档、${edgeCount} 条显式链接；${unresolved} 条待解析`, 'success');
+  }, [applyKnowledgeIndex, toast]);
+
+  const openKnowledgeWorkspace = useCallback(async () => {
+    const folder = await window.electronAPI.workspace.openFolder();
+    if (!folder) return;
+    setGenerating(true);
+    try {
+      await scanKnowledgeWorkspace(folder.path);
+      setKnowledgeWorkspace(folder.path);
+    } catch (error) {
+      toast(`知识工作区扫描失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }, [scanKnowledgeWorkspace, toast]);
+
+  const createFromTemplate = useCallback(async (templateId: string) => {
+    if (!knowledgeWorkspace || !templateTitle.trim()) return;
+    setGenerating(true);
+    try {
+      const result = await window.electronAPI.knowledge.createFromTemplate(
+        knowledgeWorkspace, templateId, { title: templateTitle.trim() },
+      );
+      if (!result.success || !result.data) throw new Error(result.error ?? 'CREATE_FAILED');
+      toast(`已创建 ${result.data.path}`, 'success');
+      setTemplateTitle('');
+      await scanKnowledgeWorkspace(knowledgeWorkspace);
+    } catch (error) {
+      toast(`模板创建失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }, [knowledgeWorkspace, scanKnowledgeWorkspace, templateTitle, toast]);
+
   // ── 渲染 ──
 
   return (
     <div className="flex h-full">
       {/* 左侧配置面板 */}
       <div className="w-64 flex-shrink-0 border-r flex flex-col bg-background">
+        <div className="border-b p-3">
+          <button
+            className="w-full h-8 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            disabled={generating}
+            onClick={() => void openKnowledgeWorkspace()}
+          >
+            打开 Markdown 知识工作区
+          </button>
+          {knowledgeWorkspace && <p className="mt-2 truncate text-xs text-muted-foreground" title={knowledgeWorkspace}>{knowledgeWorkspace}</p>}
+          {knowledgeIndex && (
+            <div className="mt-3 space-y-2">
+              <input
+                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                value={templateTitle}
+                onChange={(event) => setTemplateTitle(event.target.value)}
+                placeholder="新文档标题"
+              />
+              <div className="flex flex-wrap gap-1">
+                {knowledgeIndex.templates.map((template) => (
+                  <button
+                    key={template.id}
+                    className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+                    disabled={generating || !templateTitle.trim()}
+                    onClick={() => void createFromTemplate(template.id)}
+                  >
+                    {template.name}
+                  </button>
+                ))}
+              </div>
+              <div className="rounded bg-muted p-2 text-xs text-muted-foreground">
+                <p>孤立文档 {knowledgeIndex.orphanUris.length}</p>
+                <p>未解析链接 {knowledgeIndex.links.filter((link) => link.status === 'unresolved').length}</p>
+                <p>歧义链接 {knowledgeIndex.links.filter((link) => link.status === 'ambiguous').length}</p>
+                <p>规则问题 {knowledgeIndex.diagnostics.length}</p>
+              </div>
+            </div>
+          )}
+        </div>
         <FileSelector
           files={files}
           selectedPaths={selectedPaths}

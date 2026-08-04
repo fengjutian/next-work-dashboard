@@ -108,6 +108,17 @@ export interface ElectronAPI {
     unwatch: () => Promise<void>;
     onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;
   };
+  knowledge: {
+    scanWorkspace: (rootPath: string) => Promise<WorkspaceResult<import('../core/knowledge').KnowledgeIndex & {
+      skipped: Array<{ path: string; reason: 'too-large' | 'unreadable' }>;
+      templates: import('../core/knowledge').KnowledgeTemplate[];
+      rules: import('../core/knowledge').KnowledgeContentRule[];
+      diagnostics: import('../core/knowledge').KnowledgeDiagnostic[];
+    }>>;
+    createFromTemplate: (rootPath: string, templateId: string, values: Record<string, string>) => Promise<WorkspaceResult<{
+      path: string; modifiedAt: number; diagnostics: import('../core/knowledge').KnowledgeDiagnostic[];
+    }>>;
+  };
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;
   /** 保存到已经打开的文本文件。 */

@@ -5,7 +5,7 @@ export interface GraphNode {
   label: string;
   degree: number;
   /** 节点来源：manual=手动添加, extracted=AI抽取 */
-  source: 'manual' | 'extracted';
+  source: 'manual' | 'extracted' | 'wiki-link';
   /** 实体分类（extracted 时有效） */
   category?: string;
   /** 抽取置信度 0-1（extracted 时有效） */
@@ -16,6 +16,8 @@ export interface GraphEdge {
   source: string;
   target: string;
   weight: number;
+  kind?: 'co-occurrence' | 'inferred' | 'wiki-link';
+  sourcePath?: string;
 }
 
 export interface GraphData {
