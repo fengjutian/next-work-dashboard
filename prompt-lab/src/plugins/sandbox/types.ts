@@ -167,7 +167,7 @@ export interface PluginManifest {
    *  - 'sandbox'（默认） — iframe 沙箱，script 是 JS 源码
    *  - 'kernel' — 直接注入 React 树，bundle 是预编译的 JS 模块
    */
-  runtime?: 'sandbox' | 'kernel';
+  runtime?: 'sandbox';
 }
 
 export interface UserPluginDef {
@@ -181,9 +181,4 @@ export interface UserPluginDef {
   iconEmoji?: string;
   /** 插件清单（.nwd 格式迁移字段） */
   manifest?: PluginManifest;
-  /**
-   * 内核插件：预编译的 JS 源码（IIFE/UMD），导出 default React 组件。
-   * 仅在 manifest.runtime === 'kernel' 时使用。
-   */
-  bundle?: string;
 }

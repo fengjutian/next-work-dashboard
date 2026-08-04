@@ -1,5 +1,5 @@
 import React from 'react';
-import { Puzzle, Plus, Blocks, Trash2, Code, ShieldCheck, Download, Upload } from '@/components/icons';
+import { Puzzle, Plus, Blocks, Trash2, Code, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { isDbReady, dbSetSetting } from '@/db';
 import { loadUserPlugins, saveUserPlugins } from './user-plugin-store';
@@ -106,7 +106,6 @@ export const PluginManagerPanel: React.FC = () => {
               const userDefs = loadUserPlugins();
               const def = userDefs.find((d) => d.id === plugin.id);
               const isScriptPlugin = def?.script != null && def.script.length > 0;
-              const isKernelPlugin = def?.manifest?.runtime === 'kernel' && def?.bundle != null;
               return (
                 <PluginCard
                   key={plugin.id}
@@ -114,7 +113,6 @@ export const PluginManagerPanel: React.FC = () => {
                   Icon={Icon}
                   isUserPlugin={isUserPlugin}
                   isScriptPlugin={isScriptPlugin}
-                  isKernelPlugin={isKernelPlugin}
                   onDelete={handleDelete}
                   onExport={async (id) => {
                     const defs = loadUserPlugins();
@@ -178,7 +176,6 @@ interface PluginCardProps {
   Icon: React.ComponentType<{ className?: string }>;
   isUserPlugin: boolean;
   isScriptPlugin: boolean;
-  isKernelPlugin: boolean;
   onDelete: (id: string) => void;
   onExport: (id: string) => void;
   onToggle: (id: string) => void;
@@ -191,7 +188,6 @@ const PluginCard: React.FC<PluginCardProps> = ({
   Icon,
   isUserPlugin,
   isScriptPlugin,
-  isKernelPlugin,
   onDelete,
   onExport,
   onToggle,
@@ -274,12 +270,6 @@ const PluginCard: React.FC<PluginCardProps> = ({
 
     {/* 类型标签 */}
     <div className="flex items-center gap-1">
-      {isKernelPlugin && (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/10 bg-warning/10 text-warning text-warning font-medium">
-          <ShieldCheck className="h-2.5 w-2.5 inline mr-0.5" />
-          内核
-        </span>
-      )}
       {isScriptPlugin && (
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-light text-primary font-medium">
           <Code className="h-2.5 w-2.5 inline mr-0.5" />

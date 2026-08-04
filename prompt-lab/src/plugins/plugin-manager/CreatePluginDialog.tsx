@@ -24,15 +24,13 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
   const [formScript, setFormScript] = React.useState('');
   const [formStyle, setFormStyle] = React.useState('');
   const [formPermissions, setFormPermissions] = React.useState<PluginPermission[]>([]);
-  const [activeTab, setActiveTab] = React.useState<'basic' | 'advanced' | 'kernel'>('basic');
+  const [activeTab, setActiveTab] = React.useState<'basic' | 'advanced'>('basic');
   // 清单字段
   const [formVersion, setFormVersion] = React.useState('0.1.0');
   const [formDescription, setFormDescription] = React.useState('');
   const [formAuthor, setFormAuthor] = React.useState('');
   const [formIconEmoji, setFormIconEmoji] = React.useState('📊');
   const [formConfig, setFormConfig] = React.useState<PluginConfigDeclaration[]>([]);
-  // 内核模式
-  const [formBundle, setFormBundle] = React.useState('');
 
   // 打开时重置表单
   React.useEffect(() => {
@@ -49,7 +47,6 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       setFormAuthor('');
       setFormIconEmoji('📊');
       setFormConfig([]);
-      setFormBundle('');
     }
   }, [open]);
 
@@ -89,11 +86,6 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
     }
 
     // 构建清单
-    const isKernel = activeTab === 'kernel' && formBundle.trim().length > 0;
-    if (isKernel) {
-      alert('用户 Kernel 插件已关闭，请使用 Sandbox 模式。');
-      return;
-    }
     const manifest: PluginManifest = {
       id,
       name,
@@ -104,7 +96,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
       iconEmoji: formIconEmoji || undefined,
       permissions: formPermissions,
       config: formConfig.length > 0 ? formConfig : undefined,
-      runtime: isKernel ? 'kernel' : 'sandbox',
+      runtime: 'sandbox',
     };
 
     // 持久化 + 注册
@@ -112,13 +104,12 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
     const def: UserPluginDef = {
       id,
       name,
-      content: isKernel ? '' : formContent,
-      script: isKernel ? undefined : (formScript || undefined),
-      style: isKernel ? undefined : (formStyle || undefined),
+      content: formContent,
+      script: formScript || undefined,
+      style: formStyle || undefined,
       permissions: formPermissions.length > 0 ? formPermissions : undefined,
       iconEmoji: formIconEmoji || undefined,
       manifest,
-      bundle: isKernel ? formBundle : undefined,
     };
     defs.push(def);
     saveUserPlugins(defs);
@@ -346,68 +337,6 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             </>
           )}
 
-          {/* ── 内核模式：React 组件 ── */}
-          {activeTab === 'kernel' && (
-            <>
-              {/* 安全警告 */}
-              <div className="p-3 rounded-lg border border-warning bg-warning/10 bg-warning/10 border-warning">
-                <div className="flex items-center gap-2 mb-1">
-                  <ShieldCheck className="h-4 w-4 text-warning" />
-                  <span className="text-xs font-semibold text-warning text-warning">
-                    系统级权限
-                  </span>
-                </div>
-                <p className="text-[11px] text-warning text-warning leading-relaxed">
-                  内核插件直接注入 React 树，可以访问完整的 Node.js API、Electron API 和文件系统。
-                  仅安装来自可信来源的内核插件。
-                </p>
-              </div>
-
-              {/* Bundle 代码编辑 */}
-              <div>
-                <label className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground mb-1">
-                  <Code className="h-3.5 w-3.5" />
-                  React 组件源码（IIFE/UMD）
-                  <span className="text-destructive">*</span>
-                </label>
-                <textarea
-                  className="w-full px-2 py-1.5 text-xs font-mono border rounded-md bg-background border-border text-foreground outline-none focus:border-warning resize-none"
-                  rows={12}
-                  placeholder={"// 支持 JSX，Babel 自动编译\n// 可用: React, XLSX, useStore, electronAPI, injectToAI\n\nconst { useState } = React;\n\nfunction ExcelReader() {\n  const [data, setData] = useState(null);\n\n  const loadExcel = async () => {\n    const result = await electronAPI.pickFile({ accept: '.xlsx' });\n    if (!result) return;\n    const wb = XLSX.read(result.content, { type: 'base64' });\n    const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);\n    setData(json);\n  };\n\n  const injectData = async () => {\n    if (!data) return;\n    const text = data.map(r => Object.values(r).join('\\t')).join('\\n');\n    await injectToAI('deepseek', '请分析以下 Excel 数据:\\n' + text, false);\n  };\n\n  return (\n    <div style={{padding:16}}>\n      <button onClick={loadExcel}\n        style={{padding:'6px 14px',borderRadius:8,background:'#3b82f6',color:'#fff',border:'none',cursor:'pointer'}}>\n        打开 Excel\n      </button>\n      {data && <>\n        <button onClick={injectData}\n          style={{marginLeft:8,padding:'6px 14px',borderRadius:8,background:'#10b981',color:'#fff',border:'none',cursor:'pointer'}}>\n          注入到 AI\n        </button>\n        <pre style={{marginTop:12,fontSize:12,maxHeight:400,overflow:'auto'}}>\n          {JSON.stringify(data.slice(0,5), null, 2)}\n        </pre>\n      </>}\n    </div>\n  );\n}\n\nmodule.exports = ExcelReader;"}
-                  value={formBundle}
-                  onChange={(e) => setFormBundle(e.target.value)}
-                  spellCheck={false}
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  支持 <strong>JSX/TSX</strong> 语法（Babel 自动编译）。可用 <code>require('xlsx')</code> 返回 SheetJS。
-                  确保末尾 <code>module.exports = 组件名;</code> 导出 React 组件。
-                </p>
-              </div>
-
-              {/* 或从文件加载 */}
-              <button
-                className="w-full py-2 text-xs font-medium text-muted-foreground border border-dashed border-input rounded-lg hover:border-warning hover:text-warning transition-colors"
-                onClick={() => {
-                  const input = document.createElement('input');
-                  input.type = 'file';
-                  input.accept = '.js,.ts,.jsx,.tsx';
-                  input.onchange = () => {
-                    const file = input.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        setFormBundle(reader.result as string);
-                      };
-                      reader.readAsText(file);
-                    }
-                  };
-                  input.click();
-                }}
-              >
-                或从文件加载 bundle...
-              </button>
-            </>
-          )}
         </div>
 
         {/* 底部按钮 */}
@@ -424,7 +353,7 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             </button>
             <button
               className="px-4 py-1.5 text-xs font-medium bg-primary hover:bg-primary-hover text-white rounded-md transition-colors disabled:opacity-40"
-              disabled={!formName.trim() || (activeTab === 'kernel' && !formBundle.trim())}
+              disabled={!formName.trim()}
               onClick={handleCreate}
             >
               创建插件

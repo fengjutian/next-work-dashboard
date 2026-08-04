@@ -9,16 +9,18 @@ import { SettingsDataManagement } from '@/components/settings/SettingsDataManage
 import { SettingsAbout } from '@/components/settings/SettingsAbout';
 import { SettingsAiApi } from '@/components/settings/SettingsAiApi';
 import { SettingsMemory } from '@/components/settings/SettingsMemory';
+import { SettingsPlugins } from '@/components/settings/SettingsPlugins';
 import { useStore } from '@/store';
 
 // ── Tab 配置 ──
 
-type SettingsTab = 'ai-api' | 'memory' | 'ai-sites' | 'appearance' | 'shortcuts' | 'data' | 'about';
+type SettingsTab = 'ai-api' | 'memory' | 'ai-sites' | 'plugins' | 'appearance' | 'shortcuts' | 'data' | 'about';
 
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: 'ai-api', label: 'AI API' },
   { id: 'memory', label: '知识库' },
   { id: 'ai-sites', label: 'AI 站点' },
+  { id: 'plugins', label: '插件' },
   { id: 'appearance', label: '外观' },
   { id: 'shortcuts', label: '快捷键' },
   { id: 'data', label: '数据管理' },
@@ -30,6 +32,7 @@ const ALL_PANELS: { id: SettingsTab; Component: React.FC }[] = [
   { id: 'ai-api', Component: SettingsAiApi },
   { id: 'memory', Component: SettingsMemory },
   { id: 'ai-sites', Component: SettingsAISites },
+  { id: 'plugins', Component: SettingsPlugins },
   { id: 'appearance', Component: SettingsAppearance },
   { id: 'shortcuts', Component: SettingsShortcuts },
   { id: 'data', Component: SettingsDataManagement },

@@ -47,10 +47,27 @@ export const TitleBar: React.FC = () => {
     action();
   };
 
+  const openWithContributedEditor = async () => {
+    setOpenMenu(null);
+    const result = await window.electronAPI.pickFile({ multiple: false });
+    const file = Array.isArray(result) ? result[0] : result;
+    if (!file) return;
+    const editor = pluginRegistry.resolveFileEditor(file.name);
+    if (!editor) {
+      window.alert(`没有可用于 ${file.name} 的文件编辑器`);
+      return;
+    }
+    setActiveActivity(editor.pluginId);
+    requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('plugin:file-open', {
+      detail: { pluginId: editor.pluginId, editorId: editor.id, file },
+    })));
+  };
+
   return (
     <div ref={barRef} className="titlebar-drag titlebar-auspicious-purple relative z-[100] flex h-8 flex-shrink-0 items-center border-b text-xs text-white shadow-sm select-none">
       <nav className="titlebar-no-drag flex h-full items-center px-1" aria-label="应用菜单">
         <MenuButton label="文件" open={openMenu === 'file'} onClick={() => toggleMenu('file')}>
+          <MenuItem label="打开文件…" shortcut="Ctrl+O" onClick={() => void openWithContributedEditor()} />
           <MenuItem label="AI 工作台" shortcut="Ctrl+1" onClick={() => run(() => setActiveActivity('ai'))} />
           <MenuItem label="设置" shortcut="Ctrl+," onClick={() => run(() => setActiveActivity('settings'))} />
           <MenuDivider />

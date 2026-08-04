@@ -35,7 +35,7 @@ export function rehydrateUserPlugins(): void {
   const defs = loadUserPlugins();
   const nextOrder = pluginRegistry.getAll().length;
   defs.forEach((def, i) => {
-    if (def.manifest?.runtime === 'kernel' || def.bundle) return;
+    if (def.bundle) return;
     if (pluginRegistry.get(def.id)) return;
     const BoundPlugin: React.FC = () => (
       <DynamicPlugin
@@ -45,7 +45,6 @@ export function rehydrateUserPlugins(): void {
         style={def.style}
         pluginId={def.id}
         permissions={def.permissions}
-        bundle={def.bundle}
       />
     );
     const commands = def.manifest?.config
@@ -74,7 +73,7 @@ export function rehydrateUserPlugins(): void {
 
 /** 注册单个用户插件（用于新建/导入后即时注册） */
 export function registerUserPlugin(def: UserPluginDef): void {
-  if (def.manifest?.runtime === 'kernel' || def.bundle) {
+  if (def.bundle) {
     throw new Error('User Kernel plugins are disabled');
   }
   const BoundPlugin: React.FC = () => (
@@ -85,7 +84,6 @@ export function registerUserPlugin(def: UserPluginDef): void {
       style={def.style}
       pluginId={def.id}
       permissions={def.permissions}
-      bundle={def.bundle}
     />
   );
   const commands = def.manifest?.config

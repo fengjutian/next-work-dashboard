@@ -39,8 +39,8 @@ function validateBundle(bundle: unknown): { ok: true; manifest: PluginManifest }
   if (manifest.apiVersion && !SUPPORTED_API_VERSIONS.has(manifest.apiVersion)) {
     return { ok: false, message: `不支持的插件 API 版本: ${manifest.apiVersion}` };
   }
-  if (manifest.runtime !== undefined && manifest.runtime !== 'sandbox' && manifest.runtime !== 'kernel') {
-    return { ok: false, message: 'manifest.runtime 只能是 sandbox 或 kernel' };
+  if (manifest.runtime !== undefined && manifest.runtime !== 'sandbox') {
+    return { ok: false, message: '仅支持 sandbox runtime；用户 Kernel 插件已关闭' };
   }
   if (!Array.isArray(manifest.permissions) || manifest.permissions.some((p) => !ALLOWED_PERMISSIONS.has(p))) {
     return { ok: false, message: 'manifest.permissions 包含未知权限' };
@@ -49,9 +49,9 @@ function validateBundle(bundle: unknown): { ok: true; manifest: PluginManifest }
     return { ok: false, message: '插件 ID 必须为 2–64 位字母、数字、点、下划线或连字符' };
   }
 
-  const codeField = manifest.runtime === 'kernel' ? bundle.kernelBundle : bundle.script;
+  const codeField = bundle.script;
   if (typeof codeField !== 'string' || !codeField.trim()) {
-    return { ok: false, message: manifest.runtime === 'kernel' ? '内核插件缺少 bundle 代码' : '插件脚本为空' };
+    return { ok: false, message: '插件脚本为空' };
   }
   if (bundle.style !== undefined && bundle.style !== null && typeof bundle.style !== 'string') {
     return { ok: false, message: '插件 style 必须是字符串' };
@@ -69,18 +69,12 @@ export async function exportPlugin(def: UserPluginDef): Promise<void> {
       iconEmoji: def.iconEmoji,
     };
     const cleanManifest = { apiVersion: '1', ...manifest, id: def.id };
-    const isKernel = manifest.runtime === 'kernel' && def.bundle;
-
     const nwdBundle: any = {
       format: 'nwd-v1',
       manifest: cleanManifest,
+      script: def.script ?? def.content ?? '',
+      style: def.style ?? null,
     };
-    if (isKernel) {
-      nwdBundle.kernelBundle = def.bundle!;
-    } else {
-      nwdBundle.script = def.script ?? def.content ?? '';
-      nwdBundle.style = def.style ?? null;
-    }
     const bundleStr = JSON.stringify(nwdBundle, null, 2);
 
     const blob = new Blob([bundleStr], { type: 'application/json' });
@@ -110,14 +104,8 @@ export async function importPlugin(file: File): Promise<{ ok: boolean; message: 
     const pluginBundle = bundle as Record<string, unknown>;
 
     const id = derivePluginId(manifest);
-    const isKernel = manifest.runtime === 'kernel';
     const script = typeof pluginBundle.script === 'string' ? pluginBundle.script : '';
     const style = typeof pluginBundle.style === 'string' ? pluginBundle.style : '';
-    const kernelBundle = typeof pluginBundle.kernelBundle === 'string' ? pluginBundle.kernelBundle : '';
-
-    if (isKernel) {
-      return { ok: false, message: '用户 Kernel 插件已关闭；请将插件迁移到 Sandbox runtime' };
-    }
 
     const existing = loadUserPlugins().find((item) => item.id === id);
     if (pluginRegistry.get(id)?.source === 'built-in') {
@@ -128,12 +116,11 @@ export async function importPlugin(file: File): Promise<{ ok: boolean; message: 
       id,
       name: manifest.name,
       content: '',
-      script: isKernel ? undefined : script,
+      script,
       style: style || undefined,
       permissions: manifest.permissions ?? [],
       iconEmoji: manifest.iconEmoji,
       manifest,
-      bundle: isKernel ? kernelBundle : undefined,
     };
 
     const defs = loadUserPlugins();
