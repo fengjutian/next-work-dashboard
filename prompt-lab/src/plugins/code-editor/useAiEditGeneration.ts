@@ -11,6 +11,7 @@ import type { EditorDiffView } from './useGitDiffMerge';
 interface AiApiConfig { apiKey: string; baseUrl: string; model: string }
 
 export type AiExecutionStage = 'idle' | 'collecting-context' | 'summarizing' | 'generating' | 'parsing' | 'review' | 'cancelling' | 'interrupted' | 'failed';
+export interface AiExecutionMetrics { startedAt: number; firstChunkAt?: number; endedAt?: number; receivedChars: number }
 
 interface UseAiEditGenerationOptions {
   aiApi: AiApiConfig;
@@ -123,6 +124,20 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
   } = options;
   const requestAbortRef = useRef<AbortController | null>(null);
   const [aiExecutionStage, setAiExecutionStage] = useState<AiExecutionStage>('idle');
+  const metricsRef = useRef<AiExecutionMetrics | null>(null);
+  const lastMetricsPublishRef = useRef(0);
+  const [aiExecutionMetrics, setAiExecutionMetrics] = useState<AiExecutionMetrics | null>(null);
+  const trackResponseChunk = useCallback((delta: string) => {
+    const current = metricsRef.current;
+    if (!current || !delta) return;
+    const now = Date.now();
+    current.receivedChars += delta.length;
+    current.firstChunkAt ??= now;
+    if (now - lastMetricsPublishRef.current >= 100) {
+      lastMetricsPublishRef.current = now;
+      setAiExecutionMetrics({ ...current });
+    }
+  }, []);
 
   const cancelAiEdit = useCallback(() => {
     if (!requestAbortRef.current) return;
@@ -137,6 +152,9 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     if (requestAbortRef.current) return;
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
+    metricsRef.current = { startedAt: Date.now(), receivedChars: 0 };
+    lastMetricsPublishRef.current = 0;
+    setAiExecutionMetrics({ ...metricsRef.current });
     setAiExecutionStage(aiMultiFile ? 'collecting-context' : 'generating');
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
@@ -152,7 +170,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           ...conversation.map(({ role, content }) => ({ role, content })),
           { role: 'user' as const, content: '请压缩以上代码编辑会话：保留用户目标、已决定的方案、修改过的文件、未解决问题和约束。只返回简洁摘要。' },
         ];
-        for await (const chunk of provider.chat(prompt, { model: aiApi.model, temperature: 0.1, maxTokens: 2000, signal: abortController.signal })) summary += chunk.delta;
+        for await (const chunk of provider.chat(prompt, { model: aiApi.model, temperature: 0.1, maxTokens: 2000, signal: abortController.signal })) { summary += chunk.delta; trackResponseChunk(chunk.delta); }
         conversation = applyConversationSummary(conversation, summary);
         setAiMessages(conversation);
         appendOutput(`AI 长会话已压缩为摘要，保留最近 ${Math.min(4, aiMessages.length)} 条消息`);
@@ -174,7 +192,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fitted.files.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}` },
         ];
         setAiExecutionStage('generating');
-        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) response += chunk.delta;
+        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) { response += chunk.delta; trackResponseChunk(chunk.delta); }
         setAiExecutionStage('parsing');
         const proposals = parseProposals(response, contexts);
         if (!proposals.length) { setAiPendingRequest(null); setStatus('AI 未生成有效的多文件修改'); return; }
@@ -192,7 +210,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selected ? `\n重点关注的选中代码：\n${selected}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
         ];
         setAiExecutionStage('generating');
-        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) response += chunk.delta;
+        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) { response += chunk.delta; trackResponseChunk(chunk.delta); }
         setAiExecutionStage('parsing');
         const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
         const modified = (fenced?.[1] ?? response).trimEnd();
@@ -212,10 +230,14 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       setAiExecutionStage(isAbortError(error) ? 'interrupted' : 'failed');
       setStatus(isAbortError(error) ? 'Agent 请求已取消，可重新运行' : `AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      if (metricsRef.current) {
+        metricsRef.current.endedAt = Date.now();
+        setAiExecutionMetrics({ ...metricsRef.current });
+      }
       if (requestAbortRef.current === abortController) requestAbortRef.current = null;
       setAiEditing(false);
     }
-  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, recordAiSession, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, workspace]);
+  }, [activeDocument, aiApi, aiInstruction, aiMessages, aiMultiFile, aiTokenBudget, appendOutput, documents, editorRef, recordAiSession, setAiEditing, setAiMessages, setAiPendingRequest, setAiProposals, setDiffView, setStatus, trackResponseChunk, workspace]);
 
   const runInlineEdit = useCallback(async () => {
     if (!activeDocument || !inlineEdit.instruction.trim() || !aiApi.apiKey) return;
@@ -249,5 +271,5 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     finally { setAiEditing(false); }
   }, [activeDocument, aiApi, appendOutput, editorRef, inlineEdit.instruction, setAiEditing, setDocuments, setInlineEdit, setStatus]);
 
-  return { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage };
+  return { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage, aiExecutionMetrics };
 }

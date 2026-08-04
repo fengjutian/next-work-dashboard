@@ -11,6 +11,8 @@ export interface AgentSession {
   archivedAt?: number;
   filesChanged: number;
   accepted: number;
+  validationTask?: string;
+  autoValidate?: boolean;
 }
 
 export interface AgentLogEntry {

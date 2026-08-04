@@ -15,9 +15,10 @@ interface UseTerminalTasksOptions {
   appendOutput: (message: string) => void;
   setStatus: (message: string) => void;
   setBottomPanel: React.Dispatch<React.SetStateAction<{ open: boolean; tab: BottomPanelTab; height: number }>>;
+  onTaskEvent?: (event: WorkspaceTaskEvent) => void;
 }
 
-export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus, setBottomPanel }: UseTerminalTasksOptions) {
+export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus, setBottomPanel, onTaskEvent }: UseTerminalTasksOptions) {
   const counterRef = useRef(1);
   const activeMatcherRef = useRef<string>();
   const [taskProblems, setTaskProblems] = useState<EditorProblem[]>([]);
@@ -113,9 +114,9 @@ export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus
 
   const runWorkspaceTask = useCallback((taskName: string) => {
     const task = workspaceTasks.find((item) => item.name === taskName);
-    if (!task || !workspace) return;
+    if (!task || !workspace) return null;
     setTaskProblems([]);
-    try { resolveTaskOrder(workspaceTasks, task.name); } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); return; }
+    try { resolveTaskOrder(workspaceTasks, task.name); } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); return null; }
     activeMatcherRef.current = task.problemMatcher;
     const runId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setTaskRun({ runId, name: task.name, state: task.isBackground ? 'background' : 'running', startedAt: Date.now() });
@@ -123,11 +124,13 @@ export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus
     const env = Object.fromEntries(terminalEnvText.split(/\r?\n/).map((line) => line.split('=')).filter((parts) => parts.length >= 2).map(([key, ...value]) => [key.trim(), value.join('=').trim()]));
     void window.electronAPI.workspace.runTask(workspace.path, task.name, runId, env).then((result) => { if (!result.success) setStatus(`任务失败：${displayError(result.error)}`); });
     setStatus(`正在运行任务：${task.name}`);
+    return runId;
   }, [setBottomPanel, setStatus, terminalEnvText, workspace, workspaceTasks]);
 
   const cancelWorkspaceTask = useCallback(() => { if (taskRun) void window.electronAPI.workspace.cancelTask(taskRun.runId); }, [taskRun]);
 
   useEffect(() => window.electronAPI.workspace.onTaskEvent((event: WorkspaceTaskEvent) => {
+    onTaskEvent?.(event);
     if (event.state === 'output' && event.output) { appendOutput(`[${event.task}] ${event.output.trimEnd()}`); handleTerminalOutput(event.runId, event.output); return; }
     if (event.state === 'started') setTaskRun((current) => current?.runId === event.runId ? { ...current, state: current.state === 'background' ? 'background' : 'running' } : current);
     if (event.state === 'completed' || event.state === 'failed' || event.state === 'cancelled') {
@@ -136,7 +139,7 @@ export function useTerminalTasks({ workspace, appPrompt, appendOutput, setStatus
       setTaskHistory((previous) => [...previous.slice(-49), { runId: event.runId, name: event.task, state: finalState, startedAt: event.startedAt, endedAt: event.endedAt ?? Date.now() }]);
       setStatus(finalState === 'completed' ? `任务完成：${event.task}` : finalState === 'cancelled' ? `任务已取消：${event.task}` : `任务失败：${event.task}`);
     }
-  }), [appendOutput, handleTerminalOutput, setStatus]);
+  }), [appendOutput, handleTerminalOutput, onTaskEvent, setStatus]);
 
   useEffect(() => { void refreshTerminalProfiles(); }, [refreshTerminalProfiles]);
   useEffect(() => {

@@ -3,8 +3,9 @@ import { Bot, Copy, Edit3, Plus, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentLogEntry, AgentSession } from './agent-sessions';
-import type { AiExecutionStage } from './useAiEditGeneration';
+import type { AiExecutionMetrics, AiExecutionStage } from './useAiEditGeneration';
 import { summarizeAiProposal } from './ai-proposal-summary';
+import type { WorkspaceTask } from '@/types/electron';
 
 interface AgentsWindowProps {
   workspace: { path: string; name: string } | null;
@@ -16,10 +17,13 @@ interface AgentsWindowProps {
   aiEditing: boolean;
   aiPendingRequest: { instruction: string; status: 'running' | 'interrupted' } | null;
   aiExecutionStage: AiExecutionStage;
+  aiExecutionMetrics: AiExecutionMetrics | null;
   aiMultiFile: boolean;
   aiMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }>;
   aiProposals: AiFileProposal[];
   activeDocumentPath?: string;
+  workspaceTasks: WorkspaceTask[];
+  validationRun: { name: string; state: 'running' | 'background' | 'completed' | 'failed' | 'cancelled' } | null;
   onClose: () => void;
   onCreateSession: () => void;
   onSelectSession: (id: string) => void;
@@ -37,6 +41,9 @@ interface AgentsWindowProps {
   onRejectProposal: (path: string) => void;
   onAcceptAll: () => void;
   onRejectAll: () => void;
+  onRunValidation: (taskName: string) => void;
+  onCancelValidation: () => void;
+  onValidationConfigChange: (taskName: string, autoValidate: boolean) => void;
 }
 
 const statusLabel: Record<AgentSession['status'], string> = {
@@ -58,6 +65,7 @@ const stageLabel: Record<AiExecutionStage, string> = {
 export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
   const [sessionView, setSessionView] = useState<'active' | 'archived'>('active');
   const [contentView, setContentView] = useState<'conversation' | 'logs'>('conversation');
+  const [validationTask, setValidationTask] = useState('');
   if (!props.workspace) return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
       <Bot className="h-14 w-14 opacity-40" />
@@ -116,7 +124,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             : props.aiMessages.map((message, index) => <div key={`${message.timestamp}-${index}`} className={`mb-3 max-w-3xl rounded-lg border p-3 text-xs ${message.role === 'user' ? 'ml-auto bg-primary/5' : 'mr-auto bg-muted/30'}`}><div className="mb-1 text-[10px] font-semibold text-muted-foreground">{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Agent' : '系统'}</div><div className="whitespace-pre-wrap">{message.content}</div></div>)}
         </div>
         {contentView === 'conversation' && <div className="border-t p-3">
-          {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span></div>}
+          {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span>{props.aiExecutionMetrics && <><span>· {props.aiExecutionMetrics.receivedChars.toLocaleString()} 字符</span>{props.aiExecutionMetrics.firstChunkAt && <span>· 首字节 {props.aiExecutionMetrics.firstChunkAt - props.aiExecutionMetrics.startedAt}ms</span>}<span>· {(((props.aiExecutionMetrics.endedAt ?? Date.now()) - props.aiExecutionMetrics.startedAt) / 1000).toFixed(1)}s</span></>}</div>}
           <textarea value={props.aiInstruction} disabled={!props.activeSession || props.aiEditing} onChange={(event) => props.onInstructionChange(event.target.value)} placeholder="描述一个代码任务…" className="min-h-24 w-full resize-none rounded-md border bg-background p-3 text-xs outline-none" />
           <div className="mt-2 flex items-center gap-3 text-xs">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件 Agent</label>
@@ -138,6 +146,11 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             const kindLabel = { create: '新增', modify: '修改', delete: '删除', rename: '重命名' }[summary.kind];
             return <div key={proposal.path} className="mb-1 rounded border px-2 py-2 text-xs hover:bg-accent/40"><button className="w-full text-left" onClick={() => props.onOpenProposal(proposal)}><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium">{proposal.path.split(/[\\/]/).pop()}</span><span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">{kindLabel}</span></div><div className="mt-1 truncate text-[10px] text-muted-foreground">{proposal.previousPath ? `${proposal.previousPath} → ${proposal.path}` : proposal.path}</div><div className="mt-1 text-[10px]"><span className="text-success">+{summary.additions}</span> <span className="text-destructive">-{summary.deletions}</span></div></button><div className="mt-1 flex justify-end gap-1"><button className="rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-accent" onClick={() => props.onAcceptProposal(proposal.path)}>接受</button><button className="rounded px-1.5 py-0.5 text-[10px] text-destructive hover:bg-accent" onClick={() => props.onRejectProposal(proposal.path)}>拒绝</button></div></div>;
           })}
+        </div>
+        <div className="border-t p-3">
+          <div className="mb-2 text-[10px] font-semibold">VALIDATION</div>
+          {props.workspaceTasks.length === 0 ? <p className="text-[10px] text-muted-foreground">未发现工作区任务</p> : <><div className="flex gap-1"><select className="h-7 min-w-0 flex-1 rounded border bg-background px-1 text-[10px]" value={validationTask || props.activeSession?.validationTask || props.workspaceTasks[0]?.name || ''} disabled={Boolean(props.validationRun && (props.validationRun.state === 'running' || props.validationRun.state === 'background'))} onChange={(event) => { setValidationTask(event.target.value); props.onValidationConfigChange(event.target.value, Boolean(props.activeSession?.autoValidate)); }}>{props.workspaceTasks.map((task) => <option key={task.name} value={task.name}>{task.name}</option>)}</select>{props.validationRun && (props.validationRun.state === 'running' || props.validationRun.state === 'background') ? <Button size="sm" variant="destructive" className="h-7 px-2 text-[10px]" onClick={props.onCancelValidation}>取消</Button> : <Button size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={!props.activeSession} onClick={() => props.onRunValidation(validationTask || props.activeSession?.validationTask || props.workspaceTasks[0]?.name || '')}>运行</Button>}</div><label className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground"><input type="checkbox" checked={Boolean(props.activeSession?.autoValidate)} disabled={!props.activeSession} onChange={(event) => props.onValidationConfigChange(validationTask || props.activeSession?.validationTask || props.workspaceTasks[0]?.name || '', event.target.checked)} />接受修改后自动运行</label></>}
+          {props.validationRun && <div className="mt-2 text-[10px] text-muted-foreground">{props.validationRun.name} · {props.validationRun.state}</div>}
         </div>
         <div className="border-t p-3 text-[10px] text-muted-foreground">所有修改都需要通过 Diff 审阅，不会自动保存。</div>
       </aside>
