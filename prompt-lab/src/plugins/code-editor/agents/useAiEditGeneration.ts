@@ -3,14 +3,14 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { fitContextToTokenBudget } from './ai-context';
 import { checkTokenBudget } from './ai-token-budget';
 import { applyConversationSummary, conversationNeedsSummary, isAbortError, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
-import { languageIdFromName } from './editor-utils';
-import type { OpenDocument } from './editor-types';
+import { languageIdFromName } from '../editor-utils';
+import type { OpenDocument } from '../editor-types';
 import type { AiFileProposal } from './useAiSessionState';
-import type { EditorDiffView } from './useGitDiffMerge';
+import type { EditorDiffView } from '../useGitDiffMerge';
 import type { AgentTaskConfig, AgentTaskRecord } from '@/types/electron';
+import { pathInAgentScope, type AgentEditScope } from './agent-edit-scope';
 
 interface AiApiConfig { apiKey: string; baseUrl: string; model: string }
-export interface AgentEditScope { kind: 'workspace' | 'directory' | 'files'; paths: string[]; label: string }
 
 export type AiExecutionStage = 'idle' | 'collecting-context' | 'summarizing' | 'generating' | 'parsing' | 'review' | 'cancelling' | 'interrupted' | 'failed';
 export interface AiExecutionMetrics { startedAt: number; firstChunkAt?: number; endedAt?: number; receivedChars: number }
@@ -94,24 +94,13 @@ async function collectContexts(
 ) {
   const listed = await window.electronAPI.workspace.listFiles(workspacePath);
   const terms = instruction.toLocaleLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((term) => term.length >= 2);
-  const normalize = (value: string) => value.replace(/\\/g, '/');
-  const inScope = (filePath: string) => {
-    const normalized = normalize(filePath);
-    if (scope.kind === 'workspace') return true;
-    if (scope.kind === 'directory') {
-      const directory = normalize(scope.paths[0] ?? '').replace(/\/$/, '');
-      return Boolean(directory) && (normalized === directory || normalized.startsWith(`${directory}/`));
-    }
-    const selected = new Set(scope.paths.map(normalize));
-    return selected.has(normalized);
-  };
-  const candidates = (listed.data ?? []).filter((file) => inScope(file.path) && SOURCE_FILE.test(file.name)).sort((left, right) => {
+  const candidates = (listed.data ?? []).filter((file) => pathInAgentScope(file.path, scope) && SOURCE_FILE.test(file.name)).sort((left, right) => {
     const score = (path: string) => terms.reduce((total, term) => total + (path.toLocaleLowerCase().includes(term) ? 1 : 0), 0);
     return score(right.path) - score(left.path);
   });
   const paths = [...new Set([
-    ...(inScope(activeDocument.path) ? [activeDocument.path] : []),
-    ...documents.filter((document) => !document.standalone && inScope(document.path)).map((document) => document.path),
+    ...(pathInAgentScope(activeDocument.path, scope) ? [activeDocument.path] : []),
+    ...documents.filter((document) => !document.standalone && pathInAgentScope(document.path, scope)).map((document) => document.path),
     ...(scope.kind === 'files' ? scope.paths : []),
     ...candidates.slice(0, 8).map((file) => file.path),
   ])].slice(0, 10);
@@ -159,20 +148,11 @@ function parseProposals(response: string, contexts: AiFileProposal[], scope: Age
   const json = response.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
   const parsed = JSON.parse(json) as { files?: Array<{ path: string; oldPath?: string; content: string }> };
   const allowed = new Map(contexts.map((context) => [context.path.replace(/\\/g, '/'), context]));
-  const inScope = (filePath: string) => {
-    const normalized = filePath.replace(/\\/g, '/');
-    if (scope.kind === 'workspace') return true;
-    if (scope.kind === 'directory') {
-      const directory = (scope.paths[0] ?? '').replace(/\\/g, '/').replace(/\/$/, '');
-      return Boolean(directory) && normalized.startsWith(`${directory}/`);
-    }
-    return scope.paths.map((path) => path.replace(/\\/g, '/')).includes(normalized);
-  };
   return (parsed.files ?? []).flatMap((file) => {
     const path = file.path.replace(/\\/g, '/');
     const previousPath = file.oldPath?.replace(/\\/g, '/');
     const context = allowed.get(previousPath ?? path);
-    if (typeof file.content !== 'string' || !SAFE_PATH.test(file.path) || file.path.includes('..') || !inScope(path) || (previousPath && !inScope(previousPath))) return [];
+    if (typeof file.content !== 'string' || !SAFE_PATH.test(file.path) || file.path.includes('..') || !pathInAgentScope(path, scope) || (previousPath && !pathInAgentScope(previousPath, scope))) return [];
     if (previousPath) {
       if (!context || !file.content || previousPath === path) return [];
       return [{ ...context, path, previousPath, modified: file.content, language: languageIdFromName(path) }];

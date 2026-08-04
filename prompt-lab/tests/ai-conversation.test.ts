@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyConversationSummary, conversationNeedsSummary, isAbortError, recoverInterruptedRequest } from '../src/plugins/code-editor/ai-conversation';
+import { applyConversationSummary, conversationNeedsSummary, isAbortError, recoverInterruptedRequest } from '../src/plugins/code-editor/agents/ai-conversation';
 
 describe('AI conversation recovery', () => {
   it('detects a conversation over its summary threshold', () => expect(conversationNeedsSummary([{ role: 'user', content: '中'.repeat(5000), timestamp: 1 }], 8000)).toBe(true));

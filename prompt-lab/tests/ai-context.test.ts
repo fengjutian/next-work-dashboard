@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estimateTokens, fitContextToTokenBudget } from '../src/plugins/code-editor/ai-context';
+import { estimateTokens, fitContextToTokenBudget } from '../src/plugins/code-editor/agents/ai-context';
 
 describe('AI context budgeting', () => {
   it('estimates CJK more densely than ASCII', () => {

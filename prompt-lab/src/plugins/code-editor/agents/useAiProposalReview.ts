@@ -1,7 +1,7 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import { displayError, type AiHunk, type OpenDocument } from './editor-types';
+import { displayError, type AiHunk, type OpenDocument } from '../editor-types';
 import type { AiEditHistory, AiFileProposal } from './useAiSessionState';
-import type { EditorDiffView } from './useGitDiffMerge';
+import type { EditorDiffView } from '../useGitDiffMerge';
 
 interface UseAiProposalReviewOptions {
   workspace: { path: string } | null;

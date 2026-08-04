@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { recoverInterruptedRequest, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
 import { isDbReady, dbInsertAgentMessage, dbInsertAgentProposal, dbDeleteAgentProposals, dbLoadAgentMessages, dbLoadAgentProposals } from '@/db';
-import type { AiHunk, OpenDocument } from './editor-types';
+import type { AiHunk, OpenDocument } from '../editor-types';
 
 export interface AiFileProposal {
   path: string;

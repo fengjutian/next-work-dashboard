@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, titleFromInstruction, type AgentSession } from '../src/plugins/code-editor/agent-sessions';
+import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, titleFromInstruction, type AgentSession } from '../src/plugins/code-editor/agents/agent-sessions';
 
 describe('agent sessions', () => {
   it('creates a workspace-bound idle session', () => {

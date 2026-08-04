@@ -3,7 +3,8 @@ import { Bot, Copy, Edit3, Pin, Plus, Search, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentLogEntry, AgentSession } from './agent-sessions';
-import type { AgentEditScope, AiExecutionMetrics, AiExecutionStage } from './useAiEditGeneration';
+import type { AiExecutionMetrics, AiExecutionStage } from './useAiEditGeneration';
+import type { AgentEditScope } from './agent-edit-scope';
 import { summarizeAiProposal } from './ai-proposal-summary';
 import type { WorkspaceTask } from '@/types/electron';
 
