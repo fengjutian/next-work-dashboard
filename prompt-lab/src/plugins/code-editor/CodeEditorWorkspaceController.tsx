@@ -22,16 +22,11 @@ import { DiffViewPanel } from './DiffViewPanel';
 import { FileTreeRow } from './FileTreeRow';
 import { SearchPanel } from './SearchPanel';
 import { QuickOpenPanel } from './QuickOpenPanel';
-import { estimateTokens } from './agents/ai-context';
 import { useTerminalTasks } from './useTerminalTasks';
 import { useGitRepository } from './useGitRepository';
 import { useWorkspaceSearch } from './useWorkspaceSearch';
 import { useEditorIntelligence } from './useEditorIntelligence';
-import { useAiSessionState, type AiFileProposal } from './agents/useAiSessionState';
 import { useGitDiffMerge } from './useGitDiffMerge';
-import { useAiProposalReview } from './agents/useAiProposalReview';
-import { useAiEditGeneration } from './agents/useAiEditGeneration';
-import type { AgentEditScope } from './agents/agent-edit-scope';
 import { useExplorerTree } from './useExplorerTree';
 import { useExplorerMutations } from './useExplorerMutations';
 import { useFileOpening } from './useFileOpening';
@@ -42,9 +37,11 @@ import { EditorDocumentHeader } from './EditorDocumentHeader';
 import { EditorWorkspaceBody } from './EditorWorkspaceBody';
 import { EditorStatusBar } from './EditorStatusBar';
 import { EditorTabMenu } from './EditorTabMenu';
-import { AgentsWindow } from './agents/AgentsWindow';
-import { useAgentSessions } from './agents/useAgentSessions';
-import { titleFromInstruction } from './agents/agent-sessions';
+import {
+  AgentsWindow, estimateTokens, titleFromInstruction, useAgentSessions,
+  useAiEditGeneration, useAiProposalReview, useAiSessionState,
+  type AgentEditScope, type AiFileProposal,
+} from './agents';
 import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import {

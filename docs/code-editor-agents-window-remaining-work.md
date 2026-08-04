@@ -11,11 +11,11 @@
 
 当前重要文件：
 
-- `prompt-lab/src/plugins/code-editor/AgentsWindow.tsx`：Agents UI。
+- `prompt-lab/src/plugins/code-editor/agents/AgentsWindow.tsx`：Agents UI。
 - `prompt-lab/src/plugins/code-editor/CodeEditorWorkspaceController.tsx`：当前总编排层。
-- `prompt-lab/src/plugins/code-editor/useAgentSessions.ts`：会话持久化与操作。
-- `prompt-lab/src/plugins/code-editor/useAiSessionState.ts`：按会话保存 AI 状态和候选。
-- `prompt-lab/src/plugins/code-editor/useAiEditGeneration.ts`：模型请求与结果解析。
+- `prompt-lab/src/plugins/code-editor/agents/useAgentSessions.ts`：会话持久化与操作。
+- `prompt-lab/src/plugins/code-editor/agents/useAiSessionState.ts`：按会话保存 AI 状态和候选。
+- `prompt-lab/src/plugins/code-editor/agents/useAiEditGeneration.ts`：模型请求与结果解析。
 - `prompt-lab/src/main/agent-worktree.ts`：worktree 生命周期与安全合并。
 - `prompt-lab/src/main/task-runner.ts`、`workspace-tasks.ts`：已有终端任务基础设施。
 - `prompt-lab/src/main/ipc-handlers.ts`、`src/preload.ts`、`src/types/electron.d.ts`：IPC 契约。

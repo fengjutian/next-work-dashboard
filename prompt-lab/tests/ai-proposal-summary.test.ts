@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeAiProposal } from '../src/plugins/code-editor/ai-proposal-summary';
+import { summarizeAiProposal } from '../src/plugins/code-editor/agents/ai-proposal-summary';
 
 describe('AI proposal summary', () => {
   it('classifies and counts a modified file', () => {

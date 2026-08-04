@@ -8,7 +8,7 @@ import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus, Work
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { classifyConflictStatus } from '../../main/git-conflicts';
 import { GitHistoryGraph } from './GitHistoryGraph';
-import type { AiExecutionStage } from './agents/useAiEditGeneration';
+import type { AiExecutionStage } from './agents';
 
 interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
 
