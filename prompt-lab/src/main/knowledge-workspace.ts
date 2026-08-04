@@ -5,6 +5,7 @@ import {
   instantiateKnowledgeTemplate,
   KnowledgeSearchIndex,
   parseKnowledgeDocument,
+  rewriteResolvedWikiLinks,
   validateKnowledgeDocument,
   type KnowledgeContentRule,
   type KnowledgeDiagnostic,
@@ -14,6 +15,7 @@ import {
   type KnowledgeTemplate,
 } from '../core/knowledge';
 import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
+import { applyWorkspaceFileMutations } from './workspace-transaction';
 
 const IGNORED = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache']);
 const MAX_DOCUMENTS = 5_000;
@@ -139,4 +141,39 @@ export function searchKnowledgeWorkspace(
     searchIndexes.set(root, cached);
   }
   return cached.index.search(query, limit, filters);
+}
+
+export function renameKnowledgeDocumentWithBacklinks(
+  rootPath: string,
+  relativePath: string,
+  nextRelativePath: string,
+): { path: string; updatedReferences: string[] } {
+  if (!/\.mdx?$/i.test(relativePath) || !/\.mdx?$/i.test(nextRelativePath)) throw new Error('NOT_A_KNOWLEDGE_DOCUMENT');
+  const workspace = scanKnowledgeWorkspace(rootPath);
+  const document = workspace.documents.find((item) => item.path === relativePath.replace(/\\/g, '/'));
+  if (!document) throw new Error('KNOWLEDGE_DOCUMENT_NOT_FOUND');
+  const incoming = workspace.links.filter((link) => link.status === 'resolved' && link.targetUri === document.uri);
+  const bySource = new Map<string, typeof incoming>();
+  incoming.forEach((link) => bySource.set(link.sourceUri, [...(bySource.get(link.sourceUri) ?? []), link]));
+  const targetFile = readKnowledgeDocument(rootPath, relativePath);
+  let renamedContent: string | undefined;
+  const mutations: import('./workspace-transaction').WorkspaceFileMutation[] = [];
+  const updatedReferences: string[] = [];
+  for (const [sourceUri, links] of bySource) {
+    const source = workspace.documents.find((item) => item.uri === sourceUri);
+    if (!source) continue;
+    const sourceFile = source.path === relativePath ? targetFile : readKnowledgeDocument(rootPath, source.path);
+    const content = rewriteResolvedWikiLinks(sourceFile.content, links, nextRelativePath);
+    if (content === sourceFile.content) continue;
+    updatedReferences.push(source.path);
+    if (source.path === relativePath) renamedContent = content;
+    else mutations.push({ kind: 'write', path: source.path, content, expectedModifiedAt: sourceFile.modifiedAt });
+  }
+  mutations.unshift({
+    kind: 'rename', path: relativePath, targetPath: nextRelativePath,
+    content: renamedContent, expectedModifiedAt: targetFile.modifiedAt,
+  });
+  applyWorkspaceFileMutations(rootPath, mutations);
+  searchIndexes.delete(resolveWorkspacePath(rootPath, ''));
+  return { path: nextRelativePath, updatedReferences };
 }

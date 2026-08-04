@@ -179,6 +179,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('knowledge:readDocument', rootPath, relativePath),
     searchWorkspace: (rootPath: string, query: string, limit?: number, filters?: import('./core/knowledge').KnowledgeSearchFilters) =>
       ipcRenderer.invoke('knowledge:searchWorkspace', rootPath, query, limit, filters),
+    renameDocument: (rootPath: string, relativePath: string, nextRelativePath: string) =>
+      ipcRenderer.invoke('knowledge:renameDocument', rootPath, relativePath, nextRelativePath),
   },
   saveFile: (content: string, defaultName?: string) =>
     ipcRenderer.invoke('dialog:saveFile', content, defaultName),

@@ -1,4 +1,4 @@
-import type { KnowledgeDocument, KnowledgeDocumentType, WikiLink } from './types';
+import type { KnowledgeDocument, KnowledgeDocumentType, ResolvedKnowledgeLink, WikiLink } from './types';
 
 function scalar(value: string): unknown {
   const trimmed = value.trim();
@@ -65,4 +65,18 @@ export function parseKnowledgeDocument(path: string, content: string, modifiedAt
     tags: stringList(attributes.tags), aliases: stringList(attributes.aliases),
     links: extractWikiLinks(body), modifiedAt, contentHash: hashKnowledgeContent(content), frontmatter: attributes,
   };
+}
+
+export function rewriteResolvedWikiLinks(content: string, links: ResolvedKnowledgeLink[], nextPath: string): string {
+  const lines = content.split(/\r?\n/);
+  const normalizedNext = nextPath.replace(/\\/g, '/').replace(/\.(md|mdx)$/i, '');
+  const nextBase = normalizedNext.split('/').at(-1) ?? normalizedNext;
+  for (const link of links) {
+    const index = link.line - 1;
+    if (index < 0 || index >= lines.length) continue;
+    const nextTarget = link.target.includes('/') || link.target.includes('\\') ? normalizedNext : nextBase;
+    const replacement = link.raw.replace(link.target, nextTarget);
+    lines[index] = lines[index].replace(link.raw, replacement);
+  }
+  return lines.join(content.includes('\r\n') ? '\r\n' : '\n');
 }

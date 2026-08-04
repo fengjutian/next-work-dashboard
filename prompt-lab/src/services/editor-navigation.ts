@@ -9,8 +9,11 @@ const listeners = new Set<(request: EditorNavigationRequest) => void>();
 let pendingRequest: EditorNavigationRequest | null = null;
 
 export function requestEditorNavigation(request: EditorNavigationRequest): void {
-  pendingRequest = request;
-  listeners.forEach((listener) => listener(request));
+  if (listeners.size === 0) pendingRequest = request;
+  else {
+    pendingRequest = null;
+    listeners.forEach((listener) => listener(request));
+  }
 }
 
 export function subscribeEditorNavigation(listener: (request: EditorNavigationRequest) => void): () => void {

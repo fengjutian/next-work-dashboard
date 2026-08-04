@@ -484,7 +484,7 @@ export const KnowledgeGraph: React.FC = () => {
               <section>
                 <h4 className="mb-1 font-medium">正向链接（{selectedOutgoing.length}）</h4>
                 {selectedOutgoing.length === 0 ? <p className="text-muted-foreground">此页没有 Wiki Link</p> : selectedOutgoing.map((link, index) => (
-                  <button key={`${link.target}:${link.line}:${index}`} disabled={!link.targetUri} className="block w-full rounded px-2 py-1 text-left hover:bg-accent disabled:text-destructive" onClick={() => link.targetUri && selectKnowledgeDocument(link.targetUri)}>
+                  <button key={`${link.target}:${link.line}:${index}`} className={`block w-full rounded px-2 py-1 text-left hover:bg-accent ${link.targetUri ? '' : 'text-destructive'}`} onClick={() => openInEditor(selectedKnowledgeDocument.path, link.line)}>
                     {link.target} · {link.status} · L{link.line}
                   </button>
                 ))}

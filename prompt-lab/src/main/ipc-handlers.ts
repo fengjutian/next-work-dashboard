@@ -30,6 +30,7 @@ import { createTypeScriptSemanticIndex } from './typescript-language-service';
 import {
   createKnowledgeDocumentFromTemplate,
   readKnowledgeDocument,
+  renameKnowledgeDocumentWithBacklinks,
   scanKnowledgeWorkspace,
   searchKnowledgeWorkspace,
 } from './knowledge-workspace';
@@ -745,6 +746,11 @@ export function setupIPC(webviewPreloadPath: string) {
 
   ipcMain.handle('knowledge:searchWorkspace', async (_event, rootPath: string, query: string, limit?: number, filters?: import('../core/knowledge').KnowledgeSearchFilters) => {
     try { return { success: true, data: searchKnowledgeWorkspace(rootPath, query, limit, filters) }; }
+    catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+
+  ipcMain.handle('knowledge:renameDocument', async (_event, rootPath: string, relativePath: string, nextRelativePath: string) => {
+    try { return { success: true, data: renameKnowledgeDocumentWithBacklinks(rootPath, relativePath, nextRelativePath) }; }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 

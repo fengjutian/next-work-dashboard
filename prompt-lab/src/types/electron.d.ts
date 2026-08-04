@@ -120,6 +120,7 @@ export interface ElectronAPI {
     }>>;
     readDocument: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<{ content: string; modifiedAt: number }>>;
     searchWorkspace: (rootPath: string, query: string, limit?: number, filters?: import('../core/knowledge').KnowledgeSearchFilters) => Promise<WorkspaceResult<import('../core/knowledge').KnowledgeSearchHit[]>>;
+    renameDocument: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<{ path: string; updatedReferences: string[] }>>;
   };
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;

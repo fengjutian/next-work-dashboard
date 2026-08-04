@@ -150,5 +150,9 @@ src/core/tools           Agent 工具适配
 - [x] 应用内 Agent：`search_knowledge`、`read_knowledge_document`、`get_knowledge_backlinks`
 - [x] `propose_knowledge_change` 只生成候选，不直接写入
 - [x] before/after 审查、接受/拒绝、原子应用与外部修改冲突状态
+- [x] 图谱切换代码编辑器并定位 Wiki Link 行号
+- [x] 编辑器 Markdown backlinks 导航条
+- [x] Monaco 输入 `[[` 时按标题/路径补全文档
+- [x] Markdown 重命名时原子更新所有已解析 Wiki Link 引用
 - [x] 活动知识工作区跨插件共享、持久记忆与重新授权
 - [ ] 独立 CLI/MCP 与项目 Agent Skill

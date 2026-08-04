@@ -8,6 +8,7 @@ import {
   readKnowledgeDocument,
   scanKnowledgeWorkspace,
   searchKnowledgeWorkspace,
+  renameKnowledgeDocumentWithBacklinks,
 } from '../src/main/knowledge-workspace';
 
 const temporaryDirectories: string[] = [];
@@ -67,5 +68,17 @@ describe('knowledge workspace filesystem boundary', () => {
     fs.unlinkSync(path.join(root, 'architecture.md'));
     expect(searchKnowledgeWorkspace(root, 'PostgreSQL')).toEqual([]);
     expect(() => readKnowledgeDocument(root, '../outside.md')).toThrow('ACCESS_DENIED');
+  });
+
+  it('renames a document and atomically updates resolved backlinks', () => {
+    const root = createWorkspace();
+    fs.mkdirSync(path.join(root, 'notes'));
+    fs.writeFileSync(path.join(root, 'notes', 'source.md'), '# Source\n[[Target|read this]]\n[[Missing]]', 'utf8');
+    fs.writeFileSync(path.join(root, 'notes', 'target.md'), '# Target', 'utf8');
+    const result = renameKnowledgeDocumentWithBacklinks(root, 'notes/target.md', 'notes/renamed.md');
+    expect(result.updatedReferences).toEqual(['notes/source.md']);
+    expect(fs.existsSync(path.join(root, 'notes', 'target.md'))).toBe(false);
+    expect(fs.readFileSync(path.join(root, 'notes', 'source.md'), 'utf8')).toContain('[[renamed|read this]]');
+    expect(fs.readFileSync(path.join(root, 'notes', 'source.md'), 'utf8')).toContain('[[Missing]]');
   });
 });

@@ -66,13 +66,19 @@ export function useExplorerMutations(options: Options) {
     const parent = target.path.replace(/[\\/][^\\/]+$/, '');
     const name = treeEdit.value.trim();
     const nextPath = parent ? `${parent}/${name}` : name;
-    const result = await window.electronAPI.workspace.renameEntry(workspace.path, target.path, nextPath);
+    const isKnowledgeDocument = target.type === 'file' && /\.mdx?$/i.test(target.path) && /\.mdx?$/i.test(nextPath);
+    const result = isKnowledgeDocument
+      ? await window.electronAPI.knowledge.renameDocument(workspace.path, target.path, nextPath)
+      : await window.electronAPI.workspace.renameEntry(workspace.path, target.path, nextPath);
     if (!result.success) { setStatus(`重命名失败：${displayError(result.error)}`); return; }
     remapOpenPaths(target.path, nextPath);
     setSelectedNode(null);
     setTreeEdit(null);
     await refreshWorkspaceTree();
-    setStatus(`已重命名为 ${name}`);
+    const updatedReferences = isKnowledgeDocument && result.data && 'updatedReferences' in result.data
+      ? result.data.updatedReferences.length
+      : 0;
+    setStatus(`已重命名为 ${name}${updatedReferences ? `，同步更新 ${updatedReferences} 篇文档的 Wiki Link` : ''}`);
   }, [refreshWorkspaceTree, remapOpenPaths, selectedNode, setSelectedNode, setStatus, setTreeEdit, treeEdit, workspace]);
 
   const removeDocuments = useCallback((paths: string[]) => {

@@ -7,6 +7,7 @@ import {
   getKnowledgeTemplateVariables,
   parseKnowledgeDocument,
   validateKnowledgeDocument,
+  rewriteResolvedWikiLinks,
 } from '../src/core/knowledge';
 
 describe('knowledge markdown', () => {
@@ -15,6 +16,15 @@ describe('knowledge markdown', () => {
     expect(document).toMatchObject({ title: 'Alpha', type: 'note', tags: ['one', 'two'], aliases: ['A'] });
     expect(document.links.map((link) => [link.target, link.embedded])).toEqual([['Beta', false], ['assets/Diagram', true]]);
     expect(extractWikiLinks('[[Page#Section]]')[0].target).toBe('Page');
+  });
+
+  it('rewrites only resolved wiki links while preserving labels and embeds', () => {
+    const content = '[[Old|Label]]\n![[folder/Old#Part]]\n[[Other]]';
+    const links = [
+      { raw: '[[Old|Label]]', target: 'Old', label: 'Label', embedded: false, line: 1, sourceUri: 'a', targetUri: 'old', status: 'resolved' as const },
+      { raw: '![[folder/Old#Part]]', target: 'folder/Old', embedded: true, line: 2, sourceUri: 'a', targetUri: 'old', status: 'resolved' as const },
+    ];
+    expect(rewriteResolvedWikiLinks(content, links, 'archive/New.md')).toBe('[[New|Label]]\n![[archive/New#Part]]\n[[Other]]');
   });
 
   it('builds backlinks and reports unresolved, ambiguous and orphan links', () => {
