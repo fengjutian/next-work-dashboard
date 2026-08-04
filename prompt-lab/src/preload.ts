@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer, clipboard } from 'electron';
+import type { ElectronAPI } from './types/electron';
 
 // ── 暴露给渲染进程的安全 API ──
-contextBridge.exposeInMainWorld('electronAPI', {
+const electronAPI: ElectronAPI = {
   // 窗口控制
   minimize: () => ipcRenderer.invoke('window-minimize'),
   maximize: () => ipcRenderer.invoke('window-maximize'),
@@ -228,4 +229,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
   },
-});
+};
+
+contextBridge.exposeInMainWorld('electronAPI', electronAPI);
