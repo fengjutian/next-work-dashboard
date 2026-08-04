@@ -42,6 +42,15 @@ export interface ElectronAPI {
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) => Promise<{
     success: boolean; embeddings?: number[][]; error?: string;
   }>;
+  memoryIndex: {
+    replace: (chunks: Array<{
+      id: string; documentId: string; filePath: string; fileName: string; title: string; site: string;
+      startLine: number; endLine: number; content: string; documentModifiedAt: number; excerptHash: string;
+      vector: number[];
+    }>) => Promise<void>;
+    search: (vector: number[], limit: number) => Promise<Array<{ id: string; distance: number }>>;
+    clear: () => Promise<void>;
+  };
   saveConversation: (payload: {
     site: string;
     timestamp: number;

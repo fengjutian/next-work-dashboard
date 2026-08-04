@@ -279,6 +279,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
   private cacheLoaded = false;
   private activeSync: Promise<MemoryIndexStats> | null = null;
   private embeddingBackend: EmbeddingBackend = 'sparse';
+  private lanceIndexReady = false;
   private searchConfig: MemoryConfig = {
     provider: 'local', contextBudget: 6000, recallCount: 6,
     minScore: 0.08,
@@ -362,6 +363,39 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     }
   }
 
+  private chunkId(chunk: IndexedChunk): string {
+    return `${chunk.documentId}:${chunk.startLine}:${chunk.excerptHash}`;
+  }
+
+  private async syncLanceIndex(): Promise<void> {
+    const memoryIndex = window.electronAPI.memoryIndex;
+    if (!memoryIndex) {
+      this.lanceIndexReady = false;
+      return;
+    }
+    if (!this.chunks.length) {
+      try { await memoryIndex.clear(); } catch { /* no searchable index remains in memory */ }
+      this.lanceIndexReady = false;
+      return;
+    }
+    if (this.chunks.some((chunk) => !chunk.denseVector)) {
+      this.lanceIndexReady = false;
+      return;
+    }
+    try {
+      await memoryIndex.replace(this.chunks.map((chunk) => ({
+        id: this.chunkId(chunk), documentId: chunk.documentId, filePath: chunk.filePath,
+        fileName: chunk.fileName, title: chunk.title ?? '', site: chunk.site,
+        startLine: chunk.startLine, endLine: chunk.endLine, content: chunk.content,
+        documentModifiedAt: chunk.documentModifiedAt, excerptHash: chunk.excerptHash,
+        vector: chunk.denseVector!,
+      })));
+      this.lanceIndexReady = true;
+    } catch {
+      this.lanceIndexReady = false;
+    }
+  }
+
   async sync(options: MemorySyncOptions = {}): Promise<MemoryIndexStats> {
     if (this.activeSync) {
       if (!options.force) return this.activeSync;
@@ -385,10 +419,13 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     const identity = this.embeddingIdentity();
     const currentSignatures = Object.fromEntries(files.map((file) => [file.path, `${file.modifiedAt}:${file.size}:${identity}`]));
     let signature = files.map((file) => `${file.path}:${currentSignatures[file.path]}`).join('|');
-    if (signature === this.signature) return {
+    if (signature === this.signature) {
+      if (!this.lanceIndexReady && this.embeddingBackend !== 'sparse') await this.syncLanceIndex();
+      return {
       documents: files.length, chunks: this.chunks.length, failedFiles: [], durationMs: Date.now() - startedAt,
       embeddingFallback: this.embeddingBackend === 'sparse' && this.semanticEmbeddingRequested(), embeddingBackend: this.embeddingBackend,
-    };
+      };
+    }
     const changedFiles = files.filter((file) => this.documentSignatures[file.path] !== currentSignatures[file.path]);
     const currentPaths = new Set(files.map((file) => file.path));
     const retainedChunks = this.chunks.filter((chunk) =>
@@ -422,6 +459,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     if (options.signal?.aborted) throw new Error('INDEX_CANCELLED');
     options.onProgress?.({ phase: 'saving', completed: 0, total: 1 });
     await writePersistedIndex({ signature, chunks: this.chunks, documentSignatures: currentSignatures, embeddingBackend });
+    await this.syncLanceIndex();
     options.onProgress?.({ phase: 'saving', completed: 1, total: 1 });
     return { documents: files.length, chunks: this.chunks.length,
       failedFiles: failedFiles.map((file) => file.fileName), durationMs: Date.now() - startedAt,
@@ -434,7 +472,9 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     this.chunks = [];
     this.cacheLoaded = true;
     this.embeddingBackend = 'sparse';
+    this.lanceIndexReady = false;
     await clearPersistedIndex();
+    try { await window.electronAPI.memoryIndex?.clear(); } catch { /* IndexedDB is still cleared */ }
   }
 
   async search(query: string, limit = 6): Promise<MemorySource[]> {
@@ -455,6 +495,16 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       }
     } catch { queryDenseVectors = []; }
     const queryDenseNorms = queryDenseVectors.map(denseNorm);
+    const lanceScores = new Map<string, number>();
+    if (this.lanceIndexReady && queryDenseVectors.length && window.electronAPI.memoryIndex) {
+      try {
+        const matches = await Promise.all(queryDenseVectors.map((vector) =>
+          window.electronAPI.memoryIndex.search(vector, Math.max(limit * 10, 50))));
+        for (const match of matches.flat()) {
+          lanceScores.set(match.id, Math.max(lanceScores.get(match.id) ?? 0, Math.max(0, 1 - match.distance)));
+        }
+      } catch { this.lanceIndexReady = false; }
+    }
     const normalizedQuery = query.toLocaleLowerCase();
     const bm25Variants = queries.map((candidate) => bm25Scores(candidate, this.chunks));
     const now = Date.now();
@@ -462,7 +512,8 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       .map((chunk) => {
         const sparse = Math.max(...encodedQueries.map((encoded) => similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm)));
         const dense = chunk.denseVector && queryDenseVectors.length
-          ? Math.max(...queryDenseVectors.map((vector, index) => denseSimilarity(vector, queryDenseNorms[index], chunk.denseVector!, chunk.denseNorm ?? denseNorm(chunk.denseVector!))))
+          ? (lanceScores.get(this.chunkId(chunk)) ?? Math.max(...queryDenseVectors.map((vector, index) =>
+            denseSimilarity(vector, queryDenseNorms[index], chunk.denseVector!, chunk.denseNorm ?? denseNorm(chunk.denseVector!)))))
           : 0;
         const keyword = chunk.content.toLocaleLowerCase().includes(normalizedQuery) ? 1 : 0;
         const field = Math.max(
@@ -495,6 +546,7 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     delete this.documentSignatures[filePath];
     this.signature = '';
     await writePersistedIndex({ signature: '', chunks: this.chunks, documentSignatures: this.documentSignatures });
+    await this.syncLanceIndex();
   }
 }
 

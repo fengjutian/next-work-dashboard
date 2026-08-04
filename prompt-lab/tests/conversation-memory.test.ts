@@ -177,6 +177,33 @@ describe('local conversation memory index', () => {
     expect(results[0]?.score).toBeGreaterThan(0.6);
   });
 
+  it('persists dense chunks in LanceDB and uses it for vector recall', async () => {
+    let indexedId = '';
+    const replace = vi.fn(async (chunks: Array<{ id: string }>) => { indexedId = chunks[0]?.id ?? ''; });
+    const search = vi.fn(async () => [{ id: indexedId, distance: 0.05 }]);
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        listConversations: vi.fn(async () => [file]),
+        readConversation: vi.fn(async () => ({ success: true, content: 'Local semantic memory content.' })),
+        memoryIndex: { replace, search, clear: vi.fn(async () => undefined) },
+      },
+    });
+    const provider = new LocalConversationMemoryProvider();
+    provider.configure({
+      ...embeddingConfig,
+      provider: 'local',
+      localEmbeddingEnabled: true,
+      localEmbeddingModel: 'test-local-model',
+    });
+
+    const results = await provider.search('semantic memory');
+
+    expect(replace).toHaveBeenCalledOnce();
+    expect(search).toHaveBeenCalled();
+    expect(results[0]?.score).toBeGreaterThan(0.7);
+  });
+
   it('supports force rebuilding and cancellation progress', async () => {
     const readConversation = vi.fn(async () => ({ success: true, content: '索引内容' }));
     Object.defineProperty(window, 'electronAPI', {

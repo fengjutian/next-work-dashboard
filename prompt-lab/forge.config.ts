@@ -10,11 +10,11 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
-      unpack: '**/node_modules/node-pty/**',
+      unpack: '**/node_modules/{node-pty,@lancedb}/**',
     },
   },
   rebuildConfig: {
-    onlyModules: [],
+    onlyModules: ['node-pty', '@lancedb/lancedb'],
   },
   makers: [
     new MakerSquirrel({}),

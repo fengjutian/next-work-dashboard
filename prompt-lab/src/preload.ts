@@ -86,6 +86,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>
     ipcRenderer.invoke('embedding:create', payload),
+  memoryIndex: {
+    replace: (chunks: unknown[]) => ipcRenderer.invoke('memory:index:replace', chunks),
+    search: (vector: number[], limit: number) => ipcRenderer.invoke('memory:index:search', vector, limit),
+    clear: () => ipcRenderer.invoke('memory:index:clear'),
+  },
   // 通用 HTTP fetch（主进程，绕过 CORS）
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) =>
     ipcRenderer.invoke('fetch-url', url, options),

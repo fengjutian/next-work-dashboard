@@ -27,6 +27,12 @@ import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-t
 import { WorkspaceTaskRunner } from './task-runner';
 import { detectRenameRename, parseUnmergedIndex } from './git-rename-conflict';
 import { createTypeScriptSemanticIndex } from './typescript-language-service';
+import {
+  clearLanceMemoryIndex,
+  replaceLanceMemoryIndex,
+  searchLanceMemory,
+  type LanceMemoryChunk,
+} from './lancedb-memory';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -264,6 +270,20 @@ export function setupIPC(webviewPreloadPath: string) {
       return { success: false, error: String(err) };
     }
   });
+
+  ipcMain.handle('memory:index:replace', async (_event, chunks: LanceMemoryChunk[]) => {
+    if (!Array.isArray(chunks) || chunks.some((chunk) => !chunk.id || !Array.isArray(chunk.vector))) {
+      throw new Error('Invalid LanceDB memory index payload');
+    }
+    await replaceLanceMemoryIndex(chunks);
+  });
+  ipcMain.handle('memory:index:search', async (_event, vector: number[], limit: number) => {
+    if (!Array.isArray(vector) || vector.some((value) => !Number.isFinite(value))) {
+      throw new Error('Invalid LanceDB query vector');
+    }
+    return searchLanceMemory(vector, limit);
+  });
+  ipcMain.handle('memory:index:clear', () => clearLanceMemoryIndex());
 
   // ── 通用 HTTP fetch（绕过 CORS，供 AI 工具使用） ──
   ipcMain.handle('fetch-url', async (_event, url: string, options?: { headers?: Record<string, string> }) => {
