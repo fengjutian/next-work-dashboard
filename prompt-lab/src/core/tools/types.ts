@@ -21,6 +21,7 @@ export interface ToolParamProperty {
   type: 'string' | 'number' | 'boolean' | 'array';
   description: string;
   enum?: string[];
+  items?: { type: 'string' | 'number' | 'boolean' };
 }
 
 /**

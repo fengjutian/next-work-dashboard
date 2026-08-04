@@ -9,6 +9,7 @@ import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
 import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
+import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
@@ -224,6 +225,7 @@ export const KnowledgeGraph: React.FC = () => {
       if (!result.success || !result.data) throw new Error(result.error ?? 'SCAN_FAILED');
       const index = result.data as KnowledgeWorkspaceView;
       const edgeCount = applyKnowledgeIndex(index);
+      activeKnowledgeWorkspace.setActive(rootPath, index);
       const unresolved = index.links.filter((link) => link.status !== 'resolved').length;
       toast(`已索引 ${index.documents.length} 篇知识文档、${edgeCount} 条显式链接；${unresolved} 条待解析`, 'success');
   }, [applyKnowledgeIndex, toast]);

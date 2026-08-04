@@ -4,6 +4,7 @@ import { createOpenAIProvider, registerTools, runAgent } from '@/core';
 import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
 import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools';
+import { knowledgeTools } from '@/core/tools/knowledge-tools';
 import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
@@ -67,6 +68,7 @@ if (!toolsRegistered) {
   registerTools(builtInTools);
   registerTools(pluginTools);
   registerTools(conversationMemoryTools);
+  registerTools(knowledgeTools);
   toolsRegistered = true;
 }
 

@@ -25,3 +25,4 @@ export {
 export { builtInTools } from './builtin';
 export { pluginTools } from './plugin-tools';
 export { conversationMemoryTools } from './conversation-memory-tools';
+export { knowledgeTools } from './knowledge-tools';

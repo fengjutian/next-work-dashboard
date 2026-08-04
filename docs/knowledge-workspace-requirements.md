@@ -147,4 +147,6 @@ src/core/tools           Agent 工具适配
 - [x] 模板变量动态表单、必填校验与目标路径预览
 - [ ] 将对话、提示词迁移到统一 `KnowledgeDocument` Provider（Markdown 工作区已接入）
 - [ ] 接入本地稠密向量并持久化知识索引
-- [ ] 只读 CLI/MCP 与 Agent Skill
+- [x] 应用内 Agent：`search_knowledge`、`read_knowledge_document`、`get_knowledge_backlinks`
+- [x] 活动知识工作区跨插件共享、持久记忆与重新授权
+- [ ] 独立 CLI/MCP 与项目 Agent Skill
