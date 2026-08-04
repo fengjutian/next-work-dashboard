@@ -597,7 +597,11 @@ export function setupIPC(webviewPreloadPath: string) {
     const root = path.resolve(memoriesDir);
     const resolved = path.resolve(filePath);
     const relative = path.relative(root, resolved);
-    return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? resolved : null;
+    if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return resolved;
+    // fallback: treat as fileName relative to memoriesDir
+    const base = path.basename(filePath);
+    if (base === filePath && base.endsWith('.md')) return path.join(memoriesDir, base);
+    return null;
   };
 
   ipcMain.handle('list-memories', async () => {

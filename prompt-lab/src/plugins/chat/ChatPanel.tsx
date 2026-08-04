@@ -434,7 +434,7 @@ export const ChatPanel: React.FC = () => {
                 onClick={() => setMemoryEnabled((value) => !value)} title="检索知识库并附带原文来源">
                 <BookOpen className="h-3 w-3" /><span>{memoryEnabled ? '知识库 ✓' : '知识库'}</span>
               </button>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"
+              <Button variant="ghost" size="icon" className={`h-7 w-7 ${memoryManagerOpen ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:text-primary'}`}
                 onClick={() => setMemoryManagerOpen(true)} title="记忆管理"><Database className="h-3.5 w-3.5" /></Button>
               <button onClick={() => setRoleManagerOpen(true)}
                 className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">

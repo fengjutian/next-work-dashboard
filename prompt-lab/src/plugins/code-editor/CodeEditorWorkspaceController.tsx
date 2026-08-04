@@ -267,7 +267,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
     setStatus,
   });
 
-  const { generateAiEdit, cancelAiEdit, runInlineEdit } = useAiEditGeneration({
+  const { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage } = useAiEditGeneration({
     aiApi,
     workspace,
     documents,
@@ -1165,6 +1165,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiInstruction={aiInstruction}
         aiEditing={aiEditing}
         aiPendingRequest={aiPendingRequest}
+        aiExecutionStage={aiExecutionStage === 'review' && aiProposals.length === 0 ? 'idle' : aiExecutionStage}
         aiMultiFile={aiMultiFile}
         aiMessages={aiMessages}
         aiProposals={aiProposals}
@@ -1305,7 +1306,7 @@ export const CodeEditorWorkspaceController: React.FC = () => {
         aiMultiFile={aiMultiFile} setAiMultiFile={setAiMultiFile}
         aiProposals={aiProposals} aiHistory={aiHistory} aiSessions={aiSessions}
         aiTokenBudget={aiTokenBudget} setAiTokenBudget={setAiTokenBudget} aiEstimatedTokens={estimateTokens(`${aiInstruction}\n${activeDocument?.content ?? ''}`)}
-        aiMessages={aiMessages} aiPendingRequest={aiPendingRequest}
+        aiMessages={aiMessages} aiPendingRequest={aiPendingRequest} aiExecutionStage={aiExecutionStage === 'review' && aiProposals.length === 0 ? 'idle' : aiExecutionStage}
         undoLastAiEdit={undoLastAiEdit}
         aiInstruction={aiInstruction} aiEditing={aiEditing}
         activeDocument={activeDocument} generateAiEdit={generateAiEdit} cancelAiEdit={cancelAiEdit}

@@ -3,6 +3,7 @@ import { Bot, Edit3, Plus, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import type { AiFileProposal } from './useAiSessionState';
 import type { AgentSession } from './agent-sessions';
+import type { AiExecutionStage } from './useAiEditGeneration';
 
 interface AgentsWindowProps {
   workspace: { path: string; name: string } | null;
@@ -11,6 +12,7 @@ interface AgentsWindowProps {
   aiInstruction: string;
   aiEditing: boolean;
   aiPendingRequest: { instruction: string; status: 'running' | 'interrupted' } | null;
+  aiExecutionStage: AiExecutionStage;
   aiMultiFile: boolean;
   aiMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }>;
   aiProposals: AiFileProposal[];
@@ -29,6 +31,18 @@ interface AgentsWindowProps {
 
 const statusLabel: Record<AgentSession['status'], string> = {
   idle: '待命', running: '运行中', review: '待审阅', completed: '已完成', interrupted: '已中断',
+};
+
+const stageLabel: Record<AiExecutionStage, string> = {
+  idle: '等待任务',
+  'collecting-context': '正在收集工作区上下文',
+  summarizing: '正在压缩历史会话',
+  generating: '模型正在生成修改',
+  parsing: '正在解析和校验结果',
+  review: '修改已生成，等待审阅',
+  cancelling: '正在取消请求',
+  interrupted: '请求已中断，可重新运行',
+  failed: '请求失败，请检查状态信息',
 };
 
 export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
@@ -53,7 +67,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
         <div className="min-h-0 flex-1 overflow-auto p-2">
           {props.sessions.length === 0 && <button className="w-full rounded border border-dashed p-4 text-xs text-muted-foreground hover:bg-accent" onClick={props.onCreateSession}>创建第一个 Agent 会话</button>}
           {props.sessions.map((session) => (
-            <button key={session.id} className={`group mb-1 w-full rounded px-2 py-2 text-left text-xs ${props.activeSession?.id === session.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'}`} onClick={() => props.onSelectSession(session.id)}>
+            <button key={session.id} disabled={props.aiEditing && props.activeSession?.id !== session.id} className={`group mb-1 w-full rounded px-2 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${props.activeSession?.id === session.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'}`} onClick={() => props.onSelectSession(session.id)}>
               <div className="flex items-center gap-1"><span className="min-w-0 flex-1 truncate font-medium">{session.title}</span><span className="text-[9px] text-muted-foreground">{statusLabel[session.status]}</span></div>
               <div className="mt-1 flex items-center gap-2 text-[9px] text-muted-foreground"><span>{session.filesChanged} 文件</span><span>{new Date(session.updatedAt).toLocaleTimeString()}</span></div>
             </button>
@@ -74,6 +88,7 @@ export const AgentsWindow: React.FC<AgentsWindowProps> = (props) => {
             : props.aiMessages.map((message, index) => <div key={`${message.timestamp}-${index}`} className={`mb-3 max-w-3xl rounded-lg border p-3 text-xs ${message.role === 'user' ? 'ml-auto bg-primary/5' : 'mr-auto bg-muted/30'}`}><div className="mb-1 text-[10px] font-semibold text-muted-foreground">{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Agent' : '系统'}</div><div className="whitespace-pre-wrap">{message.content}</div></div>)}
         </div>
         <div className="border-t p-3">
+          {(props.aiEditing || props.aiExecutionStage !== 'idle') && <div className="mb-2 flex items-center gap-2 rounded border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${props.aiEditing ? 'animate-pulse bg-primary' : props.aiExecutionStage === 'failed' || props.aiExecutionStage === 'interrupted' ? 'bg-warning' : 'bg-success'}`} /><span>{stageLabel[props.aiExecutionStage]}</span></div>}
           <textarea value={props.aiInstruction} disabled={!props.activeSession || props.aiEditing} onChange={(event) => props.onInstructionChange(event.target.value)} placeholder="描述一个代码任务…" className="min-h-24 w-full resize-none rounded-md border bg-background p-3 text-xs outline-none" />
           <div className="mt-2 flex items-center gap-3 text-xs">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={props.aiMultiFile} onChange={(event) => props.onMultiFileChange(event.target.checked)} />多文件 Agent</label>

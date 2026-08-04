@@ -1,4 +1,4 @@
-import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { createOpenAIProvider } from '../../core/llm';
 import { fitContextToTokenBudget } from './ai-context';
@@ -9,6 +9,8 @@ import type { AiFileProposal } from './useAiSessionState';
 import type { EditorDiffView } from './useGitDiffMerge';
 
 interface AiApiConfig { apiKey: string; baseUrl: string; model: string }
+
+export type AiExecutionStage = 'idle' | 'collecting-context' | 'summarizing' | 'generating' | 'parsing' | 'review' | 'cancelling' | 'interrupted' | 'failed';
 
 interface UseAiEditGenerationOptions {
   aiApi: AiApiConfig;
@@ -120,9 +122,11 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     appendOutput, setStatus,
   } = options;
   const requestAbortRef = useRef<AbortController | null>(null);
+  const [aiExecutionStage, setAiExecutionStage] = useState<AiExecutionStage>('idle');
 
   const cancelAiEdit = useCallback(() => {
     if (!requestAbortRef.current) return;
+    setAiExecutionStage('cancelling');
     requestAbortRef.current.abort();
     setStatus('正在取消 Agent 请求…');
   }, [setStatus]);
@@ -133,6 +137,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     if (requestAbortRef.current) return;
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
+    setAiExecutionStage(aiMultiFile ? 'collecting-context' : 'generating');
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setAiPendingRequest({ id: requestId, instruction: aiInstruction.trim(), startedAt: Date.now(), status: 'running' });
     setAiEditing(true);
@@ -141,6 +146,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       let conversation = aiMessages;
       if (conversationNeedsSummary(conversation, aiTokenBudget) && conversation.length > 4) {
+        setAiExecutionStage('summarizing');
         let summary = '';
         const prompt = [
           ...conversation.map(({ role, content }) => ({ role, content })),
@@ -154,6 +160,7 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
       const history = conversation.slice(-12).map(({ role, content }) => ({ role, content }));
       let response = '';
       if (aiMultiFile && workspace) {
+        setAiExecutionStage('collecting-context');
         const contexts = await collectContexts(workspace.path, documents, activeDocument, aiInstruction);
         abortController.signal.throwIfAborted();
         const fitted = fitContextToTokenBudget(contexts.map((context) => ({
@@ -166,7 +173,9 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           ...history,
           { role: 'user' as const, content: `修改要求：${aiInstruction.trim()}\n\n工作区候选文件：\n${fitted.files.map((file) => `--- ${file.path} ---\n${file.content}`).join('\n\n')}` },
         ];
+        setAiExecutionStage('generating');
         for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.15, maxTokens: Math.min(24_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) response += chunk.delta;
+        setAiExecutionStage('parsing');
         const proposals = parseProposals(response, contexts);
         if (!proposals.length) { setAiPendingRequest(null); setStatus('AI 未生成有效的多文件修改'); return; }
         setAiProposals(proposals);
@@ -182,7 +191,9 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
           ...history,
           { role: 'user' as const, content: `文件名：${activeDocument.name}\n语言：${activeDocument.language}\n修改要求：${aiInstruction.trim()}${selected ? `\n重点关注的选中代码：\n${selected}` : ''}\n\n当前完整文件：\n${activeDocument.content}` },
         ];
+        setAiExecutionStage('generating');
         for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: Math.min(16_000, Math.max(2_000, Math.floor(aiTokenBudget / 2))), signal: abortController.signal })) response += chunk.delta;
+        setAiExecutionStage('parsing');
         const fenced = response.match(/```(?:[\w+-]+)?\s*\n([\s\S]*?)```/);
         const modified = (fenced?.[1] ?? response).trimEnd();
         if (!modified || modified === activeDocument.content.trimEnd()) { setAiPendingRequest(null); setStatus('AI 未生成有效修改'); return; }
@@ -195,8 +206,10 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
         { role: 'assistant' as const, content: response, timestamp: Date.now() },
       ].slice(-100));
       setAiPendingRequest(null);
+      setAiExecutionStage('review');
     } catch (error) {
       setAiPendingRequest((current) => current?.id === requestId ? { ...current, status: 'interrupted' } : current);
+      setAiExecutionStage(isAbortError(error) ? 'interrupted' : 'failed');
       setStatus(isAbortError(error) ? 'Agent 请求已取消，可重新运行' : `AI 修改失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       if (requestAbortRef.current === abortController) requestAbortRef.current = null;
@@ -236,5 +249,5 @@ export function useAiEditGeneration(options: UseAiEditGenerationOptions) {
     finally { setAiEditing(false); }
   }, [activeDocument, aiApi, appendOutput, editorRef, inlineEdit.instruction, setAiEditing, setDocuments, setInlineEdit, setStatus]);
 
-  return { generateAiEdit, cancelAiEdit, runInlineEdit };
+  return { generateAiEdit, cancelAiEdit, runInlineEdit, aiExecutionStage };
 }

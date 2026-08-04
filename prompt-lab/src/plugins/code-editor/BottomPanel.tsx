@@ -8,6 +8,7 @@ import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus, Work
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { classifyConflictStatus } from '../../main/git-conflicts';
 import { GitHistoryGraph } from './GitHistoryGraph';
+import type { AiExecutionStage } from './useAiEditGeneration';
 
 interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
 
@@ -91,6 +92,7 @@ export interface BottomPanelProps {
   aiEstimatedTokens: number;
   aiMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: number }>;
   aiPendingRequest: { instruction: string; status: 'running' | 'interrupted' } | null;
+  aiExecutionStage: AiExecutionStage;
   undoLastAiEdit: () => void;
   aiInstruction: string;
   aiEditing: boolean;
@@ -331,7 +333,7 @@ const AiTabContent: React.FC<BottomPanelProps> = (p) => (
     <div className="text-xs text-muted-foreground">描述希望对当前文件执行的修改。AI 结果会先进入 Diff，不会自动保存。</div>
     <div className="flex flex-wrap items-center gap-3 text-xs"><label className="flex items-center gap-1.5"><input type="checkbox" checked={p.aiMultiFile} onChange={(e) => p.setAiMultiFile(e.target.checked)} />多文件 Agent（自动筛选相关文件）</label><label className="flex items-center gap-1">Token 预算 <input type="number" min={4000} max={64000} step={1000} value={p.aiTokenBudget} onChange={(e) => p.setAiTokenBudget(Math.max(4000, Math.min(64000, Number(e.target.value) || 24000)))} className="h-7 w-20 rounded border bg-background px-1" /></label><span className={p.aiEstimatedTokens > p.aiTokenBudget ? 'text-warning' : 'text-muted-foreground'}>当前约 {p.aiEstimatedTokens} tokens</span><span className="text-muted-foreground">待审阅 {p.aiProposals.length}</span><span className="text-muted-foreground">已接受 {p.aiHistory.length}</span><span className="text-muted-foreground">会话 {p.aiSessions.length}</span><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={p.aiHistory.length === 0} onClick={p.undoLastAiEdit}>撤销上次 AI 修改</Button></div>
     {p.aiSessions.length > 0 && <div className="max-h-24 overflow-auto border-t px-3 py-1"><div className="text-[10px] font-semibold text-muted-foreground">最近会话</div>{p.aiSessions.slice(-5).reverse().map((s) => <div key={s.id} className="flex items-center gap-2 py-0.5 text-[10px] text-muted-foreground"><span className="max-w-32 truncate">{s.instruction}</span><span>{s.filesChanged} 文件</span><span>{new Date(s.timestamp).toLocaleTimeString()}</span></div>)}</div>}
-    {p.aiPendingRequest && <div className="rounded border border-warning/40 bg-warning/5 px-2 py-1 text-[10px] text-warning">{p.aiPendingRequest.status === 'running' ? '请求执行中' : '上次请求中断，可直接重新生成'}：{p.aiPendingRequest.instruction}</div>}
+    {p.aiPendingRequest && <div className="rounded border border-warning/40 bg-warning/5 px-2 py-1 text-[10px] text-warning">{p.aiPendingRequest.status === 'running' ? `请求执行中（${p.aiExecutionStage}）` : '上次请求中断，可直接重新生成'}：{p.aiPendingRequest.instruction}</div>}
     {p.aiMessages.length > 0 && <div className="max-h-28 overflow-auto rounded border px-2 py-1 text-[10px]">{p.aiMessages.slice(-10).map((message, index) => <div key={`${message.timestamp}:${index}`} className="flex gap-2 py-0.5"><span className="w-12 shrink-0 font-medium text-primary">{message.role}</span><span className="whitespace-pre-wrap text-muted-foreground">{message.content.slice(0, 500)}{message.content.length > 500 ? '…' : ''}</span></div>)}</div>}
     <textarea value={p.aiInstruction} onChange={(e) => p.setAiInstruction(e.target.value)} placeholder="例如：重构这个组件，拆分重复逻辑并补充错误处理" className="min-h-20 flex-1 resize-none rounded border bg-background p-2 text-xs outline-none" />
     <div className="flex justify-end">
