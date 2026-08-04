@@ -28,10 +28,16 @@ export interface ChatOptions {
   maxTokens?: number;
   signal?: AbortSignal;
   tools?: ToolDef[];
+  /** 默认启用流式响应；部分 OpenAI 兼容服务只支持非流式。 */
+  stream?: boolean;
+  /** 请求 OpenAI 兼容服务强制返回 JSON 对象。 */
+  responseFormat?: 'json_object';
 }
 
 export interface ChatChunk {
   delta: string;
+  /** 部分推理模型将可见推理输出放在独立字段。 */
+  reasoningDelta?: string;
   finishReason?: 'stop' | 'length' | 'tool_calls' | null;
   /** 流式 tool_call 增量 */
   toolCallDelta?: {
@@ -83,12 +89,13 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
         }),
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens,
-        stream: true,
+        stream: options.stream ?? true,
       };
       if (options.tools?.length) {
         body.tools = options.tools;
         body.tool_choice = 'auto';
       }
+      if (options.responseFormat) body.response_format = { type: options.responseFormat };
 
       const response = await fetch(`${normalizedBase}/chat/completions`, {
         method: 'POST',
@@ -103,6 +110,18 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`LLM API error ${response.status}: ${text}`);
+      }
+
+      if (options.stream === false) {
+        const parsed = await response.json();
+        const choice = parsed.choices?.[0];
+        const content = choice?.message?.content ?? choice?.text ?? parsed.output_text ?? parsed.content ?? '';
+        const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning ?? choice?.message?.analysis ?? '';
+        const text = Array.isArray(content)
+          ? content.map((part: { text?: string; content?: string }) => part.text ?? part.content ?? '').join('')
+          : String(content ?? '');
+        yield { delta: text, reasoningDelta: String(reasoning ?? ''), finishReason: choice?.finish_reason ?? 'stop' };
+        return;
       }
 
       const reader = response.body?.getReader();
@@ -121,8 +140,8 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          const data = trimmed.slice(6);
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trimStart();
           if (data === '[DONE]') return;
 
           try {
@@ -131,10 +150,15 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
             if (!choice) continue;
 
             const delta = choice.delta;
-            const content = delta?.content || '';
+            const rawContent = delta?.content ?? choice.message?.content ?? choice.text ?? '';
+            const rawReasoning = delta?.reasoning_content ?? delta?.reasoning ?? delta?.analysis ?? '';
+            const content = Array.isArray(rawContent)
+              ? rawContent.map((part: { text?: string; content?: string }) => part.text ?? part.content ?? '').join('')
+              : String(rawContent ?? '');
 
             const chunk: ChatChunk = {
               delta: content,
+              reasoningDelta: String(rawReasoning ?? ''),
               finishReason: choice.finish_reason || null,
             };
 

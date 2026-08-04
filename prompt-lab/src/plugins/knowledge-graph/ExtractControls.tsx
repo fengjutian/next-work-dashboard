@@ -3,7 +3,7 @@ import { Sparkles, Loader2 } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import { quickExtract } from '@/core';
-import type { ExtractStrategy, ExtractedEntity, GraphNode } from './graph-types';
+import type { ExtractStrategy, ExtractedEntity, ExtractedRelation, GraphNode } from './graph-types';
 
 // ── 抽取策略标签 ──
 
@@ -58,13 +58,13 @@ interface ExtractControlsProps {
   /** 对话文件内容获取器 */
   getSelectedContents: () => Promise<{ name: string; content: string }[]>;
   /** 添加抽取节点回调 */
-  onAddExtractedNodes: (nodes: GraphNode[]) => void;
+  onAddExtractedGraph: (nodes: GraphNode[], relations: ExtractedRelation[]) => void;
 }
 
 export const ExtractControls: React.FC<ExtractControlsProps> = ({
   existingLabels,
   getSelectedContents,
-  onAddExtractedNodes,
+  onAddExtractedGraph,
 }) => {
   const { toast } = useToast();
   const aiApi = useStore((s) => s.aiApi);
@@ -72,6 +72,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
   const [strategy, setStrategy] = useState<ExtractStrategy>('keyword');
   const [extracting, setExtracting] = useState(false);
   const [extractedEntities, setExtractedEntities] = useState<ExtractedEntity[]>([]);
+  const [extractedRelations, setExtractedRelations] = useState<ExtractedRelation[]>([]);
   const [checkedSet, setCheckedSet] = useState<Set<string>>(new Set());
 
   // ── 执行抽取 ──
@@ -95,6 +96,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
       );
 
       setExtractedEntities(valid);
+      setExtractedRelations(result.relations ?? []);
       // 默认勾选全部不重复的
       const defaultChecked = new Set(
         valid.filter((e) => !existingLabels.includes(e.name)).map((e) => e.name),
@@ -137,11 +139,16 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
       confidence: e.relevance,
     }));
 
-    onAddExtractedNodes(newNodes);
+    const availableLabels = new Set([...existingLabels, ...selected.map((entity) => entity.name)]);
+    const relations = extractedRelations.filter((relation) =>
+      availableLabels.has(relation.source) && availableLabels.has(relation.target) && relation.source !== relation.target,
+    );
+    onAddExtractedGraph(newNodes, relations);
     setExtractedEntities([]);
+    setExtractedRelations([]);
     setCheckedSet(new Set());
-    toast(`已添加 ${newNodes.length} 个节点`, 'success');
-  }, [extractedEntities, checkedSet, onAddExtractedNodes, toast]);
+    toast(`已添加 ${newNodes.length} 个节点、${relations.length} 条关系`, 'success');
+  }, [extractedEntities, extractedRelations, checkedSet, existingLabels, onAddExtractedGraph, toast]);
 
   const existingLabelSet = new Set(existingLabels);
 
@@ -203,6 +210,12 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
               />
             ))}
           </div>
+          {extractedRelations.length > 0 && <div className="max-h-24 overflow-y-auto border-t bg-muted/20 px-2 py-1">
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">关系预览（{extractedRelations.length}）</p>
+            {extractedRelations.map((relation, index) => <div key={`${relation.source}:${relation.target}:${index}`} className="truncate text-[10px] text-muted-foreground" title={`${relation.source} —${relation.label}→ ${relation.target}`}>
+              {relation.source} <span className="text-primary">—{relation.label || '关联'}→</span> {relation.target}
+            </div>)}
+          </div>}
           <div className="px-2 py-1 border-t border-border">
             <button
               className="w-full h-6 text-[11px] rounded bg-success hover:bg-success text-white transition-colors disabled:opacity-50"

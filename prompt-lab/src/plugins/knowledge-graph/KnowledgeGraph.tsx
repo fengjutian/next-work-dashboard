@@ -3,7 +3,7 @@ import { Search } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile } from '@/types/electron';
-import type { GraphNode, GraphData } from './graph-types';
+import type { ExtractedRelation, GraphNode, GraphData } from './graph-types';
 import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
@@ -25,6 +25,7 @@ const DEFAULT_NODES = [
   'React', 'TypeScript', 'Electron', 'Zustand',
   'Vite', 'Tailwind', 'SQLite', 'Drizzle',
 ];
+const GRAPH_STORAGE_KEY = 'prompt-lab:knowledge-graph:v1';
 
 // ── 默认节点工厂 ──
 const makeDefaultNodes = (): GraphNode[] =>
@@ -34,6 +35,25 @@ const makeDefaultNodes = (): GraphNode[] =>
     degree: 0,
     source: 'manual' as const,
   }));
+
+function loadPersistedGraph(): { nodes: GraphNode[]; graphData: GraphData | null } {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GRAPH_STORAGE_KEY) ?? 'null') as Partial<GraphData> | null;
+    if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
+      return { nodes: makeDefaultNodes(), graphData: null };
+    }
+    const nodes = parsed.nodes.filter((node): node is GraphNode =>
+      Boolean(node && typeof node.id === 'string' && typeof node.label === 'string' && ['manual', 'extracted'].includes(node.source)),
+    );
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const edges = parsed.edges.filter((edge) =>
+      Boolean(edge && typeof edge.source === 'string' && typeof edge.target === 'string' && nodeIds.has(edge.source) && nodeIds.has(edge.target)),
+    );
+    return { nodes: nodes.length > 0 ? nodes : makeDefaultNodes(), graphData: nodes.length > 0 ? { nodes, edges } : null };
+  } catch {
+    return { nodes: makeDefaultNodes(), graphData: null };
+  }
+}
 
 // ── 主组件 ──
 
@@ -45,8 +65,8 @@ export const KnowledgeGraph: React.FC = () => {
   const [files, setFiles] = useState<ConversationFile[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [nodeInput, setNodeInput] = useState('');
-  const [nodes, setNodes] = useState<GraphNode[]>(makeDefaultNodes);
-  const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const [nodes, setNodes] = useState<GraphNode[]>(() => loadPersistedGraph().nodes);
+  const [graphData, setGraphData] = useState<GraphData | null>(() => loadPersistedGraph().graphData);
   const [generating, setGenerating] = useState(false);
   const [knowledgeWorkspace, setKnowledgeWorkspace] = useState<string | null>(null);
   const [knowledgeIndex, setKnowledgeIndex] = useState<KnowledgeWorkspaceView | null>(null);
@@ -60,6 +80,15 @@ export const KnowledgeGraph: React.FC = () => {
   const [knowledgeMatches, setKnowledgeMatches] = useState<KnowledgeSearchMatch[]>([]);
   const [knowledgeProposals, setKnowledgeProposals] = useState<KnowledgeChangeProposal[]>(activeKnowledgeWorkspace.changeProposals);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+
+  // 人工/AI 图谱自动保存；知识工作区扫描结果是临时视图，不覆盖持久数据。
+  useEffect(() => {
+    if (graphData?.nodes.some((node) => node.source === 'wiki-link')) return;
+    localStorage.setItem(GRAPH_STORAGE_KEY, JSON.stringify({
+      nodes,
+      edges: graphData?.edges ?? [],
+    }));
+  }, [nodes, graphData]);
 
   // ── 加载对话文件列表 ──
 
@@ -130,11 +159,26 @@ export const KnowledgeGraph: React.FC = () => {
   }, [files, selectedPaths]);
 
   // ── 添加 AI 抽取的节点 ──
-  const addExtractedNodes = useCallback((newNodes: GraphNode[]) => {
+  const addExtractedGraph = useCallback((newNodes: GraphNode[], relations: ExtractedRelation[]) => {
     setNodes((prev) => {
       const existingLabels = new Set(prev.map((n) => n.label));
       const toAdd = newNodes.filter((n) => !existingLabels.has(n.label));
-      return [...prev, ...toAdd];
+      const merged = [...prev, ...toAdd];
+      const relationEdges = relations.map((relation) => ({
+        source: relation.source,
+        target: relation.target,
+        weight: 1,
+        kind: 'inferred' as const,
+        label: relation.label,
+      }));
+      const degree = new Map(merged.map((node) => [node.id, 0]));
+      relationEdges.forEach((edge) => {
+        degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+        degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+      });
+      const graphNodes = merged.map((node) => ({ ...node, degree: degree.get(node.id) ?? 0 }));
+      setGraphData({ nodes: graphNodes, edges: relationEdges });
+      return graphNodes;
     });
   }, []);
 
@@ -444,7 +488,7 @@ export const KnowledgeGraph: React.FC = () => {
           <ExtractControls
             existingLabels={nodes.map((n) => n.label)}
             getSelectedContents={getSelectedContents}
-            onAddExtractedNodes={addExtractedNodes}
+            onAddExtractedGraph={addExtractedGraph}
           />
         </NodePanel>
 

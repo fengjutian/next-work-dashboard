@@ -18,6 +18,8 @@ export interface GraphEdge {
   weight: number;
   kind?: 'co-occurrence' | 'inferred' | 'wiki-link';
   sourcePath?: string;
+  /** AI 抽取出的关系名称，例如“依赖”“调用” */
+  label?: string;
 }
 
 export interface GraphData {

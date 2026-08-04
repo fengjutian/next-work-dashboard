@@ -8,15 +8,15 @@ import type { ExtractedEntity, ExtractedRelation, ExtractResult, ExtractOptions 
 // ── 策略对应的 System Prompt ──
 
 const STRATEGY_PROMPTS: Record<ExtractOptions['strategy'], string> = {
-  keyword: `你是一个技术关键词抽取器。从文档中提取关键技术名词/术语。
+  keyword: `你是一个技术关键词抽取器。从文档中提取关键技术名词/术语。不要输出分析过程或解释，直接输出结果。
 输出严格 JSON，不要 markdown 代码块标记：
 { "entities": [{ "name": "关键词", "category": "分类", "relevance": 0.9, "context": "原文片段" }] }
 categories: 技术栈, 架构概念, 业务术语, 工具链, 文件模块`,
-  entity: `你是一个知识图谱实体抽取器。从文档中提取关键实体并精确分类。
+  entity: `你是一个知识图谱实体抽取器。从文档中提取关键实体并精确分类。不要输出分析过程或解释，直接输出结果。
 输出严格 JSON，不要 markdown 代码块标记：
 { "entities": [{ "name": "实体名", "category": "分类", "aliases": ["别名"], "relevance": 0.9, "context": "原文片段" }] }
 categories: 技术栈, 架构概念, 业务术语, 工具链, 文件模块, 设计模式, 数据模型`,
-  'concept-relation': `你是一个知识图谱实体和关系抽取器。从文档中提取关键实体及其之间的关系。
+  'concept-relation': `你是一个知识图谱实体和关系抽取器。从文档中提取关键实体及其之间的关系。不要输出分析过程或解释，直接输出结果。
 输出严格 JSON，不要 markdown 代码块标记：
 { "entities": [{ "name": "实体名", "category": "分类", "relevance": 0.9, "context": "原文片段" }], "relations": [{ "source": "实体A", "target": "实体B", "label": "关系描述" }] }
 categories: 技术栈, 架构概念, 业务术语, 工具链, 文件模块, 设计模式
@@ -31,7 +31,7 @@ function buildUserMessage(
 ): string {
   const maxEntities = options.maxEntities ?? 20;
   const docsText = documents
-    .map((d, i) => `--- 文档 ${i + 1}: ${d.name} ---\n${d.content.slice(0, 4000)}`)
+    .map((d, i) => `--- 文档 ${i + 1}: ${d.name} ---\n${d.content.slice(0, 2500)}`)
     .join('\n\n');
 
   const basePrompt = options.customPrompt
@@ -242,17 +242,41 @@ export async function extractFromDocuments(
   ];
 
   let fullResponse = '';
+  let reasoningResponse = '';
   for await (const chunk of provider.chat(messages, {
     model: config.model,
     temperature: 0.2,
-    maxTokens: 4096,
+    maxTokens: 12_000,
     signal,
+    responseFormat: 'json_object',
   })) {
     fullResponse += chunk.delta;
+    reasoningResponse += chunk.reasoningDelta ?? '';
   }
+
+  // 部分 OpenAI 兼容服务接受 stream=true，但返回空流；自动使用非流式重试。
+  if (!fullResponse.trim()) {
+    for await (const chunk of provider.chat(messages, {
+      model: config.model,
+      temperature: 0.2,
+      maxTokens: 12_000,
+      signal,
+      stream: false,
+      responseFormat: 'json_object',
+    })) {
+      fullResponse += chunk.delta;
+      reasoningResponse += chunk.reasoningDelta ?? '';
+    }
+  }
+
+  // 某些推理模型把结构化结果放入 reasoning_content，正文 content 为空。
+  if (!fullResponse.trim() && reasoningResponse.trim()) fullResponse = reasoningResponse;
 
   const result = tryParseJson(fullResponse);
   if (!result) {
+    if (!fullResponse.trim()) {
+      throw new Error('模型返回了空内容。请检查 API Base URL、模型名称及该服务是否支持 /chat/completions。');
+    }
     throw new Error(
       `LLM 返回无法解析为 JSON。\n` +
       `响应开头 (200字): ${fullResponse.slice(0, 200)}\n` +

@@ -64,7 +64,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
         edges: graphData.edges.map((e) => ({
           source: e.source,
           target: e.target,
-          data: { weight: e.weight },
+          data: { weight: e.weight, label: e.label, kind: e.kind },
         })),
       },
       layout: {
@@ -123,7 +123,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           endArrow: false,
           labelText: (d: any) => {
             const wgt: number = d.data?.weight ?? 0;
-            return wgt > 0 ? String(wgt) : '';
+            return d.data?.label || (wgt > 0 ? String(wgt) : '');
           },
           labelFontSize: 10,
           labelFill: '#94a3b8',
@@ -153,7 +153,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
             if (item.type === 'edge') {
               const d = item.data?.data;
               return `<div style="padding:4px 10px;font-size:11px;color:#475569">
-                共现权重: <b>${d?.weight ?? 0}</b>
+                ${d?.label ? `关系: <b>${d.label}</b>` : `共现权重: <b>${d?.weight ?? 0}</b>`}
               </div>`;
             }
             return '';
