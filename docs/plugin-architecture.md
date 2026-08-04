@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | 内置插件 | 随应用编译 | 宿主 React 树 | 完全信任 | 核心工作台功能 |
 | Sandbox | 用户脚本或 `.nwd` | `sandbox="allow-scripts"` iframe | 低信任 | 数据面板、轻量工具 |
-| Kernel | 用户 bundle 或 `.nwd` | Renderer 宿主上下文 | 高风险、仅可信来源 | 需要 React 与宿主能力的扩展 |
+| Kernel | 历史兼容代码 | Renderer 宿主上下文 | 已关闭 | 不再允许用户创建或导入 |
 
 旧版纯文本 `content` 插件仍可由 `DynamicPlugin` 渲染，以保证向后兼容。
 
@@ -41,7 +41,7 @@ registerBuiltInPlugins()
 
 `App`、`ActivityBar`、`TitleBar`、`CommandPalette`、`PluginStatusBar` 和插件管理器通过 `usePluginRegistryVersion()` 订阅 Registry。该 Hook 基于 React `useSyncExternalStore`，不再使用计数器强制刷新。
 
-当前 App 会挂载全部已启用插件的面板，并通过 `display` 切换可见性。这样可以保留组件状态，但大型插件仍会占用后台资源；按需加载和 `keepAlive` 策略尚未实现。
+内置插件使用 `React.lazy()` 动态 import。App 只挂载当前面板；声明 `keepAlive: true` 的插件会在首次访问后保持挂载。目前 Terminal、Code Editor、Excel 和 Excalidraw 使用 keepAlive。
 
 ## 3. Plugin 接口
 
@@ -69,13 +69,19 @@ interface Plugin {
 interface PluginContributions {
   commands?: PluginCommand[];
   statusBarItems?: StatusBarItemDef[];
-  views?: Record<string, FC>;
+  views?: PluginViewDef[];
+  menus?: PluginMenuItemDef[];
+  settings?: PluginSettingDef[];
+  fileEditors?: PluginFileEditorDef[];
 }
 ```
 
 - `commands` 已接入命令面板。
 - `statusBarItems` 已接入底部状态栏。
-- `views` 是预留扩展点，尚未形成完整的视图区域注册机制。
+- `views` 通过 `getViews()` 解析。
+- `menus` 可贡献到文件、模块、视图和上下文菜单；TitleBar 已消费文件与视图菜单。
+- `settings` 通过 `getSettings()` 汇总，用户插件 manifest 配置会自动映射。
+- `fileEditors` 通过 `resolveFileEditor(fileName)` 按扩展名和优先级选择编辑器。
 
 ### 3.2 生命周期
 
@@ -299,9 +305,9 @@ await PluginSDK.config.getDefaults();
 
 SDK 类型和实际注入 iframe 的运行时代码都来自 `sandbox/plugin-sdk.ts`，避免维护两份协议实现。
 
-## 7. Kernel 插件
+## 7. Kernel 插件（已关闭）
 
-Kernel 插件由 `DynamicPlugin` 中的 `KernelPluginLoader` 加载：
+代码中仍保留历史 `KernelPluginLoader` 作为迁移期兼容实现，但用户 Kernel 已关闭：
 
 1. 检测 JSX 并尝试使用 Babel 转换。
 2. 通过 `new Function()` 执行 CommonJS/IIFE bundle。
@@ -315,7 +321,7 @@ Kernel 插件由 `DynamicPlugin` 中的 `KernelPluginLoader` 加载：
 - `saveFile`
 - `copyText`
 
-导入或本地创建 Kernel 插件时必须经过高风险确认。
+`.nwd` 导入器会拒绝 `runtime: "kernel"`，创建对话框也不会创建 Kernel 插件；历史 Kernel 定义在恢复时被跳过，不会执行。
 
 > 安全警告：Kernel 插件仍在 Renderer 全局上下文执行。白名单减少了正常开发时的能力暴露，但不能阻止恶意代码通过全局对象寻找宿主能力。它不是真正的安全沙箱，只能安装完全可信的代码。可靠隔离需要 Electron Utility Process；在完成隔离前，也可以考虑关闭用户 Kernel 插件入口。
 
@@ -341,7 +347,7 @@ Kernel 插件由 `DynamicPlugin` 中的 `KernelPluginLoader` 加载：
 }
 ```
 
-Kernel 包使用 `kernelBundle` 代替 `script`。
+旧版 Kernel 包使用 `kernelBundle` 代替 `script`；该格式仅用于识别和拒绝历史包，当前版本不再允许导入、创建或执行用户 Kernel 插件。
 
 ### 8.2 导入校验
 
@@ -352,25 +358,28 @@ Kernel 包使用 `kernelBundle` 代替 `script`。
 - `name` 长度为 1–100 个字符。
 - `version` 使用语义版本格式。
 - 当前只支持 `apiVersion: "1"`。
-- `runtime` 只能是 `sandbox` 或 `kernel`。
+- 新导入包的 `runtime` 必须为 `sandbox`；检测到 `kernel` 会立即拒绝。
 - 权限必须在已知权限集合内。
 - ID 为 2–64 位字母、数字、点、下划线或连字符；支持 Unicode 字母。
-- Sandbox 必须包含非空 `script`，Kernel 必须包含非空 `kernelBundle`。
+- Sandbox 必须包含非空 `script`。历史 `kernelBundle` 不会被执行。
 
 旧包没有 `id` 时会从 `name` 推导，以保持兼容。新导出的包总会写入稳定的 `id` 和 `apiVersion`。
 
 ## 9. 持久化
 
-当前持久化尚未完全统一：
+插件数据已统一到 `PluginPlatformStore`：
 
 | 数据 | 位置 |
 |---|---|
-| 用户插件定义、脚本和 manifest | `localStorage["plugin-manager-user-plugins"]` |
-| 插件私有数据及配置 | `localStorage["pksdk:data:<pluginId>"]` |
+| 用户插件定义、脚本和 manifest | `localStorage["plugin-platform-state-v1"]` |
+| 插件配置、授权和私有数据 | 同一平台记录，按 pluginId 分区 |
+| 更新回滚记录 | 每插件最近 5 个 revision |
+| 日志与崩溃状态 | 每插件最近 200 条日志、崩溃计数与熔断状态 |
+| 安全模式 | 平台级持久化开关 |
 | 内置插件启用差量 | 数据库 setting：`plugin.enabled.delta` |
 | Registry 状态和生命周期 | 当前 Renderer 内存 |
 
-删除用户插件会删除插件定义并从 Registry 卸载，但私有数据目前不会自动删除。完整卸载、数据保留策略和统一数据库存储仍是后续工作。
+首次读取会自动迁移旧的插件定义、`$config` 和 `pksdk:data:*` 数据，且不破坏旧 key。插件连续发生 3 次运行错误会被熔断禁用；插件管理器可切换安全模式、查看日志、覆盖更新和回滚上一版本。
 
 ## 10. 开发一个 Sandbox 插件
 
@@ -432,10 +441,8 @@ Manifest 必须声明 `store.read`，否则调用会被 Bridge 拒绝。
 
 近期优先级：
 
-1. 将 Kernel 移至 Utility Process，或关闭用户 Kernel 安装入口。
-2. 增加权限授权记录、权限变更确认和撤销界面。
-3. 统一插件定义、设置、授权和私有数据的持久化。
-4. 增加内置插件动态 import、按需挂载和 `keepAlive`。
-5. 完成 `views`、`menus`、`settings`、`fileEditors` 等声明式扩展点。
-6. 将命令 fallback 替换为明确的导航与命令执行结果。
-7. 增加插件更新、回滚、日志、崩溃熔断和安全模式。
+1. 删除历史 Kernel Loader，或迁移到 Utility Process 后以新 runtime 重新开放。
+2. 增加权限变更差异确认和逐项撤销界面。
+3. 为 PluginPlatformStore 增加 SQLite 后端适配器。
+4. 为 settings 和 fileEditors 增加完整宿主 UI。
+5. 将命令 fallback 替换为明确的导航与命令执行结果。

@@ -54,6 +54,10 @@ export const TitleBar: React.FC = () => {
           <MenuItem label="AI 工作台" shortcut="Ctrl+1" onClick={() => run(() => setActiveActivity('ai'))} />
           <MenuItem label="设置" shortcut="Ctrl+," onClick={() => run(() => setActiveActivity('settings'))} />
           <MenuDivider />
+          {pluginRegistry.getMenus('file').map((item) => (
+            <MenuItem key={`${item.pluginId}:${item.id}`} label={item.label} onClick={() => run(() => { pluginRegistry.executeCommand(item.command); })} />
+          ))}
+          {pluginRegistry.getMenus('file').length > 0 && <MenuDivider />}
           <MenuItem label="关闭窗口" shortcut="Alt+F4" onClick={() => run(() => void window.electronAPI.close())} />
         </MenuButton>
 
@@ -69,6 +73,9 @@ export const TitleBar: React.FC = () => {
         </MenuButton>
 
         <MenuButton label="视图" open={openMenu === 'view'} onClick={() => toggleMenu('view')}>
+          {pluginRegistry.getMenus('view').map((item) => (
+            <MenuItem key={`${item.pluginId}:${item.id}`} label={item.label} onClick={() => run(() => { pluginRegistry.executeCommand(item.command); })} />
+          ))}
           <MenuItem label="浅色主题" checked={theme === 'light'} onClick={() => run(() => setTheme('light'))} />
           <MenuItem label="深色主题" checked={theme === 'dark'} onClick={() => run(() => setTheme('dark'))} />
           <MenuItem label="跟随系统" checked={theme === 'system'} onClick={() => run(() => setTheme('system'))} />

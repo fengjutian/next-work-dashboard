@@ -2,6 +2,7 @@ import { pluginRegistry } from '../registry';
 import { loadUserPlugins, saveUserPlugins, registerUserPlugin } from './user-plugin-store';
 import type { UserPluginDef } from './user-plugin-store';
 import type { PluginManifest } from '../sandbox/types';
+import { pluginStorage } from '../plugin-storage';
 
 const MAX_PLUGIN_FILE_SIZE = 2 * 1024 * 1024;
 const PLUGIN_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._-]{1,63}$/u;
@@ -118,8 +119,9 @@ export async function importPlugin(file: File): Promise<{ ok: boolean; message: 
       return { ok: false, message: '用户 Kernel 插件已关闭；请将插件迁移到 Sandbox runtime' };
     }
 
-    if (pluginRegistry.get(id)) {
-      return { ok: false, message: `插件 "${id}" 已存在，请先删除旧版本` };
+    const existing = loadUserPlugins().find((item) => item.id === id);
+    if (pluginRegistry.get(id)?.source === 'built-in') {
+      return { ok: false, message: `插件 "${id}" 与内置插件冲突` };
     }
 
     const def: UserPluginDef = {
@@ -135,13 +137,40 @@ export async function importPlugin(file: File): Promise<{ ok: boolean; message: 
     };
 
     const defs = loadUserPlugins();
-    defs.push(def);
+    if (existing) {
+      pluginStorage.addRevision(id, {
+        version: existing.manifest?.version ?? '0.0.0', definition: existing, savedAt: Date.now(),
+      });
+      defs[defs.findIndex((item) => item.id === id)] = def;
+      pluginRegistry.unregister(id);
+    } else {
+      defs.push(def);
+    }
     saveUserPlugins(defs);
 
     registerUserPlugin(def);
 
-    return { ok: true, message: `已导入插件: ${manifest.name} v${manifest.version}` };
+    return { ok: true, message: `${existing ? '已更新' : '已导入'}插件: ${manifest.name} v${manifest.version}` };
   } catch (err) {
     return { ok: false, message: '解析失败：' + (err as Error).message };
   }
+}
+
+export function rollbackPlugin(pluginId: string): { ok: boolean; message: string } {
+  const revision = pluginStorage.getRevisions(pluginId).at(-1);
+  if (!revision || typeof revision.definition !== 'object' || revision.definition === null) {
+    return { ok: false, message: '没有可回滚的版本' };
+  }
+  const previous = revision.definition as UserPluginDef;
+  const defs = loadUserPlugins();
+  const index = defs.findIndex((item) => item.id === pluginId);
+  if (index < 0) return { ok: false, message: '插件不存在' };
+  pluginStorage.addRevision(pluginId, {
+    version: defs[index].manifest?.version ?? '0.0.0', definition: defs[index], savedAt: Date.now(),
+  });
+  defs[index] = previous;
+  saveUserPlugins(defs);
+  pluginRegistry.unregister(pluginId);
+  registerUserPlugin(previous);
+  return { ok: true, message: `已回滚到 ${revision.version}` };
 }

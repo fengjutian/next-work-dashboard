@@ -17,6 +17,24 @@ function createPlugin(overrides: Partial<Plugin> = {}): Plugin {
 }
 
 describe('PluginRegistry lifecycle', () => {
+  it('resolves declarative views, menus, settings, and file editors', () => {
+    const registry = new PluginRegistry();
+    registry.register(createPlugin({
+      enabled: true,
+      contributions: {
+        views: [{ id: 'test.view', title: 'Test', component: EmptyComponent }],
+        menus: [{ id: 'test.menu', label: 'Test', command: 'test.run', location: 'file' }],
+        settings: [{ key: 'test.enabled', label: 'Enabled', type: 'boolean' }],
+        fileEditors: [{ id: 'test.editor', extensions: ['.test'], viewId: 'test.view', priority: 5 }],
+      },
+    }));
+
+    expect(registry.getViews()[0]).toMatchObject({ id: 'test.view', pluginId: 'test-plugin' });
+    expect(registry.getMenus('file')[0]).toMatchObject({ id: 'test.menu', pluginId: 'test-plugin' });
+    expect(registry.getSettings()[0]).toMatchObject({ key: 'test.enabled', pluginId: 'test-plugin' });
+    expect(registry.resolveFileEditor('example.TEST')).toMatchObject({ id: 'test.editor', pluginId: 'test-plugin' });
+  });
+
   it('activates on enable and disposes resources before deactivation', async () => {
     const registry = new PluginRegistry();
     const dispose = vi.fn();

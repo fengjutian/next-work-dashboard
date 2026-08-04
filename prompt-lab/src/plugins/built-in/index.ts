@@ -134,6 +134,8 @@ const builtInPlugins: Plugin[] = [
         { id: 'word-preview.open', title: '打开 Word 文档', category: 'Word 预览' },
         { id: 'word-preview.close', title: '关闭当前文档', category: 'Word 预览' },
       ],
+      views: [{ id: 'word-preview.editor', title: 'Word 预览', component: WordPreviewPanel, location: 'main' }],
+      fileEditors: [{ id: 'word-preview.editor', extensions: ['.docx'], viewId: 'word-preview.editor', priority: 100 }],
     },
   },
   {
@@ -143,11 +145,15 @@ const builtInPlugins: Plugin[] = [
     component: ExcelPreviewPanel,
     enabled: EXCEL_PREVIEW_DEFAULT_ENABLED,
     order: 13,
+    keepAlive: true,
     contributions: {
       commands: [
         { id: 'excel-preview.open', title: '打开 Excel 文件', category: 'Excel 编辑' },
         { id: 'excel-preview.save', title: '保存当前表格', category: 'Excel 编辑' },
       ],
+      views: [{ id: 'excel-preview.editor', title: 'Excel 编辑', component: ExcelPreviewPanel, location: 'main' }],
+      fileEditors: [{ id: 'excel-preview.editor', extensions: ['.xlsx', '.xls'], viewId: 'excel-preview.editor', priority: 100 }],
+      settings: [{ key: 'excel-preview.autoSave', label: '自动保存', type: 'boolean', default: false }],
     },
   },
   {
@@ -162,6 +168,8 @@ const builtInPlugins: Plugin[] = [
         { id: 'ppt-preview.open', title: '打开 PPT 文件', category: 'PPT 演示' },
         { id: 'ppt-preview.export', title: '导出 PPTX', category: 'PPT 演示' },
       ],
+      views: [{ id: 'ppt-preview.editor', title: 'PPT 演示', component: PptPreviewPanel, location: 'main' }],
+      fileEditors: [{ id: 'ppt-preview.editor', extensions: ['.pptx'], viewId: 'ppt-preview.editor', priority: 100 }],
     },
   },
   {
@@ -171,6 +179,7 @@ const builtInPlugins: Plugin[] = [
     component: ExcalidrawPanel,
     enabled: true,
     order: 15,
+    keepAlive: true,
     contributions: {
       commands: [
         { id: 'excalidraw.export', title: '导出图片', category: 'Excalidraw' },
@@ -190,6 +199,8 @@ const builtInPlugins: Plugin[] = [
         { id: 'pdf-preview.open', title: '打开 PDF 文件', category: 'PDF 预览' },
         { id: 'pdf-preview.close', title: '关闭当前 PDF', category: 'PDF 预览' },
       ],
+      views: [{ id: 'pdf-preview.viewer', title: 'PDF 预览', component: PdfPreviewPanel, location: 'main' }],
+      fileEditors: [{ id: 'pdf-preview.viewer', extensions: ['.pdf'], viewId: 'pdf-preview.viewer', priority: 100 }],
     },
   },
   {
@@ -199,11 +210,16 @@ const builtInPlugins: Plugin[] = [
     component: CodeEditorPanel,
     enabled: true,
     order: 17,
+    keepAlive: true,
     contributions: {
       commands: [
         { id: 'code-editor.open', title: '打开代码文件', category: '代码编辑' },
         { id: 'code-editor.save', title: '保存代码文件', category: '代码编辑' },
       ],
+      views: [{ id: 'code-editor.editor', title: '代码编辑器', component: CodeEditorPanel, location: 'main' }],
+      fileEditors: [{ id: 'code-editor.editor', extensions: ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.css', '.html'], viewId: 'code-editor.editor', priority: 10 }],
+      menus: [{ id: 'code-editor.open.menu', label: '打开代码文件', command: 'code-editor.open', location: 'file', order: 20 }],
+      settings: [{ key: 'code-editor.wordWrap', label: '自动换行', type: 'boolean', default: true }],
     },
   },
   {
@@ -227,6 +243,7 @@ const builtInPlugins: Plugin[] = [
     component: TerminalPluginPanel,
     enabled: false,
     order: 9,
+    keepAlive: true,
     contributions: {
       commands: [
         { id: 'terminal.new', title: '新建终端', category: '终端' },
@@ -244,7 +261,7 @@ const builtInPlugins: Plugin[] = [
 ];
 
 export function registerBuiltInPlugins(): void {
-  pluginRegistry.registerAll(builtInPlugins);
+  pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({ ...plugin, source: 'built-in' })));
 }
 
 export { builtInPlugins };

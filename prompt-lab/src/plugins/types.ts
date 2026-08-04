@@ -93,6 +93,7 @@ export interface PluginContributions {
 export interface Plugin {
   /** 唯一标识，如 'ai', 'prompts', 'history', 'graph' */
   id: string;
+  source?: 'built-in' | 'user';
 
   /** ActivityBar 悬停提示 & 设置页显示名 */
   name: string;

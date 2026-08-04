@@ -154,7 +154,6 @@ export const CreatePluginDialog: React.FC<CreatePluginDialogProps> = ({
             {([
               ['basic', '基础模式'],
               ['advanced', '高级模式（脚本）'],
-              ['kernel', '内核模式（React）'],
             ] as const).map(([key, label]) => (
               <button
                 key={key}

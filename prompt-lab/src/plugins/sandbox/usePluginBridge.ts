@@ -14,6 +14,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { SandboxMessage, PluginPermission } from './types';
 import { useStore } from '@/store';
+import { pluginStorage } from '../plugin-storage';
+import { pluginRegistry } from '../registry';
 
 interface UsePluginBridgeOptions {
   pluginId: string;
@@ -32,7 +34,6 @@ interface UsePluginBridgeReturn {
 
 // ── 插件私有存储（按 pluginId 命名空间隔离） ──
 
-const DATA_PREFIX = 'pksdk:data:';
 const MAX_MESSAGE_SIZE = 256 * 1024;
 const MAX_PLUGIN_STORAGE_SIZE = 512 * 1024;
 const VALID_CHANNELS = new Set(['store', 'ui', 'actions', 'data', 'preview', 'file', 'config']);
@@ -68,12 +69,7 @@ function requireStorageKey(value: unknown): string {
 }
 
 function getPluginStore(pluginId: string): Record<string, unknown> {
-  try {
-    const raw = localStorage.getItem(DATA_PREFIX + pluginId);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return pluginStorage.getData(pluginId);
 }
 
 function setPluginStore(pluginId: string, store: Record<string, unknown>): void {
@@ -81,7 +77,7 @@ function setPluginStore(pluginId: string, store: Record<string, unknown>): void 
   if (serialized.length > MAX_PLUGIN_STORAGE_SIZE) {
     throw new Error('Plugin storage quota exceeded (512 KB)');
   }
-  localStorage.setItem(DATA_PREFIX + pluginId, serialized);
+  pluginStorage.setData(pluginId, store);
 }
 
 export function usePluginBridge({
@@ -89,6 +85,9 @@ export function usePluginBridge({
   permissions,
 }: UsePluginBridgeOptions): UsePluginBridgeReturn {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const grantedPermissions = pluginStorage.getGrants(pluginId);
+  const hasPermission = (permission: PluginPermission) =>
+    permissions.includes(permission) && grantedPermissions.includes(permission);
 
   // ── 读取 Store（在 ref 中保持最新，避免闭包陷阱） ──
   const storeRef = useRef(useStore.getState());
@@ -129,7 +128,7 @@ export function usePluginBridge({
         switch (channel) {
           // ── store ──
           case 'store': {
-            if (!permissions.includes('store.read')) {
+            if (!hasPermission('store.read')) {
               respond(requestId, false, undefined, '缺少权限: store.read');
               return;
             }
@@ -174,6 +173,13 @@ export function usePluginBridge({
           // ── ui ──
           case 'ui': {
             switch (method) {
+              case 'error': {
+                const message = requireString(msg.error ?? args[0] ?? 'Sandbox error', 'error', 4_000);
+                pluginStorage.appendLog(pluginId, { timestamp: Date.now(), level: 'error', message });
+                if (pluginStorage.recordCrash(pluginId) >= 3) pluginRegistry.setEnabled(pluginId, false);
+                respond(requestId, true);
+                break;
+              }
               case 'setContent': {
                 const html = requireString(args[0] ?? '', 'html', 200_000);
                 iframeRef.current?.contentWindow?.postMessage(
@@ -218,7 +224,7 @@ export function usePluginBridge({
           case 'actions': {
             switch (method) {
               case 'copyToClipboard': {
-                if (!permissions.includes('clipboard')) {
+                if (!hasPermission('clipboard')) {
                   respond(requestId, false, undefined, '缺少权限: clipboard');
                   return;
                 }
@@ -230,7 +236,7 @@ export function usePluginBridge({
                 return;
               }
               case 'injectPrompt': {
-                if (!permissions.includes('inject')) {
+                if (!hasPermission('inject')) {
                   respond(requestId, false, undefined, '缺少权限: inject');
                   return;
                 }
@@ -268,7 +274,7 @@ export function usePluginBridge({
                 return;
               }
               case 'openUrl': {
-                if (!permissions.includes('external.open')) {
+                if (!hasPermission('external.open')) {
                   respond(requestId, false, undefined, '缺少权限: external.open');
                   return;
                 }
@@ -295,7 +301,7 @@ export function usePluginBridge({
 
           // ── data (插件私有存储) ──
           case 'data': {
-            if (!permissions.includes('data')) {
+            if (!hasPermission('data')) {
               respond(requestId, false, undefined, '缺少权限: data');
               return;
             }
@@ -329,7 +335,7 @@ export function usePluginBridge({
 
           // ── preview (内容预览) ──
           case 'preview': {
-            if (!permissions.includes('preview')) {
+            if (!hasPermission('preview')) {
               respond(requestId, false, undefined, '缺少权限: preview');
               return;
             }
@@ -411,7 +417,7 @@ export function usePluginBridge({
           case 'file': {
             switch (method) {
               case 'pickOpen': {
-                if (!permissions.includes('file.read')) {
+                if (!hasPermission('file.read')) {
                   respond(requestId, false, undefined, '缺少权限: file.read');
                   return;
                 }
@@ -429,7 +435,7 @@ export function usePluginBridge({
                 return;
               }
               case 'pickSave': {
-                if (!permissions.includes('file.write')) {
+                if (!hasPermission('file.write')) {
                   respond(requestId, false, undefined, '缺少权限: file.write');
                   return;
                 }
@@ -453,33 +459,28 @@ export function usePluginBridge({
 
           // ── config (插件配置) ──
           case 'config': {
-            const rawStore = getPluginStore(pluginId);
+            const rawStore = pluginStorage.getConfig(pluginId);
             switch (method) {
               case 'get': {
-                const config = (rawStore as Record<string, any>)['$config'] as Record<string, unknown> | undefined;
-                respond(requestId, true, config?.[String(args[0])] ?? null);
+                respond(requestId, true, rawStore[String(args[0])] ?? null);
                 break;
               }
               case 'getAll': {
-                const config = (rawStore as Record<string, any>)['$config'] as Record<string, unknown> | undefined;
-                respond(requestId, true, config ?? {});
+                respond(requestId, true, rawStore);
                 break;
               }
               case 'set': {
                 const key = String(args[0]);
                 const value = args[1];
-                const cur = (rawStore as Record<string, any>)['$config'] as Record<string, unknown> | undefined ?? {};
-                rawStore['$config'] = { ...cur, [key]: value };
-                setPluginStore(pluginId, rawStore);
+                pluginStorage.setConfig(pluginId, { ...rawStore, [key]: value });
                 respond(requestId, true);
                 break;
               }
               case 'getDefaults': {
                 // 从插件清单中读取默认配置
-                const userDefsRaw = localStorage.getItem('plugin-manager-user-plugins');
                 let defaults: Record<string, unknown> = {};
                 try {
-                  const defs = JSON.parse(userDefsRaw ?? '[]');
+                  const defs = pluginStorage.loadDefinitions<Array<{ id: string; manifest?: { config?: Array<{ key: string; default?: unknown }> } }>[number]>();
                   const def = defs.find((d: any) => d.id === pluginId);
                   if (def?.manifest?.config) {
                     for (const c of def.manifest.config) {

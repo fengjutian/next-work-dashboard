@@ -88,6 +88,8 @@ export default function App() {
   } = useStore();
   usePersistence();
   useDbPersistence();
+  const visitedPluginIds = React.useRef(new Set<string>());
+  if (activeActivity) visitedPluginIds.current.add(activeActivity);
 
   // 应用主题
   React.useEffect(() => {
@@ -168,6 +170,7 @@ export default function App() {
           {/* 动态插件面板 — 由 pluginRegistry 驱动的常驻面板 */}
           {pluginRegistry.getEnabled()
             .filter((p) => p.id !== 'ai')
+            .filter((p) => activeActivity === p.id || (p.keepAlive && visitedPluginIds.current.has(p.id)))
             .map((p) => {
               const Panel = p.component;
               return (
@@ -176,7 +179,9 @@ export default function App() {
                   className="flex-1 flex flex-col overflow-hidden"
                   style={{ display: activeActivity === p.id ? 'flex' : 'none' }}
                 >
-                  <Panel />
+                  <React.Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载插件中…</div>}>
+                    <Panel />
+                  </React.Suspense>
                 </div>
               );
             })}

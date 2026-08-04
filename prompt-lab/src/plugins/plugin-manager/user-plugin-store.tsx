@@ -4,10 +4,9 @@ import { pluginRegistry } from '../registry';
 import { DynamicPlugin } from '../dynamic';
 import type { PluginPermission, PluginManifest } from '../sandbox/types';
 import { getUserPluginDefaultEnabled } from '../defaults';
+import { pluginStorage } from '../plugin-storage';
 
 // ── localStorage 持久化 ──
-
-const STORAGE_KEY = 'plugin-manager-user-plugins';
 
 export interface UserPluginDef {
   id: string;
@@ -24,16 +23,11 @@ export interface UserPluginDef {
 }
 
 export function loadUserPlugins(): UserPluginDef[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return pluginStorage.loadDefinitions<UserPluginDef>();
 }
 
 export function saveUserPlugins(defs: UserPluginDef[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(defs));
+  pluginStorage.saveDefinitions(defs);
 }
 
 /** 重新注册所有用户插件（启动时调用，幂等） */
@@ -61,14 +55,19 @@ export function rehydrateUserPlugins(): void {
           category: def.name,
         }))
       : undefined;
+    const settings = def.manifest?.config?.map((item) => ({
+      key: item.key, label: item.label ?? item.key, type: item.type ?? 'string',
+      default: item.default, description: item.description,
+    }));
     pluginRegistry.register({
       id: def.id,
+      source: 'user',
       name: def.name,
       icon: Blocks,
       component: BoundPlugin,
-      enabled: getUserPluginDefaultEnabled(def),
+      enabled: !pluginStorage.isSafeMode() && !pluginStorage.isCrashDisabled(def.id) && getUserPluginDefaultEnabled(def),
       order: nextOrder + i,
-      contributions: { commands },
+      contributions: { commands, settings },
     });
   });
 }
@@ -96,13 +95,18 @@ export function registerUserPlugin(def: UserPluginDef): void {
         category: def.name,
       }))
     : undefined;
+  const settings = def.manifest?.config?.map((item) => ({
+    key: item.key, label: item.label ?? item.key, type: item.type ?? 'string',
+    default: item.default, description: item.description,
+  }));
   pluginRegistry.register({
     id: def.id,
+    source: 'user',
     name: def.name,
     icon: Blocks,
     component: BoundPlugin,
-    enabled: getUserPluginDefaultEnabled(def),
+    enabled: !pluginStorage.isSafeMode() && !pluginStorage.isCrashDisabled(def.id) && getUserPluginDefaultEnabled(def),
     order: pluginRegistry.getAll().length,
-    contributions: { commands },
+    contributions: { commands, settings },
   });
 }

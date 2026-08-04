@@ -5,8 +5,9 @@ import { isDbReady, dbSetSetting } from '@/db';
 import { loadUserPlugins, saveUserPlugins } from './user-plugin-store';
 import { builtInPlugins } from '../built-in';
 import { CreatePluginDialog } from './CreatePluginDialog';
-import { exportPlugin, importPlugin } from './import-export';
+import { exportPlugin, importPlugin, rollbackPlugin } from './import-export';
 import { usePluginRegistryVersion } from '../usePluginRegistry';
+import { pluginStorage } from '../plugin-storage';
 
 // ── 主面板 ──
 
@@ -16,6 +17,7 @@ export const PluginManagerPanel: React.FC = () => {
   // 启动时从 localStorage 恢复用户插件
   // 弹层状态
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [safeMode, setSafeMode] = React.useState(() => pluginStorage.isSafeMode());
 
   const allPlugins = pluginRegistry.getAll();
   const enabledCount = pluginRegistry.getEnabled().length;
@@ -45,6 +47,13 @@ export const PluginManagerPanel: React.FC = () => {
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          <button
+            className={`px-2 py-1 rounded text-xs ${safeMode ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={() => { const next = !safeMode; pluginRegistry.setSafeMode(next); setSafeMode(next); }}
+            title="安全模式会禁用全部用户插件"
+          >
+            {safeMode ? '退出安全模式' : '安全模式'}
+          </button>
           {/* 导入 .nwd */}
           <button
             className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground text-muted-foreground dark:hover:text-foreground transition-colors"
@@ -112,6 +121,11 @@ export const PluginManagerPanel: React.FC = () => {
                     const def = defs.find((d) => d.id === id);
                     if (def) exportPlugin(def);
                   }}
+                  onRollback={(id) => alert(rollbackPlugin(id).message)}
+                  onLogs={(id) => {
+                    const logs = pluginStorage.getLogs(id);
+                    alert(logs.length ? logs.map((entry) => `[${entry.level}] ${entry.message}`).join('\n') : '暂无日志');
+                  }}
                   onToggle={(id) => {
                     const p = pluginRegistry.get(id);
                     if (p) {
@@ -168,6 +182,8 @@ interface PluginCardProps {
   onDelete: (id: string) => void;
   onExport: (id: string) => void;
   onToggle: (id: string) => void;
+  onRollback: (id: string) => void;
+  onLogs: (id: string) => void;
 }
 
 const PluginCard: React.FC<PluginCardProps> = ({
@@ -179,6 +195,8 @@ const PluginCard: React.FC<PluginCardProps> = ({
   onDelete,
   onExport,
   onToggle,
+  onRollback,
+  onLogs,
 }) => (
   <div
     className={`relative flex flex-col items-center gap-3 p-4 rounded-xl border transition-all group ${
@@ -197,6 +215,8 @@ const PluginCard: React.FC<PluginCardProps> = ({
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
+        <button className="absolute top-2 left-14 opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-primary" onClick={() => onRollback(plugin.id)} title="回滚上一版本">回滚</button>
+        <button className="absolute top-2 left-24 opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-primary" onClick={() => onLogs(plugin.id)} title="查看运行日志">日志</button>
         <button
           className="absolute top-2 left-8 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all"
           onClick={() => onExport(plugin.id)}

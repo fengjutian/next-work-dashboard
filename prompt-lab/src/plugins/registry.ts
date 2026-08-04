@@ -1,4 +1,5 @@
 import type { Plugin, PluginCommand, PluginContext, PluginDisposable } from './types';
+import { pluginStorage } from './plugin-storage';
 
 export type PluginLifecycleState = 'inactive' | 'activating' | 'active' | 'deactivating' | 'error';
 
@@ -52,6 +53,28 @@ export class PluginRegistry {
 
   getLifecycleState(id: string): PluginLifecycleState {
     return this.lifecycleStates.get(id) ?? 'inactive';
+  }
+
+  getViews() { return this.getEnabled().flatMap((plugin) => (plugin.contributions?.views ?? []).map((item) => ({ ...item, pluginId: plugin.id }))); }
+  getMenus(location?: 'file' | 'modules' | 'view' | 'context') {
+    return this.getEnabled().flatMap((plugin) => (plugin.contributions?.menus ?? []).map((item) => ({ ...item, pluginId: plugin.id })))
+      .filter((item) => !location || item.location === location)
+      .sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  }
+  getSettings() { return this.getEnabled().flatMap((plugin) => (plugin.contributions?.settings ?? []).map((item) => ({ ...item, pluginId: plugin.id }))); }
+  resolveFileEditor(fileName: string) {
+    const extension = fileName.toLowerCase().match(/\.[^.]+$/)?.[0];
+    if (!extension) return undefined;
+    return this.getEnabled().flatMap((plugin) => (plugin.contributions?.fileEditors ?? []).map((item) => ({ ...item, pluginId: plugin.id })))
+      .filter((item) => item.extensions.map((value) => value.toLowerCase()).includes(extension))
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0];
+  }
+
+  setSafeMode(enabled: boolean): void {
+    pluginStorage.setSafeMode(enabled);
+    for (const plugin of this.plugins.values()) {
+      if (plugin.source === 'user') this.setEnabled(plugin.id, !enabled && !pluginStorage.isCrashDisabled(plugin.id));
+    }
   }
 
   private nextLifecycleToken(id: string): number {
@@ -109,6 +132,10 @@ export class PluginRegistry {
       if (this.lifecycleTokens.get(plugin.id) !== token) return;
       this.disposePluginResources(plugin.id);
       this.lifecycleStates.set(plugin.id, 'error');
+      pluginStorage.appendLog(plugin.id, { timestamp: Date.now(), level: 'error', message: error instanceof Error ? error.message : String(error) });
+      if (plugin.source === 'user' && pluginStorage.recordCrash(plugin.id) >= 3) {
+        this.setEnabled(plugin.id, false);
+      }
       console.error(`[PluginRegistry] Failed to activate "${plugin.id}"`, error);
     }
     this.notify();
