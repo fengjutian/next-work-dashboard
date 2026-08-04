@@ -8,7 +8,7 @@ import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
-import type { KnowledgeDiagnostic, KnowledgeIndex, KnowledgeTemplate } from '@/core/knowledge';
+import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
@@ -47,10 +47,13 @@ export const KnowledgeGraph: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [knowledgeWorkspace, setKnowledgeWorkspace] = useState<string | null>(null);
   const [knowledgeIndex, setKnowledgeIndex] = useState<KnowledgeWorkspaceView | null>(null);
-  const [templateTitle, setTemplateTitle] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('note');
+  const [templateValues, setTemplateValues] = useState<Record<string, string>>({});
   const [selectedKnowledgeUri, setSelectedKnowledgeUri] = useState<string | null>(null);
   const [selectedKnowledgeContent, setSelectedKnowledgeContent] = useState('');
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
+  const [knowledgeTypeFilter, setKnowledgeTypeFilter] = useState('');
+  const [knowledgeTagFilter, setKnowledgeTagFilter] = useState('');
   const [knowledgeMatches, setKnowledgeMatches] = useState<KnowledgeSearchMatch[]>([]);
 
   // ── 加载对话文件列表 ──
@@ -239,23 +242,31 @@ export const KnowledgeGraph: React.FC = () => {
     }
   }, [scanKnowledgeWorkspace, toast]);
 
-  const createFromTemplate = useCallback(async (templateId: string) => {
-    if (!knowledgeWorkspace || !templateTitle.trim()) return;
+  const selectedTemplate = knowledgeIndex?.templates.find((template) => template.id === selectedTemplateId) ?? knowledgeIndex?.templates[0];
+  const selectedTemplateVariables = selectedTemplate ? getKnowledgeTemplateVariables(selectedTemplate) : [];
+
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    setTemplateValues(Object.fromEntries(getKnowledgeTemplateVariables(selectedTemplate).map((variable) => [variable.name, variable.defaultValue])));
+  }, [selectedTemplate]);
+
+  const createFromTemplate = useCallback(async () => {
+    if (!knowledgeWorkspace || !selectedTemplate) return;
     setGenerating(true);
     try {
       const result = await window.electronAPI.knowledge.createFromTemplate(
-        knowledgeWorkspace, templateId, { title: templateTitle.trim() },
+        knowledgeWorkspace, selectedTemplate.id, templateValues,
       );
       if (!result.success || !result.data) throw new Error(result.error ?? 'CREATE_FAILED');
       toast(`已创建 ${result.data.path}`, 'success');
-      setTemplateTitle('');
+      setTemplateValues(Object.fromEntries(getKnowledgeTemplateVariables(selectedTemplate).map((variable) => [variable.name, variable.defaultValue])));
       await scanKnowledgeWorkspace(knowledgeWorkspace);
     } catch (error) {
       toast(`模板创建失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     } finally {
       setGenerating(false);
     }
-  }, [knowledgeWorkspace, scanKnowledgeWorkspace, templateTitle, toast]);
+  }, [knowledgeWorkspace, scanKnowledgeWorkspace, selectedTemplate, templateValues, toast]);
 
   const selectKnowledgeDocument = useCallback((uri: string) => {
     setSelectedKnowledgeUri(uri);
@@ -271,14 +282,21 @@ export const KnowledgeGraph: React.FC = () => {
 
   const searchKnowledge = useCallback(async () => {
     if (!knowledgeWorkspace || !knowledgeQuery.trim()) { setKnowledgeMatches([]); return; }
-    const result = await window.electronAPI.knowledge.searchWorkspace(knowledgeWorkspace, knowledgeQuery.trim(), 20);
+    const result = await window.electronAPI.knowledge.searchWorkspace(knowledgeWorkspace, knowledgeQuery.trim(), 20, {
+      types: knowledgeTypeFilter ? [knowledgeTypeFilter as import('@/core/knowledge').KnowledgeDocumentType] : undefined,
+      tags: knowledgeTagFilter.trim() ? knowledgeTagFilter.split(',').map((tag) => tag.trim()).filter(Boolean) : undefined,
+    });
     if (!result.success) { toast(`知识搜索失败：${result.error ?? 'SEARCH_FAILED'}`, 'error'); return; }
     setKnowledgeMatches(result.data ?? []);
-  }, [knowledgeQuery, knowledgeWorkspace, toast]);
+  }, [knowledgeQuery, knowledgeTagFilter, knowledgeTypeFilter, knowledgeWorkspace, toast]);
 
   const selectedKnowledgeDocument = knowledgeIndex?.documents.find((item) => item.uri === selectedKnowledgeUri);
   const selectedBacklinks = selectedKnowledgeUri ? knowledgeIndex?.backlinks[selectedKnowledgeUri] ?? [] : [];
   const selectedOutgoing = selectedKnowledgeUri ? knowledgeIndex?.links.filter((link) => link.sourceUri === selectedKnowledgeUri) ?? [] : [];
+  let templatePreviewPath = '';
+  if (selectedTemplate) {
+    try { templatePreviewPath = instantiateKnowledgeTemplate(selectedTemplate, templateValues).path; } catch { templatePreviewPath = ''; }
+  }
 
   // ── 渲染 ──
 
@@ -307,6 +325,13 @@ export const KnowledgeGraph: React.FC = () => {
                 />
                 <button className="rounded border px-2 text-xs hover:bg-accent" onClick={() => void searchKnowledge()}>搜索</button>
               </div>
+              <div className="flex gap-1">
+                <select className="h-7 min-w-0 flex-1 rounded border bg-background px-1 text-xs" value={knowledgeTypeFilter} onChange={(event) => setKnowledgeTypeFilter(event.target.value)}>
+                  <option value="">全部类型</option>
+                  {['conversation', 'note', 'spec', 'prompt', 'code', 'document'].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+                <input className="h-7 min-w-0 flex-1 rounded border bg-background px-2 text-xs" value={knowledgeTagFilter} onChange={(event) => setKnowledgeTagFilter(event.target.value)} placeholder="标签,标签" />
+              </div>
               {knowledgeMatches.length > 0 && (
                 <div className="max-h-32 space-y-1 overflow-auto rounded border p-1">
                   {knowledgeMatches.map((match) => (
@@ -316,30 +341,51 @@ export const KnowledgeGraph: React.FC = () => {
                   ))}
                 </div>
               )}
-              <input
-                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-                value={templateTitle}
-                onChange={(event) => setTemplateTitle(event.target.value)}
-                placeholder="新文档标题"
-              />
-              <div className="flex flex-wrap gap-1">
-                {knowledgeIndex.templates.map((template) => (
-                  <button
-                    key={template.id}
-                    className="rounded border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
-                    disabled={generating || !templateTitle.trim()}
-                    onClick={() => void createFromTemplate(template.id)}
-                  >
-                    {template.name}
-                  </button>
-                ))}
-              </div>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-xs" value={selectedTemplate?.id ?? ''} onChange={(event) => setSelectedTemplateId(event.target.value)}>
+                {knowledgeIndex.templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>
+              {selectedTemplateVariables.map((variable) => (
+                <label key={variable.name} className="block text-xs">
+                  <span className="mb-1 block text-muted-foreground">{variable.label}{variable.required ? ' *' : ''}</span>
+                  <input
+                    className="h-8 w-full rounded-md border bg-background px-2"
+                    value={templateValues[variable.name] ?? ''}
+                    onChange={(event) => setTemplateValues((values) => ({ ...values, [variable.name]: event.target.value }))}
+                    placeholder={variable.description ?? variable.name}
+                  />
+                </label>
+              ))}
+              <button
+                className="h-8 w-full rounded-md border text-xs hover:bg-accent disabled:opacity-50"
+                disabled={generating || selectedTemplateVariables.some((variable) => variable.required && !templateValues[variable.name]?.trim())}
+                onClick={() => void createFromTemplate()}
+              >
+                从模板创建
+              </button>
+              {templatePreviewPath && <p className="truncate text-xs text-muted-foreground" title={templatePreviewPath}>将创建：{templatePreviewPath}</p>}
               <div className="rounded bg-muted p-2 text-xs text-muted-foreground">
                 <p>孤立文档 {knowledgeIndex.orphanUris.length}</p>
                 <p>未解析链接 {knowledgeIndex.links.filter((link) => link.status === 'unresolved').length}</p>
                 <p>歧义链接 {knowledgeIndex.links.filter((link) => link.status === 'ambiguous').length}</p>
                 <p>规则问题 {knowledgeIndex.diagnostics.length}</p>
               </div>
+              {(knowledgeIndex.links.some((link) => link.status !== 'resolved') || knowledgeIndex.diagnostics.length > 0) && (
+                <div className="max-h-40 space-y-1 overflow-auto rounded border p-1">
+                  {knowledgeIndex.links.filter((link) => link.status !== 'resolved').slice(0, 20).map((link, index) => (
+                    <button key={`${link.sourceUri}:${link.line}:${index}`} className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent" title={`${link.target} · ${link.status}`} onClick={() => selectKnowledgeDocument(link.sourceUri)}>
+                      {link.status === 'unresolved' ? '缺失' : '歧义'}：{link.target} · L{link.line}
+                    </button>
+                  ))}
+                  {knowledgeIndex.diagnostics.slice(0, 20).map((diagnostic, index) => {
+                    const document = knowledgeIndex.documents.find((item) => item.path === diagnostic.path);
+                    return (
+                      <button key={`${diagnostic.code}:${diagnostic.path}:${index}`} disabled={!document} className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent disabled:opacity-60" title={diagnostic.message} onClick={() => document && selectKnowledgeDocument(document.uri)}>
+                        {diagnostic.severity === 'error' ? '错误' : '警告'}：{diagnostic.message}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

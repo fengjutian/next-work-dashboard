@@ -3,11 +3,14 @@ import path from 'node:path';
 import {
   buildKnowledgeIndex,
   instantiateKnowledgeTemplate,
+  KnowledgeSearchIndex,
   parseKnowledgeDocument,
   validateKnowledgeDocument,
   type KnowledgeContentRule,
   type KnowledgeDiagnostic,
   type KnowledgeIndex,
+  type KnowledgeSearchFilters,
+  type KnowledgeSearchHit,
   type KnowledgeTemplate,
 } from '../core/knowledge';
 import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
@@ -23,13 +26,8 @@ export interface KnowledgeWorkspaceScanResult extends KnowledgeIndex {
   diagnostics: KnowledgeDiagnostic[];
 }
 
-export interface KnowledgeSearchResult {
-  uri: string;
-  path: string;
-  title: string;
-  score: number;
-  snippets: Array<{ line: number; text: string }>;
-}
+interface CachedKnowledgeSearchIndex { signature: string; index: KnowledgeSearchIndex }
+const searchIndexes = new Map<string, CachedKnowledgeSearchIndex>();
 
 const BUILTIN_TEMPLATES: KnowledgeTemplate[] = [{
   id: 'note', name: '普通笔记', directory: '.', fileName: '{{title}}.md',
@@ -120,20 +118,25 @@ export function readKnowledgeDocument(rootPath: string, relativePath: string): {
   return { content: fs.readFileSync(absolutePath, 'utf8'), modifiedAt: stat.mtimeMs };
 }
 
-export function searchKnowledgeWorkspace(rootPath: string, query: string, limit = 30): KnowledgeSearchResult[] {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  if (!normalizedQuery) return [];
-  const index = scanKnowledgeWorkspace(rootPath);
-  return index.documents.flatMap((document) => {
-    const { content } = readKnowledgeDocument(rootPath, document.path);
-    const lines = content.split(/\r?\n/);
-    const snippets = lines.flatMap((line, index) => line.toLocaleLowerCase().includes(normalizedQuery)
-      ? [{ line: index + 1, text: line.trim().slice(0, 240) }]
-      : []).slice(0, 3);
-    let score = snippets.length;
-    if (document.title.toLocaleLowerCase().includes(normalizedQuery)) score += 10;
-    if (document.tags.some((tag) => tag.toLocaleLowerCase().includes(normalizedQuery))) score += 6;
-    if (document.path.toLocaleLowerCase().includes(normalizedQuery)) score += 3;
-    return score ? [{ uri: document.uri, path: document.path, title: document.title, score, snippets }] : [];
-  }).sort((a, b) => b.score - a.score || a.path.localeCompare(b.path)).slice(0, Math.max(1, Math.min(100, limit)));
+export function searchKnowledgeWorkspace(
+  rootPath: string,
+  query: string,
+  limit = 30,
+  filters: KnowledgeSearchFilters = {},
+): KnowledgeSearchHit[] {
+  if (!query.trim()) return [];
+  const root = resolveWorkspacePath(rootPath, '');
+  const workspace = scanKnowledgeWorkspace(rootPath);
+  const signature = workspace.documents.map((document) => `${document.path}:${document.contentHash}`).sort().join('|');
+  let cached = searchIndexes.get(root);
+  if (!cached || cached.signature !== signature) {
+    const index = new KnowledgeSearchIndex();
+    index.replace(workspace.documents.map((document) => ({
+      document,
+      content: readKnowledgeDocument(rootPath, document.path).content,
+    })));
+    cached = { signature, index };
+    searchIndexes.set(root, cached);
+  }
+  return cached.index.search(query, limit, filters);
 }

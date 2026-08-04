@@ -743,8 +743,8 @@ export function setupIPC(webviewPreloadPath: string) {
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
-  ipcMain.handle('knowledge:searchWorkspace', async (_event, rootPath: string, query: string, limit?: number) => {
-    try { return { success: true, data: searchKnowledgeWorkspace(rootPath, query, limit) }; }
+  ipcMain.handle('knowledge:searchWorkspace', async (_event, rootPath: string, query: string, limit?: number, filters?: import('../core/knowledge').KnowledgeSearchFilters) => {
+    try { return { success: true, data: searchKnowledgeWorkspace(rootPath, query, limit, filters) }; }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
