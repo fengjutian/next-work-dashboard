@@ -5,7 +5,7 @@ import type { BubbleProps } from '@ant-design/x';
 import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
-  BookOpen, Bot, Check, ChevronDown, Copy, Database, Download, ExternalLink,
+  BookOpen, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
   FileText, Globe, MessageSquare, PanelLeft, Paperclip, Plus, RefreshCw, Robot,
   RotateCcw, Settings, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
@@ -430,19 +430,24 @@ export const ChatPanel: React.FC = () => {
                   </div>
                 )}
               </div>
-              <button className={`flex h-6 items-center gap-1 rounded-full px-1.5 text-[10px] font-medium transition-colors ${agentMode ? 'bg-warning/10 text-warning' : 'bg-muted text-muted-foreground'}`}
-                onClick={() => setAgentMode((v) => !v)} title="切换 Agent 模式" aria-pressed={agentMode}>
-                <Bot className="h-3 w-3" /><span>Agent</span>{agentMode && <Check className="h-3 w-3" />}
+              <button className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${agentMode ? 'bg-warning/10 text-warning' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                onClick={() => setAgentMode((v) => !v)} title={agentMode ? '关闭 Agent 模式' : '开启 Agent 模式'} aria-label={agentMode ? '关闭 Agent 模式' : '开启 Agent 模式'} aria-pressed={agentMode}>
+                <Sparkles className="h-3.5 w-3.5" />
+                {agentMode && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-warning" />}
               </button>
-              <button className={`h-6 rounded-full px-1.5 text-[10px] font-medium transition-colors flex items-center gap-1 ${memoryEnabled ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}`}
-                onClick={() => setMemoryEnabled((value) => !value)} title="检索知识库并附带原文来源">
-                <BookOpen className="h-3 w-3" /><span>知识库</span>{memoryEnabled && <Check className="h-3 w-3" />}
+              <button className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${memoryEnabled ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                onClick={() => setMemoryEnabled((value) => !value)} title={memoryEnabled ? '关闭知识库检索' : '开启知识库检索'} aria-label={memoryEnabled ? '关闭知识库检索' : '开启知识库检索'} aria-pressed={memoryEnabled}>
+                <BookOpen className="h-3.5 w-3.5" />
+                {memoryEnabled && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />}
               </button>
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${memoryManagerOpen ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:text-primary'}`}
                 onClick={() => setMemoryManagerOpen(true)} title="记忆管理"><Database className="h-3.5 w-3.5" /></Button>
               <button onClick={() => setRoleManagerOpen(true)}
-                className={`h-6 px-1.5 text-[10px] font-medium rounded-full transition-colors flex items-center gap-1 ${activeRole ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`} title="角色管理">
-                <Bot className="h-3 w-3" /><span>{activeRole ? activeRole.name : '角色'}</span></button>
+                className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${activeRole ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                title={activeRole ? `当前角色：${activeRole.name}` : '角色管理'} aria-label={activeRole ? `角色管理，当前角色：${activeRole.name}` : '角色管理'}>
+                <Bot className="h-3.5 w-3.5" />
+                {activeRole && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />}
+              </button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setToolManagerOpen(true)} title="工具管理"><Wrench className="h-3.5 w-3.5" /></Button>
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${sysPromptOpen || systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}
