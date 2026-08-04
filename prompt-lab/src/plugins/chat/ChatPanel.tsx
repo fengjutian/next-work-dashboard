@@ -15,6 +15,7 @@ import { useChatSession, MODELS, toBubbleItems } from './useChatSession';
 import { ToolCallCard } from './MessageBubble';
 import { setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './ToolManagerDialog';
+import { McpApprovalDialog } from './McpApprovalDialog';
 import { PromptManagerDialog } from './PromptManagerDialog';
 import { RoleManagerDialog } from './RoleManagerDialog';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
@@ -641,6 +642,7 @@ export const ChatPanel: React.FC = () => {
           </div>
 
           <ToolManagerDialog open={toolManagerOpen} onClose={() => setToolManagerOpen(false)} />
+          <McpApprovalDialog />
           <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)}
             boundPromptIds={boundPromptIds} onToggleBound={toggleBoundPrompt} />
           <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />

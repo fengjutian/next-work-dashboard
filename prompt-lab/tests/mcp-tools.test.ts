@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toMcpToolDefinition } from '../src/core/tools/mcp-tools';
+import { subscribeMcpApproval } from '../src/services/mcp-approval';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -28,18 +29,22 @@ describe('MCP tool adapter', () => {
   });
 
   it('turns MCP tool-level failures into agent tool errors', async () => {
-    vi.stubGlobal('window', { confirm: vi.fn(() => true), electronAPI: { mcp: { callTool: vi.fn().mockResolvedValue({ isError: true, content: [{ type: 'text', text: 'denied' }] }) } } });
+    vi.stubGlobal('window', { electronAPI: { mcp: { callTool: vi.fn().mockResolvedValue({ isError: true, content: [{ type: 'text', text: 'denied' }] }) } } });
+    const unsubscribe = subscribeMcpApproval((request) => request.respond('once'));
     const tool = toMcpToolDefinition({ serverId: 'fs', name: 'write', inputSchema: { type: 'object' }, trustAnnotations: false });
     await expect(tool.execute({})).rejects.toThrow('denied');
+    unsubscribe();
   });
 
   it('records rejected write-capable calls without invoking the server', async () => {
     const callTool = vi.fn();
     const recordDenial = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal('window', { confirm: vi.fn(() => false), electronAPI: { mcp: { callTool, recordDenial } } });
+    vi.stubGlobal('window', { electronAPI: { mcp: { callTool, recordDenial } } });
+    const unsubscribe = subscribeMcpApproval((request) => request.respond('deny'));
     const tool = toMcpToolDefinition({ serverId: 'fs', name: 'delete', inputSchema: { type: 'object' }, trustAnnotations: false, annotations: { destructiveHint: true } });
     await expect(tool.execute({ path: 'a.md' })).rejects.toThrow('denied by user');
     expect(recordDenial).toHaveBeenCalledWith('fs', 'delete', { path: 'a.md' });
     expect(callTool).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

@@ -3,6 +3,7 @@ import { Wrench, X } from '@/components/icons';
 import { listTools, isToolEnabled, setToolEnabled, syncMcpTools } from '@/core/tools';
 import type { ToolDefinition } from '@/core/tools';
 import type { McpAuditRecord, McpServerStatus } from '@/types/mcp';
+import { clearMcpApprovalPolicies } from '@/services/mcp-approval';
 
 /**
  * 工具管理器弹层
@@ -235,8 +236,9 @@ export const ToolManagerDialog: React.FC<{
         </div>
 
         {/* 底部 */}
-        <div className="px-5 py-3 border-t text-[10px] text-muted-foreground shrink-0">
-          禁用后，AI Agent 将无法调用该工具。所有工具默认启用。
+        <div className="flex items-center justify-between px-5 py-3 border-t text-[10px] text-muted-foreground shrink-0">
+          <span>禁用后，AI Agent 将无法调用该工具。所有工具默认启用。</span>
+          <button className="hover:text-foreground hover:underline" onClick={clearMcpApprovalPolicies}>清除 MCP 授权</button>
         </div>
       </div>
     </div>

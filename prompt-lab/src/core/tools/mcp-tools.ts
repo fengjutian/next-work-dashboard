@@ -1,6 +1,7 @@
 import type { McpToolCallResult, McpToolDescriptor } from '@/types/mcp';
 import type { ToolDefinition, ToolParameterSchema } from './types';
 import { listTools, registerTools, unregisterTool } from './registry';
+import { requestMcpApproval } from '@/services/mcp-approval';
 
 const MCP_PREFIX = 'mcp__';
 
@@ -27,8 +28,7 @@ export function toMcpToolDefinition(tool: McpToolDescriptor): ToolDefinition {
     execute: async (args) => {
       const trustedReadOnly = tool.trustAnnotations && tool.annotations?.readOnlyHint === true;
       if (!trustedReadOnly) {
-        const risk = tool.annotations?.destructiveHint === true ? '此工具可能执行破坏性修改。' : '此工具可能修改数据或访问外部系统。';
-        const approved = window.confirm(`${risk}\n\nMCP: ${tool.serverId}\n工具: ${tool.name}\n参数: ${JSON.stringify(args, null, 2)}\n\n是否允许执行？`);
+        const approved = await requestMcpApproval(tool, args);
         if (!approved) {
           await window.electronAPI.mcp.recordDenial(tool.serverId, tool.name, args);
           throw new Error('MCP tool call denied by user');
