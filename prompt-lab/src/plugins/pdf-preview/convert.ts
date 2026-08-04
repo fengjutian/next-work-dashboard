@@ -69,7 +69,7 @@ export async function renderPageToImage(
  */
 export async function loadPdfFirstPage(
   file: File,
-  scale: number = 1,
+  scale = 1,
 ): Promise<{ state: PdfPreviewState; pdfDoc: any }> {
   try {
     const { pdfDoc, fileName, pageCount } = await loadPdfDocument(file);

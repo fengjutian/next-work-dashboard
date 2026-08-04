@@ -2,10 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..', '..');
-const ignored = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.vite', '.tmp-node-v22.23.1']);
+const ignored = new Set(['.git', 'node_modules', 'dist', 'build', 'out', 'coverage', '.next', '.vite', '.tmp-node-v22.23.1']);
 const textExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.json', '.jsonc', '.md', '.css', '.html', '.yml', '.yaml']);
 const decoder = new TextDecoder('utf-8', { fatal: true });
-const mojibake = [/\uFFFD/u, /锟斤拷/u, /Ã[\u0080-\u00BF]/u, /â(?:€™|€œ|€|€“|€”)/u];
+const mojibake = [
+  /\uFFFD/u,
+  new RegExp(String.fromCodePoint(0x951f, 0x65a4, 0x62f7), 'u'),
+  /[\u00c2\u00c3][\u0080-\u00bf]/u,
+];
 const errors = [];
 
 function visit(directory) {

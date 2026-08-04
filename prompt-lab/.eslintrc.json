@@ -23,7 +23,16 @@
   },
   "rules": {
     "@typescript-eslint/no-empty-function": "warn",
+    "import/no-unresolved": ["error", { "ignore": ["\\.css$", "\\?worker$"] }],
     "no-control-regex": "warn",
     "prefer-const": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/plugins/code-editor/CodeEditorWorkspaceController.tsx"],
+      "rules": {
+        "import/default": "off"
+      }
+    }
+  ]
 }
