@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Graph, type IEvent } from '@antv/g6';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, GitBranch } from '@/components/icons';
 import type { GraphData, GraphNode } from './graph-types';
-import { aggregateGraph, dependencyMatrix, localGraph } from './graph-views';
+import { aggregateGraph, dependencyMatrix, localGraph, sanitizeGraph } from './graph-views';
 
 type GraphView = 'relation' | 'layered' | 'aggregate' | 'local' | 'matrix';
 
@@ -24,17 +24,19 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
   const graphRef = useRef<Graph | null>(null);
   const [view, setView] = useState<GraphView>('aggregate');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const fallbackNodeId = useMemo(() => graphData?.nodes.reduce<GraphNode | undefined>(
+  const validGraph = useMemo(() => graphData ? sanitizeGraph(graphData) : null, [graphData]);
+  const fallbackNodeId = useMemo(() => validGraph?.nodes.reduce<GraphNode | undefined>(
     (best, node) => !best || node.degree > best.degree ? node : best,
     undefined,
-  )?.id ?? null, [graphData]);
+  )?.id ?? null, [validGraph]);
   const displayGraph = useMemo(() => {
-    if (!graphData) return null;
-    if (view === 'aggregate' || view === 'matrix') return aggregateGraph(graphData);
-    if (view === 'local') return localGraph(graphData, selectedNodeId ?? fallbackNodeId ?? '', 1);
-    return graphData;
-  }, [fallbackNodeId, graphData, selectedNodeId, view]);
-  const matrix = useMemo(() => graphData ? dependencyMatrix(graphData) : null, [graphData]);
+    if (!validGraph) return null;
+    if (view === 'aggregate' || view === 'matrix') return aggregateGraph(validGraph);
+    const selectedExists = Boolean(selectedNodeId && validGraph.nodes.some((node) => node.id === selectedNodeId));
+    if (view === 'local') return localGraph(validGraph, selectedExists ? selectedNodeId! : fallbackNodeId ?? '', 1);
+    return validGraph;
+  }, [fallbackNodeId, selectedNodeId, validGraph, view]);
+  const matrix = useMemo(() => validGraph ? dependencyMatrix(validGraph) : null, [validGraph]);
 
   // ── 工具栏操作 ──
   const zoomIn = () => graphRef.current?.zoomBy(1.3);
@@ -48,8 +50,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
   // ── 渲染 G6 ──
   useEffect(() => {
     if (!displayGraph || view === 'matrix' || !containerRef.current) return;
-
-    if (graphRef.current) { graphRef.current.destroy(); graphRef.current = null; }
 
     const container = containerRef.current;
     const { clientWidth: w, clientHeight: h } = container;
@@ -199,14 +199,21 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
     graph.on('node:click', (event: IEvent) => {
       if ('target' in event && event.target && 'id' in event.target) {
         const id = String(event.target.id);
-        if (graphData.nodes.some((node) => node.id === id)) {
+        if (validGraph?.nodes.some((node) => node.id === id)) {
           setSelectedNodeId(id);
           onNodeSelect?.(id);
         }
       }
     });
-    graph.render();
     graphRef.current = graph;
+    let disposed = false;
+    let renderFinished = false;
+    const renderPromise = Promise.resolve(graph.render())
+      .catch((error) => { if (!disposed) console.error('[GraphCanvas] render failed:', error); })
+      .finally(() => {
+        renderFinished = true;
+        if (disposed) graph.destroy();
+      });
 
     const onResize = () => {
       if (!containerRef.current) return;
@@ -215,11 +222,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
     window.addEventListener('resize', onResize);
 
     return () => {
+      disposed = true;
       window.removeEventListener('resize', onResize);
-      graph.destroy();
-      graphRef.current = null;
+      if (graphRef.current === graph) graphRef.current = null;
+      if (renderFinished) graph.destroy();
+      else void renderPromise;
     };
-  }, [displayGraph, graphData, onNodeSelect, view]);
+  }, [displayGraph, onNodeSelect, validGraph, view]);
 
   // ── 空状态 ──
   if (!graphData) {
@@ -241,7 +250,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           <option value="aggregate">模块聚合</option><option value="layered">分层依赖</option><option value="local">局部关系</option><option value="matrix">依赖矩阵</option><option value="relation">完整关系</option>
         </select>
         {view === 'local' && <select className="h-7 max-w-56 rounded border-l border-border bg-transparent px-2 text-xs outline-none" value={selectedNodeId ?? fallbackNodeId ?? ''} onChange={(event) => setSelectedNodeId(event.target.value)}>
-          {graphData.nodes.slice().sort((a, b) => a.label.localeCompare(b.label)).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
+          {(validGraph?.nodes ?? []).slice().sort((a, b) => a.label.localeCompare(b.label)).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
         </select>}
       </div>
 

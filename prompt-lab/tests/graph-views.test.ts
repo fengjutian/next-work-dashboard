@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateGraph, dependencyMatrix, localGraph } from '../src/plugins/knowledge-graph/graph-views';
+import { aggregateGraph, dependencyMatrix, localGraph, sanitizeGraph } from '../src/plugins/knowledge-graph/graph-views';
 import type { GraphData } from '../src/plugins/knowledge-graph/graph-types';
 
 const graph: GraphData = {
@@ -22,5 +22,9 @@ describe('knowledge graph views', () => {
     const result = dependencyMatrix(graph);
     expect(result.labels).toEqual(['src/core', 'src/plugins']);
     expect(result.values.flat().some((value) => value === 1)).toBe(true);
+  });
+  it('removes relations whose endpoint no longer exists', () => {
+    const result = sanitizeGraph({ ...graph, edges: [...graph.edges, { source: 'a', target: 'visit', weight: 1 }] });
+    expect(result.edges.some((edge) => edge.target === 'visit')).toBe(false);
   });
 });
