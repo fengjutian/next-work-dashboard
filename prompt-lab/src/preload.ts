@@ -102,6 +102,8 @@ const electronAPI: ElectronAPI = {
   // 通用 HTTP fetch（主进程，绕过 CORS）
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) =>
     ipcRenderer.invoke('fetch-url', url, options),
+  wereadRequest: (apiKey: string, payload: Record<string, unknown>) =>
+    ipcRenderer.invoke('weread:request', apiKey, payload),
   // webview preload 路径
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 

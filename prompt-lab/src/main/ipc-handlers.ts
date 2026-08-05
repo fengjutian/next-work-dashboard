@@ -316,6 +316,57 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  // 微信读书 Agent API。固定目标域名，避免把带凭据的请求变成通用代理。
+  ipcMain.handle('weread:request', async (_event, apiKey: string, payload: Record<string, unknown>) => {
+    const key = String(apiKey || '').trim();
+    if (!/^wrk-\S{4,}$/.test(key)) return { success: false, error: 'API Key 格式不正确' };
+    if (!payload || typeof payload.api_name !== 'string') return { success: false, error: '接口参数不正确' };
+
+    let lastError = '请求微信读书失败';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      try {
+        const response = await fetch('https://i.weread.qq.com/api/agent/gateway', {
+          method: 'POST', signal: controller.signal,
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, skill_version: '1.0.4' }),
+        });
+        const text = await response.text();
+        if (!response.ok) {
+          let detail = text.trim().slice(0, 300);
+          try {
+            const body = JSON.parse(text) as { errmsg?: string; message?: string };
+            detail = body.errmsg || body.message || detail;
+          } catch { /* use response text */ }
+          lastError = `请求失败（HTTP ${response.status}）${detail ? `：${detail}` : ''}`;
+          if ((response.status === 429 || response.status === 499 || response.status >= 500) && attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 800 * 2 ** attempt));
+            continue;
+          }
+          return { success: false, error: lastError };
+        }
+        let data: Record<string, unknown>;
+        try { data = JSON.parse(text) as Record<string, unknown>; }
+        catch { return { success: false, error: '微信读书返回了无法解析的数据' }; }
+        if (typeof data.errcode === 'number' && data.errcode !== 0) {
+          return { success: false, error: String(data.errmsg || `微信读书错误 ${data.errcode}`) };
+        }
+        if (data.upgrade_info) return { success: false, error: String((data.upgrade_info as { message?: string }).message || '微信读书 Skill 需要升级') };
+        return { success: true, data };
+      } catch (error) {
+        lastError = error instanceof Error && error.name === 'AbortError'
+          ? '请求微信读书超时（60 秒）'
+          : error instanceof Error ? error.message : String(error);
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 800 * 2 ** attempt));
+          continue;
+        }
+      } finally { clearTimeout(timeout); }
+    }
+    return { success: false, error: lastError };
+  });
+
   // ── JSON 存储 ──
   ipcMain.handle('store-save', async (_event, data: string) => {
     try {

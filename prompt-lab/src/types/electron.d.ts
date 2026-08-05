@@ -39,6 +39,11 @@ export interface ElectronAPI {
     contentType?: string;
     error?: string;
   }>;
+  wereadRequest: (apiKey: string, payload: Record<string, unknown>) => Promise<{
+    success: boolean;
+    data?: Record<string, unknown>;
+    error?: string;
+  }>;
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) => Promise<{
     success: boolean; embeddings?: number[][]; error?: string;
   }>;

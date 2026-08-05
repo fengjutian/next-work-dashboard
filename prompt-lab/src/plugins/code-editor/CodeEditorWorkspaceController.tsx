@@ -35,9 +35,12 @@ import { EditorStatusBar } from './EditorStatusBar';
 import { EditorTabMenu } from './EditorTabMenu';
 import {
   AgentsWindow, estimateTokens, titleFromInstruction,
-  type AgentEditScope, type AiFileProposal,
+  type AgentEditScope,
 } from './agents';
-import { useAgentSessions, useAiEditGeneration, useAiProposalReview, useAiSessionState } from './hooks';
+import {
+  useAgentSessions, useAiEditGeneration, useAiProposalReview, useAiSessionState,
+  type AiFileProposal,
+} from './hooks';
 import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import {
