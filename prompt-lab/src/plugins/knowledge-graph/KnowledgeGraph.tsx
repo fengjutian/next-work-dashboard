@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Search } from '@/components/icons';
+import { FolderOpen, Plus, Search } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile } from '@/types/electron';
@@ -12,6 +12,7 @@ import { CodeExtractControls } from './CodeExtractControls';
 import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
+import { KnowledgeFolderTree } from './KnowledgeFolderTree';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
@@ -84,6 +85,9 @@ export const KnowledgeGraph: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [knowledgeWorkspace, setKnowledgeWorkspace] = useState<string | null>(null);
   const [knowledgeIndex, setKnowledgeIndex] = useState<KnowledgeWorkspaceView | null>(null);
+  const [knowledgeFolderPaths, setKnowledgeFolderPaths] = useState<string[]>([]);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolder, setShowNewFolder] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState('note');
   const [templateValues, setTemplateValues] = useState<Record<string, string>>({});
   const [selectedKnowledgeUri, setSelectedKnowledgeUri] = useState<string | null>(null);
@@ -288,15 +292,54 @@ export const KnowledgeGraph: React.FC = () => {
       return edges.length;
   }, []);
 
+  const loadKnowledgeFolders = useCallback(async (rootPath: string) => {
+    const folders: string[] = [];
+    const visit = async (relativePath = ''): Promise<void> => {
+      const result = await window.electronAPI.workspace.listDirectory(rootPath, relativePath);
+      if (!result.success) return;
+      for (const entry of result.data ?? []) {
+        if (entry.type !== 'directory' || entry.name === '.knowledge') continue;
+        const normalizedPath = entry.path.replace(/\\/g, '/');
+        folders.push(normalizedPath);
+        await visit(entry.path);
+      }
+    };
+    await visit();
+    setKnowledgeFolderPaths(folders);
+  }, []);
+
   const scanKnowledgeWorkspace = useCallback(async (rootPath: string) => {
       const result = await window.electronAPI.knowledge.scanWorkspace(rootPath);
       if (!result.success || !result.data) throw new Error(result.error ?? 'SCAN_FAILED');
       const index = result.data as KnowledgeWorkspaceView;
       const edgeCount = applyKnowledgeIndex(index);
       activeKnowledgeWorkspace.setActive(rootPath, index);
+      await loadKnowledgeFolders(rootPath);
       const unresolved = index.links.filter((link) => link.status !== 'resolved').length;
       toast(`已索引 ${index.documents.length} 篇知识文档、${edgeCount} 条显式链接；${unresolved} 条待解析`, 'success');
-  }, [applyKnowledgeIndex, toast]);
+  }, [applyKnowledgeIndex, loadKnowledgeFolders, toast]);
+
+  const createKnowledgeFolder = useCallback(async () => {
+    if (!knowledgeWorkspace) return;
+    const path = newFolderName.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!path || path.split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+      toast('请输入有效的目录名称', 'error');
+      return;
+    }
+    setGenerating(true);
+    try {
+      const result = await window.electronAPI.workspace.createDirectory(knowledgeWorkspace, path);
+      if (!result.success) throw new Error(result.error ?? 'CREATE_DIRECTORY_FAILED');
+      setNewFolderName('');
+      setShowNewFolder(false);
+      await loadKnowledgeFolders(knowledgeWorkspace);
+      toast(`已创建主题目录：${path}`, 'success');
+    } catch (error) {
+      toast(`创建目录失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }, [knowledgeWorkspace, loadKnowledgeFolders, newFolderName, toast]);
 
   const openKnowledgeWorkspace = useCallback(async () => {
     const folder = await window.electronAPI.workspace.openFolder();
@@ -431,6 +474,48 @@ export const KnowledgeGraph: React.FC = () => {
                   ))}
                 </div>
               )}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between px-0.5">
+                  <p className="text-xs font-medium">主题文件夹</p>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">{knowledgeIndex.documents.length} 篇</span>
+                    <button
+                      type="button"
+                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title="新建主题目录"
+                      aria-label="新建主题目录"
+                      onClick={() => setShowNewFolder((visible) => !visible)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {showNewFolder && (
+                  <div className="mb-1.5 flex gap-1">
+                    <div className="relative min-w-0 flex-1">
+                      <FolderOpen className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                      <input
+                        autoFocus
+                        className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs"
+                        value={newFolderName}
+                        onChange={(event) => setNewFolderName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') void createKnowledgeFolder();
+                          if (event.key === 'Escape') { setShowNewFolder(false); setNewFolderName(''); }
+                        }}
+                        placeholder="目录名称，如：产品"
+                      />
+                    </div>
+                    <button type="button" className="h-8 rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-50" disabled={!newFolderName.trim() || generating} onClick={() => void createKnowledgeFolder()}>添加</button>
+                  </div>
+                )}
+                <KnowledgeFolderTree
+                  documents={knowledgeIndex.documents}
+                  folderPaths={knowledgeFolderPaths}
+                  selectedUri={selectedKnowledgeUri}
+                  onSelectDocument={selectKnowledgeDocument}
+                />
+              </div>
               <select className="h-8 w-full rounded-md border bg-background px-2 text-xs" value={selectedTemplate?.id ?? ''} onChange={(event) => setSelectedTemplateId(event.target.value)}>
                 {knowledgeIndex.templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
               </select>
