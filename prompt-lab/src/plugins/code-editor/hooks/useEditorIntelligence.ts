@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { OnMount } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { displayError, type EditorProblem, type EditorSymbol, type OpenDocument } from './editor-types';
+import { displayError, type EditorProblem, type EditorSymbol, type OpenDocument } from '../editor-types';
 
 interface UseEditorIntelligenceOptions {
   editorRef: MutableRefObject<monaco.editor.IStandaloneCodeEditor | null>;

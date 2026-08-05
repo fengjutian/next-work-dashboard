@@ -1,7 +1,7 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { FilePickResult } from '@/types/electron';
-import { decodeBase64Utf8, languageIdFromName } from './editor-utils';
-import { displayError, type OpenDocument, type TreeNode } from './editor-types';
+import { decodeBase64Utf8, languageIdFromName } from '../editor-utils';
+import { displayError, type OpenDocument, type TreeNode } from '../editor-types';
 
 interface QuickOpenState { open: boolean; query: string; files: TreeNode[] }
 

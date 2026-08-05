@@ -1,5 +1,5 @@
 import { useCallback, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
-import type { TreeNode } from './editor-types';
+import type { TreeNode } from '../editor-types';
 import { updateTreeNode } from './useExplorerTree';
 
 interface Options {

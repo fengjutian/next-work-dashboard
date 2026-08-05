@@ -1,14 +1,14 @@
 import { useCallback, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { fitContextToTokenBudget } from './ai-context';
-import { checkTokenBudget } from './ai-token-budget';
-import { applyConversationSummary, conversationNeedsSummary, isAbortError, type AiConversationMessage, type AiPendingRequest } from './ai-conversation';
+import { fitContextToTokenBudget } from '../agents/ai-context';
+import { checkTokenBudget } from '../agents/ai-token-budget';
+import { applyConversationSummary, conversationNeedsSummary, isAbortError, type AiConversationMessage, type AiPendingRequest } from '../agents/ai-conversation';
 import { languageIdFromName } from '../editor-utils';
 import type { OpenDocument } from '../editor-types';
 import type { AiFileProposal } from './useAiSessionState';
-import type { EditorDiffView } from '../useGitDiffMerge';
+import type { EditorDiffView } from './useGitDiffMerge';
 import type { AgentTaskConfig, AgentTaskRecord } from '@/types/electron';
-import { pathInAgentScope, type AgentEditScope } from './agent-edit-scope';
+import { pathInAgentScope, type AgentEditScope } from '../agents/agent-edit-scope';
 
 interface AiApiConfig { apiKey: string; baseUrl: string; model: string }
 

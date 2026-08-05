@@ -1,5 +1,5 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import { displayError, type OpenDocument, type TreeEditState, type TreeNode } from './editor-types';
+import { displayError, type OpenDocument, type TreeEditState, type TreeNode } from '../editor-types';
 
 interface Options {
   workspace: { path: string } | null;

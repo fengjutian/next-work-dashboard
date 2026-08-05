@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, type AgentLogEntry, type AgentSession } from './agent-sessions';
+import { archivedSessionsForWorkspace, createAgentLogEntry, createAgentSession, sessionsForWorkspace, type AgentLogEntry, type AgentSession } from '../agents/agent-sessions';
 import { isDbReady, dbInsertAgentSession, dbUpdateAgentSession, dbDeleteAgentSession, dbInsertAgentLog, dbDeleteAgentLogs, dbLoadAgentSessions, dbLoadAgentLogs } from '@/db';
 
 const STORAGE_KEY = 'code-editor.agent-sessions.v1';

@@ -1,7 +1,7 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
 import type { WorkspaceEncoding, WorkspaceSearchResult } from '@/types/electron';
-import { languageIdFromName } from './editor-utils';
-import { displayError, type OpenDocument } from './editor-types';
+import { languageIdFromName } from '../editor-utils';
+import { displayError, type OpenDocument } from '../editor-types';
 
 export interface SearchPanelState {
   open: boolean;

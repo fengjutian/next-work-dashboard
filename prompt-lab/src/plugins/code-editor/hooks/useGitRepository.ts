@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { WorkspaceGitCommit, WorkspaceGitOperation, WorkspaceGitOverview, WorkspaceGitStatus } from '@/types/electron';
-import { displayError } from './editor-types';
+import { displayError } from '../editor-types';
 
 interface UseGitRepositoryOptions {
   workspace: { path: string } | null;
