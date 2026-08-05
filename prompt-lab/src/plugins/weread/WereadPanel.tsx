@@ -106,6 +106,7 @@ function makeMarkdown(books: ExportedBook[]): string {
 export const WereadPanel: React.FC = () => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const [mode, setMode] = useState<'reader' | 'notes' | 'analytics'>('reader');
+  const visitedModes = useRef(new Set<'reader' | 'notes' | 'analytics'>(['reader']));
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -114,11 +115,20 @@ export const WereadPanel: React.FC = () => {
   const [books, setBooks] = useState<ExportedBook[]>([]);
   const [openBookId, setOpenBookId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [webviewReady, setWebviewReady] = useState(false);
 
   useEffect(() => {
     void window.electronAPI.auth.getToken(TOKEN_SERVICE).then((token) => {
       if (token) setApiKey(token);
     });
+  }, []);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+    const onFinish = () => setWebviewReady(true);
+    webview.addEventListener('did-finish-load', onFinish);
+    return () => { webview.removeEventListener('did-finish-load', onFinish); };
   }, []);
 
   useEffect(() => {
@@ -133,10 +143,10 @@ export const WereadPanel: React.FC = () => {
         }
         return true;
       }
-      return attempts >= 50;
+      return attempts >= 30;
     };
     if (loadCache()) return undefined;
-    const timer = window.setInterval(() => { if (loadCache()) window.clearInterval(timer); }, 100);
+    const timer = window.setInterval(() => { if (loadCache()) window.clearInterval(timer); }, 300);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -148,9 +158,14 @@ export const WereadPanel: React.FC = () => {
 
   const visibleBooks = useMemo(() => {
     if (!searchQuery.trim()) return books;
-    if (isDbReady()) return dbLoadWereadCache(searchQuery) as ExportedBook[];
     const query = searchQuery.trim().toLocaleLowerCase();
-    return books.filter((book) => JSON.stringify(book).toLocaleLowerCase().includes(query));
+    if (isDbReady()) {
+      try { return dbLoadWereadCache(searchQuery) as ExportedBook[]; } catch { /* fall through */ }
+    }
+    return books.filter((book) =>
+      book.title.toLocaleLowerCase().includes(query) ||
+      book.author.toLocaleLowerCase().includes(query)
+    );
   }, [books, searchQuery]);
 
   async function request(payload: JsonObject): Promise<JsonObject> {
@@ -210,6 +225,8 @@ export const WereadPanel: React.FC = () => {
       }
 
       const exported: ExportedBook[] = [];
+      let lastUpdate = 0;
+      const BATCH_SIZE = 5;
       for (let index = 0; index < summaries.length; index += 1) {
         const summary = summaries[index];
         setStatus(`正在获取 ${index + 1}/${summaries.length}：《${summary.title}》`);
@@ -222,7 +239,11 @@ export const WereadPanel: React.FC = () => {
           ...highlight, chapter: chapters.get(String(highlight.chapterUid)),
         }));
         exported.push({ ...summary, highlights, reviews });
-        setBooks([...exported]);
+        const now = Date.now();
+        if (exported.length % BATCH_SIZE === 0 || now - lastUpdate > 300 || index === summaries.length - 1) {
+          setBooks([...exported]);
+          lastUpdate = now;
+        }
       }
       const sync = dbReplaceWereadCache(exported);
       await flushDbToDisk();
@@ -247,18 +268,34 @@ export const WereadPanel: React.FC = () => {
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => webviewRef.current?.reload()}><RefreshCw /></Button>
         </>}
         <span className="flex-1 truncate px-2 text-xs text-muted-foreground">微信读书</span>
-        <Button size="sm" variant={mode === 'reader' ? 'secondary' : 'ghost'} onClick={() => setMode('reader')}>阅读</Button>
+        <Button size="sm" variant={mode === 'reader' ? 'secondary' : 'ghost'} onClick={() => { visitedModes.current.add('reader'); setMode('reader'); }}>阅读</Button>
         <Button size="sm" variant={mode === 'notes' ? 'secondary' : 'ghost'} onClick={() => setMode('notes')}><BookOpen />笔记导出</Button>
-        <Button size="sm" variant={mode === 'analytics' ? 'secondary' : 'ghost'} onClick={() => setMode('analytics')}>阅读分析</Button>
+        <Button size="sm" variant={mode === 'analytics' ? 'secondary' : 'ghost'} onClick={() => { visitedModes.current.add('analytics'); setMode('analytics'); }}>阅读分析</Button>
       </div>
 
-      {mode === 'reader' ? (
-        <webview ref={webviewRef} src="https://weread.qq.com/" partition="persist:weread" style={{ flex: 1 }}
-          // @ts-expect-error webview-specific attribute
-          allowpopups="true" />
-      ) : mode === 'analytics' ? (
-        <WereadAnalytics books={books} onSelectBook={(bookId) => { setOpenBookId(bookId); setSearchQuery(''); setMode('notes'); }} />
-      ) : (
+      {visitedModes.current.has('reader') && (
+        <div style={{ flex: mode === 'reader' ? 1 : 0, display: mode === 'reader' ? undefined : 'none', position: 'relative' }}>
+          {!webviewReady && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background">
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span className="text-sm">正在加载微信读书…</span>
+              </div>
+            </div>
+          )}
+          <webview ref={webviewRef} src="https://weread.qq.com/" partition="persist:weread"
+            useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+            // @ts-expect-error webview-specific attribute
+            allowpopups="true" />
+        </div>
+      )}
+      {visitedModes.current.has('analytics') && (
+        <div style={{ flex: mode === 'analytics' ? 1 : 0, display: mode === 'analytics' ? undefined : 'none', overflow: 'hidden' }}>
+          <WereadAnalytics books={books} onSelectBook={(bookId) => { setOpenBookId(bookId); setSearchQuery(''); setMode('notes'); }} />
+        </div>
+      )}
+      <div style={{ flex: mode === 'notes' ? 1 : 0, display: mode === 'notes' ? undefined : 'none', overflow: 'hidden' }}>
         <div className="flex-1 overflow-auto p-5">
           <div className="mx-auto max-w-4xl space-y-5">
             <div>
@@ -313,7 +350,7 @@ export const WereadPanel: React.FC = () => {
             </>}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };
