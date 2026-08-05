@@ -1,6 +1,6 @@
 import type { GraphData, GraphEdge, GraphNode } from './graph-types';
 
-/** 清除重复节点及端点不存在的旧边，保证所有视图都可安全交给 G6。 */
+/** 清除重复节点及端点不存在的旧边，保证所有视图都可安全交给图表渲染器。 */
 export function sanitizeGraph(graph: GraphData): GraphData {
   const nodeMap = new Map(graph.nodes.map((node) => [node.id, node]));
   const nodeIds = new Set(nodeMap.keys());
