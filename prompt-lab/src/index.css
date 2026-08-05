@@ -151,6 +151,101 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--foreground) / 0.25);
 }
+
+/* AI chat Markdown document typography */
+.chat-markdown {
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.chat-markdown :where(p, li, td, dd) { color: hsl(var(--foreground) / 0.94); }
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  color: hsl(var(--foreground));
+  font-weight: 650;
+  line-height: 1.35;
+  scroll-margin-top: 1rem;
+}
+.chat-markdown h1 { margin: 1.5rem 0 0.75rem; font-size: 1.35rem; }
+.chat-markdown h2 { margin: 1.4rem 0 0.65rem; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.35rem; font-size: 1.15rem; }
+.chat-markdown h3 { margin: 1.15rem 0 0.5rem; font-size: 1rem; }
+.chat-markdown h4 { margin: 1rem 0 0.4rem; font-size: 0.925rem; }
+.chat-markdown p { margin: 0.65rem 0; }
+.chat-markdown ul,
+.chat-markdown ol { margin: 0.65rem 0; padding-left: 1.4rem; }
+.chat-markdown li { margin: 0.25rem 0; padding-left: 0.15rem; }
+.chat-markdown li::marker { color: hsl(var(--primary)); }
+.chat-markdown blockquote {
+  margin: 0.9rem 0;
+  border-left: 3px solid hsl(var(--primary) / 0.65);
+  border-radius: 0 0.35rem 0.35rem 0;
+  background: hsl(var(--primary-light) / 0.5);
+  padding: 0.55rem 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+.chat-markdown table {
+  display: block;
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+}
+.chat-markdown th {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  text-align: left;
+}
+.chat-markdown th,
+.chat-markdown td { border-bottom: 1px solid hsl(var(--foreground) / 0.16); padding: 0.55rem 0.7rem; vertical-align: top; }
+.chat-markdown th + th,
+.chat-markdown td + td { border-left: 1px solid hsl(var(--border)); }
+.chat-markdown tr:last-child td { border-bottom: 0; }
+.chat-markdown tbody tr:nth-child(even) { background: hsl(var(--muted) / 0.3); }
+.chat-markdown pre {
+  margin: 0.9rem 0;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  background: hsl(var(--foreground) / 0.055);
+  color: hsl(var(--foreground));
+  padding: 0.8rem 1rem;
+  font-size: 0.78rem;
+  line-height: 1.65;
+}
+.chat-markdown pre code,
+.chat-markdown pre code span {
+  color: hsl(var(--foreground)) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+.chat-markdown :not(pre) > code {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.3rem;
+  background: hsl(var(--muted));
+  padding: 0.1rem 0.3rem;
+  color: hsl(var(--primary));
+  font-size: 0.82em;
+}
+.chat-markdown a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 2px; }
+.chat-markdown hr { margin: 1.25rem 0; border: 0; border-top: 1px solid hsl(var(--border)); }
+.chat-markdown strong { color: hsl(var(--foreground)); font-weight: 650; }
+.chat-markdown em { color: hsl(var(--foreground) / 0.82); }
+.chat-markdown .token.comment,
+.chat-markdown .token.prolog,
+.chat-markdown .token.doctype {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
 /* Code editor Git diff decorations */
 .monaco-editor .git-line-added { background: color-mix(in srgb, #22c55e 10%, transparent); }
 .monaco-editor .git-line-modified { background: color-mix(in srgb, #3b82f6 10%, transparent); }

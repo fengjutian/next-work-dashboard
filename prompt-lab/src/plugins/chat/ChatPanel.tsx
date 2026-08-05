@@ -76,6 +76,13 @@ const SCENE_PRESETS: Record<ChatScene, {
   },
 };
 
+const MARKDOWN_RESPONSE_PROMPT = `回答使用清晰、规范的 Markdown 排版：
+- 使用简短标题建立层级，避免用粗体代替所有标题；
+- 段落、列表和代码块之间保留空行；
+- 对真正适合横向比较的数据使用表格，普通说明不要强行制表；
+- 代码必须使用带语言标识的 fenced code block；
+- 避免过深的标题层级和冗长连续段落。`;
+
 const WELCOME_PROMPTS = [
   { key: '1', icon: <FileText className="h-4 w-4" />, label: '帮我写一份项目周报', value: '帮我写一份项目周报' },
   { key: '2', icon: <Sparkles className="h-4 w-4" />, label: '解释这段代码的逻辑', value: '解释这段代码的逻辑' },
@@ -123,6 +130,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [codeChangeDiff, setCodeChangeDiff] = useState<CodeChangeDiffData | null>(null);
   const sceneSystemPrompt = useMemo(() => [
     scenePreset.systemPrompt,
+    MARKDOWN_RESPONSE_PROMPT,
     scene === 'code' && codeWorkspace
       ? `当前已授权代码工作区：${codeWorkspace.path}。使用 workspace_* 工具分析和修改其中的代码；工具路径参数必须使用相对路径。`
       : '',
@@ -542,7 +550,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       return (
         <div>
           {toolCalls && toolCalls.length > 0 && <ToolCallCard calls={toolCalls} results={toolResults} />}
-          {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="text-sm" />}
+          {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none dark:prose-invert" />}
           {!!memorySources?.length && !streaming && <MemorySourceList sources={memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
         </div>
       );
@@ -786,7 +794,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                         </div>
                         {message.content ? (
                           <div>
-                            <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="text-sm" />
+                            <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none dark:prose-invert" />
                             {!!message.memorySources?.length && !streaming && <MemorySourceList sources={message.memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
                           </div>
                         ) : (

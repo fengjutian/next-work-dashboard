@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Puzzle, Settings } from '@/components/icons';
+import { Database, Puzzle, Settings, X } from '@/components/icons';
 import { ActivityBar } from '@/components/ActivityBar';
 import { TitleBar } from '@/components/TitleBar';
 import { AIPanel, AISiteWelcome, WebViewContainer } from '@/plugins/ai';
@@ -25,12 +25,12 @@ export default function App() {
   usePluginRegistryVersion();
   const {
     activeActivity,
-    setActiveActivity,
     tabs,
     theme,
   } = useStore();
   usePersistence();
   useDbPersistence();
+  const [bottomOverlay, setBottomOverlay] = React.useState<'database' | 'plugin-manager' | 'settings' | null>(null);
   const visitedPluginIds = React.useRef(new Set<string>());
   if (activeActivity) visitedPluginIds.current.add(activeActivity);
 
@@ -46,14 +46,18 @@ export default function App() {
 
   const isAI = activeActivity === 'ai' || activeActivity === null;
   const isSettings = activeActivity === 'settings';
-  const isPluginManager = activeActivity === 'plugin-manager';
-  const isDatabase = activeActivity === 'database';
 
-  // 根据 activeActivity 找到对应的插件（非 AI/非 settings 时）
-  const activePlugin =
-    !isAI && !isSettings && activeActivity
-      ? pluginRegistry.get(activeActivity)
-      : undefined;
+  React.useEffect(() => {
+    if (!bottomOverlay) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setBottomOverlay(null); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [bottomOverlay]);
+
+  const bottomOverlayPlugin = bottomOverlay === 'database' || bottomOverlay === 'plugin-manager'
+    ? pluginRegistry.get(bottomOverlay)
+    : undefined;
+  const BottomOverlayPanel = bottomOverlayPlugin?.component;
 
   return (
     <ToastProvider>
@@ -114,16 +118,34 @@ export default function App() {
       {/* 提示词抽屉 */}
       <PromptDrawer />
 
+      {bottomOverlay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5" onMouseDown={() => setBottomOverlay(null)}>
+          <section className="flex h-[88vh] w-[92vw] max-w-[1600px] flex-col overflow-hidden rounded-xl border bg-background shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={bottomOverlay === 'database' ? '数据库浏览器' : bottomOverlay === 'plugin-manager' ? '插件管理' : '设置'}>
+            <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-card px-4">
+              {bottomOverlay === 'database' ? <Database className="h-4 w-4 text-primary" /> : bottomOverlay === 'plugin-manager' ? <Puzzle className="h-4 w-4 text-primary" /> : <Settings className="h-4 w-4 text-primary" />}
+              <h2 className="text-sm font-semibold">{bottomOverlay === 'database' ? '数据库浏览器' : bottomOverlay === 'plugin-manager' ? '插件管理' : '设置'}</h2>
+              <div className="flex-1" />
+              <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setBottomOverlay(null)} title="关闭" aria-label="关闭弹层"><X className="h-4 w-4" /></button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <React.Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中…</div>}>
+                {bottomOverlay === 'settings' ? <SettingsSidebar /> : BottomOverlayPanel ? <BottomOverlayPanel /> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">模块不可用</div>}
+              </React.Suspense>
+            </div>
+          </section>
+        </div>
+      )}
+
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
       <div className="h-7 flex items-center px-2 border-t border-[#61245b] bg-[#61245b] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(97_36_91_/_0.16)]">
         <PluginStatusBar />
         <button
           className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
-            isDatabase
+            bottomOverlay === 'database'
               ? 'bg-white/20 text-white'
               : 'text-white/80 hover:bg-white/15 hover:text-white'
           }`}
-          onClick={() => setActiveActivity(isDatabase ? null : 'database')}
+          onClick={() => setBottomOverlay((current) => current === 'database' ? null : 'database')}
           title="数据库浏览器"
           aria-label="数据库浏览器"
         >
@@ -131,11 +153,11 @@ export default function App() {
         </button>
         <button
           className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
-            isPluginManager
+            bottomOverlay === 'plugin-manager'
               ? 'bg-white/20 text-white'
               : 'text-white/80 hover:bg-white/15 hover:text-white'
           }`}
-          onClick={() => setActiveActivity(isPluginManager ? null : 'plugin-manager')}
+          onClick={() => setBottomOverlay((current) => current === 'plugin-manager' ? null : 'plugin-manager')}
           title="插件管理"
           aria-label="插件管理"
         >
@@ -143,11 +165,11 @@ export default function App() {
         </button>
         <button
           className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
-            isSettings
+            bottomOverlay === 'settings'
               ? 'bg-white/20 text-white'
               : 'text-white/80 hover:bg-white/15 hover:text-white'
           }`}
-          onClick={() => setActiveActivity(isSettings ? null : 'settings')}
+          onClick={() => setBottomOverlay((current) => current === 'settings' ? null : 'settings')}
           title="设置"
         >
           <Settings className="h-4 w-4" />
