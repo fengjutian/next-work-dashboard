@@ -97,6 +97,7 @@ export const MODELS = [
 // ── 会话类型 ──
 export interface Session {
   id: string;
+  scene: 'chat' | 'code' | 'workbench';
   title: string;
   messages: Message[];
   model: string;
@@ -109,7 +110,7 @@ export interface Session {
 }
 
 // ── Hook ──
-export function useChatSession(sceneSystemPrompt = '') {
+export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] = 'chat') {
   const aiApi = useStore((s) => s.aiApi);
   const selectedPromptId = useStore((s) => s.selectedPromptId);
   const prompts = useStore((s) => s.prompts);
@@ -117,14 +118,15 @@ export function useChatSession(sceneSystemPrompt = '') {
 
   // ── 会话管理 ──
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string>('default');
+  const sessionsRef = useRef<Session[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => `default-${scene}`);
   const sessionsLoaded = useRef(false);
 
   // 初始化：从 DB 加载已持久化的会话
   useEffect(() => {
     if (sessionsLoaded.current) return;
     try {
-      const saved = dbLoadChatSessions<Session[]>();
+      const saved = dbLoadChatSessions<Session[]>(scene);
       if (saved && saved.length > 0) {
         setSessions(saved.map((session) => ({
           ...session,
@@ -139,19 +141,25 @@ export function useChatSession(sceneSystemPrompt = '') {
       }
     } catch { /* ignore */ }
     sessionsLoaded.current = true;
-  }, []);
+  }, [scene]);
 
   // 自动持久化：sessions 变化时保存到 DB（debounce 2s）
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => {
     if (!isDbReady() || sessions.length === 0) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      dbSaveChatSessions(sessions);
-      flushDbToDisk();
+      dbSaveChatSessions(sessions, scene);
+      void flushDbToDisk();
     }, 2000);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [sessions]);
+  }, [scene, sessions]);
+  useEffect(() => () => {
+    if (!isDbReady() || sessionsRef.current.length === 0) return;
+    dbSaveChatSessions(sessionsRef.current, scene);
+    void flushDbToDisk();
+  }, [scene]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const messages = activeSession?.messages ?? [];
@@ -160,11 +168,11 @@ export function useChatSession(sceneSystemPrompt = '') {
   // 确保至少有一个默认会话
   useEffect(() => {
     if (sessions.length === 0) {
-      const def: Session = { id: 'default', title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
+      const def: Session = { id: `default-${scene}`, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
       setSessions([def]);
-      setActiveSessionId('default');
+      setActiveSessionId(def.id);
     }
-  }, [sessions.length, aiApi.model]);
+  }, [sessions.length, aiApi.model, scene]);
 
   const currentModel = activeSession?.model ?? aiApi.model;
   const compareModels = activeSession?.compareModels?.length
@@ -215,7 +223,13 @@ export function useChatSession(sceneSystemPrompt = '') {
 
   // ── 更新会话 ──
   const updateSession = useCallback((fn: (msgs: Message[]) => Message[]) => {
-    setSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, messages: fn(s.messages) } : s));
+    setSessions((prev) => {
+      const targetId = prev.some((session) => session.id === activeSessionId)
+        ? activeSessionId
+        : prev[0]?.id;
+      if (!targetId) return prev;
+      return prev.map((session) => session.id === targetId ? { ...session, messages: fn(session.messages) } : session);
+    });
   }, [activeSessionId]);
 
   const updateSessionMeta = useCallback((patch: Partial<Session>) => {
@@ -247,12 +261,12 @@ export function useChatSession(sceneSystemPrompt = '') {
   // ── 新建/删除/导出会话 ──
   const handleNewSession = useCallback(() => {
     const id = `s-${Date.now()}`;
-    const s: Session = { id, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
+    const s: Session = { id, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
     setSessions((prev) => [...prev, s]);
     setActiveSessionId(id);
     setShowHistory(false);
     setError(null);
-  }, [aiApi.model]);
+  }, [aiApi.model, scene]);
 
   const handleDeleteSession = useCallback((id: string) => {
     setSessions((prev) => {
@@ -260,14 +274,14 @@ export function useChatSession(sceneSystemPrompt = '') {
       if (activeSessionId === id) {
         if (next.length > 0) setActiveSessionId(next[0].id);
         else {
-          const def: Session = { id: 'default', title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
-          setActiveSessionId('default');
+          const def: Session = { id: `default-${scene}`, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
+          setActiveSessionId(def.id);
           return [def];
         }
       }
       return next;
     });
-  }, [activeSessionId, aiApi.model]);
+  }, [activeSessionId, aiApi.model, scene]);
 
   const handleRenameSession = useCallback((id: string) => {
     const name = window.prompt('请输入新名称');

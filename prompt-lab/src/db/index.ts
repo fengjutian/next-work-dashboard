@@ -116,6 +116,28 @@ function ensureSchema(): void {
       seq INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      scene TEXT NOT NULL DEFAULT 'chat',
+      title TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT '',
+      compare_models TEXT NOT NULL DEFAULT '[]',
+      system_prompt TEXT NOT NULL DEFAULT '',
+      bound_prompt_ids TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_scene ON chat_sessions(scene, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      payload TEXT NOT NULL DEFAULT '{}',
+      seq INTEGER NOT NULL DEFAULT 0,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, seq);
     CREATE TABLE IF NOT EXISTS agent_tasks (
       task_id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -521,15 +543,47 @@ export async function flushDbToDisk(): Promise<void> {
 }
 
 // ═══════════════════════════════════════════
-// Chat Sessions — 作为 JSON 存在 settings 中
+// Chat Sessions — SQLite 规范化存储
 // ═══════════════════════════════════════════
 
 const CHAT_SESSIONS_KEY = 'chat_sessions';
 
-export function dbLoadChatSessions<T = unknown>(): T | null {
+export function dbLoadChatSessions<T = unknown>(scene = 'chat'): T | null {
+  if (!_sqlDb) return null;
+  const sessionStatement = _sqlDb.prepare('SELECT * FROM chat_sessions WHERE scene = ? ORDER BY updated_at DESC');
+  sessionStatement.bind([scene]);
+  const sessions: any[] = [];
+  while (sessionStatement.step()) {
+    const row = sessionStatement.getAsObject() as Record<string, unknown>;
+    const messageStatement = _sqlDb.prepare('SELECT * FROM chat_messages WHERE session_id = ? ORDER BY seq ASC');
+    messageStatement.bind([String(row.id)]);
+    const messages: any[] = [];
+    while (messageStatement.step()) {
+      const message = messageStatement.getAsObject() as Record<string, unknown>;
+      let payload: Record<string, unknown> = {};
+      try { payload = JSON.parse(String(message.payload ?? '{}')); } catch { /* ignore invalid legacy payload */ }
+      messages.push({ ...payload, id: String(message.id), role: String(message.role), content: String(message.content), timestamp: Number(message.timestamp) });
+    }
+    messageStatement.free();
+    sessions.push({
+      id: String(row.id), scene: String(row.scene), title: String(row.title), model: String(row.model),
+      compareModels: JSON.parse(String(row.compare_models ?? '[]')),
+      systemPrompt: String(row.system_prompt), boundPromptIds: JSON.parse(String(row.bound_prompt_ids ?? '[]')),
+      createdAt: Number(row.created_at), messages,
+    });
+  }
+  sessionStatement.free();
+  if (sessions.length) return sessions as unknown as T;
+
+  // 一次性兼容旧版 settings JSON。
   const raw = dbGetSetting(CHAT_SESSIONS_KEY);
   if (!raw) return null;
-  try { return JSON.parse(raw) as T; } catch { return null; }
+  try {
+    const legacy = JSON.parse(raw) as Array<Record<string, unknown>>;
+    const migrated = legacy.map((session) => ({ ...session, scene: session.scene ?? 'chat' }));
+    dbSaveChatSessions(migrated, 'chat');
+    return migrated.filter((session) => session.scene === scene) as unknown as T;
+  } catch { return null; }
 }
 
 
@@ -719,8 +773,37 @@ export function dbSetSchemaVersion(version: number, description = ""): void {
   } as never).run();
 }
 
-export function dbSaveChatSessions(sessions: unknown): void {
-  dbSetSetting(CHAT_SESSIONS_KEY, JSON.stringify(sessions));
+export function dbSaveChatSessions(sessions: unknown, scene = 'chat'): void {
+  if (!_sqlDb || !Array.isArray(sessions)) return;
+  _sqlDb.run('BEGIN');
+  try {
+    const ids = sessions.map((session: any) => String(session.id));
+    const existing = _sqlDb.exec(`SELECT id FROM chat_sessions WHERE scene = '${scene.replace(/'/g, "''")}'`)[0]?.values.flat().map(String) ?? [];
+    for (const id of existing.filter((id) => !ids.includes(id))) {
+      _sqlDb.run('DELETE FROM chat_messages WHERE session_id = ?', [id]);
+      _sqlDb.run('DELETE FROM chat_sessions WHERE id = ?', [id]);
+    }
+    for (const session of sessions as any[]) {
+      const now = Date.now();
+      _sqlDb.run(`INSERT OR REPLACE INTO chat_sessions
+        (id, scene, title, model, compare_models, system_prompt, bound_prompt_ids, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        String(session.id), scene, String(session.title ?? '新对话'), String(session.model ?? ''),
+        JSON.stringify(session.compareModels ?? []), String(session.systemPrompt ?? ''),
+        JSON.stringify(session.boundPromptIds ?? []), Number(session.createdAt ?? now), now,
+      ]);
+      _sqlDb.run('DELETE FROM chat_messages WHERE session_id = ?', [String(session.id)]);
+      (session.messages ?? []).forEach((message: any, seq: number) => {
+        const { id, role, content, timestamp, ...payload } = message;
+        _sqlDb!.run(`INSERT INTO chat_messages (id, session_id, role, content, payload, seq, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`, [String(id), String(session.id), String(role), String(content ?? ''), JSON.stringify(payload), seq, Number(timestamp ?? now)]);
+      });
+    }
+    _sqlDb.run('COMMIT');
+  } catch (error) {
+    _sqlDb.run('ROLLBACK');
+    throw error;
+  }
 }
 
 

@@ -112,7 +112,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
   });
   const [workspaceChanges, setWorkspaceChanges] = useState<Array<{
     path: string;
-    type: 'change' | 'rename';
+    status: 'added' | 'modified' | 'deleted' | 'renamed';
     timestamp: number;
     original: string;
     modified: string;
@@ -176,7 +176,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
     handleEditConfirm,
     updateSessionMeta,
     boundPromptIds, toggleBoundPrompt,
-  } = useChatSession(sceneSystemPrompt);
+  } = useChatSession(sceneSystemPrompt, scene);
 
   useEffect(() => {
     if (scene === 'code') setAgentMode(true);
@@ -227,9 +227,16 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
             const modified = workspaceSnapshotsRef.current.get(entry.path)
               ?? (current?.success && current.data ? current.data.content : '');
             if (current?.success && current.data) workspaceSnapshotsRef.current.set(entry.path, modified);
+            const status = entry.status.includes('R')
+              ? 'renamed' as const
+              : entry.status.includes('D')
+                ? 'deleted' as const
+                : /[?A]/.test(entry.status)
+                  ? 'added' as const
+                  : 'modified' as const;
             return {
               path: entry.path,
-              type: /[?ADR]/.test(entry.status) ? 'rename' as const : 'change' as const,
+              status,
               timestamp: Date.now(),
               original: head.success ? head.data ?? '' : '',
               modified,
@@ -253,6 +260,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
 
     const unsubscribe = window.electronAPI.workspace.onFileChanged(async (event) => {
       if (disposed) return;
+      const hadSnapshot = workspaceSnapshotsRef.current.has(event.path);
       const original = workspaceSnapshotsRef.current.get(event.path) ?? '';
       const current = await window.electronAPI.workspace.readTextFile(codeWorkspace.path, event.path);
       if (disposed) return;
@@ -260,8 +268,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
       if (original === modified) return;
       if (current.success) workspaceSnapshotsRef.current.set(event.path, modified);
       else workspaceSnapshotsRef.current.delete(event.path);
+      const status = current.success ? (hadSnapshot ? 'modified' as const : 'added' as const) : 'deleted' as const;
       setWorkspaceChanges((previous) => [
-        { ...event, timestamp: Date.now(), original, modified },
+        { path: event.path, status, timestamp: Date.now(), original, modified },
         ...previous.filter((item) => item.path !== event.path),
       ].slice(0, 200));
     });
@@ -902,12 +911,17 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
                     ) : workspaceChanges.map((change) => (
                       <button type="button" key={change.path} className="mb-1 w-full rounded-md border bg-card px-2.5 py-2 text-left hover:border-primary/40 hover:bg-accent/40 last:mb-0" onClick={() => openCodeChangeDiff(change)} title="查看本次监听到的具体行变更">
                         <div className="flex items-center gap-2">
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${change.type === 'rename' ? 'bg-primary' : 'bg-warning'}`} />
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            change.status === 'added' ? 'bg-success'
+                              : change.status === 'deleted' ? 'bg-destructive'
+                                : change.status === 'renamed' ? 'bg-primary'
+                                  : 'bg-warning'
+                          }`} />
                           <span className="min-w-0 flex-1 truncate text-xs font-medium" title={change.path}>{change.path.split(/[\\/]/).pop()}</span>
                           <span className="text-[9px] text-muted-foreground">{formatTime(change.timestamp)}</span>
                         </div>
                         <div className="mt-1 truncate pl-3.5 text-[10px] text-muted-foreground" title={change.path}>
-                          {change.type === 'rename' ? '新增、删除或重命名' : '内容已修改'} · {change.path}
+                          {{ added: '新增', modified: '已修改', deleted: '已删除', renamed: '已重命名' }[change.status]} · {change.path}
                         </div>
                       </button>
                     ))}
