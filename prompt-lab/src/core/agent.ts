@@ -43,6 +43,30 @@ function openAiSchemaToToolDef(schema: ReturnType<typeof getEnabledToolSchemas>[
   };
 }
 
+function parseDsmlToolCalls(content: string): ToolCall[] {
+  if (!/<\|\s*DSML\s*\|\s*tool_calls\s*>/i.test(content)) return [];
+  const calls: ToolCall[] = [];
+  const invokePattern = /<\|\s*DSML\s*\|\s*invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)(?=<\|\s*DSML\s*\|\s*invoke\b|$)/gi;
+  for (const match of content.matchAll(invokePattern)) {
+    const parameters = new Map<string, string[]>();
+    const parameterPattern = /<\|\s*DSML\s*\|\s*parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)(?=<\|\s*DSML\s*\|\s*(?:parameter|invoke)\b|$)/gi;
+    for (const parameter of match[2].matchAll(parameterPattern)) {
+      const values = parameters.get(parameter[1]) ?? [];
+      values.push(parameter[2].replace(/<\|\s*DSML\s*\|[^>]*>/gi, '').trim());
+      parameters.set(parameter[1], values);
+    }
+    const args: Record<string, unknown> = {};
+    for (const [name, values] of parameters) args[name] = values.length === 1 ? values[0] : values;
+    const oldStrings = parameters.get('oldString') ?? [];
+    const newStrings = parameters.get('newString') ?? [];
+    if (match[1] === 'workspace_edit_file' && oldStrings.length) {
+      args.edits = oldStrings.map((oldString, index) => ({ oldString, newString: newStrings[index] ?? '' }));
+    }
+    calls.push({ id: `dsml_${calls.length}`, name: match[1], arguments: args });
+  }
+  return calls;
+}
+
 export async function* runAgent(
   provider: LLMProvider,
   userMessage: string,
@@ -98,8 +122,9 @@ export async function* runAgent(
       return;
     }
 
+    const dsmlToolCalls = accumulatedToolCalls.size === 0 ? parseDsmlToolCalls(fullContent) : [];
     // ── 判断是否有 tool_calls ──
-    if (accumulatedToolCalls.size === 0) {
+    if (accumulatedToolCalls.size === 0 && dsmlToolCalls.length === 0) {
       yield { type: 'answer', content: fullContent };
       return;
     }
@@ -108,7 +133,7 @@ export async function* runAgent(
     const rawCalls = [...accumulatedToolCalls.values()]
       .sort((a, b) => a.id.localeCompare(b.id) || 0);
 
-    const toolCalls: ToolCall[] = rawCalls
+    const toolCalls: ToolCall[] = dsmlToolCalls.length ? dsmlToolCalls : rawCalls
       .map((c, i) => {
         let args: Record<string, unknown> = {};
         try { args = JSON.parse(c.arguments); } catch { /* empty args */ }
@@ -126,7 +151,9 @@ export async function* runAgent(
     }
 
     // ── Act：执行工具 ──
-    const thinkingText = fullContent.trim();
+    const thinkingText = (dsmlToolCalls.length
+      ? fullContent.split(/<\|\s*DSML\s*\|\s*tool_calls\s*>/i)[0]
+      : fullContent).trim();
     yield { type: 'act', content: thinkingText, toolCalls };
 
     const toolResults: ToolResult[] = [];

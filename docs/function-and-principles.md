@@ -37,7 +37,7 @@
 | UI | shadcn/ui + Tailwind CSS 3 |
 | 状态管理 | Zustand 5 |
 | 持久化 | sql.js (SQLite WASM) + Drizzle ORM |
-| 图可视化 | @antv/g6 5 |
+| 图可视化 | ECharts 6 |
 | 构建 | electron-forge 7 + Vite 5 |
 | 终端 | xterm.js |
 | 测试 | Vitest 2 + Testing Library |
@@ -50,12 +50,12 @@
 | 提示词管理 | 完整的 CRUD + 分类/标签/搜索/收藏/置顶/变量模板 |
 | 一键注入 | 点击提示词 → 自动填入 AI 输入框，支持填充后自动发送 |
 | 对话保存 | 提取 WebView 中的对话历史，保存为 Markdown |
-| 知识图谱 | G6 可视化提示词与对话之间的关联 |
-| 插件系统 | 统一 Registry：18 个内置插件 + Sandbox / Kernel 用户插件 |
+| 知识图谱 | ECharts 可视化提示词与对话之间的关联 |
+| 插件系统 | 统一 Registry：18 个内置插件 + Sandbox 用户插件 |
 | 浮动面板 | 全局 Ctrl+K 唤出 Spotlight 风格搜索面板 |
 | 主题切换 | 亮色 / 暗色 / 跟随系统 |
 | 代码编辑器 | 工作区文件树 + Monaco 编辑器 + Git 集成 |
-| SSH 终端 | 基于 xterm.js + SSH2 的远程终端 |
+| 本地终端 | 基于 xterm.js + node-pty 的本地 shell 终端 |
 | ReAct Agent | 支持 function calling 的 AI Agent 循环 |
 
 ---
@@ -87,7 +87,7 @@
 │  src/renderer.tsx → App.tsx             │
 │  · React UI (ActivityBar + 面板)         │
 │  · WebView 标签页容器                     │
-│  · 插件系统 (内置 + Sandbox + Kernel)     │
+│  · 插件系统 (内置 + Sandbox)              │
 │  · Zustand 状态管理                      │
 │  · SQL.js 数据库                         │
 └──────────────┬──────────────────────────┘
@@ -648,12 +648,13 @@ Phase 2 — 写入：逐个写文件
 
 > 文件：`src/plugins/terminal/`（Renderer UI 与 `backend/` 主进程实现）
 
-### 11.1 双模式终端
+### 11.1 终端架构
 
 | 模式 | 后端 | 使用场景 |
 |------|------|----------|
 | 本地终端 | `node-pty` (主进程) | 本地 shell 操作 |
-| SSH 远程终端 | `ssh2` (主进程) | 远程服务器连接 |
+
+> 说明：远程 SSH 终端目前**尚未实现**（`ssh2` 依赖未引入，`plugins/terminal/backend/` 仅包含 environment / shell-profiles / terminal-manager）。
 
 ### 11.2 架构
 
@@ -664,9 +665,8 @@ Phase 2 — 写入：逐个写文件
 IPC: 'terminal:write'
     │
     ▼
-主进程 (terminal-manager.ts)
-    ├── node-pty (本地 PTY)
-    └── ssh2 Client (远程 SSH)
+主进程 (plugins/terminal/backend/terminal-manager.ts)
+    └── node-pty (本地 PTY)
     │
     ▼ 输出
 IPC: 'terminal:data'
@@ -681,7 +681,7 @@ IPC: 'terminal:data'
 // 应用退出时清理
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  destroyAll();  // 销毁所有 PTY/SSH 连接
+  destroyAll();  // 销毁所有 PTY 连接
 });
 ```
 
@@ -723,7 +723,7 @@ onFileChanged: (callback) => {
 | `window.*` | 窗口控制（最小化/最大化/关闭） |
 | `db.*` | 数据库读写 |
 | `workspace.*` | 工作区文件/Git 操作（20+ 方法） |
-| `terminal.*` | 终端输入/输出/SSH 连接 |
+| `terminal.*` | 终端输入/输出（本地 PTY） |
 | `auth.*` | OAuth 流程 |
 | `shell.*` | 打开外部链接/文件 |
 | `injectPrompt` | 向 WebView 注入提示词 |
@@ -804,7 +804,7 @@ prompt-lab/
 │   │   ├── registry.ts            # 发布-订阅注册中心
 │   │   ├── built-in/index.ts      # 18 个内置插件注册
 │   │   ├── code-editor/           # 代码编辑器 (145K+)
-│   │   ├── terminal/              # 终端面板
+│   │   ├── terminal/              # 终端插件（backend/ 主进程 PTY 实现）
 │   │   ├── excel-preview/         # Excel 预览
 │   │   ├── pdf-preview/           # PDF 预览
 │   │   ├── ppt-preview/           # PPT 预览
@@ -817,8 +817,6 @@ prompt-lab/
 │   │   ├── plugin-manager/        # 插件管理
 │   │   ├── dynamic/               # 动态加载
 │   │   └── sandbox/               # iframe 沙箱 SDK
-│   ├── terminal/                  # 终端管理
-│   │   └── terminal-manager.ts
 │   ├── components/                # 通用 UI 组件
 │   ├── hooks/                     # 通用 Hooks
 │   ├── lib/                       # 工具函数

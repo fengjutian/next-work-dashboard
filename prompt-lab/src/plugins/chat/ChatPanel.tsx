@@ -43,7 +43,7 @@ const ALL_TOOLS = [
   'read_file_content', 'read_pdf_document', 'read_word_document',
   'read_excel_spreadsheet', 'read_ppt_presentation', 'open_image',
   'search_conversation_history', 'read_conversation_document',
-  'workspace_list_files', 'workspace_read_file', 'workspace_write_file',
+  'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'workspace_edit_file',
 ];
 
 export type ChatScene = 'chat' | 'code' | 'workbench';
@@ -66,7 +66,7 @@ const SCENE_PRESETS: Record<ChatScene, {
     systemPrompt: `你是代码编程 Agent。优先理解现有代码和工程约束，并使用 workspace_* 工具完成任务。
 当用户明确要求修改、修复、实现、重构或删除代码时，该请求本身就是对本次工作区修改的授权：直接读取相关文件并执行修改，不要再次询问“是否确认”“是否继续”或只提供修改建议。
 只有目标文件或需求存在会显著改变结果的歧义、操作超出已选择工作区、或文件版本冲突时才暂停询问。修改完成后简要列出已改文件和验证结果。`,
-    enabledToolIds: ['calculator', 'web_search', 'fetch_url', 'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'open_image'],
+    enabledToolIds: ['calculator', 'web_search', 'fetch_url', 'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'workspace_edit_file', 'open_image'],
   },
   workbench: {
     title: '工作台',

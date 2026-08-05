@@ -149,7 +149,7 @@
 ### 5.1 技术栈
 | 层 | 技术选型 |
 |----|----------|
-| 框架 | Electron 28+ |
+| 框架 | Electron 35 |
 | 渲染进程 | React 18 + TypeScript |
 | UI 组件库 | shadcn/ui + Tailwind CSS |
 | 状态管理 | Zustand |
@@ -304,16 +304,16 @@ interface AppSettings {
 ### 11.2 技术路线
 
 ```
-┌──────────┐      ┌──────────────┐      ┌──────────┐      ┌──────────┐
-│  .docx   │ ──→  │  mammoth.js  │ ──→  │  Tiptap   │ ──→  │   docx   │ ──→ .docx
-│  上传    │      │  docx→HTML   │      │  编辑     │      │ JSON→docx│    下载
-└──────────┘      └──────────────┘      └──────────┘      └──────────┘
-                       MIT                 MIT                MIT
+┌──────────┐      ┌──────────────┐      ┌──────────────┐
+│  .docx   │ ──→  │  mammoth.js  │ ──→  │ HTML 渲染预览 │
+│  打开    │      │  docx→HTML   │      │ (只读，V1)    │
+└──────────┘      └──────────────┘      └──────────────┘
+                       MIT
 ```
 
-- **导入（预览）**：mammoth.js 将 .docx 转换为 HTML，在 Tiptap 编辑器中渲染
-- **编辑**：Tiptap（免费 MIT 核心）提供富文本编辑能力
-- **导出**：docx 库将 Tiptap JSON 转回 .docx 下载
+- **导入（预览）**：mammoth.js 将 .docx 转换为 HTML 渲染（V1 当前实现，仅只读预览）
+- **编辑**：Tiptap 富文本编辑为 V2 规划，尚未引入依赖
+- **导出**：docx 库导出为 V2 规划，尚未引入依赖
 
 ### 11.3 功能需求
 
@@ -354,16 +354,16 @@ interface AppSettings {
 ### 11.4 插件架构
 
 Word 模块作为系统内置插件（id: `word-preview`），与其他内置插件同级：
-- **插件文件**：`src/plugins/built-in/word-preview.plugin.tsx`
+- **插件文件**：`src/plugins/word-preview/`（WordPreviewPanel.tsx + convert.ts）
 - **图标**：`FaFileWord`（react-icons/fa6）
-- **依赖**：mammoth.js（MIT）、@tiptap/core + 扩展（MIT）、docx 库（MIT）
+- **依赖**：mammoth.js（MIT）——@tiptap/core、docx 库尚未引入，编辑能力（W11-W22）为规划项
 
 ### 11.5 技术决策
 | 事项 | 决策 | 理由 |
 |------|------|------|
 | 预览引擎 | **mammoth.js** | MIT 协议、纯前端、⭐6.3k 成熟度、输出干净 HTML |
-| 编辑器 | **Tiptap（免费版）** | MIT 协议、基于 ProseMirror、可扩展架构、⭐28k+ |
-| 导出库 | **docx** | MIT 协议、API 完善、支持浏览器端运行 |
+| 编辑器 | **Tiptap（免费版）**（规划中，尚未引入） | MIT 协议、基于 ProseMirror、可扩展架构、⭐28k+ |
+| 导出库 | **docx**（规划中，尚未引入） | MIT 协议、API 完善、支持浏览器端运行 |
 | 不选 ONLYOFFICE | 需后端部署、AGPL 协议 | 不符合纯前端+MIT 要求 |
 | 不选 Tiptap Pro | 付费（$49/月起） | 不符合免费要求 |
 | 预览先行 | V1 仅预览，V2 加编辑 | 预览是最高频场景，先快速交付再迭代 |
