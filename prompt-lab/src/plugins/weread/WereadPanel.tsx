@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, Download, Eye, EyeOff, Loader2, RefreshCw, Search } from '@/components/icons';
+import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, EyeOff, Loader2, RefreshCw, Search } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { dbLoadWereadCache, dbReplaceWereadCache, flushDbToDisk, isDbReady } from '@/db';
@@ -260,6 +260,9 @@ export const WereadPanel: React.FC = () => {
             <div>
               <h2 className="text-lg font-semibold">导出全部读书笔记</h2>
               <p className="mt-1 text-sm text-muted-foreground">获取全部划线、个人想法和点评。书签内容受接口限制，只统计数量。</p>
+              <Button variant="link" className="mt-1 h-auto px-0 text-sm" onClick={() => void window.electronAPI.shell.openExternal('https://weread.qq.com/r/weread-skills')}>
+                获取微信读书 API Key <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
             </div>
             <div className="flex gap-2">
               <div className="relative flex-1">
