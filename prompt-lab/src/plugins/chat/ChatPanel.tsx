@@ -6,7 +6,7 @@ import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
   BookOpen, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
-  FileText, FolderOpen, Globe, MessageSquare, PanelLeft, Paperclip, Plus, RefreshCw, Robot,
+  FileText, FolderOpen, Globe, MessageSquare, PanelLeft, PanelRight, Paperclip, Plus, RefreshCw, Robot,
   RotateCcw, Settings, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ import { buildAttachmentContext, parseAttachment } from './attachment-parser';
 import type { MemoryCitation } from '@/core/conversation-memory';
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
 import { configureCodeWorkspace } from '@/core/tools/code-workspace-tools';
+import { CodeChangeDiff, type CodeChangeDiffData } from './CodeChangeDiff';
 
 interface ChatAttachment {
   key: string;
@@ -62,7 +63,9 @@ const SCENE_PRESETS: Record<ChatScene, {
   code: {
     title: '代码编程',
     description: '面向代码分析、调试、实现和工程任务',
-    systemPrompt: '你是代码编程助手。优先理解现有代码和工程约束，给出可验证的实现；写入文件前应明确说明修改范围。',
+    systemPrompt: `你是代码编程 Agent。优先理解现有代码和工程约束，并使用 workspace_* 工具完成任务。
+当用户明确要求修改、修复、实现、重构或删除代码时，该请求本身就是对本次工作区修改的授权：直接读取相关文件并执行修改，不要再次询问“是否确认”“是否继续”或只提供修改建议。
+只有目标文件或需求存在会显著改变结果的歧义、操作超出已选择工作区、或文件版本冲突时才暂停询问。修改完成后简要列出已改文件和验证结果。`,
     enabledToolIds: ['calculator', 'web_search', 'fetch_url', 'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'open_image'],
   },
   workbench: {
@@ -107,6 +110,17 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
     try { return JSON.parse(localStorage.getItem('ai-chat.code-workspace') ?? 'null'); }
     catch { return null; }
   });
+  const [workspaceChanges, setWorkspaceChanges] = useState<Array<{
+    path: string;
+    type: 'change' | 'rename';
+    timestamp: number;
+    original: string;
+    modified: string;
+  }>>([]);
+  const workspaceSnapshotsRef = useRef<Map<string, string>>(new Map());
+  const [changesPanelOpen, setChangesPanelOpen] = useState(true);
+  const [workspaceScanPending, setWorkspaceScanPending] = useState(false);
+  const [codeChangeDiff, setCodeChangeDiff] = useState<CodeChangeDiffData | null>(null);
   const sceneSystemPrompt = useMemo(() => [
     scenePreset.systemPrompt,
     scene === 'code' && codeWorkspace
@@ -177,9 +191,94 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
     return () => configureCodeWorkspace(null);
   }, [codeWorkspace, scene]);
 
+  useEffect(() => {
+    if (scene !== 'code' || !codeWorkspace) return;
+    let disposed = false;
+    setWorkspaceChanges([]);
+    setWorkspaceScanPending(true);
+    workspaceSnapshotsRef.current.clear();
+
+    const initializeSnapshots = async () => {
+      const listed = await window.electronAPI.workspace.listFiles(codeWorkspace.path);
+      if (!listed.success || disposed) return;
+      const files = (listed.data ?? []).filter((entry) => entry.type === 'file' && (entry.size ?? 0) <= 1024 * 1024);
+      for (let index = 0; index < files.length && !disposed; index += 20) {
+        const batch = files.slice(index, index + 20);
+        const contents = await Promise.all(batch.map((file) => window.electronAPI.workspace.readTextFile(codeWorkspace.path, file.path)));
+        batch.forEach((file, fileIndex) => {
+          const result = contents[fileIndex];
+          if (result.success && result.data) workspaceSnapshotsRef.current.set(file.path, result.data.content);
+        });
+      }
+      if (disposed) return;
+
+      const gitStatus = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      if (gitStatus.success && gitStatus.data?.length) {
+        const initialChanges: typeof workspaceChanges = [];
+        for (let index = 0; index < gitStatus.data.length && !disposed; index += 20) {
+          const batch = gitStatus.data.slice(index, index + 20);
+          const comparisons = await Promise.all(batch.map(async (entry) => {
+            const [head, current] = await Promise.all([
+              window.electronAPI.workspace.gitShowHead(codeWorkspace.path, entry.path),
+              workspaceSnapshotsRef.current.has(entry.path)
+                ? Promise.resolve(null)
+                : window.electronAPI.workspace.readTextFile(codeWorkspace.path, entry.path),
+            ]);
+            const modified = workspaceSnapshotsRef.current.get(entry.path)
+              ?? (current?.success && current.data ? current.data.content : '');
+            if (current?.success && current.data) workspaceSnapshotsRef.current.set(entry.path, modified);
+            return {
+              path: entry.path,
+              type: /[?ADR]/.test(entry.status) ? 'rename' as const : 'change' as const,
+              timestamp: Date.now(),
+              original: head.success ? head.data ?? '' : '',
+              modified,
+            };
+          }));
+          initialChanges.push(...comparisons);
+        }
+        if (!disposed) setWorkspaceChanges(initialChanges);
+      }
+      if (disposed) return;
+      setWorkspaceScanPending(false);
+      const result = await window.electronAPI.workspace.watch(codeWorkspace.path);
+      if (!result.success) notifApi.warning({ message: '文件变化检测不可用', description: result.error });
+    };
+    void initializeSnapshots().catch((error) => {
+      if (!disposed) {
+        setWorkspaceScanPending(false);
+        notifApi.warning({ message: '无法扫描已有文件变化', description: String(error) });
+      }
+    });
+
+    const unsubscribe = window.electronAPI.workspace.onFileChanged(async (event) => {
+      if (disposed) return;
+      const original = workspaceSnapshotsRef.current.get(event.path) ?? '';
+      const current = await window.electronAPI.workspace.readTextFile(codeWorkspace.path, event.path);
+      if (disposed) return;
+      const modified = current.success && current.data ? current.data.content : '';
+      if (original === modified) return;
+      if (current.success) workspaceSnapshotsRef.current.set(event.path, modified);
+      else workspaceSnapshotsRef.current.delete(event.path);
+      setWorkspaceChanges((previous) => [
+        { ...event, timestamp: Date.now(), original, modified },
+        ...previous.filter((item) => item.path !== event.path),
+      ].slice(0, 200));
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+      void window.electronAPI.workspace.unwatch();
+    };
+  }, [codeWorkspace, notifApi, scene]);
+
   const selectCodeWorkspace = useCallback(async () => {
     const folder = await window.electronAPI.workspace.openFolder();
     if (folder) setCodeWorkspace(folder);
+  }, []);
+
+  const openCodeChangeDiff = useCallback((change: typeof workspaceChanges[number]) => {
+    setCodeChangeDiff({ path: change.path, original: change.original, modified: change.modified });
   }, []);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
@@ -225,8 +324,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
     if (activeRole) {
       updateSessionMeta({ systemPrompt: activeRole.systemPrompt });
       const tools = activeRole.enabledToolIds;
+      const workspaceTools = scene === 'code'
+        ? scenePreset.enabledToolIds.filter((tool) => tool.startsWith('workspace_'))
+        : [];
       const permittedTools = tools.length > 0
-        ? scenePreset.enabledToolIds.filter((tool) => tools.includes(tool))
+        ? scenePreset.enabledToolIds.filter((tool) => tools.includes(tool) || workspaceTools.includes(tool))
         : scenePreset.enabledToolIds;
       ALL_TOOLS.forEach((tool) => setToolEnabled(tool, permittedTools.includes(tool)));
     } else {
@@ -543,7 +645,6 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
                 </Button>
               </div>
             )}
-
             {/* 系统提示词 */}
             {showSysPrompt && (
               <div className="px-3 py-2 border-b bg-background shrink-0">
@@ -770,6 +871,57 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
             </div>
           </div>
 
+          {scene === 'code' && codeWorkspace && (
+            <aside className={`${changesPanelOpen ? 'w-72' : 'w-10'} flex shrink-0 flex-col overflow-hidden border-l bg-background transition-[width] duration-200`} aria-label="文件变化">
+              <div className={`flex h-10 shrink-0 items-center border-b ${changesPanelOpen ? 'justify-between px-3' : 'justify-center'}`}>
+                {changesPanelOpen && (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <RefreshCw className={`h-3.5 w-3.5 ${workspaceChanges.length ? 'text-warning' : 'text-muted-foreground'}`} />
+                    <span className="text-xs font-semibold">文件变化</span>
+                    {workspaceChanges.length > 0 && <span className="rounded-full bg-warning/15 px-1.5 text-[10px] text-warning">{workspaceChanges.length}</span>}
+                  </div>
+                )}
+                <Button type="button" variant="ghost" size="icon" className="relative h-7 w-7" onClick={() => setChangesPanelOpen((open) => !open)} title={changesPanelOpen ? '折叠文件变化' : `展开文件变化${workspaceChanges.length ? `（${workspaceChanges.length}）` : ''}`}>
+                  <PanelRight className={`h-4 w-4 transition-transform ${changesPanelOpen ? '' : 'rotate-180'} ${!changesPanelOpen && workspaceChanges.length ? 'text-warning' : ''}`} />
+                  {!changesPanelOpen && workspaceChanges.length > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-warning px-1 text-[9px] leading-4 text-white">{workspaceChanges.length}</span>}
+                </Button>
+              </div>
+              {changesPanelOpen && (
+                <>
+                  <div className="flex-1 overflow-y-auto p-2">
+                    {workspaceScanPending ? (
+                      <div className="flex h-32 flex-col items-center justify-center gap-2 text-center text-[10px] text-muted-foreground">
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                        <span>正在扫描已有变化…</span>
+                      </div>
+                    ) : workspaceChanges.length === 0 ? (
+                      <div className="flex h-32 flex-col items-center justify-center gap-2 text-center text-[10px] text-muted-foreground">
+                        <RefreshCw className="h-5 w-5" />
+                        <span>正在监听工作区<br />暂无文件变化</span>
+                      </div>
+                    ) : workspaceChanges.map((change) => (
+                      <button type="button" key={change.path} className="mb-1 w-full rounded-md border bg-card px-2.5 py-2 text-left hover:border-primary/40 hover:bg-accent/40 last:mb-0" onClick={() => openCodeChangeDiff(change)} title="查看本次监听到的具体行变更">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${change.type === 'rename' ? 'bg-primary' : 'bg-warning'}`} />
+                          <span className="min-w-0 flex-1 truncate text-xs font-medium" title={change.path}>{change.path.split(/[\\/]/).pop()}</span>
+                          <span className="text-[9px] text-muted-foreground">{formatTime(change.timestamp)}</span>
+                        </div>
+                        <div className="mt-1 truncate pl-3.5 text-[10px] text-muted-foreground" title={change.path}>
+                          {change.type === 'rename' ? '新增、删除或重命名' : '内容已修改'} · {change.path}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {workspaceChanges.length > 0 && (
+                    <div className="shrink-0 border-t p-2">
+                      <Button type="button" size="sm" variant="ghost" className="h-7 w-full text-[10px]" onClick={() => setWorkspaceChanges([])}>清除记录</Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </aside>
+          )}
+
           <ToolManagerDialog open={toolManagerOpen} onClose={() => setToolManagerOpen(false)} />
           <McpApprovalDialog />
           <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)}
@@ -807,6 +959,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
         )}
         <MemoryDocumentDialog preview={memoryPreview} sources={memoryPreviewSources}
           onNavigate={(source) => void openMemorySource(source)} onClose={() => setMemoryPreview(null)} />
+        {codeChangeDiff && <CodeChangeDiff value={codeChangeDiff} dark={isDark} onClose={() => setCodeChangeDiff(null)} />}
       </XProvider>
     </ConfigProvider>
   );

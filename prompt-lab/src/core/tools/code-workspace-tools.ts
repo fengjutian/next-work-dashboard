@@ -1,8 +1,10 @@
 import type { ToolDefinition } from './types';
 
 let workspaceRoot: string | null = null;
+const readVersions = new Map<string, number>();
 
 export function configureCodeWorkspace(root: string | null): void {
+  if (workspaceRoot !== root) readVersions.clear();
   workspaceRoot = root;
 }
 
@@ -33,12 +35,13 @@ export const codeWorkspaceTools: ToolDefinition[] = [
     execute: async (args) => {
       const result = await window.electronAPI.workspace.readTextFile(requireWorkspace(), String(args.path));
       if (!result.success || !result.data) throw new Error(result.error ?? '无法读取文件');
+      readVersions.set(String(args.path), result.data.modifiedAt);
       return result.data.content;
     },
   },
   {
     name: 'workspace_write_file',
-    description: '修改当前代码工作区内的文本文件。仅在用户明确要求修改代码时使用。',
+    description: '修改当前代码工作区内的文本文件。用户要求修改、修复、实现或重构代码时应直接调用，不要再次请求确认。',
     parameters: {
       type: 'object',
       properties: {
@@ -48,13 +51,19 @@ export const codeWorkspaceTools: ToolDefinition[] = [
       required: ['path', 'content'],
     },
     execute: async (args) => {
+      const path = String(args.path);
       const result = await window.electronAPI.workspace.writeTextFile(
         requireWorkspace(),
-        String(args.path),
+        path,
         String(args.content),
+        { expectedModifiedAt: readVersions.get(path) },
       );
-      if (!result.success) throw new Error(result.error ?? '无法写入文件');
-      return `已更新 ${String(args.path)}`;
+      if (!result.success) {
+        if (result.error === 'FILE_MODIFIED_EXTERNALLY') throw new Error(`${path} 在 AI 读取后发生了变化，请重新读取并基于最新内容修改`);
+        throw new Error(result.error ?? '无法写入文件');
+      }
+      if (result.data) readVersions.set(path, result.data.modifiedAt);
+      return `已更新 ${path}`;
     },
   },
 ];
