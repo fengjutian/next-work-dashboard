@@ -1,4 +1,4 @@
-import type { AiFileProposal } from './useAiSessionState';
+import type { AiFileProposal } from '../hooks/useAiSessionState';
 
 export type AiProposalKind = 'create' | 'modify' | 'delete' | 'rename';
 
@@ -22,4 +22,3 @@ export function summarizeAiProposal(proposal: AiFileProposal): { kind: AiProposa
   for (const [line, count] of modifiedCounts) additions += Math.max(0, count - (originalCounts.get(line) ?? 0));
   return { kind, additions, deletions };
 }
-

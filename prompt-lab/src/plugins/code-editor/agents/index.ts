@@ -1,11 +1,5 @@
 export { AgentsWindow } from './AgentsWindow';
 export { estimateTokens } from './ai-context';
 export { titleFromInstruction } from './agent-sessions';
-export { useAgentSessions } from './useAgentSessions';
-export { useAiEditGeneration } from './useAiEditGeneration';
-export { useAiProposalReview } from './useAiProposalReview';
-export { useAiSessionState } from './useAiSessionState';
 export type { AgentEditScope } from './agent-edit-scope';
 export type { AgentLogEntry, AgentSession } from './agent-sessions';
-export type { AiExecutionMetrics, AiExecutionStage } from './useAiEditGeneration';
-export type { AiFileProposal } from './useAiSessionState';
