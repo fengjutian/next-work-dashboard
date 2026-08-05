@@ -1,0 +1,1 @@
+export { AIChatModule } from './AIChatModule';

@@ -5,6 +5,7 @@ import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
 import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools';
 import { knowledgeTools } from '@/core/tools/knowledge-tools';
+import { codeWorkspaceTools } from '@/core/tools/code-workspace-tools';
 import { syncMcpTools } from '@/core/tools/mcp-tools';
 import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
@@ -70,6 +71,7 @@ if (!toolsRegistered) {
   registerTools(pluginTools);
   registerTools(conversationMemoryTools);
   registerTools(knowledgeTools);
+  registerTools(codeWorkspaceTools);
   if (typeof window !== 'undefined' && window.electronAPI?.mcp) {
     void syncMcpTools().catch((error) => console.warn('[mcp] Failed to synchronize tools', error));
   }
@@ -107,7 +109,7 @@ export interface Session {
 }
 
 // ── Hook ──
-export function useChatSession() {
+export function useChatSession(sceneSystemPrompt = '') {
   const aiApi = useStore((s) => s.aiApi);
   const selectedPromptId = useStore((s) => s.selectedPromptId);
   const prompts = useStore((s) => s.prompts);
@@ -300,7 +302,7 @@ export function useChatSession() {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const boundContent = getBoundPromptsContent();
-    const fullSystemPrompt = [systemPrompt.trim(), boundContent].filter(Boolean).join('\n\n');
+    const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim(), boundContent].filter(Boolean).join('\n\n');
     const sysMsg = fullSystemPrompt ? [{ role: 'system' as const, content: fullSystemPrompt }] : [];
     const chatMessages: ChatMessage[] = [
       ...sysMsg,
@@ -326,7 +328,7 @@ export function useChatSession() {
       const title = history[0]?.content?.slice(0, 30) + (history[0]?.content?.length > 30 ? '...' : '') || '新对话';
       updateSessionMeta({ title });
     }
-  }, [currentModel, systemPrompt, getBoundPromptsContent, getProvider, updateSession, updateSessionMeta]);
+  }, [currentModel, sceneSystemPrompt, systemPrompt, getBoundPromptsContent, getProvider, updateSession, updateSessionMeta]);
 
   const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal) => {
     const provider = getProvider();
@@ -347,7 +349,8 @@ export function useChatSession() {
 
     let thinkingText = '';
     let currentToolCalls: ToolCall[] = [];
-    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal, systemPrompt })) {
+    const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim()].filter(Boolean).join('\n\n');
+    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal, systemPrompt: fullSystemPrompt })) {
       switch (step.type) {
         case 'think':
           updateSession((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: '🤔 思考中...' } : message));
@@ -383,7 +386,7 @@ export function useChatSession() {
           break;
       }
     }
-  }, [currentModel, getProvider, updateSession, systemPrompt]);
+  }, [currentModel, getProvider, sceneSystemPrompt, updateSession, systemPrompt]);
 
   // ── 发送 ──
   const handleSend = useCallback(async (directText?: string, contextText?: string) => {

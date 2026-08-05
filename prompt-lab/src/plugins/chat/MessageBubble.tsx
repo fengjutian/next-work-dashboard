@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Robot, Copy, Check, Wrench, RotateCcw, Edit3 } from '@/components/icons';
+import { Robot, Copy, Check, ChevronDown, Wrench, RotateCcw, Edit3 } from '@/components/icons';
 import type { ToolCall, ToolResult } from '@/core';
 import type { MemoryCitation } from '@/core/conversation-memory';
 
@@ -41,23 +41,41 @@ const CodeBlock: React.FC<{ code: string; lang?: string }> = ({ code, lang }) =>
 
 // ── 工具调用卡片 ──
 
-export const ToolCallCard: React.FC<{ calls: ToolCall[]; results?: ToolResult[] }> = ({ calls, results }) => (
-  <div className="my-2 rounded-md border border-warning border-warning bg-warning/10 bg-warning/10">
+export const ToolCallCard: React.FC<{ calls: ToolCall[]; results?: ToolResult[] }> = ({ calls, results }) => {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  return (
+  <div className="my-2 overflow-hidden rounded-lg border bg-muted/30">
     {calls.map((call) => {
       const result = results?.find((r) => r.callId === call.id);
+      const target = typeof call.arguments.path === 'string' ? call.arguments.path : '';
+      const output = result?.output ?? '';
+      const isExpanded = Boolean(expanded[call.id]);
       return (
-        <div key={call.id} className="px-3 py-2 border-b border-warning border-warning last:border-b-0">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-warning text-warning">
-            <Wrench className="h-3 w-3" /> {call.name}
-            {result && !result.error && <Check className="h-3 w-3 text-success" />}
+        <div key={call.id} className="border-b px-3 py-2 last:border-b-0">
+          <div className="flex items-center gap-2 text-xs">
+            <Wrench className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium">{call.name}</span>
+            {target && <code className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground" title={target}>{target}</code>}
+            {!result && <span className="text-[10px] text-muted-foreground">运行中…</span>}
+            {result?.error && <span className="text-[10px] text-destructive">失败</span>}
+            {result && !result.error && <Check className="h-3.5 w-3.5 text-success" />}
+            {!!(result?.error || output) && (
+              <button type="button" className="rounded p-0.5 text-muted-foreground hover:bg-accent" onClick={() => setExpanded((value) => ({ ...value, [call.id]: !isExpanded }))} title={isExpanded ? '收起详情' : '查看详情'}>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+              </button>
+            )}
           </div>
-          <div className="mt-1 text-[10px] text-warning text-warning font-mono">{JSON.stringify(call.arguments)}</div>
-          {result && <div className={`mt-1 text-[10px] whitespace-pre-wrap break-all ${result.error ? 'text-destructive' : 'text-muted-foreground'}`}>{result.error ? `❌ ${result.error}` : result.output}</div>}
+          {isExpanded && (
+            <pre className={`mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-[10px] ${result?.error ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {result?.error ?? output ?? JSON.stringify(call.arguments, null, 2)}
+            </pre>
+          )}
         </div>
       );
     })}
   </div>
-);
+  );
+};
 
 // ── Markdown 渲染（导出供外部使用）──
 

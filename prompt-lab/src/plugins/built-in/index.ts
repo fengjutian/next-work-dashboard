@@ -9,7 +9,7 @@ import type { Plugin } from '../types';
 import { EXCEL_PREVIEW_DEFAULT_ENABLED } from '../defaults';
 
 const AIPanel = lazy(() => import('../ai').then((m) => ({ default: m.AIPanel })));
-const ChatPanel = lazy(() => import('../chat').then((m) => ({ default: m.ChatPanel })));
+const AIChatModule = lazy(() => import('../ai-chat-module').then((m) => ({ default: m.AIChatModule })));
 const PromptSidebar = lazy(() => import('../prompts').then((m) => ({ default: m.PromptSidebar })));
 const ConversationHistory = lazy(() => import('../history').then((m) => ({ default: m.ConversationHistory })));
 const KnowledgeGraph = lazy(() => import('../knowledge-graph').then((m) => ({ default: m.KnowledgeGraph })));
@@ -46,7 +46,7 @@ const builtInPlugins: Plugin[] = [
     id: 'chat',
     name: 'AI 对话',
     icon: Robot,
-    component: ChatPanel,
+    component: AIChatModule,
     enabled: true,
     order: 1,
     contributions: {

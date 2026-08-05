@@ -6,7 +6,7 @@ import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
   BookOpen, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
-  FileText, Globe, MessageSquare, PanelLeft, Paperclip, Plus, RefreshCw, Robot,
+  FileText, FolderOpen, Globe, MessageSquare, PanelLeft, Paperclip, Plus, RefreshCw, Robot,
   RotateCcw, Settings, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import { VariableFillDialog } from '@/components/VariableFillDialog';
 import { buildAttachmentContext, parseAttachment } from './attachment-parser';
 import type { MemoryCitation } from '@/core/conversation-memory';
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
+import { configureCodeWorkspace } from '@/core/tools/code-workspace-tools';
 
 interface ChatAttachment {
   key: string;
@@ -41,7 +42,36 @@ const ALL_TOOLS = [
   'read_file_content', 'read_pdf_document', 'read_word_document',
   'read_excel_spreadsheet', 'read_ppt_presentation', 'open_image',
   'search_conversation_history', 'read_conversation_document',
+  'workspace_list_files', 'workspace_read_file', 'workspace_write_file',
 ];
+
+export type ChatScene = 'chat' | 'code' | 'workbench';
+
+const SCENE_PRESETS: Record<ChatScene, {
+  title: string;
+  description: string;
+  systemPrompt: string;
+  enabledToolIds: string[];
+}> = {
+  chat: {
+    title: 'AI 对话',
+    description: '适合问答、写作、总结和日常交流',
+    systemPrompt: '你是通用对话助手。回答应清晰、准确；除非用户明确要求，不要修改本地文件。',
+    enabledToolIds: ['get_current_time', 'calculator', 'web_search', 'fetch_url', 'search_conversation_history', 'read_conversation_document'],
+  },
+  code: {
+    title: '代码编程',
+    description: '面向代码分析、调试、实现和工程任务',
+    systemPrompt: '你是代码编程助手。优先理解现有代码和工程约束，给出可验证的实现；写入文件前应明确说明修改范围。',
+    enabledToolIds: ['calculator', 'web_search', 'fetch_url', 'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'open_image'],
+  },
+  workbench: {
+    title: '工作台',
+    description: '可组合文件、知识库和插件工具完成综合任务',
+    systemPrompt: '你是工作台助手。根据任务选择合适的文件、知识库和插件工具，先确认上下文，再分步骤完成工作。',
+    enabledToolIds: ALL_TOOLS,
+  },
+};
 
 const WELCOME_PROMPTS = [
   { key: '1', icon: <FileText className="h-4 w-4" />, label: '帮我写一份项目周报', value: '帮我写一份项目周报' },
@@ -70,10 +100,23 @@ function formatTime(ts: number): string {
 // 主面板
 // ════════════════════════════════════════
 
-export const ChatPanel: React.FC = () => {
+export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) => {
+  const scenePreset = SCENE_PRESETS[scene];
+  const [codeWorkspace, setCodeWorkspace] = useState<{ path: string; name: string } | null>(() => {
+    if (scene !== 'code') return null;
+    try { return JSON.parse(localStorage.getItem('ai-chat.code-workspace') ?? 'null'); }
+    catch { return null; }
+  });
+  const sceneSystemPrompt = useMemo(() => [
+    scenePreset.systemPrompt,
+    scene === 'code' && codeWorkspace
+      ? `当前已授权代码工作区：${codeWorkspace.path}。使用 workspace_* 工具分析和修改其中的代码；工具路径参数必须使用相对路径。`
+      : '',
+  ].filter(Boolean).join('\n\n'), [codeWorkspace, scene, scenePreset.systemPrompt]);
   const setActiveActivity = useStore((s) => s.setActiveActivity);
   const theme = useStore((s) => s.theme);
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
+  const [agentTraceOpen, setAgentTraceOpen] = useState(scene === 'code');
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
@@ -119,7 +162,25 @@ export const ChatPanel: React.FC = () => {
     handleEditConfirm,
     updateSessionMeta,
     boundPromptIds, toggleBoundPrompt,
-  } = useChatSession();
+  } = useChatSession(sceneSystemPrompt);
+
+  useEffect(() => {
+    if (scene === 'code') setAgentMode(true);
+  }, [scene, setAgentMode]);
+
+  useEffect(() => {
+    configureCodeWorkspace(scene === 'code' ? codeWorkspace?.path ?? null : null);
+    if (scene === 'code' && codeWorkspace) {
+      localStorage.setItem('ai-chat.code-workspace', JSON.stringify(codeWorkspace));
+      void window.electronAPI.workspace.reauthorize(codeWorkspace.path);
+    }
+    return () => configureCodeWorkspace(null);
+  }, [codeWorkspace, scene]);
+
+  const selectCodeWorkspace = useCallback(async () => {
+    const folder = await window.electronAPI.workspace.openFolder();
+    if (folder) setCodeWorkspace(folder);
+  }, []);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -164,12 +225,14 @@ export const ChatPanel: React.FC = () => {
     if (activeRole) {
       updateSessionMeta({ systemPrompt: activeRole.systemPrompt });
       const tools = activeRole.enabledToolIds;
-      if (tools.length > 0) ALL_TOOLS.forEach((t) => setToolEnabled(t, tools.includes(t)));
-      else ALL_TOOLS.forEach((t) => setToolEnabled(t, true));
+      const permittedTools = tools.length > 0
+        ? scenePreset.enabledToolIds.filter((tool) => tools.includes(tool))
+        : scenePreset.enabledToolIds;
+      ALL_TOOLS.forEach((tool) => setToolEnabled(tool, permittedTools.includes(tool)));
     } else {
-      ALL_TOOLS.forEach((t) => setToolEnabled(t, true));
+      ALL_TOOLS.forEach((tool) => setToolEnabled(tool, scenePreset.enabledToolIds.includes(tool)));
     }
-  }, [activeRoleId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeRoleId, scene]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── bubbleItems / conversationItems ──
   const latestComparisonId = useMemo(() => {
@@ -182,10 +245,10 @@ export const ChatPanel: React.FC = () => {
     [messages, latestComparisonId],
   );
   const bubbleMessages = useMemo(
-    () => latestComparisonId
+    () => (latestComparisonId
       ? messages.filter((message) => message.comparisonId !== latestComparisonId)
-      : messages,
-    [messages, latestComparisonId],
+      : messages).filter((message) => scene !== 'code' || message.role !== 'tool'),
+    [messages, latestComparisonId, scene],
   );
   const bubbleItems = useMemo(
     () => toBubbleItems(bubbleMessages, streaming && latestComparison.length === 0, error),
@@ -313,11 +376,16 @@ export const ChatPanel: React.FC = () => {
     const items: { title: string; description: string; status: 'success' | 'error' }[] = [];
     for (const m of messages) {
       if (m.role === 'assistant' && m.toolCalls?.length) {
-        items.push({ title: '🤔 思考', description: m.content?.slice(0, 120) || '分析中...', status: 'success' });
-        items.push({ title: `🔧 ${m.toolCalls.map((c) => c.name).join(', ')}`, description: '执行工具调用', status: 'success' });
+        const targets = m.toolCalls.map((call) => typeof call.arguments.path === 'string' ? call.arguments.path : call.name);
+        items.push({ title: '🤔 分析任务', description: m.content?.slice(0, 120) || '确定下一步操作', status: 'success' });
+        items.push({ title: `🔧 执行 ${m.toolCalls.length} 个工具`, description: targets.join('、'), status: 'success' });
       } else if (m.role === 'tool') {
-        const res = m.toolResults?.map((r) => r.error ? `❌ ${r.error}` : (r.output || '').slice(0, 120)).join(', ') || '';
-        items.push({ title: '📋 结果', description: res,
+        const failed = m.toolResults?.filter((result) => result.error) ?? [];
+        const completed = (m.toolResults?.length ?? 0) - failed.length;
+        const description = failed.length
+          ? failed.map((result) => `${result.name}: ${result.error}`).join('；')
+          : `${completed} 个工具执行成功，结果已加入 Agent 上下文`;
+        items.push({ title: failed.length ? '📋 执行异常' : '📋 获取上下文', description,
           status: m.toolResults?.some((r) => r.error) ? 'error' : 'success' });
       }
     }
@@ -459,6 +527,23 @@ export const ChatPanel: React.FC = () => {
               {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')} title="配置 AI API" aria-label="配置 AI API"><Settings className="h-3.5 w-3.5" /></Button>}
             </div>
 
+            {scene === 'code' && (
+              <div className="flex shrink-0 items-center gap-3 border-b bg-primary/5 px-3 py-2">
+                <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium">
+                    {codeWorkspace ? codeWorkspace.name : '尚未选择代码文件夹'}
+                  </p>
+                  <p className="truncate text-[10px] text-muted-foreground" title={codeWorkspace?.path}>
+                    {codeWorkspace?.path ?? '选择本地项目后，AI 才能读取、分析和修改其中的代码'}
+                  </p>
+                </div>
+                <Button type="button" size="sm" variant={codeWorkspace ? 'outline' : 'default'} className="h-7 shrink-0 text-xs" onClick={selectCodeWorkspace}>
+                  {codeWorkspace ? '更换文件夹' : '选择代码文件夹'}
+                </Button>
+              </div>
+            )}
+
             {/* 系统提示词 */}
             {showSysPrompt && (
               <div className="px-3 py-2 border-b bg-background shrink-0">
@@ -468,9 +553,38 @@ export const ChatPanel: React.FC = () => {
               </div>
             )}
 
-            {/* Agent 思考链 */}
-            {agentMode && thoughtChainItems.length > 0 && (
-              <div className="px-4 py-2 border-b bg-background shrink-0 max-h-40 overflow-y-auto">
+            {/* Agent 执行轨迹 */}
+            {agentMode && thoughtChainItems.length > 0 && scene === 'code' && (
+              <div className="shrink-0 border-b bg-background">
+                <div className="flex h-9 items-center px-2 hover:bg-accent/50">
+                  <button type="button" className="flex min-w-0 flex-1 items-center gap-2 px-2 text-left text-xs" onClick={() => setAgentTraceOpen((open) => !open)} aria-expanded={agentTraceOpen}>
+                    <span className={`h-2 w-2 rounded-full ${streaming ? 'animate-pulse bg-warning' : 'bg-success'}`} />
+                    <span className="font-medium">{streaming ? 'Agent 正在执行' : 'Agent 执行完成'}</span>
+                    <span className="text-muted-foreground">{thoughtChainItems.length} 个步骤</span>
+                    <span className="flex-1" />
+                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${agentTraceOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {streaming && <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive" onClick={handleStop}>停止</Button>}
+                </div>
+                {agentTraceOpen && (
+                  <div className="max-h-52 overflow-y-auto border-t px-4 py-2">
+                    <div className="relative space-y-2 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-border">
+                      {thoughtChainItems.map((item, index) => (
+                        <div key={`${item.title}-${index}`} className="relative flex gap-3 pl-5 text-xs">
+                          <span className={`absolute left-0 top-1 h-2.5 w-2.5 rounded-full border-2 border-background ${item.status === 'error' ? 'bg-destructive' : 'bg-success'}`} />
+                          <div className="min-w-0">
+                            <p className="font-medium">{item.title.replace(/^[^\p{L}\p{N}_]+/u, '')}</p>
+                            <p className="truncate text-[10px] text-muted-foreground" title={item.description}>{item.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {agentMode && thoughtChainItems.length > 0 && scene !== 'code' && (
+              <div className="max-h-40 shrink-0 overflow-y-auto border-b bg-background px-4 py-2">
                 <ThoughtChain items={thoughtChainItems} />
               </div>
             )}
@@ -479,8 +593,8 @@ export const ChatPanel: React.FC = () => {
             {messages.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-4" onClick={handleMessageClick}>
                 <Welcome variant="borderless" icon={<Robot className="h-10 w-10 text-foreground" />}
-                  title={hasKey ? 'AI 对话' : '未配置 API Key'}
-                  description={hasKey ? '输入消息开始对话，可开启 Agent 模式自动调用工具' : '请在设置 → AI API 中配置后使用'} />
+                  title={hasKey ? scenePreset.title : '未配置 API Key'}
+                  description={hasKey ? scenePreset.description : '请在设置 → AI API 中配置后使用'} />
                 {hasKey && (
                   <Prompts items={WELCOME_PROMPTS} onItemClick={onPromptClick}
                     styles={{ list: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' } }} />
