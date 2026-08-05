@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
 // ── 提示词 ──
 export const prompts = sqliteTable('prompts', {
@@ -40,6 +40,20 @@ export const injectHistory = sqliteTable('inject_history', {
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+});
+
+// 微信读书离线缓存。完整笔记保留为 JSON，同时用 searchable_text 提供本地搜索。
+export const wereadBooks = sqliteTable('weread_books', {
+  bookId: text('book_id').primaryKey(),
+  title: text('title').notNull(),
+  author: text('author').notNull().default(''),
+  noteCount: integer('note_count').notNull().default(0),
+  reviewCount: integer('review_count').notNull().default(0),
+  bookmarkCount: integer('bookmark_count').notNull().default(0),
+  highlights: text('highlights').notNull().default('[]'),
+  reviews: text('reviews').notNull().default('[]'),
+  searchableText: text('searchable_text').notNull().default(''),
+  cachedAt: integer('cached_at').notNull(),
 });
 
 // ── Schema version tracking ──

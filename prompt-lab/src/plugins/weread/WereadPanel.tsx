@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, Download, Eye, EyeOff, Loader2, RefreshCw } from '@/components/icons';
+import { ArrowLeft, ArrowRight, BookOpen, Download, Eye, EyeOff, Loader2, RefreshCw, Search } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { dbLoadWereadCache, dbReplaceWereadCache, flushDbToDisk, isDbReady } from '@/db';
 
 const TOKEN_SERVICE = 'weread-api-key';
 
@@ -14,7 +15,7 @@ type BookSummary = {
   reviewCount: number;
   bookmarkCount: number;
 };
-type ExportedBook = BookSummary & { highlights: JsonObject[]; reviews: JsonObject[] };
+type ExportedBook = BookSummary & { highlights: JsonObject[]; reviews: JsonObject[]; cachedAt?: number };
 
 function asObject(value: unknown): JsonObject {
   return value && typeof value === 'object' ? value as JsonObject : {};
@@ -111,6 +112,7 @@ export const WereadPanel: React.FC = () => {
   const [error, setError] = useState('');
   const [books, setBooks] = useState<ExportedBook[]>([]);
   const [openBookId, setOpenBookId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     void window.electronAPI.auth.getToken(TOKEN_SERVICE).then((token) => {
@@ -118,11 +120,37 @@ export const WereadPanel: React.FC = () => {
     });
   }, []);
 
+  useEffect(() => {
+    let attempts = 0;
+    const loadCache = () => {
+      attempts += 1;
+      if (isDbReady()) {
+        const cached = dbLoadWereadCache() as ExportedBook[];
+        if (cached.length) {
+          setBooks(cached);
+          setStatus(`已加载本地缓存：${cached.length} 本书`);
+        }
+        return true;
+      }
+      return attempts >= 50;
+    };
+    if (loadCache()) return undefined;
+    const timer = window.setInterval(() => { if (loadCache()) window.clearInterval(timer); }, 100);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const totals = useMemo(() => books.reduce((result, book) => ({
     highlights: result.highlights + book.highlights.length,
     reviews: result.reviews + book.reviews.length,
     bookmarks: result.bookmarks + book.bookmarkCount,
   }), { highlights: 0, reviews: 0, bookmarks: 0 }), [books]);
+
+  const visibleBooks = useMemo(() => {
+    if (!searchQuery.trim()) return books;
+    if (isDbReady()) return dbLoadWereadCache(searchQuery) as ExportedBook[];
+    const query = searchQuery.trim().toLocaleLowerCase();
+    return books.filter((book) => JSON.stringify(book).toLocaleLowerCase().includes(query));
+  }, [books, searchQuery]);
 
   async function request(payload: JsonObject): Promise<JsonObject> {
     let response: Awaited<ReturnType<typeof window.electronAPI.wereadRequest>>;
@@ -156,6 +184,7 @@ export const WereadPanel: React.FC = () => {
   async function fetchAllNotes() {
     const key = apiKey.trim();
     if (!key) { setError('请先输入微信读书 API Key'); return; }
+    if (!isDbReady()) { setError('本地数据库正在初始化，请稍后重试'); return; }
     setLoading(true); setError(''); setBooks([]); setStatus('正在读取笔记本列表…');
     try {
       await window.electronAPI.auth.saveToken(TOKEN_SERVICE, key, '微信读书 API Key');
@@ -194,7 +223,9 @@ export const WereadPanel: React.FC = () => {
         exported.push({ ...summary, highlights, reviews });
         setBooks([...exported]);
       }
-      setStatus(`获取完成：${exported.length} 本书`);
+      dbReplaceWereadCache(exported);
+      await flushDbToDisk();
+      setStatus(`获取完成并已缓存到本地：${exported.length} 本书`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setStatus('');
@@ -250,8 +281,14 @@ export const WereadPanel: React.FC = () => {
                 <div className="text-sm"><strong>{books.length}</strong> 本书 · <strong>{totals.highlights}</strong> 条划线 · <strong>{totals.reviews}</strong> 条想法/点评 · <strong>{totals.bookmarks}</strong> 个书签</div>
                 <Button variant="outline" size="sm" onClick={() => void exportMarkdown()}><Download />导出 Markdown</Button>
               </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} disabled={loading}
+                  placeholder="搜索书名、作者、章节、划线或想法" className="pl-9" />
+                {searchQuery && <p className="mt-2 text-xs text-muted-foreground">在本地 SQLite 缓存中找到 {visibleBooks.length} 本相关书籍</p>}
+              </div>
               <div className="space-y-2">
-                {books.map((book) => {
+                {visibleBooks.map((book) => {
                   const isOpen = openBookId === book.bookId;
                   return <div key={book.bookId} className="rounded-lg border bg-background p-3">
                     <div className="flex items-center gap-3">
@@ -264,6 +301,7 @@ export const WereadPanel: React.FC = () => {
                     {isOpen && <BookNotes book={book} />}
                   </div>;
                 })}
+                {visibleBooks.length === 0 && <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">没有找到匹配的笔记</div>}
               </div>
             </>}
           </div>

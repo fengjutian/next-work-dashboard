@@ -1,6 +1,6 @@
 import initSqlJs, { type Database as SqlJsDatabase, type QueryExecResult } from 'sql.js';
 import { drizzle, type SQLJsDatabase } from 'drizzle-orm/sql-js';
-import { eq, inArray, desc, and, sql } from 'drizzle-orm';
+import { eq, inArray, desc, like, or } from 'drizzle-orm';
 import * as schema from './schema';
 
 let _db: SQLJsDatabase<typeof schema> | null = null;
@@ -169,6 +169,19 @@ function ensureSchema(): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS weread_books (
+      book_id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT '',
+      note_count INTEGER NOT NULL DEFAULT 0,
+      review_count INTEGER NOT NULL DEFAULT 0,
+      bookmark_count INTEGER NOT NULL DEFAULT 0,
+      highlights TEXT NOT NULL DEFAULT '[]',
+      reviews TEXT NOT NULL DEFAULT '[]',
+      searchable_text TEXT NOT NULL DEFAULT '',
+      cached_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_weread_books_cached_at ON weread_books(cached_at DESC);
   `);
   const sessionColumns = new Set((_sqlDb.exec('PRAGMA table_info(agent_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!sessionColumns.has('payload')) _sqlDb.run("ALTER TABLE agent_sessions ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'");
@@ -322,6 +335,72 @@ export function dbGetSetting(key: string): string | null {
 export function dbSetSetting(key: string, value: string): void {
   getDb().delete(schema.settings).where(eq(schema.settings.key, key)).run();
   getDb().insert(schema.settings).values({ key, value } as never).run();
+}
+
+export interface WereadCachedBook {
+  bookId: string;
+  title: string;
+  author: string;
+  noteCount: number;
+  reviewCount: number;
+  bookmarkCount: number;
+  highlights: Array<Record<string, unknown>>;
+  reviews: Array<Record<string, unknown>>;
+  cachedAt: number;
+}
+
+interface WereadBookRow extends Omit<WereadCachedBook, 'highlights' | 'reviews'> {
+  highlights: string;
+  reviews: string;
+  searchableText: string;
+}
+
+function wereadRowToBook(row: WereadBookRow): WereadCachedBook {
+  return {
+    bookId: row.bookId, title: row.title, author: row.author,
+    noteCount: row.noteCount, reviewCount: row.reviewCount, bookmarkCount: row.bookmarkCount,
+    highlights: safeJsonParse(row.highlights, []), reviews: safeJsonParse(row.reviews, []), cachedAt: row.cachedAt,
+  };
+}
+
+function wereadSearchText(book: Omit<WereadCachedBook, 'cachedAt'>): string {
+  const noteText = [...book.highlights, ...book.reviews].map((item) => {
+    const review = item.review && typeof item.review === 'object' ? item.review as Record<string, unknown> : item;
+    const chapter = item.chapter && typeof item.chapter === 'object' ? item.chapter as Record<string, unknown> : {};
+    return [item.markText, item.chapterTitle, chapter.title, review.abstract, review.content, review.chapterName]
+      .filter(Boolean).join(' ');
+  }).join(' ');
+  return `${book.title} ${book.author} ${noteText}`.toLocaleLowerCase();
+}
+
+export function dbReplaceWereadCache(books: Array<Omit<WereadCachedBook, 'cachedAt'>>): void {
+  const database = getDb();
+  database.transaction((tx) => {
+    tx.delete(schema.wereadBooks).run();
+    const cachedAt = Date.now();
+    for (const book of books) {
+      tx.insert(schema.wereadBooks).values({
+        ...book,
+        highlights: JSON.stringify(book.highlights),
+        reviews: JSON.stringify(book.reviews),
+        searchableText: wereadSearchText(book),
+        cachedAt,
+      } as never).run();
+    }
+  });
+}
+
+export function dbLoadWereadCache(query = ''): WereadCachedBook[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  const statement = getDb().select().from(schema.wereadBooks);
+  const rows = normalized
+    ? statement.where(or(
+      like(schema.wereadBooks.searchableText, `%${normalized}%`),
+      like(schema.wereadBooks.title, `%${query.trim()}%`),
+      like(schema.wereadBooks.author, `%${query.trim()}%`),
+    )).orderBy(desc(schema.wereadBooks.cachedAt)).all()
+    : statement.orderBy(desc(schema.wereadBooks.cachedAt)).all();
+  return (rows as unknown as WereadBookRow[]).map(wereadRowToBook);
 }
 
 // ═══════════════════════════════════════════
