@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2, Edit3, Check } from '@/components/icons';
+import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2, Edit3, Check, ChevronDown, Plus } from '@/components/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MonacoEditor from '@monaco-editor/react';
@@ -56,6 +56,11 @@ const FileItem: React.FC<{
 
 export const ConversationHistory: React.FC = () => {
   const [files, setFiles] = useState<ConversationFile[]>([]);
+  const [folders, setFolders] = useState<Array<{ name: string; path: string }>>([]);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ConversationSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -77,7 +82,14 @@ export const ConversationHistory: React.FC = () => {
   const memoryConfig = useStore((state) => state.memoryConfig);
 
   const loadList = useCallback(async () => {
-    try { setFiles(await window.electronAPI.listConversations()); }
+    try {
+      const [nextFiles, nextFolders] = await Promise.all([
+        window.electronAPI.listConversations(),
+        window.electronAPI.listConversationFolders(),
+      ]);
+      setFiles(nextFiles);
+      setFolders(nextFolders);
+    }
     catch { toast('读取知识库文件列表失败', 'error'); }
   }, [toast]);
 
@@ -108,6 +120,37 @@ export const ConversationHistory: React.FC = () => {
   const displayed = useMemo(() => query.trim().length >= 2
     ? results.map((result) => ({ file: result.file, result }))
     : files.map((file) => ({ file, result: undefined })), [files, query, results]);
+
+  const groupedFiles = useMemo(() => {
+    const groups = new Map<string, typeof displayed>();
+    groups.set('', []);
+    folders.forEach((folder) => groups.set(folder.path, []));
+    displayed.forEach((item) => {
+      const folder = item.file.folder ?? '';
+      if (!groups.has(folder)) groups.set(folder, []);
+      groups.get(folder)!.push(item);
+    });
+    return [...groups.entries()].filter(([folder, items]) => !query.trim() || items.length > 0 || folder === '');
+  }, [displayed, folders, query]);
+
+  const createFolder = useCallback(async () => {
+    const name = newFolderName.trim();
+    if (!name || creatingFolder) return;
+    setCreatingFolder(true);
+    try {
+      const result = await window.electronAPI.createConversationFolder(name);
+      if (!result.success) {
+        const message = result.error === 'ALREADY_EXISTS' ? '同名目录已经存在'
+          : result.error === 'INVALID_NAME' ? '目录名称包含非法字符' : result.error || '创建失败';
+        throw new Error(message);
+      }
+      setNewFolderName('');
+      setShowNewFolder(false);
+      await loadList();
+      toast(`已创建主题目录：${result.path ?? name}`, 'success');
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), 'error'); }
+    finally { setCreatingFolder(false); }
+  }, [creatingFolder, loadList, newFolderName, toast]);
 
   const selectFile = useCallback(async (file: ConversationFile) => {
     if (editing && draftContent !== content && !window.confirm('当前修改尚未保存，确定放弃吗？')) return;
@@ -272,10 +315,21 @@ export const ConversationHistory: React.FC = () => {
         <div className="flex items-center justify-between border-b px-3 py-2">
           <span className="text-xs font-semibold text-muted-foreground">知识库 ({files.length})</span>
           <div className="flex gap-1">
+            <button className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setShowNewFolder((value) => !value)} title="新建主题目录">
+              <Plus className="h-3.5 w-3.5" />新建目录
+            </button>
             <button className="p-1 text-muted-foreground hover:text-foreground" onClick={() => void loadList()} title="刷新"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button className="p-1 text-muted-foreground hover:text-foreground" onClick={() => void window.electronAPI.openConversationFolder()} title="打开文件夹"><FolderOpen className="h-3.5 w-3.5" /></button>
           </div>
         </div>
+        {showNewFolder && <div className="flex gap-1 border-b p-2">
+          <input autoFocus value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') void createFolder(); if (event.key === 'Escape') { setShowNewFolder(false); setNewFolderName(''); } }}
+            placeholder="主题目录名称" className="h-8 min-w-0 flex-1 rounded-md border bg-card px-2 text-xs outline-none focus:border-primary" />
+          <Button size="sm" className="h-8 px-2 text-xs" disabled={!newFolderName.trim() || creatingFolder} onClick={() => void createFolder()}>
+            {creatingFolder ? <Loader2 className="h-3.5 w-3.5" /> : '添加'}
+          </Button>
+        </div>}
         <div className="border-b p-2">
           <div className="flex items-center gap-1.5 rounded-md border bg-card px-2">
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
@@ -293,12 +347,26 @@ export const ConversationHistory: React.FC = () => {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {!searching && displayed.length === 0 ? (
+          {!searching && displayed.length === 0 && (query.trim().length >= 2 || folders.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground">
               <FileText className="h-8 w-8" /><p className="text-xs">{query.trim().length >= 2 ? '没有匹配的知识库文件' : '知识库暂无文件'}</p>
             </div>
-          ) : displayed.map(({ file, result }) => <FileItem key={file.path} file={file} result={result} query={query.trim()}
-            isActive={activeFile?.path === file.path} onClick={() => void selectFile(file)} onDelete={() => setDeleteTarget(file)} />)}
+          ) : groupedFiles.map(([folder, items]) => {
+            const collapsed = collapsedFolders.has(folder);
+            const label = folder || '未分类';
+            return <section key={folder || '__root'}>
+              <button type="button" className="flex h-8 w-full items-center gap-1.5 border-b bg-muted/40 px-2 text-left text-[11px] font-medium hover:bg-accent"
+                onClick={() => setCollapsedFolders((current) => { const next = new Set(current); next.has(folder) ? next.delete(folder) : next.add(folder); return next; })}>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+                <FolderOpen className="h-3.5 w-3.5 text-amber-500" />
+                <span className="min-w-0 flex-1 truncate" title={folder}>{label}</span>
+                <span className="text-[10px] font-normal text-muted-foreground">{items.length}</span>
+              </button>
+              {!collapsed && (items.length > 0 ? items.map(({ file, result }) => <FileItem key={file.path} file={file} result={result} query={query.trim()}
+                isActive={activeFile?.path === file.path} onClick={() => void selectFile(file)} onDelete={() => setDeleteTarget(file)} />)
+                : <p className="border-b px-8 py-2 text-[10px] text-muted-foreground">空目录</p>)}
+            </section>;
+          })}
         </div>
       </div>
 

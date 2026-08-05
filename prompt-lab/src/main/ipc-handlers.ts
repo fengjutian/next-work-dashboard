@@ -497,7 +497,8 @@ export function setupIPC(webviewPreloadPath: string) {
   };
 
   const conversationMetadata = (file: string) => {
-    const match = file.match(/^(.+)-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.md$/);
+    const fileName = path.basename(file);
+    const match = fileName.match(/^(.+)-(\d{4}-\d{2}-\d{2})(?:-\d+)?\.md$/);
     const filePath = path.join(exportDir, file);
     const stat = fs.statSync(filePath);
     let title: string | undefined;
@@ -507,8 +508,29 @@ export function setupIPC(webviewPreloadPath: string) {
       title = head.match(/^# (.+)$/m)?.[1].trim();
       notes = head.match(/^> (.+)$/m)?.[1].trim();
     } catch { /* keep undefined */ }
-    return { site: match?.[1] || 'unknown', date: match?.[2] || '', fileName: file,
-      path: filePath, size: stat.size, modifiedAt: stat.mtimeMs, title, notes };
+    const relativeFolder = path.dirname(file).replace(/\\/g, '/');
+    return { site: match?.[1] || 'unknown', date: match?.[2] || '', fileName,
+      path: filePath, size: stat.size, modifiedAt: stat.mtimeMs, title, notes,
+      folder: relativeFolder === '.' ? '' : relativeFolder };
+  };
+
+  const walkConversationEntries = (directory = exportDir): { files: string[]; folders: string[] } => {
+    const files: string[] = [];
+    const folders: string[] = [];
+    if (!fs.existsSync(directory)) return { files, folders };
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = path.relative(exportDir, absolutePath);
+      if (entry.isDirectory()) {
+        folders.push(relativePath.replace(/\\/g, '/'));
+        const nested = walkConversationEntries(absolutePath);
+        files.push(...nested.files);
+        folders.push(...nested.folders);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+        files.push(relativePath);
+      }
+    }
+    return { files, folders };
   };
 
   ipcMain.handle('list-conversations', async () => {
@@ -526,7 +548,7 @@ export function setupIPC(webviewPreloadPath: string) {
         notes?: string;
       }> = [];
 
-      const files = fs.readdirSync(exportDir).filter((f) => f.endsWith('.md'));
+      const files = walkConversationEntries().files;
       for (const file of files) {
         list.push(conversationMetadata(file));
       }
@@ -538,11 +560,35 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('list-conversation-folders', async () => {
+    try {
+      return walkConversationEntries().folders.sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }))
+        .map((folder) => ({ name: path.basename(folder), path: folder }));
+    } catch { return []; }
+  });
+
+  ipcMain.handle('create-conversation-folder', async (_event, rawRelativePath: string) => {
+    try {
+      const relativePath = String(rawRelativePath || '').trim().replace(/[\\/]+/g, path.sep);
+      const segments = relativePath.split(path.sep).filter(Boolean);
+      if (!segments.length || segments.some((segment) => segment === '.' || segment === '..'
+        || /[<>:"|?*\u0000-\u001f]/.test(segment) || /[. ]$/.test(segment))) {
+        return { success: false, error: 'INVALID_NAME' };
+      }
+      const target = path.resolve(exportDir, ...segments);
+      const root = path.resolve(exportDir);
+      if (!target.startsWith(`${root}${path.sep}`)) return { success: false, error: 'ACCESS_DENIED' };
+      if (fs.existsSync(target)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.mkdirSync(target, { recursive: true });
+      return { success: true, path: segments.join('/') };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+
   ipcMain.handle('search-conversations', async (_event, rawQuery: string) => {
     const query = String(rawQuery || '').trim().toLocaleLowerCase();
     if (query.length < 2 || !fs.existsSync(exportDir)) return [];
     const results = [];
-    for (const fileName of fs.readdirSync(exportDir).filter((file) => file.endsWith('.md'))) {
+    for (const fileName of walkConversationEntries().files) {
       if (results.length >= 100) break;
       try {
         const file = conversationMetadata(fileName);

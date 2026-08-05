@@ -79,6 +79,8 @@ export interface ElectronAPI {
     contentMode?: 'exchange' | 'document';
   }) => Promise<{ success: boolean; filePath?: string }>;
   listConversations: () => Promise<ConversationFile[]>;
+  listConversationFolders: () => Promise<Array<{ name: string; path: string }>>;
+  createConversationFolder: (relativePath: string) => Promise<{ success: boolean; path?: string; error?: string }>;
   searchConversations: (query: string) => Promise<ConversationSearchResult[]>;
   readConversation: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   writeConversation: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
@@ -206,6 +208,7 @@ export interface ConversationFile {
   modifiedAt: number;
   title?: string;
   notes?: string;
+  folder?: string;
 }
 
 export interface MemoryFile {

@@ -481,12 +481,13 @@ export const KnowledgeGraph: React.FC = () => {
                     <span className="text-[10px] text-muted-foreground">{knowledgeIndex.documents.length} 篇</span>
                     <button
                       type="button"
-                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-[11px] font-medium hover:bg-accent"
                       title="新建主题目录"
                       aria-label="新建主题目录"
                       onClick={() => setShowNewFolder((visible) => !visible)}
                     >
                       <Plus className="h-3.5 w-3.5" />
+                      新建目录
                     </button>
                   </div>
                 </div>
