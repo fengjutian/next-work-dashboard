@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
+import { Loader2 } from '@/components/icons';
 import { BarChart, GraphChart, HeatmapChart, LineChart, PieChart, ScatterChart } from 'echarts/charts';
 import { CalendarComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
@@ -8,6 +9,8 @@ import { WereadKnowledgeInsights } from './WereadKnowledgeInsights';
 import { WereadInterestProfile } from './WereadInterestProfile';
 import { WereadKnowledgeNetwork } from './WereadKnowledgeNetwork';
 import { WereadInsightsActions } from './WereadInsightsActions';
+import { WereadAISummary } from './WereadAISummary';
+import { WereadAIRecommend } from './WereadAIRecommend';
 
 echarts.use([
   BarChart, GraphChart, HeatmapChart, LineChart, PieChart, ScatterChart,
@@ -92,15 +95,23 @@ function Chart({ option, height = 300, onClick }: { option: EChartsCoreOption; h
 
 export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (bookId: string) => void }> = ({ books, onSelectBook }) => {
   const theme = useThemePalette();
-  const [section, setSection] = useState<'overview' | 'habits' | 'topics' | 'interest' | 'network' | 'actions' | 'knowledge'>('overview');
+  const [section, setSection] = useState<'overview' | 'habits' | 'topics' | 'interest' | 'network' | 'actions' | 'knowledge' | 'ai' | 'recommend'>('overview');
   const [visited, setVisited] = useState<Set<typeof section>>(() => new Set(['overview']));
+  const [dataReady, setDataReady] = useState(false);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDataReady(true), 0);
+    return () => clearTimeout(id);
+  }, []);
 
   function activateSection(next: typeof section) {
     setSection(next);
     if (!visited.has(next)) window.setTimeout(() => setVisited((current) => new Set(current).add(next)), 0);
   }
   const data = useMemo(() => {
+    if (!dataReady) return null;
     const days = new Map<string, { highlights: number; reviews: number }>();
+    const hours = new Map<number, Map<number, number>>(); // dayOfWeek(0=Mon) → hour(0-23) → count
     const words = new Map<string, number>();
     const monthlyWords = new Map<string, Map<string, number>>();
     const bookWords = new Map<string, Map<string, number>>();
@@ -114,6 +125,15 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
         const review = item.review && typeof item.review === 'object' ? item.review as JsonObject : item;
         const timestamp = timestampOf(review.createTime);
         if (timestamp) { const key = dateKey(timestamp); const value = days.get(key) || { highlights: 0, reviews: 0 }; value.reviews += 1; days.set(key, value); }
+      }
+      for (const note of noteTexts(book)) {
+        if (!note.timestamp) continue;
+        const date = new Date(note.timestamp * 1000);
+        const dayOfWeek = (date.getDay() + 6) % 7; // 0=Mon … 6=Sun
+        const hour = date.getHours();
+        const hourMap = hours.get(dayOfWeek) || new Map<number, number>();
+        hourMap.set(hour, (hourMap.get(hour) || 0) + 1);
+        hours.set(dayOfWeek, hourMap);
       }
       for (const note of noteTexts(book)) {
         const month = note.timestamp ? dateKey(note.timestamp).slice(0, 7) : '';
@@ -185,13 +205,27 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
       const priority = Math.round(Math.log2(book.noteCount + book.reviewCount + 1) * 15 + Math.min(ageDays, 365) / 5 + (book.reviewCount ? 0 : 15));
       return { book, ageDays, interval, priority };
     }).filter((item) => item.ageDays >= item.interval).sort((a, b) => b.priority - a.priority).slice(0, 8);
-    return { days, months, ranking, keywords, themeWords, monthlyWords, reflection, reviewCandidates, longestStreak, currentStreak, weekday, depth, similarityBooks, similarities, wordNodes, wordLinks, reviewQueue };
-  }, [books]);
+    return { days, months, hours, ranking, keywords, themeWords, monthlyWords, reflection, reviewCandidates, longestStreak, currentStreak, weekday, depth, similarityBooks, similarities, wordNodes, wordLinks, reviewQueue };
+  }, [books, dataReady]);
 
   const totals = useMemo(() => books.reduce((sum, book) => ({ highlights: sum.highlights + book.noteCount, reviews: sum.reviews + book.reviewCount, bookmarks: sum.bookmarks + book.bookmarkCount }), { highlights: 0, reviews: 0, bookmarks: 0 }), [books]);
+
+  if (!books.length) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">请先获取微信读书笔记，分析将基于本地 SQLite 缓存生成。</div>;
+  if (!data) return (
+    <div className="flex h-full items-center justify-center bg-background/40">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin" />
+        <span className="text-sm">正在分析阅读数据…</span>
+        <span className="text-xs">{books.length} 本书 · {totals.highlights} 条划线 · {totals.reviews} 条想法</span>
+      </div>
+    </div>
+  );
   const monthKeys = [...data.months.keys()].sort();
   const wordMonthKeys = [...data.monthlyWords.keys()].sort();
   const maxDay = Math.max(1, ...[...data.days.values()].map((day) => day.highlights + day.reviews));
+  const maxHour = Math.max(1, ...[...data.hours.values()].flatMap((hourMap) => [...hourMap.values()]));
+  const hourlyData: [number, number, number][] = [];
+  for (const [dayOfWeek, hourMap] of data.hours) for (const [hour, count] of hourMap) hourlyData.push([dayOfWeek, hour, count]);
   const calendarYears = [...new Set([...data.days.keys()].map((day) => Number(day.slice(0, 4))))].sort((a, b) => a - b);
   if (!calendarYears.length) calendarYears.push(new Date().getFullYear());
   const topBook = data.ranking[0];
@@ -206,18 +240,18 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
   const reflectionOption: EChartsCoreOption = { ...base, tooltip: { formatter: (params: unknown) => { const value = (params as { data?: { value?: [number, number, number]; title?: string } }).data; return value?.value ? `${value.title}<br/>划线 ${value.value[0]} 条<br/>思考转化率 ${value.value[1]}%` : ''; } }, grid: { left: 50, right: 20, top: 20, bottom: 45 }, xAxis: { ...axis, name: '划线数', type: 'value', minInterval: 1, nameTextStyle: { color: theme.muted } }, yAxis: { ...axis, name: '转化率 %', type: 'value', max: (value: { max: number }) => Math.max(100, Math.ceil(value.max / 20) * 20), nameTextStyle: { color: theme.muted } }, series: [{ type: 'scatter', data: data.reflection.map(({ book, rate }) => ({ title: book.title, bookId: book.bookId, value: [book.noteCount, rate, book.reviewCount], symbolSize: Math.min(34, 10 + Math.sqrt(book.noteCount + book.reviewCount) * 3) })) }] };
   const topicTrendOption: EChartsCoreOption = { ...base, tooltip: { trigger: 'axis' }, legend: { bottom: 0, textStyle: { color: theme.muted } }, grid: { left: 45, right: 20, top: 20, bottom: 60 }, xAxis: { ...axis, type: 'category', data: wordMonthKeys }, yAxis: { ...axis, type: 'value', minInterval: 1 }, series: data.themeWords.map((word) => ({ name: word, type: 'line', smooth: true, data: wordMonthKeys.map((month) => data.monthlyWords.get(month)?.get(word) || 0) })) };
   const weekdayOption: EChartsCoreOption = { ...base, tooltip: { trigger: 'axis' }, grid: { left: 45, right: 20, top: 20, bottom: 35 }, xAxis: { ...axis, type: 'category', data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] }, yAxis: { ...axis, type: 'value', minInterval: 1 }, series: [{ type: 'bar', data: data.weekday, itemStyle: { color: theme.colors[0], borderRadius: [4, 4, 0, 0] } }] };
+  const hourlyOption: EChartsCoreOption = { ...base, tooltip: { formatter: (params: unknown) => { const value = (params as { value?: [number, number, number] }).value; if (!value) return ''; const dayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']; return `${dayLabels[value[0]]} ${String(value[1]).padStart(2, '0')}:00 — ${String(value[1] + 1).padStart(2, '0')}:00<br/>${value[2]} 条笔记`; } }, grid: { left: 50, right: 25, top: 10, bottom: 55 }, xAxis: { ...axis, type: 'category', data: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`), axisLabel: { color: theme.muted, rotate: 0 }, splitArea: { show: true } }, yAxis: { ...axis, type: 'category', data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'], splitArea: { show: true } }, visualMap: { min: 0, max: maxHour, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, textStyle: { color: theme.muted }, inRange: { color: [theme.primaryLight, theme.colors[0], theme.primaryStrong] } }, series: [{ type: 'heatmap', data: hourlyData, label: { show: true, color: theme.text, fontSize: 10 } }] };
   const depthOption: EChartsCoreOption = { ...base, tooltip: { trigger: 'axis' }, grid: { left: 110, right: 35, top: 15, bottom: 30 }, yAxis: { ...axis, type: 'category', inverse: true, data: data.depth.map(({ book }) => book.title), axisLabel: { color: theme.muted, width: 96, overflow: 'truncate' } }, xAxis: { ...axis, type: 'value', max: 100 }, series: [{ type: 'bar', data: data.depth.map(({ book, score }) => ({ value: score, bookId: book.bookId })), label: { show: true, position: 'right', color: theme.muted }, itemStyle: { color: theme.colors[0], borderRadius: [0, 4, 4, 0] } }] };
   const similarityOption: EChartsCoreOption = { ...base, tooltip: { formatter: (params: unknown) => { const value = (params as { value?: [number, number, number] }).value; return value ? `${data.similarityBooks[value[1]]?.title} × ${data.similarityBooks[value[0]]?.title}<br/>主题相似度：${value[2]}%` : ''; } }, grid: { left: 125, right: 25, top: 20, bottom: 105 }, xAxis: { ...axis, type: 'category', data: data.similarityBooks.map((book) => book.title), axisLabel: { color: theme.muted, rotate: 40, width: 90, overflow: 'truncate' }, splitArea: { show: true } }, yAxis: { ...axis, type: 'category', data: data.similarityBooks.map((book) => book.title), axisLabel: { color: theme.muted, width: 105, overflow: 'truncate' }, splitArea: { show: true } }, visualMap: { min: 0, max: 100, calculable: false, orient: 'horizontal', left: 'center', bottom: 8, textStyle: { color: theme.muted }, inRange: { color: [theme.primaryLight, theme.colors[0], theme.primaryStrong] } }, series: [{ type: 'heatmap', data: data.similarities, label: { show: true, color: theme.text, formatter: (params: unknown) => String((params as { value?: [number, number, number] }).value?.[2] || '') } }] };
   const relationOption: EChartsCoreOption = { ...base, tooltip: { formatter: (params: unknown) => { const item = params as { dataType?: string; name?: string; value?: number; data?: { source?: string; target?: string; value?: number } }; return item.dataType === 'edge' ? `${item.data?.source} ↔ ${item.data?.target}<br/>共同出现 ${item.data?.value} 次` : `${item.name}<br/>出现 ${item.value} 次`; } }, series: [{ type: 'graph', layout: 'force', roam: true, draggable: true, data: data.wordNodes, links: data.wordLinks, label: { show: true, color: theme.text }, itemStyle: { color: theme.colors[0] }, lineStyle: { color: theme.colors[1], opacity: 0.5, curveness: 0.08 }, emphasis: { focus: 'adjacency', lineStyle: { opacity: 0.9 } }, force: { repulsion: 170, edgeLength: [65, 150], gravity: 0.08 } }] };
 
-  if (!books.length) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">请先获取微信读书笔记，分析将基于本地 SQLite 缓存生成。</div>;
   const selectFromChart = (params: unknown) => { const bookId = String(((params as { data?: { bookId?: unknown } }).data?.bookId) || ''); if (bookId) onSelectBook(bookId); };
 
   return <div className="h-full overflow-auto bg-background/40">
     <div className="sticky top-0 z-20 border-b bg-background/95 px-5 py-3 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-2 overflow-x-auto">
         <div className="mr-auto shrink-0"><h2 className="text-base font-semibold">阅读分析</h2><p className="text-xs text-muted-foreground">本地 SQLite 数据分析</p></div>
-        {([['overview', '数据概览'], ['habits', '习惯与深度'], ['topics', '主题关联'], ['interest', '兴趣画像'], ['network', '知识网络'], ['actions', '洞察与行动'], ['knowledge', '知识与复习']] as const).map(([id, label]) => <button key={id} onClick={() => activateSection(id)} className={`shrink-0 rounded-md px-3 py-2 text-sm transition-colors ${section === id ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>{label}</button>)}
+        {([['overview', '数据概览'], ['habits', '习惯与深度'], ['topics', '主题关联'], ['interest', '兴趣画像'], ['network', '知识网络'], ['actions', '洞察与行动'], ['knowledge', '知识与复习'], ['ai', 'AI 摘要'], ['recommend', 'AI 推荐']] as const).map(([id, label]) => <button key={id} onClick={() => activateSection(id)} className={`shrink-0 rounded-md px-3 py-2 text-sm transition-colors ${section === id ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>{label}</button>)}
       </div>
     </div>
     <div className="mx-auto max-w-6xl space-y-4 p-5">
@@ -230,6 +264,7 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
       {section === 'habits' && <>
         <div className="grid gap-4 lg:grid-cols-3"><div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">最长连续记录</p><p className="mt-2 text-2xl font-semibold text-primary">{data.longestStreak} 天</p></div><div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">当前连续记录</p><p className="mt-2 text-2xl font-semibold text-primary">{data.currentStreak} 天</p></div><div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">最活跃星期</p><p className="mt-2 text-2xl font-semibold text-primary">{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][data.weekday.indexOf(Math.max(...data.weekday))]}</p></div></div>
         <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">星期笔记习惯</h3><Chart option={weekdayOption} height={280} /></section>
+        <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">阅读时段分布（小时 × 星期）</h3><p className="px-2 pt-1 text-xs text-muted-foreground">颜色越深表示该时段笔记越多，可用于发现自己的阅读节奏。</p><Chart option={hourlyOption} height={320} /></section>
         <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">思考转化率（点击查看笔记）</h3><p className="px-2 pt-1 text-xs text-muted-foreground">想法/点评数 ÷ 划线数；气泡大小代表笔记量。</p><Chart option={reflectionOption} height={365} onClick={selectFromChart} /></section>
         <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">阅读深度综合评分（点击查看笔记）</h3><p className="px-2 pt-1 text-xs text-muted-foreground">综合笔记量 45%、思考转化率 35% 和记录时间跨度 20%。</p><Chart option={depthOption} height={Math.max(340, data.depth.length * 30)} onClick={selectFromChart} /></section>
         <section className="rounded-lg border bg-card p-4"><h3 className="text-sm font-medium">间隔复习建议</h3><div className="mt-3 grid gap-2 md:grid-cols-2">{data.reviewQueue.map(({ book, ageDays, interval, priority }) => <button key={book.bookId} onClick={() => onSelectBook(book.bookId)} className="rounded-md border bg-background p-3 text-left hover:bg-accent"><p className="truncate text-sm font-medium">{book.title}</p><p className="mt-1 text-xs text-muted-foreground">距最近笔记 {ageDays} 天 · {interval} 天间隔 · 优先级 {priority}</p></button>)}</div></section>
@@ -238,11 +273,13 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
         <div className="grid gap-4 lg:grid-cols-2"><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">高频关键词</h3><Chart option={keywordOption} height={390} /></section><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">全部月份关注主题变化</h3><Chart option={topicTrendOption} height={390} /></section></div>
         <div className="grid gap-4 xl:grid-cols-2"><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">关键词共现关系</h3>{data.wordNodes.length ? <Chart option={relationOption} height={520} /> : <p className="py-20 text-center text-sm text-muted-foreground">暂无足够数据</p>}</section><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">书籍主题相似度</h3><Chart option={similarityOption} height={520} /></section></div>
       </>}
-      {(['interest', 'network', 'actions', 'knowledge'] as const).includes(section as 'interest') && !visited.has(section) && <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">正在准备分析数据…</div>}
+      {(['interest', 'network', 'actions', 'knowledge', 'ai', 'recommend'] as const).includes(section as 'interest') && !visited.has(section) && <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">正在准备分析数据…</div>}
       {visited.has('interest') && <div className={section === 'interest' ? 'block' : 'hidden'}><WereadInterestProfile books={books} theme={theme} /></div>}
       {visited.has('network') && <div className={section === 'network' ? 'block' : 'hidden'}><WereadKnowledgeNetwork books={books} theme={theme} onSelectBook={onSelectBook} /></div>}
       {visited.has('actions') && <div className={section === 'actions' ? 'block' : 'hidden'}><WereadInsightsActions books={books} theme={theme} onSelectBook={onSelectBook} /></div>}
       {visited.has('knowledge') && <div className={section === 'knowledge' ? 'block' : 'hidden'}><WereadKnowledgeInsights books={books} theme={theme} onSelectBook={onSelectBook} /></div>}
+      {visited.has('ai') && <div className={section === 'ai' ? 'block' : 'hidden'}><WereadAISummary books={books} /></div>}
+      {visited.has('recommend') && <div className={section === 'recommend' ? 'block' : 'hidden'}><WereadAIRecommend books={books} /></div>}
     </div>
   </div>;
 };

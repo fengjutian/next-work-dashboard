@@ -107,6 +107,10 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('fetch-url', url, options),
   wereadRequest: (apiKey: string, payload: Record<string, unknown>) =>
     ipcRenderer.invoke('weread:request', apiKey, payload),
+  wereadAiSummary: (payload: { baseUrl: string; apiKey: string; model: string; books: Array<{ bookId: string; title: string; author: string; highlights: string[]; reviews: string[] }> }) =>
+    ipcRenderer.invoke('weread:ai-summary', payload),
+  wereadAiRecommend: (payload: { baseUrl: string; apiKey: string; model: string; books: Array<{ title: string; author: string; highlights: string[]; reviews: string[] }> }) =>
+    ipcRenderer.invoke('weread:ai-recommend', payload),
   // webview preload 路径
   getWebviewPreloadPath: () => ipcRenderer.invoke('get-webview-preload-path'),
 

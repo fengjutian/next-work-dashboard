@@ -44,6 +44,16 @@ export interface ElectronAPI {
     data?: Record<string, unknown>;
     error?: string;
   }>;
+  wereadAiSummary: (payload: { baseUrl: string; apiKey: string; model: string; books: Array<{ bookId: string; title: string; author: string; highlights: string[]; reviews: string[] }> }) => Promise<{
+    success: boolean;
+    summaries?: Array<{ bookId: string; summary: string; tags: string[] }>;
+    error?: string;
+  }>;
+  wereadAiRecommend: (payload: { baseUrl: string; apiKey: string; model: string; books: Array<{ title: string; author: string; highlights: string[]; reviews: string[] }> }) => Promise<{
+    success: boolean;
+    recommendations?: Array<{ type: 'same_author' | 'similar' | 'opposite'; title: string; author: string; reason: string }>;
+    error?: string;
+  }>;
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) => Promise<{
     success: boolean; embeddings?: number[][]; error?: string;
   }>;
