@@ -74,6 +74,7 @@ const electronAPI: ElectronAPI = {
   listConversations: () => ipcRenderer.invoke('list-conversations'),
   listConversationFolders: () => ipcRenderer.invoke('list-conversation-folders'),
   createConversationFolder: (relativePath: string) => ipcRenderer.invoke('create-conversation-folder', relativePath),
+  moveConversation: (filePath: string, targetFolder: string) => ipcRenderer.invoke('move-conversation', filePath, targetFolder),
   searchConversations: (query: string) => ipcRenderer.invoke('search-conversations', query),
   readConversation: (filePath: string) => ipcRenderer.invoke('read-conversation', filePath),
   writeConversation: (filePath: string, content: string) => ipcRenderer.invoke('write-conversation', filePath, content),

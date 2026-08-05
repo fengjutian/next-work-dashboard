@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2, Edit3, Check, ChevronDown, Plus } from '@/components/icons';
+import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2, Edit3, Check, ChevronDown, Plus, ArrowRight } from '@/components/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MonacoEditor from '@monaco-editor/react';
@@ -61,6 +61,9 @@ export const ConversationHistory: React.FC = () => {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [showMoveFile, setShowMoveFile] = useState(false);
+  const [moveTargetFolder, setMoveTargetFolder] = useState('');
+  const [movingFile, setMovingFile] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ConversationSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -151,6 +154,33 @@ export const ConversationHistory: React.FC = () => {
     } catch (error) { toast(error instanceof Error ? error.message : String(error), 'error'); }
     finally { setCreatingFolder(false); }
   }, [creatingFolder, loadList, newFolderName, toast]);
+
+  const moveActiveFile = useCallback(async () => {
+    if (!activeFile || movingFile) return;
+    if ((activeFile.folder ?? '') === moveTargetFolder) { setShowMoveFile(false); return; }
+    setMovingFile(true);
+    const oldPath = activeFile.path;
+    try {
+      const result = await window.electronAPI.moveConversation(oldPath, moveTargetFolder);
+      if (!result.success || !result.filePath) {
+        const message = result.error === 'ALREADY_EXISTS' ? '目标目录中已存在同名文件'
+          : result.error === 'TARGET_NOT_FOUND' ? '目标目录不存在' : result.error || '移动失败';
+        throw new Error(message);
+      }
+      await conversationMemory.removeDocument(oldPath);
+      const nextFiles = await window.electronAPI.listConversations();
+      setFiles(nextFiles);
+      const moved = nextFiles.find((file) => file.path === result.filePath);
+      setActiveFile(moved ?? null);
+      setShowMoveFile(false);
+      const stats = await conversationMemory.sync();
+      setIndexStats(stats);
+      useStore.getState().notifyConversationSaved();
+      if (query.trim().length >= 2) setResults(await window.electronAPI.searchConversations(query.trim()));
+      toast(`已移动到${moveTargetFolder ? `“${moveTargetFolder}”` : '“未分类”'}`, 'success');
+    } catch (error) { toast(error instanceof Error ? error.message : String(error), 'error'); }
+    finally { setMovingFile(false); }
+  }, [activeFile, moveTargetFolder, movingFile, query, toast]);
 
   const selectFile = useCallback(async (file: ConversationFile) => {
     if (editing && draftContent !== content && !window.confirm('当前修改尚未保存，确定放弃吗？')) return;
@@ -388,6 +418,21 @@ export const ConversationHistory: React.FC = () => {
             </div>}
             <div className="truncate text-[10px] text-muted-foreground" title={activeFile.path}>{activeFile.path}</div>
           </div>
+          {showMoveFile && <div className="flex shrink-0 items-center gap-1 rounded-md border bg-background p-1">
+            <select autoFocus value={moveTargetFolder} onChange={(event) => setMoveTargetFolder(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void moveActiveFile(); if (event.key === 'Escape') setShowMoveFile(false); }}
+              className="h-6 max-w-40 rounded border-0 bg-transparent px-1 text-xs outline-none">
+              <option value="">未分类（根目录）</option>
+              {folders.map((folder) => <option key={folder.path} value={folder.path}>{folder.path}</option>)}
+            </select>
+            <Button size="sm" className="h-6 px-2 text-[11px]" disabled={movingFile || moveTargetFolder === (activeFile.folder ?? '')} onClick={() => void moveActiveFile()}>
+              {movingFile ? <Loader2 className="h-3 w-3" /> : '确定'}
+            </Button>
+            <button className="rounded p-1 text-muted-foreground hover:bg-accent" onClick={() => setShowMoveFile(false)} title="取消"><X className="h-3 w-3" /></button>
+          </div>}
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setMoveTargetFolder(activeFile.folder ?? ''); setShowMoveFile((value) => !value); }}>
+            <ArrowRight className="mr-1 h-3.5 w-3.5" />移动到
+          </Button>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={copyPath}><Copy className="mr-1 h-3.5 w-3.5" />复制路径</Button>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void revealFile()}><FolderOpen className="mr-1 h-3.5 w-3.5" />显示原文件</Button>
           {editing ? <>

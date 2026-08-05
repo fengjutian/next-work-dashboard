@@ -584,6 +584,31 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
+  ipcMain.handle('move-conversation', async (_event, filePath: string, rawTargetFolder: string) => {
+    try {
+      const source = resolveConversationPath(filePath);
+      if (!source || !fs.existsSync(source) || path.extname(source).toLowerCase() !== '.md') {
+        return { success: false, error: source ? 'NOT_FOUND' : 'ACCESS_DENIED' };
+      }
+      const targetFolder = String(rawTargetFolder || '').trim().replace(/[\\/]+/g, path.sep);
+      const segments = targetFolder ? targetFolder.split(path.sep).filter(Boolean) : [];
+      if (segments.some((segment) => segment === '.' || segment === '..')) return { success: false, error: 'INVALID_TARGET' };
+      const destinationDirectory = path.resolve(exportDir, ...segments);
+      const root = path.resolve(exportDir);
+      if (destinationDirectory !== root && !destinationDirectory.startsWith(`${root}${path.sep}`)) {
+        return { success: false, error: 'ACCESS_DENIED' };
+      }
+      if (!fs.existsSync(destinationDirectory) || !fs.statSync(destinationDirectory).isDirectory()) {
+        return { success: false, error: 'TARGET_NOT_FOUND' };
+      }
+      const target = path.join(destinationDirectory, path.basename(source));
+      if (target.toLocaleLowerCase() === source.toLocaleLowerCase()) return { success: true, filePath: source };
+      if (fs.existsSync(target)) return { success: false, error: 'ALREADY_EXISTS' };
+      fs.renameSync(source, target);
+      return { success: true, filePath: target };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+
   ipcMain.handle('search-conversations', async (_event, rawQuery: string) => {
     const query = String(rawQuery || '').trim().toLocaleLowerCase();
     if (query.length < 2 || !fs.existsSync(exportDir)) return [];
