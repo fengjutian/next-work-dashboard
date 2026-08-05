@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
 import { BarChart, GraphChart, HeatmapChart, SankeyChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -27,7 +27,7 @@ function Chart({ option, height = 560, onClick }: { option: EChartsCoreOption; h
   return <div ref={ref} className="w-full" style={{ height }} />;
 }
 
-export const WereadKnowledgeNetwork: React.FC<{ books: AnalyticsBook[]; theme: ThemePalette; onSelectBook: (bookId: string) => void }> = ({ books, theme, onSelectBook }) => {
+export const WereadKnowledgeNetwork = memo(function WereadKnowledgeNetwork({ books, theme, onSelectBook }: { books: AnalyticsBook[]; theme: ThemePalette; onSelectBook: (bookId: string) => void }) {
   const [view, setView] = useState<'relations' | 'concepts' | 'authors' | 'wander'>('relations');
   const [graphMode, setGraphMode] = useState<'structure' | 'knowledge'>('structure');
   const [selectedNoteId, setSelectedNoteId] = useState('');
@@ -75,4 +75,4 @@ export const WereadKnowledgeNetwork: React.FC<{ books: AnalyticsBook[]; theme: T
     {view === 'authors' && <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">作者之间的主题相似度</h3><p className="px-2 pt-1 text-xs text-muted-foreground">根据作者相关书籍中的概念向量计算。</p><Chart option={authorOption} height={620} /></section>}
     {view === 'wander' && <section className="rounded-lg border bg-card p-4"><div className="flex items-center justify-between"><div><h3 className="text-sm font-medium">从一条笔记向相关笔记漫游</h3><p className="mt-1 text-xs text-muted-foreground">使用概念集合的 Jaccard 相似度在不同书籍之间发现关联。</p></div><button onClick={() => setSelectedNoteId(data.notes[Math.floor(Math.random() * Math.max(1, data.notes.length))]?.id || '')} className="rounded border px-3 py-1.5 text-sm hover:bg-accent">随机漫游</button></div>{selectedNote && <div className="mt-4 rounded-lg border-l-4 border-primary bg-primary/5 p-4"><p className="text-xs text-muted-foreground">{selectedNote.book} · {selectedNote.chapter}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{selectedNote.text}</p><button onClick={() => onSelectBook(selectedNote.bookId)} className="mt-2 text-xs text-primary hover:underline">打开本书笔记</button></div>}<div className="mt-4 grid gap-2 md:grid-cols-2">{related.map(({ note, score }) => <button key={note.id} onClick={() => setSelectedNoteId(note.id)} className="rounded-md border bg-background p-3 text-left hover:bg-accent"><div className="flex justify-between gap-2"><p className="truncate text-sm font-medium">{note.book}</p><span className="shrink-0 text-xs text-primary">相似 {Math.round(score * 100)}%</span></div><p className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">{note.text}</p></button>)}{!related.length && <p className="col-span-full py-10 text-center text-sm text-muted-foreground">没有找到包含共同概念的相关笔记</p>}</div></section>}
   </div>;
-};
+});

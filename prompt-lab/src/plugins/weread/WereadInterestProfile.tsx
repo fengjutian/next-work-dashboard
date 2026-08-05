@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, PieChart, SankeyChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -32,7 +32,7 @@ function Chart({ option, height = 360 }: { option: EChartsCoreOption; height?: n
   return <div ref={ref} className="w-full" style={{ height }} />;
 }
 
-export const WereadInterestProfile: React.FC<{ books: AnalyticsBook[]; theme: ThemePalette }> = ({ books, theme }) => {
+export const WereadInterestProfile = memo(function WereadInterestProfile({ books, theme }: { books: AnalyticsBook[]; theme: ThemePalette }) {
   const data = useMemo(() => {
     const notes = books.flatMap(notesOf).filter((note) => note.text.trim());
     const latest = Math.max(0, ...notes.map((note) => note.time));
@@ -82,4 +82,4 @@ export const WereadInterestProfile: React.FC<{ books: AnalyticsBook[]; theme: Th
     <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">主题—作者—时间演化</h3><p className="px-2 pt-1 text-xs text-muted-foreground">月份流向作者，再流向作者笔记中的主要主题。</p><Chart option={evolutionOption} height={580} /></section>
     <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">兴趣迁移路径</h3><p className="px-2 pt-1 text-xs text-muted-foreground">展示每个月最突出的主题及其变化轨迹。</p><Chart option={migrationOption} height={390} /></section>
   </div>;
-};
+});

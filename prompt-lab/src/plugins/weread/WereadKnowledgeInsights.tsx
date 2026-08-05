@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, PieChart, SankeyChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -49,7 +49,7 @@ function classify(text: string): string {
   return '其他';
 }
 
-export const WereadKnowledgeInsights: React.FC<{ books: AnalyticsBook[]; theme: ThemePalette; onSelectBook: (bookId: string) => void }> = ({ books, theme, onSelectBook }) => {
+export const WereadKnowledgeInsights = memo(function WereadKnowledgeInsights({ books, theme, onSelectBook }: { books: AnalyticsBook[]; theme: ThemePalette; onSelectBook: (bookId: string) => void }) {
   const [chapterBookId, setChapterBookId] = useState(books[0]?.bookId || '');
   const [reviewStates, setReviewStates] = useState<WereadReviewState[]>([]);
   const [reviewError, setReviewError] = useState('');
@@ -99,4 +99,4 @@ export const WereadKnowledgeInsights: React.FC<{ books: AnalyticsBook[]; theme: 
     <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">作者—书籍—主题</h3><p className="px-2 pt-1 text-xs text-muted-foreground">展示笔记量最多的书籍及其主要主题流向。</p><Chart option={sankeyOption} height={560} /></section>
     <section className="rounded-lg border bg-card p-4"><h3 className="text-sm font-medium">复习记录</h3><p className="mt-1 text-xs text-muted-foreground">完成复习后选择下一次间隔，记录会保存在本地 SQLite。</p>{reviewError && <p className="mt-2 text-sm text-destructive">{reviewError}</p>}<div className="mt-3 grid gap-2 md:grid-cols-2">{books.slice().sort((a, b) => b.noteCount + b.reviewCount - a.noteCount - a.reviewCount).slice(0, 12).map((book) => { const state = stateByBook.get(book.bookId); return <div key={book.bookId} className="rounded-md border bg-background p-3"><button className="block w-full truncate text-left text-sm font-medium hover:text-primary" onClick={() => onSelectBook(book.bookId)}>{book.title}</button><p className="mt-1 text-xs text-muted-foreground">{state ? `已复习 ${state.reviewCount} 次 · 下次 ${new Date(state.nextReviewAt).toLocaleDateString('zh-CN')}` : '尚未记录复习'}</p><div className="mt-2 flex gap-1"><span className="mr-1 self-center text-xs text-muted-foreground">完成并在</span>{[7, 30, 90].map((days) => <button key={days} onClick={() => void markReviewed(book.bookId, days)} className="rounded border px-2 py-1 text-xs hover:bg-accent">{days} 天后</button>)}</div></div>; })}</div></section>
   </div>;
-};
+});

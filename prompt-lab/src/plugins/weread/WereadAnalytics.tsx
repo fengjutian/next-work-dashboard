@@ -59,23 +59,21 @@ function cssColor(style: CSSStyleDeclaration, name: string, alpha = 1): string {
 }
 
 function useThemePalette(): ThemePalette {
-  const [, setRevision] = useState(0);
+  const [revision, setRevision] = useState(0);
   useEffect(() => {
     const observer = new MutationObserver(() => setRevision((value) => value + 1));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
     return () => observer.disconnect();
   }, []);
-  const style = getComputedStyle(document.documentElement);
-  return {
-    colors: [
-      cssColor(style, '--primary', 0.72), cssColor(style, '--info', 0.72),
-      cssColor(style, '--success', 0.72), cssColor(style, '--warning', 0.72),
-      cssColor(style, '--primary-hover', 0.58),
-    ],
-    text: cssColor(style, '--foreground'), muted: cssColor(style, '--muted-foreground'), border: cssColor(style, '--border'),
-    background: cssColor(style, '--background'), primaryLight: cssColor(style, '--primary-muted', 0.72),
-    primaryStrong: cssColor(style, '--primary-hover', 0.94),
-  };
+  return useMemo(() => {
+    void revision;
+    const style = getComputedStyle(document.documentElement);
+    return {
+      colors: [cssColor(style, '--primary', 0.72), cssColor(style, '--info', 0.72), cssColor(style, '--success', 0.72), cssColor(style, '--warning', 0.72), cssColor(style, '--primary-hover', 0.58)],
+      text: cssColor(style, '--foreground'), muted: cssColor(style, '--muted-foreground'), border: cssColor(style, '--border'),
+      background: cssColor(style, '--background'), primaryLight: cssColor(style, '--primary-muted', 0.72), primaryStrong: cssColor(style, '--primary-hover', 0.94),
+    };
+  }, [revision]);
 }
 
 function Chart({ option, height = 300, onClick }: { option: EChartsCoreOption; height?: number; onClick?: (params: unknown) => void }) {
@@ -95,6 +93,12 @@ function Chart({ option, height = 300, onClick }: { option: EChartsCoreOption; h
 export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (bookId: string) => void }> = ({ books, onSelectBook }) => {
   const theme = useThemePalette();
   const [section, setSection] = useState<'overview' | 'habits' | 'topics' | 'interest' | 'network' | 'actions' | 'knowledge'>('overview');
+  const [visited, setVisited] = useState<Set<typeof section>>(() => new Set(['overview']));
+
+  function activateSection(next: typeof section) {
+    setSection(next);
+    if (!visited.has(next)) window.setTimeout(() => setVisited((current) => new Set(current).add(next)), 0);
+  }
   const data = useMemo(() => {
     const days = new Map<string, { highlights: number; reviews: number }>();
     const words = new Map<string, number>();
@@ -213,7 +217,7 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
     <div className="sticky top-0 z-20 border-b bg-background/95 px-5 py-3 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-2 overflow-x-auto">
         <div className="mr-auto shrink-0"><h2 className="text-base font-semibold">阅读分析</h2><p className="text-xs text-muted-foreground">本地 SQLite 数据分析</p></div>
-        {([['overview', '数据概览'], ['habits', '习惯与深度'], ['topics', '主题关联'], ['interest', '兴趣画像'], ['network', '知识网络'], ['actions', '洞察与行动'], ['knowledge', '知识与复习']] as const).map(([id, label]) => <button key={id} onClick={() => setSection(id)} className={`shrink-0 rounded-md px-3 py-2 text-sm transition-colors ${section === id ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>{label}</button>)}
+        {([['overview', '数据概览'], ['habits', '习惯与深度'], ['topics', '主题关联'], ['interest', '兴趣画像'], ['network', '知识网络'], ['actions', '洞察与行动'], ['knowledge', '知识与复习']] as const).map(([id, label]) => <button key={id} onClick={() => activateSection(id)} className={`shrink-0 rounded-md px-3 py-2 text-sm transition-colors ${section === id ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}`}>{label}</button>)}
       </div>
     </div>
     <div className="mx-auto max-w-6xl space-y-4 p-5">
@@ -234,10 +238,11 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
         <div className="grid gap-4 lg:grid-cols-2"><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">高频关键词</h3><Chart option={keywordOption} height={390} /></section><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">全部月份关注主题变化</h3><Chart option={topicTrendOption} height={390} /></section></div>
         <div className="grid gap-4 xl:grid-cols-2"><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">关键词共现关系</h3>{data.wordNodes.length ? <Chart option={relationOption} height={520} /> : <p className="py-20 text-center text-sm text-muted-foreground">暂无足够数据</p>}</section><section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">书籍主题相似度</h3><Chart option={similarityOption} height={520} /></section></div>
       </>}
-      {section === 'interest' && <WereadInterestProfile books={books} theme={theme} />}
-      {section === 'network' && <WereadKnowledgeNetwork books={books} theme={theme} onSelectBook={onSelectBook} />}
-      {section === 'actions' && <WereadInsightsActions books={books} theme={theme} onSelectBook={onSelectBook} />}
-      {section === 'knowledge' && <WereadKnowledgeInsights books={books} theme={theme} onSelectBook={onSelectBook} />}
+      {(['interest', 'network', 'actions', 'knowledge'] as const).includes(section as 'interest') && !visited.has(section) && <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground">正在准备分析数据…</div>}
+      {visited.has('interest') && <div className={section === 'interest' ? 'block' : 'hidden'}><WereadInterestProfile books={books} theme={theme} /></div>}
+      {visited.has('network') && <div className={section === 'network' ? 'block' : 'hidden'}><WereadKnowledgeNetwork books={books} theme={theme} onSelectBook={onSelectBook} /></div>}
+      {visited.has('actions') && <div className={section === 'actions' ? 'block' : 'hidden'}><WereadInsightsActions books={books} theme={theme} onSelectBook={onSelectBook} /></div>}
+      {visited.has('knowledge') && <div className={section === 'knowledge' ? 'block' : 'hidden'}><WereadKnowledgeInsights books={books} theme={theme} onSelectBook={onSelectBook} /></div>}
     </div>
   </div>;
 };
