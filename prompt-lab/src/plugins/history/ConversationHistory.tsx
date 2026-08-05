@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Trash2, FolderOpen, FileText, Calendar, RefreshCw, Search, Copy, X, Loader2, Edit3, Check, ChevronDown, Plus, ArrowRight } from '@/components/icons';
+import { Trash2, FolderOpen, RefreshCw, Search, Copy, X, Loader2, Edit3, Check, Plus, ArrowRight } from '@/components/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MonacoEditor from '@monaco-editor/react';
@@ -9,61 +9,18 @@ import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile, ConversationSearchResult } from '@/types/electron';
 import { conversationMemory } from '@/core/conversation-memory';
-
-function Highlight({ text, query }: { text: string; query: string }) {
-  if (!query) return <>{text}</>;
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
-  return <>{parts.map((part, index) => part.toLocaleLowerCase() === query.toLocaleLowerCase()
-    ? <mark key={index} className="rounded bg-yellow-200 px-0.5 text-foreground dark:bg-yellow-700">{part}</mark>
-    : part)}</>;
-}
-
-const FileItem: React.FC<{
-  file: ConversationFile;
-  result?: ConversationSearchResult;
-  query: string;
-  isActive: boolean;
-  onClick: () => void;
-  onDelete: () => void;
-}> = ({ file, result, query, isActive, onClick, onDelete }) => (
-  <div className={`group border-b border-border px-3 py-2 text-xs transition-colors ${
-    isActive ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:bg-accent/50'
-  }`}>
-    <div className="flex cursor-pointer items-start gap-2" onClick={onClick}>
-      <FileText className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-foreground">
-          <Highlight text={file.title || file.fileName} query={query} />
-        </div>
-        <div className="mt-0.5 flex items-center gap-2 text-[10px]">
-          <Calendar className="h-3 w-3" /> {file.date} · {(file.size / 1024).toFixed(1)} KB
-          {result && <span className="text-primary">{result.matchCount} 处</span>}
-        </div>
-        {result?.snippets[0] && (
-          <div className="mt-1 line-clamp-2 text-[10px] leading-4" title={`第 ${result.snippets[0].line} 行`}>
-            <Highlight text={result.snippets[0].text} query={query} />
-          </div>
-        )}
-      </div>
-      <button className="invisible p-0.5 text-muted-foreground hover:text-destructive group-hover:visible"
-        onClick={(event) => { event.stopPropagation(); onDelete(); }} title="删除">
-        <Trash2 className="h-3 w-3" />
-      </button>
-    </div>
-  </div>
-);
+import { KnowledgeFileList } from '@/components/KnowledgeFileList';
 
 export const ConversationHistory: React.FC = () => {
   const [files, setFiles] = useState<ConversationFile[]>([]);
   const [folders, setFolders] = useState<Array<{ name: string; path: string }>>([]);
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [showMoveFile, setShowMoveFile] = useState(false);
   const [moveTargetFolder, setMoveTargetFolder] = useState('');
   const [movingFile, setMovingFile] = useState(false);
+  const [fileMenu, setFileMenu] = useState<{ x: number; y: number; file: ConversationFile } | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<ConversationSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -124,18 +81,6 @@ export const ConversationHistory: React.FC = () => {
     ? results.map((result) => ({ file: result.file, result }))
     : files.map((file) => ({ file, result: undefined })), [files, query, results]);
 
-  const groupedFiles = useMemo(() => {
-    const groups = new Map<string, typeof displayed>();
-    groups.set('', []);
-    folders.forEach((folder) => groups.set(folder.path, []));
-    displayed.forEach((item) => {
-      const folder = item.file.folder ?? '';
-      if (!groups.has(folder)) groups.set(folder, []);
-      groups.get(folder)!.push(item);
-    });
-    return [...groups.entries()].filter(([folder, items]) => !query.trim() || items.length > 0 || folder === '');
-  }, [displayed, folders, query]);
-
   const createFolder = useCallback(async () => {
     const name = newFolderName.trim();
     if (!name || creatingFolder) return;
@@ -183,7 +128,7 @@ export const ConversationHistory: React.FC = () => {
   }, [activeFile, moveTargetFolder, movingFile, query, toast]);
 
   const selectFile = useCallback(async (file: ConversationFile) => {
-    if (editing && draftContent !== content && !window.confirm('当前修改尚未保存，确定放弃吗？')) return;
+    if (editing && draftContent !== content && !window.confirm('当前修改尚未保存，确定放弃吗？')) return false;
     setActiveFile(file); setLoading(true);
     setEditing(false);
     setRenaming(false);
@@ -192,7 +137,8 @@ export const ConversationHistory: React.FC = () => {
       if (!result.success) throw new Error(result.error);
       setContent(result.content || '');
       setDraftContent(result.content || '');
-    } catch { setContent(''); toast('读取原文件失败', 'error'); }
+      return true;
+    } catch { setContent(''); toast('读取原文件失败', 'error'); return false; }
     finally { setLoading(false); }
   }, [content, draftContent, editing, toast]);
 
@@ -376,27 +322,18 @@ export const ConversationHistory: React.FC = () => {
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {!searching && displayed.length === 0 && (query.trim().length >= 2 || folders.length === 0) ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground">
-              <FileText className="h-8 w-8" /><p className="text-xs">{query.trim().length >= 2 ? '没有匹配的知识库文件' : '知识库暂无文件'}</p>
-            </div>
-          ) : groupedFiles.map(([folder, items]) => {
-            const collapsed = collapsedFolders.has(folder);
-            const label = folder || '未分类';
-            return <section key={folder || '__root'}>
-              <button type="button" className="flex h-8 w-full items-center gap-1.5 border-b bg-muted/40 px-2 text-left text-[11px] font-medium hover:bg-accent"
-                onClick={() => setCollapsedFolders((current) => { const next = new Set(current); next.has(folder) ? next.delete(folder) : next.add(folder); return next; })}>
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
-                <FolderOpen className="h-3.5 w-3.5 text-amber-500" />
-                <span className="min-w-0 flex-1 truncate" title={folder}>{label}</span>
-                <span className="text-[10px] font-normal text-muted-foreground">{items.length}</span>
-              </button>
-              {!collapsed && (items.length > 0 ? items.map(({ file, result }) => <FileItem key={file.path} file={file} result={result} query={query.trim()}
-                isActive={activeFile?.path === file.path} onClick={() => void selectFile(file)} onDelete={() => setDeleteTarget(file)} />)
-                : <p className="border-b px-8 py-2 text-[10px] text-muted-foreground">空目录</p>)}
-            </section>;
-          })}
+        <div className="min-h-0 flex-1">
+          {!searching && <KnowledgeFileList
+            files={query.trim().length >= 2 ? displayed.map((item) => item.file) : files}
+            folders={folders}
+            query={query.trim()}
+            searchResults={query.trim().length >= 2 ? results : undefined}
+            activePath={activeFile?.path}
+            onOpen={(file) => void selectFile(file)}
+            onDelete={setDeleteTarget}
+            onContextMenu={(event, file) => { event.preventDefault(); setFileMenu({ x: event.clientX, y: event.clientY, file }); }}
+            emptyMessage={query.trim().length >= 2 ? '没有匹配的知识库文件' : '知识库暂无文件'}
+          />}
         </div>
       </div>
 
@@ -483,6 +420,29 @@ export const ConversationHistory: React.FC = () => {
             : <div className="flex-1 overflow-y-auto p-4"><div className="prose prose-sm max-w-none dark:prose-invert"><Markdown remarkPlugins={[remarkGfm]}>{content || '_(空)_'}</Markdown></div></div>
           : <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">选择左侧文件查看完整原文</div>}
       </div>
+      {fileMenu && createPortal(
+        <div className="fixed inset-0 z-[180]" onMouseDown={() => setFileMenu(null)} onContextMenu={(event) => { event.preventDefault(); setFileMenu(null); }}>
+          <div role="menu" aria-label={`${fileMenu.file.fileName} 操作`} className="fixed w-48 overflow-hidden rounded-md border bg-popover py-1 text-xs text-popover-foreground shadow-xl"
+            style={{ left: Math.min(fileMenu.x, window.innerWidth - 208), top: Math.min(fileMenu.y, window.innerHeight - 270) }} onMouseDown={(event) => event.stopPropagation()}>
+            <button role="menuitem" className="flex w-full items-center justify-between px-3 py-1.5 text-left font-medium hover:bg-accent" onClick={() => { void selectFile(fileMenu.file); setFileMenu(null); }}>
+              打开 <span className="text-[10px] font-normal text-muted-foreground">Enter</span>
+            </button>
+            <div className="my-1 border-t" />
+            <button role="menuitem" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => {
+              const file = fileMenu.file; setFileMenu(null); void selectFile(file).then((selected) => { if (selected) { setFileNameDraft(file.fileName.replace(/\.md$/i, '')); setRenaming(true); } });
+            }}>重命名…</button>
+            <button role="menuitem" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => {
+              const file = fileMenu.file; setFileMenu(null); void selectFile(file).then((selected) => { if (selected) { setMoveTargetFolder(file.folder ?? ''); setShowMoveFile(true); } });
+            }}>移动到…</button>
+            <div className="my-1 border-t" />
+            <button role="menuitem" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { void window.electronAPI.revealConversation(fileMenu.file.path); setFileMenu(null); }}>在文件管理器中显示</button>
+            <button role="menuitem" className="w-full px-3 py-1.5 text-left hover:bg-accent" onClick={() => { window.electronAPI.copyText(fileMenu.file.path); toast('文件路径已复制', 'success'); setFileMenu(null); }}>复制完整路径</button>
+            <div className="my-1 border-t" />
+            <button role="menuitem" className="w-full px-3 py-1.5 text-left text-destructive hover:bg-accent" onClick={() => { setDeleteTarget(fileMenu.file); setFileMenu(null); }}>删除文件…</button>
+          </div>
+        </div>,
+        document.body,
+      )}
       {deleteTarget && createPortal(
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]"
           onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) setDeleteTarget(null); }}>

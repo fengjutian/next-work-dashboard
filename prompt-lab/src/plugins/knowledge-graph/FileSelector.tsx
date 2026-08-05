@@ -1,38 +1,13 @@
 import React from 'react';
-import { RefreshCw, FileText } from '@/components/icons';
+import { RefreshCw } from '@/components/icons';
 import type { ConversationFile } from '@/types/electron';
-
-// ── 对话文件列表项 ──
-
-const FileCheckItem: React.FC<{
-  file: ConversationFile;
-  checked: boolean;
-  onChange: (path: string, checked: boolean) => void;
-}> = ({ file, checked, onChange }) => {
-  return (
-    <label
-      className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer text-xs border-b border-border transition-colors hover:bg-muted/50 ${
-        checked ? 'text-primary' : 'text-muted-foreground'
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(file.path, e.target.checked)}
-        className="h-3.5 w-3.5 rounded border-input"
-      />
-      <div className="flex-1 min-w-0">
-        <div className="truncate">{file.title || file.fileName}</div>
-        <div className="text-[10px] text-muted-foreground">{file.date}</div>
-      </div>
-    </label>
-  );
-};
+import { KnowledgeFileList, type KnowledgeFileFolder } from '@/components/KnowledgeFileList';
 
 // ── 文件选择器 ──
 
 interface FileSelectorProps {
   files: ConversationFile[];
+  folders?: KnowledgeFileFolder[];
   selectedPaths: Set<string>;
   onToggle: (path: string, checked: boolean) => void;
   onToggleAll: () => void;
@@ -41,6 +16,7 @@ interface FileSelectorProps {
 
 export const FileSelector: React.FC<FileSelectorProps> = ({
   files,
+  folders,
   selectedPaths,
   onToggle,
   onToggleAll,
@@ -69,22 +45,8 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {files.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
-            <FileText className="h-6 w-6" />
-            <p className="text-xs">知识库暂无文件</p>
-          </div>
-        ) : (
-          files.map((f) => (
-            <FileCheckItem
-              key={f.path}
-              file={f}
-              checked={selectedPaths.has(f.path)}
-              onChange={onToggle}
-            />
-          ))
-        )}
+      <div className="min-h-0 flex-1">
+        <KnowledgeFileList files={files} folders={folders} mode="select" selectedPaths={selectedPaths} onToggle={onToggle} />
       </div>
     </div>
   );
