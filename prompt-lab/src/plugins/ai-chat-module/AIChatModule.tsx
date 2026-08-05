@@ -51,8 +51,18 @@ export const AIChatModule: React.FC = () => {
         })}
       </div>
 
-      <div id={`ai-chat-scene-${scene}`} role="tabpanel" className="relative flex-1 overflow-hidden">
-        <ChatPanel key={scene} scene={scene} />
+      <div className="relative flex-1 overflow-hidden">
+        {TABS.map((tab) => (
+          <div
+            key={tab.key}
+            id={`ai-chat-scene-${tab.key}`}
+            role="tabpanel"
+            className="absolute inset-0"
+            style={{ display: scene === tab.key ? 'block' : 'none' }}
+          >
+            <ChatPanel scene={tab.key} active={scene === tab.key} />
+          </div>
+        ))}
       </div>
     </div>
   );

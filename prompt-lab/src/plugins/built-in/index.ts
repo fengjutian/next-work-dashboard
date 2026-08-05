@@ -48,6 +48,7 @@ const builtInPlugins: Plugin[] = [
     icon: Robot,
     component: AIChatModule,
     enabled: true,
+    keepAlive: true,
     order: 1,
     contributions: {
       commands: [

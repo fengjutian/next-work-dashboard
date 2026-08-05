@@ -103,7 +103,7 @@ function formatTime(ts: number): string {
 // 主面板
 // ════════════════════════════════════════
 
-export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) => {
+export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ scene = 'chat', active = true }) => {
   const scenePreset = SCENE_PRESETS[scene];
   const [codeWorkspace, setCodeWorkspace] = useState<{ path: string; name: string } | null>(() => {
     if (scene !== 'code') return null;
@@ -183,8 +183,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
   }, [scene, setAgentMode]);
 
   useEffect(() => {
-    configureCodeWorkspace(scene === 'code' ? codeWorkspace?.path ?? null : null);
-    if (scene === 'code' && codeWorkspace) {
+    if (scene !== 'code') return;
+    configureCodeWorkspace(codeWorkspace?.path ?? null);
+    if (codeWorkspace) {
       localStorage.setItem('ai-chat.code-workspace', JSON.stringify(codeWorkspace));
       void window.electronAPI.workspace.reauthorize(codeWorkspace.path);
     }
@@ -330,6 +331,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
   const activeRole = roles.find((r) => r.id === activeRoleId);
 
   useEffect(() => {
+    if (!active) return;
     if (activeRole) {
       updateSessionMeta({ systemPrompt: activeRole.systemPrompt });
       const tools = activeRole.enabledToolIds;
@@ -343,7 +345,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
     } else {
       ALL_TOOLS.forEach((tool) => setToolEnabled(tool, scenePreset.enabledToolIds.includes(tool)));
     }
-  }, [activeRoleId, scene]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, activeRoleId, scene]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── bubbleItems / conversationItems ──
   const latestComparisonId = useMemo(() => {
@@ -485,10 +487,16 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
   const thoughtChainItems = useMemo(() => {
     if (!agentMode || messages.length === 0) return [];
     const items: { title: string; description: string; status: 'success' | 'error' }[] = [];
-    for (const m of messages) {
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') { lastUserIndex = index; break; }
+    }
+    const traceMessages = messages.slice(Math.max(0, lastUserIndex));
+    const task = traceMessages.find((message) => message.role === 'user');
+    if (task) items.push({ title: '🤔 分析任务', description: task.content.slice(0, 120), status: 'success' });
+    for (const m of traceMessages) {
       if (m.role === 'assistant' && m.toolCalls?.length) {
         const targets = m.toolCalls.map((call) => typeof call.arguments.path === 'string' ? call.arguments.path : call.name);
-        items.push({ title: '🤔 分析任务', description: m.content?.slice(0, 120) || '确定下一步操作', status: 'success' });
         items.push({ title: `🔧 执行 ${m.toolCalls.length} 个工具`, description: targets.join('、'), status: 'success' });
       } else if (m.role === 'tool') {
         const failed = m.toolResults?.filter((result) => result.error) ?? [];
@@ -498,7 +506,13 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
           : `${completed} 个工具执行成功，结果已加入 Agent 上下文`;
         items.push({ title: failed.length ? '📋 执行异常' : '📋 获取上下文', description,
           status: m.toolResults?.some((r) => r.error) ? 'error' : 'success' });
+      } else if (m.role === 'assistant' && m.content.trim()) {
+        items.push({ title: '📄 生成结果', description: m.content.slice(0, 120), status: 'success' });
       }
+    }
+    const finalAssistant = [...traceMessages].reverse().find((message) => message.role === 'assistant');
+    if (finalAssistant?.toolCalls?.length && finalAssistant.toolResults?.length && finalAssistant.content.trim()) {
+      items.push({ title: '📄 生成结果', description: finalAssistant.content.slice(0, 120), status: 'success' });
     }
     return items;
   }, [agentMode, messages]);
@@ -664,13 +678,13 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
             )}
 
             {/* Agent 执行轨迹 */}
-            {agentMode && thoughtChainItems.length > 0 && scene === 'code' && (
+            {agentMode && (streaming || thoughtChainItems.length > 0) && scene === 'code' && (
               <div className="shrink-0 border-b bg-background">
                 <div className="flex h-9 items-center px-2 hover:bg-accent/50">
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-2 px-2 text-left text-xs" onClick={() => setAgentTraceOpen((open) => !open)} aria-expanded={agentTraceOpen}>
                     <span className={`h-2 w-2 rounded-full ${streaming ? 'animate-pulse bg-warning' : 'bg-success'}`} />
                     <span className="font-medium">{streaming ? 'Agent 正在执行' : 'Agent 执行完成'}</span>
-                    <span className="text-muted-foreground">{thoughtChainItems.length} 个步骤</span>
+                    <span className="text-muted-foreground">{Math.max(1, thoughtChainItems.length)} 个步骤</span>
                     <span className="flex-1" />
                     <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${agentTraceOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -679,7 +693,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene }> = ({ scene = 'chat' }) =
                 {agentTraceOpen && (
                   <div className="max-h-52 overflow-y-auto border-t px-4 py-2">
                     <div className="relative space-y-2 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-border">
-                      {thoughtChainItems.map((item, index) => (
+                      {(thoughtChainItems.length ? thoughtChainItems : [{ title: '分析任务', description: '正在理解请求并规划下一步操作', status: 'success' as const }]).map((item, index) => (
                         <div key={`${item.title}-${index}`} className="relative flex gap-3 pl-5 text-xs">
                           <span className={`absolute left-0 top-1 h-2.5 w-2.5 rounded-full border-2 border-background ${item.status === 'error' ? 'bg-destructive' : 'bg-success'}`} />
                           <div className="min-w-0">
