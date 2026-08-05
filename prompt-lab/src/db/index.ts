@@ -182,6 +182,26 @@ function ensureSchema(): void {
       cached_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_weread_books_cached_at ON weread_books(cached_at DESC);
+    CREATE TABLE IF NOT EXISTS weread_review_state (
+      book_id TEXT PRIMARY KEY,
+      last_reviewed_at INTEGER NOT NULL,
+      next_review_at INTEGER NOT NULL,
+      review_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_weread_review_next ON weread_review_state(next_review_at);
+    CREATE TABLE IF NOT EXISTS weread_actions (
+      id TEXT PRIMARY KEY, book_id TEXT NOT NULL, source_note_id TEXT NOT NULL,
+      content TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'todo',
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_weread_actions_status ON weread_actions(status, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS weread_sync_history (
+      id TEXT PRIMARY KEY, synced_at INTEGER NOT NULL,
+      added_books INTEGER NOT NULL, updated_books INTEGER NOT NULL, deleted_books INTEGER NOT NULL,
+      added_notes INTEGER NOT NULL, deleted_notes INTEGER NOT NULL,
+      total_books INTEGER NOT NULL, total_notes INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_weread_sync_time ON weread_sync_history(synced_at DESC);
   `);
   const sessionColumns = new Set((_sqlDb.exec('PRAGMA table_info(agent_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!sessionColumns.has('payload')) _sqlDb.run("ALTER TABLE agent_sessions ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'");
@@ -373,11 +393,29 @@ function wereadSearchText(book: Omit<WereadCachedBook, 'cachedAt'>): string {
   return `${book.title} ${book.author} ${noteText}`.toLocaleLowerCase();
 }
 
-export function dbReplaceWereadCache(books: Array<Omit<WereadCachedBook, 'cachedAt'>>): void {
+export interface WereadSyncSummary { id: string; syncedAt: number; addedBooks: number; updatedBooks: number; deletedBooks: number; addedNotes: number; deletedNotes: number; totalBooks: number; totalNotes: number }
+
+function wereadNoteIds(book: Pick<WereadCachedBook, 'bookId' | 'highlights' | 'reviews'>): Set<string> {
+  return new Set([...book.highlights.map((item, index) => String(item.bookmarkId || `h:${book.bookId}:${index}`)), ...book.reviews.map((item, index) => { const review = item.review && typeof item.review === 'object' ? item.review as Record<string, unknown> : item; return String(review.reviewId || `r:${book.bookId}:${index}`); })]);
+}
+
+export function dbReplaceWereadCache(books: Array<Omit<WereadCachedBook, 'cachedAt'>>): WereadSyncSummary {
   const database = getDb();
+  const previous = dbLoadWereadCache(); const oldById = new Map(previous.map((book) => [book.bookId, book])); const nextById = new Map(books.map((book) => [book.bookId, book]));
+  const oldNotes = new Set(previous.flatMap((book) => [...wereadNoteIds(book)])); const nextNotes = new Set(books.flatMap((book) => [...wereadNoteIds(book)]));
+  const syncedAt = Date.now();
+  const summary: WereadSyncSummary = {
+    id: `weread-sync-${syncedAt}`, syncedAt,
+    addedBooks: books.filter((book) => !oldById.has(book.bookId)).length,
+    updatedBooks: books.filter((book) => { const old = oldById.get(book.bookId); return old && (JSON.stringify(old.highlights) !== JSON.stringify(book.highlights) || JSON.stringify(old.reviews) !== JSON.stringify(book.reviews)); }).length,
+    deletedBooks: previous.filter((book) => !nextById.has(book.bookId)).length,
+    addedNotes: [...nextNotes].filter((id) => !oldNotes.has(id)).length,
+    deletedNotes: [...oldNotes].filter((id) => !nextNotes.has(id)).length,
+    totalBooks: books.length, totalNotes: nextNotes.size,
+  };
   database.transaction((tx) => {
     tx.delete(schema.wereadBooks).run();
-    const cachedAt = Date.now();
+    const cachedAt = syncedAt;
     for (const book of books) {
       tx.insert(schema.wereadBooks).values({
         ...book,
@@ -387,7 +425,9 @@ export function dbReplaceWereadCache(books: Array<Omit<WereadCachedBook, 'cached
         cachedAt,
       } as never).run();
     }
+    tx.insert(schema.wereadSyncHistory).values(summary as never).run();
   });
+  return summary;
 }
 
 export function dbLoadWereadCache(query = ''): WereadCachedBook[] {
@@ -402,6 +442,30 @@ export function dbLoadWereadCache(query = ''): WereadCachedBook[] {
     : statement.orderBy(desc(schema.wereadBooks.cachedAt)).all();
   return (rows as unknown as WereadBookRow[]).map(wereadRowToBook);
 }
+
+export interface WereadReviewState {
+  bookId: string;
+  lastReviewedAt: number;
+  nextReviewAt: number;
+  reviewCount: number;
+}
+
+export function dbLoadWereadReviewStates(): WereadReviewState[] {
+  return getDb().select().from(schema.wereadReviewState).all() as unknown as WereadReviewState[];
+}
+
+export function dbMarkWereadReviewed(bookId: string, intervalDays: number): WereadReviewState {
+  const previous = getDb().select().from(schema.wereadReviewState).where(eq(schema.wereadReviewState.bookId, bookId)).get() as WereadReviewState | undefined;
+  const now = Date.now();
+  const state = { bookId, lastReviewedAt: now, nextReviewAt: now + intervalDays * 86_400_000, reviewCount: (previous?.reviewCount || 0) + 1 };
+  getDb().insert(schema.wereadReviewState).values(state as never).onConflictDoUpdate({ target: schema.wereadReviewState.bookId, set: state as never }).run();
+  return state;
+}
+
+export interface WereadAction { id: string; bookId: string; sourceNoteId: string; content: string; status: 'todo' | 'doing' | 'done'; createdAt: number; updatedAt: number }
+export function dbLoadWereadActions(): WereadAction[] { return getDb().select().from(schema.wereadActions).orderBy(desc(schema.wereadActions.updatedAt)).all() as unknown as WereadAction[]; }
+export function dbSaveWereadAction(action: WereadAction): void { getDb().insert(schema.wereadActions).values(action as never).onConflictDoUpdate({ target: schema.wereadActions.id, set: action as never }).run(); }
+export function dbLoadWereadSyncHistory(): WereadSyncSummary[] { return getDb().select().from(schema.wereadSyncHistory).orderBy(desc(schema.wereadSyncHistory.syncedAt)).all() as unknown as WereadSyncSummary[]; }
 
 // ═══════════════════════════════════════════
 // 数据库浏览器（只读查询）

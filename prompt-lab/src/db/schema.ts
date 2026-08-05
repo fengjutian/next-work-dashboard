@@ -56,6 +56,25 @@ export const wereadBooks = sqliteTable('weread_books', {
   cachedAt: integer('cached_at').notNull(),
 });
 
+export const wereadReviewState = sqliteTable('weread_review_state', {
+  bookId: text('book_id').primaryKey(),
+  lastReviewedAt: integer('last_reviewed_at').notNull(),
+  nextReviewAt: integer('next_review_at').notNull(),
+  reviewCount: integer('review_count').notNull().default(0),
+});
+
+export const wereadActions = sqliteTable('weread_actions', {
+  id: text('id').primaryKey(), bookId: text('book_id').notNull(), sourceNoteId: text('source_note_id').notNull(),
+  content: text('content').notNull(), status: text('status').notNull().default('todo'),
+  createdAt: integer('created_at').notNull(), updatedAt: integer('updated_at').notNull(),
+});
+
+export const wereadSyncHistory = sqliteTable('weread_sync_history', {
+  id: text('id').primaryKey(), syncedAt: integer('synced_at').notNull(),
+  addedBooks: integer('added_books').notNull(), updatedBooks: integer('updated_books').notNull(), deletedBooks: integer('deleted_books').notNull(),
+  addedNotes: integer('added_notes').notNull(), deletedNotes: integer('deleted_notes').notNull(), totalBooks: integer('total_books').notNull(), totalNotes: integer('total_notes').notNull(),
+});
+
 // ── Schema version tracking ──
 export const schemaVersion = sqliteTable("schema_version", {
   version: integer("version").primaryKey(),

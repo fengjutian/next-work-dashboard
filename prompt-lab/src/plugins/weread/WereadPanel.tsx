@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, EyeOff, L
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { dbLoadWereadCache, dbReplaceWereadCache, flushDbToDisk, isDbReady } from '@/db';
+import { WereadAnalytics } from './WereadAnalytics';
 
 const TOKEN_SERVICE = 'weread-api-key';
 
@@ -104,7 +105,7 @@ function makeMarkdown(books: ExportedBook[]): string {
 
 export const WereadPanel: React.FC = () => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
-  const [mode, setMode] = useState<'reader' | 'notes'>('reader');
+  const [mode, setMode] = useState<'reader' | 'notes' | 'analytics'>('reader');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -223,9 +224,9 @@ export const WereadPanel: React.FC = () => {
         exported.push({ ...summary, highlights, reviews });
         setBooks([...exported]);
       }
-      dbReplaceWereadCache(exported);
+      const sync = dbReplaceWereadCache(exported);
       await flushDbToDisk();
-      setStatus(`获取完成并已缓存到本地：${exported.length} 本书`);
+      setStatus(`获取完成并已缓存：${exported.length} 本书 · 新增 ${sync.addedNotes} 条 · 删除 ${sync.deletedNotes} 条 · 更新 ${sync.updatedBooks} 本`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setStatus('');
@@ -248,12 +249,15 @@ export const WereadPanel: React.FC = () => {
         <span className="flex-1 truncate px-2 text-xs text-muted-foreground">微信读书</span>
         <Button size="sm" variant={mode === 'reader' ? 'secondary' : 'ghost'} onClick={() => setMode('reader')}>阅读</Button>
         <Button size="sm" variant={mode === 'notes' ? 'secondary' : 'ghost'} onClick={() => setMode('notes')}><BookOpen />笔记导出</Button>
+        <Button size="sm" variant={mode === 'analytics' ? 'secondary' : 'ghost'} onClick={() => setMode('analytics')}>阅读分析</Button>
       </div>
 
       {mode === 'reader' ? (
         <webview ref={webviewRef} src="https://weread.qq.com/" partition="persist:weread" style={{ flex: 1 }}
           // @ts-expect-error webview-specific attribute
           allowpopups="true" />
+      ) : mode === 'analytics' ? (
+        <WereadAnalytics books={books} onSelectBook={(bookId) => { setOpenBookId(bookId); setSearchQuery(''); setMode('notes'); }} />
       ) : (
         <div className="flex-1 overflow-auto p-5">
           <div className="mx-auto max-w-4xl space-y-5">
