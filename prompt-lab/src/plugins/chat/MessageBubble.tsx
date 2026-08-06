@@ -9,6 +9,8 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'tool';
   content: string;
+  /** 模型返回的思考/推理过程，与最终回答分开展示。 */
+  reasoning?: string;
   /** 发送给模型的完整内容；界面仍只显示 content。 */
   contextContent?: string;
   timestamp: number;

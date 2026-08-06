@@ -83,6 +83,7 @@ export async function* runAgent(
     : SYSTEM_PROMPT;
   const systemMsg: ChatMessage = { role: 'system', content: systemPrompt };
   const messages: ChatMessage[] = [systemMsg, ...history, { role: 'user', content: userMessage }];
+  let agentReasoning = '';
 
   for (let step = 0; step < maxSteps; step++) {
     yield { type: 'think', content: '' };
@@ -96,6 +97,10 @@ export async function* runAgent(
       const stream = provider.chat(messages, chatOpts);
       for await (const chunk of stream) {
         fullContent += chunk.delta;
+        if (chunk.reasoningDelta) {
+          agentReasoning += chunk.reasoningDelta;
+          yield { type: 'think', content: agentReasoning };
+        }
 
         // 收集 tool_call delta
         if (chunk.toolCallDelta) {

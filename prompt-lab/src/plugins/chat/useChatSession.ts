@@ -57,6 +57,7 @@ export function toBubbleItems(messages: Message[], streaming: boolean, error: st
         model: msg.model,
         comparisonId: msg.comparisonId,
         memorySources: msg.memorySources,
+        reasoning: msg.reasoning,
         originalRole: msg.role,
         isLastAi: msg.role === 'assistant' && isLastAi,
       },
@@ -332,12 +333,14 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
         })),
     ];
     let full = '';
+    let reasoning = '';
     const stream = provider.chat(chatMessages, { model, signal });
     for await (const chunk of stream) {
       full += chunk.delta;
-      updateSession((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: full } : m));
+      reasoning += chunk.reasoningDelta ?? '';
+      updateSession((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: full, reasoning } : m));
     }
-    updateSession((prev) => prev.filter((m) => m.id !== assistantId || m.content.trim()));
+    updateSession((prev) => prev.filter((m) => m.id !== assistantId || m.content.trim() || m.reasoning?.trim()));
     if (history.length <= 1 && full) {
       const title = history[0]?.content?.slice(0, 30) + (history[0]?.content?.length > 30 ? '...' : '') || '新对话';
       updateSessionMeta({ title });
@@ -367,12 +370,14 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal, systemPrompt: fullSystemPrompt })) {
       switch (step.type) {
         case 'think':
-          updateSession((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: '🤔 思考中...' } : message));
+          updateSession((prev) => prev.map((message) => message.id === assistantId
+            ? { ...message, content: '', reasoning: step.content || message.reasoning || '' }
+            : message));
           break;
         case 'act':
           thinkingText = step.content || ''; currentToolCalls = step.toolCalls || [];
           updateSession((prev) => prev.map((message) => message.id === assistantId
-            ? { ...message, content: thinkingText || '🔧 调用工具中...', toolCalls: [...currentToolCalls] }
+            ? { ...message, content: '', reasoning: thinkingText || message.reasoning || '', toolCalls: [...currentToolCalls] }
             : message));
           break;
         case 'observe':
@@ -386,7 +391,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
                 const assistant = u[assistantIndex];
                 const sources = [...(assistant.memorySources ?? []), ...recalledSources]
                   .filter((source, index, all) => all.findIndex((item) => item.filePath === source.filePath && item.startLine === source.startLine) === index);
-                u[assistantIndex] = { ...assistant, toolResults: step.toolResults, content: thinkingText || '', memorySources: sources };
+                u[assistantIndex] = { ...assistant, toolResults: step.toolResults, content: '', reasoning: thinkingText || assistant.reasoning || '', memorySources: sources };
               }
               u.push(toolMsg);
               return u;

@@ -106,6 +106,24 @@ function formatTime(ts: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+const ReasoningPanel: React.FC<{ content?: string; streaming?: boolean }> = ({ content = '', streaming = false }) => {
+  const [open, setOpen] = useState(true);
+  if (!content && !streaming) return null;
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-primary/15 bg-primary/[0.03]">
+      <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-primary/5" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><Sparkles className="h-3 w-3" /></span>
+        <span className="flex-1 font-medium text-foreground">思考过程</span>
+        {streaming && <span className="inline-flex items-center gap-1 text-[10px] text-primary"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />正在思考</span>}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? '' : '-rotate-90'}`} />
+      </button>
+      {open && <div className="border-t border-primary/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
+        {content ? <XMarkdown content={content} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none text-muted-foreground dark:prose-invert" /> : <span className="inline-flex items-center gap-2"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />正在分析任务和工作区上下文…</span>}
+      </div>}
+    </div>
+  );
+};
+
 // ════════════════════════════════════════
 // 主面板
 // ════════════════════════════════════════
@@ -120,6 +138,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [workspaceChanges, setWorkspaceChanges] = useState<Array<{
     path: string;
     status: 'added' | 'modified' | 'deleted' | 'renamed';
+    gitStatus: string;
     timestamp: number;
     original: string;
     modified: string;
@@ -246,6 +265,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
             return {
               path: entry.path,
               status,
+              gitStatus: entry.status,
               timestamp: Date.now(),
               original: head.success ? head.data ?? '' : '',
               modified,
@@ -278,8 +298,14 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       if (current.success) workspaceSnapshotsRef.current.set(event.path, modified);
       else workspaceSnapshotsRef.current.delete(event.path);
       const status = current.success ? (hadSnapshot ? 'modified' as const : 'added' as const) : 'deleted' as const;
+      const gitStatusResult = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      const gitEntry = gitStatusResult.success ? gitStatusResult.data?.find((entry) => entry.path === event.path) : undefined;
+      if (!gitEntry) {
+        setWorkspaceChanges((previous) => previous.filter((item) => item.path !== event.path));
+        return;
+      }
       setWorkspaceChanges((previous) => [
-        { path: event.path, status, timestamp: Date.now(), original, modified },
+        { path: event.path, status, gitStatus: gitEntry.status, timestamp: Date.now(), original, modified },
         ...previous.filter((item) => item.path !== event.path),
       ].slice(0, 200));
     });
@@ -298,6 +324,15 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const openCodeChangeDiff = useCallback((change: typeof workspaceChanges[number]) => {
     setCodeChangeDiff({ path: change.path, original: change.original, modified: change.modified });
   }, []);
+
+  const stagedWorkspaceChanges = workspaceChanges.filter((change) => {
+    const code = change.gitStatus.padEnd(2, ' ').slice(0, 2);
+    return !['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(code) && code[0] !== ' ' && code[0] !== '?';
+  });
+  const unstagedWorkspaceChanges = workspaceChanges.filter((change) => {
+    const code = change.gitStatus.padEnd(2, ' ').slice(0, 2);
+    return ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(code) || code === '??' || code[1] !== ' ';
+  });
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -501,26 +536,26 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     }
     const traceMessages = messages.slice(Math.max(0, lastUserIndex));
     const task = traceMessages.find((message) => message.role === 'user');
-    if (task) items.push({ title: '🤔 分析任务', description: task.content.slice(0, 120), status: 'success' });
+    if (task) items.push({ title: '分析任务', description: task.content.slice(0, 120), status: 'success' });
     for (const m of traceMessages) {
       if (m.role === 'assistant' && m.toolCalls?.length) {
         const targets = m.toolCalls.map((call) => typeof call.arguments.path === 'string' ? call.arguments.path : call.name);
-        items.push({ title: `🔧 执行 ${m.toolCalls.length} 个工具`, description: targets.join('、'), status: 'success' });
+        items.push({ title: `执行 ${m.toolCalls.length} 个工具`, description: targets.join('、'), status: 'success' });
       } else if (m.role === 'tool') {
         const failed = m.toolResults?.filter((result) => result.error) ?? [];
         const completed = (m.toolResults?.length ?? 0) - failed.length;
         const description = failed.length
           ? failed.map((result) => `${result.name}: ${result.error}`).join('；')
           : `${completed} 个工具执行成功，结果已加入 Agent 上下文`;
-        items.push({ title: failed.length ? '📋 执行异常' : '📋 获取上下文', description,
+        items.push({ title: failed.length ? '执行异常' : '获取上下文', description,
           status: m.toolResults?.some((r) => r.error) ? 'error' : 'success' });
       } else if (m.role === 'assistant' && m.content.trim()) {
-        items.push({ title: '📄 生成结果', description: m.content.slice(0, 120), status: 'success' });
+        items.push({ title: '生成结果', description: m.content.slice(0, 120), status: 'success' });
       }
     }
     const finalAssistant = [...traceMessages].reverse().find((message) => message.role === 'assistant');
     if (finalAssistant?.toolCalls?.length && finalAssistant.toolResults?.length && finalAssistant.content.trim()) {
-      items.push({ title: '📄 生成结果', description: finalAssistant.content.slice(0, 120), status: 'success' });
+      items.push({ title: '生成结果', description: finalAssistant.content.slice(0, 120), status: 'success' });
     }
     return items;
   }, [agentMode, messages]);
@@ -532,6 +567,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     const toolCalls = extra?.toolCalls;
     const toolResults = extra?.toolResults;
     const memorySources = extra?.memorySources as MemoryCitation[] | undefined;
+    const reasoning = extra?.reasoning as string | undefined;
     const text = typeof content === 'string' ? content : String(content ?? '');
 
     if (origRole === 'tool') {
@@ -549,6 +585,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     if (origRole === 'assistant') {
       return (
         <div>
+          <ReasoningPanel content={reasoning} streaming={streaming} />
           {toolCalls && toolCalls.length > 0 && <ToolCallCard calls={toolCalls} results={toolResults} />}
           {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none dark:prose-invert" />}
           {!!memorySources?.length && !streaming && <MemorySourceList sources={memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
@@ -930,23 +967,38 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                         <RefreshCw className="h-5 w-5" />
                         <span>正在监听工作区<br />暂无文件变化</span>
                       </div>
-                    ) : workspaceChanges.map((change) => (
-                      <button type="button" key={change.path} className="mb-1 w-full rounded-md border bg-card px-2.5 py-2 text-left hover:border-primary/40 hover:bg-accent/40 last:mb-0" onClick={() => openCodeChangeDiff(change)} title="查看本次监听到的具体行变更">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            change.status === 'added' ? 'bg-success'
-                              : change.status === 'deleted' ? 'bg-destructive'
-                                : change.status === 'renamed' ? 'bg-primary'
-                                  : 'bg-warning'
-                          }`} />
-                          <span className="min-w-0 flex-1 truncate text-xs font-medium" title={change.path}>{change.path.split(/[\\/]/).pop()}</span>
-                          <span className="text-[9px] text-muted-foreground">{formatTime(change.timestamp)}</span>
+                    ) : (
+                      <>
+                        <div className="mb-1 flex items-center px-1 py-1 text-[10px] font-semibold text-muted-foreground">
+                          <span>Changes</span><span className="ml-1.5 rounded bg-muted px-1.5 py-0.5">{unstagedWorkspaceChanges.length}</span>
                         </div>
-                        <div className="mt-1 truncate pl-3.5 text-[10px] text-muted-foreground" title={change.path}>
-                          {{ added: '新增', modified: '已修改', deleted: '已删除', renamed: '已重命名' }[change.status]} · {change.path}
+                        {unstagedWorkspaceChanges.length === 0 && <div className="mb-2 px-1 py-2 text-[10px] text-muted-foreground">暂无未暂存变更</div>}
+                        {unstagedWorkspaceChanges.map((change) => (
+                          <button type="button" key={`unstaged:${change.path}`} className="mb-1 w-full rounded-md border bg-card px-2.5 py-2 text-left hover:border-primary/40 hover:bg-accent/40" onClick={() => openCodeChangeDiff(change)} title="查看未暂存变更">
+                            <div className="flex items-center gap-2">
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${change.status === 'added' ? 'bg-success' : change.status === 'deleted' ? 'bg-destructive' : change.status === 'renamed' ? 'bg-primary' : 'bg-warning'}`} />
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium" title={change.path}>{change.path.split(/[\\/]/).pop()}</span>
+                              <span className="text-[9px] text-muted-foreground">{formatTime(change.timestamp)}</span>
+                            </div>
+                            <div className="mt-1 truncate pl-3.5 text-[10px] text-muted-foreground" title={change.path}>{{ added: '新增', modified: '已修改', deleted: '已删除', renamed: '已重命名' }[change.status]} · {change.path}</div>
+                          </button>
+                        ))}
+                        <div className="mb-1 mt-3 flex items-center border-t px-1 pt-3 text-[10px] font-semibold text-muted-foreground">
+                          <span>Staged Changes</span><span className="ml-1.5 rounded bg-muted px-1.5 py-0.5">{stagedWorkspaceChanges.length}</span>
                         </div>
-                      </button>
-                    ))}
+                        {stagedWorkspaceChanges.length === 0 && <div className="px-1 py-2 text-[10px] text-muted-foreground">暂无已暂存变更</div>}
+                        {stagedWorkspaceChanges.map((change) => (
+                          <button type="button" key={`staged:${change.path}`} className="mb-1 w-full rounded-md border border-success/25 bg-success/5 px-2.5 py-2 text-left hover:border-success/50 hover:bg-success/10" onClick={() => openCodeChangeDiff(change)} title="查看已暂存变更">
+                            <div className="flex items-center gap-2">
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium" title={change.path}>{change.path.split(/[\\/]/).pop()}</span>
+                              <span className="rounded bg-success/10 px-1 py-0.5 text-[9px] text-success">已暂存</span>
+                            </div>
+                            <div className="mt-1 truncate pl-3.5 text-[10px] text-muted-foreground" title={change.path}>{{ added: '新增', modified: '已修改', deleted: '已删除', renamed: '已重命名' }[change.status]} · {change.path}</div>
+                          </button>
+                        ))}
+                      </>
+                    )}
                   </div>
                   {workspaceChanges.length > 0 && (
                     <div className="shrink-0 border-t p-2">
