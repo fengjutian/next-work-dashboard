@@ -14,8 +14,14 @@ export const ActivityBar: React.FC = () => {
 
   return (
     <div className="w-12 flex-shrink-0 border-r bg-muted flex flex-col items-center py-3 gap-1 select-none">
-      {plugins.map(({ id, icon: Icon, name: label }) => {
+      {plugins.map(({ id, icon: Icon, name: label, preload }) => {
         const isActive = activeActivity === id;
+        const prepare = () => preload?.() ?? Promise.resolve();
+        const warm = () => {
+          void prepare().catch((error) => {
+            console.error(`[ActivityBar] Failed to preload plugin "${id}"`, error);
+          });
+        };
         return (
           <button
             key={id}
@@ -24,7 +30,20 @@ export const ActivityBar: React.FC = () => {
                 ? 'text-foreground bg-accent'
                 : 'text-muted-foreground hover:text-foreground hover:bg-accent/50 dark:hover:bg-muted'
             }`}
-            onClick={() => setActiveActivity(isActive ? null : id)}
+            onMouseEnter={warm}
+            onFocus={warm}
+            onPointerDown={warm}
+            onClick={async () => {
+              if (!isActive) {
+                try {
+                  await prepare();
+                } catch (error) {
+                  console.error(`[ActivityBar] Failed to activate plugin "${id}"`, error);
+                  return;
+                }
+              }
+              setActiveActivity(isActive ? null : id);
+            }}
             title={label}
           >
             {/* VSCode 风格的活动指示器 */}

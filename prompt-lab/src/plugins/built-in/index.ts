@@ -3,29 +3,54 @@
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
 import { Sparkles, MessageSquare, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code } from '@/components/icons';
-import { lazy } from 'react';
+import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
 import { EXCEL_PREVIEW_DEFAULT_ENABLED } from '../defaults';
+import { KnowledgeGraph } from '../knowledge-graph';
 
-const AIPanel = lazy(() => import('../ai').then((m) => ({ default: m.AIPanel })));
-const AIChatModule = lazy(() => import('../ai-chat-module').then((m) => ({ default: m.AIChatModule })));
-const PromptSidebar = lazy(() => import('../prompts').then((m) => ({ default: m.PromptSidebar })));
-const ConversationHistory = lazy(() => import('../history').then((m) => ({ default: m.ConversationHistory })));
-const KnowledgeGraph = lazy(() => import('../knowledge-graph').then((m) => ({ default: m.KnowledgeGraph })));
-const NotesPanel = lazy(() => import('../notes').then((m) => ({ default: m.NotesPanel })));
-const WordPreviewPanel = lazy(() => import('../word-preview').then((m) => ({ default: m.WordPreviewPanel })));
-const ExcelPreviewPanel = lazy(() => import('../excel-preview').then((m) => ({ default: m.ExcelPreviewPanel })));
-const PptPreviewPanel = lazy(() => import('../ppt-preview').then((m) => ({ default: m.PptPreviewPanel })));
-const PdfPreviewPanel = lazy(() => import('../pdf-preview').then((m) => ({ default: m.PdfPreviewPanel })));
-const ExcalidrawPanel = lazy(() => import('../excalidraw').then((m) => ({ default: m.ExcalidrawPanel })));
-const PluginManagerPanel = lazy(() => import('../plugin-manager').then((m) => ({ default: m.PluginManagerPanel })));
-const WereadPanel = lazy(() => import('../weread').then((m) => ({ default: m.WereadPanel })));
-const TranslationPanel = lazy(() => import('../translation').then((m) => ({ default: m.TranslationPanel })));
-const WindyPanel = lazy(() => import('../windy').then((m) => ({ default: m.WindyPanel })));
-const TerminalPluginPanel = lazy(() => import('../terminal').then((m) => ({ default: m.TerminalPluginPanel })));
-const DatabaseBrowser = lazy(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
-const CodeEditorPanel = lazy(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
+function preloadable<T extends ComponentType<any>>(
+  loader: () => Promise<{ default: T }>,
+): { component: T; preload: () => Promise<{ default: T }> } {
+  let pending: Promise<{ default: T }> | undefined;
+  const preload = () => (pending ??= loader());
+  return { component: lazy(preload) as T, preload };
+}
+
+const aiPanel = preloadable(() => import('../ai').then((m) => ({ default: m.AIPanel })));
+const aiChatModule = preloadable(() => import('../ai-chat-module').then((m) => ({ default: m.AIChatModule })));
+const promptSidebar = preloadable(() => import('../prompts').then((m) => ({ default: m.PromptSidebar })));
+const conversationHistory = preloadable(() => import('../history').then((m) => ({ default: m.ConversationHistory })));
+const notesPanel = preloadable(() => import('../notes').then((m) => ({ default: m.NotesPanel })));
+const AIPanel = aiPanel.component;
+const AIChatModule = aiChatModule.component;
+const PromptSidebar = promptSidebar.component;
+const ConversationHistory = conversationHistory.component;
+const NotesPanel = notesPanel.component;
+const wordPreview = preloadable(() => import('../word-preview').then((m) => ({ default: m.WordPreviewPanel })));
+const excelPreview = preloadable(() => import('../excel-preview').then((m) => ({ default: m.ExcelPreviewPanel })));
+const pptPreview = preloadable(() => import('../ppt-preview').then((m) => ({ default: m.PptPreviewPanel })));
+const pdfPreview = preloadable(() => import('../pdf-preview').then((m) => ({ default: m.PdfPreviewPanel })));
+const excalidraw = preloadable(() => import('../excalidraw').then((m) => ({ default: m.ExcalidrawPanel })));
+const pluginManager = preloadable(() => import('../plugin-manager').then((m) => ({ default: m.PluginManagerPanel })));
+const weread = preloadable(() => import('../weread').then((m) => ({ default: m.WereadPanel })));
+const translation = preloadable(() => import('../translation').then((m) => ({ default: m.TranslationPanel })));
+const windy = preloadable(() => import('../windy').then((m) => ({ default: m.WindyPanel })));
+const terminal = preloadable(() => import('../terminal').then((m) => ({ default: m.TerminalPluginPanel })));
+const database = preloadable(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
+const codeEditor = preloadable(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
+const WordPreviewPanel = wordPreview.component;
+const ExcelPreviewPanel = excelPreview.component;
+const PptPreviewPanel = pptPreview.component;
+const PdfPreviewPanel = pdfPreview.component;
+const ExcalidrawPanel = excalidraw.component;
+const PluginManagerPanel = pluginManager.component;
+const WereadPanel = weread.component;
+const TranslationPanel = translation.component;
+const WindyPanel = windy.component;
+const TerminalPluginPanel = terminal.component;
+const DatabaseBrowser = database.component;
+const CodeEditorPanel = codeEditor.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -262,7 +287,30 @@ const builtInPlugins: Plugin[] = [
 ];
 
 export function registerBuiltInPlugins(): void {
-  pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({ ...plugin, source: 'built-in' })));
+  const preloadById: Record<string, () => Promise<unknown>> = {
+    ai: aiPanel.preload,
+    chat: aiChatModule.preload,
+    prompts: promptSidebar.preload,
+    history: conversationHistory.preload,
+    notes: notesPanel.preload,
+    weread: weread.preload,
+    translator: translation.preload,
+    windy: windy.preload,
+    'word-preview': wordPreview.preload,
+    'excel-preview': excelPreview.preload,
+    'ppt-preview': pptPreview.preload,
+    'pdf-preview': pdfPreview.preload,
+    excalidraw: excalidraw.preload,
+    'plugin-manager': pluginManager.preload,
+    terminal: terminal.preload,
+    database: database.preload,
+    'code-editor': codeEditor.preload,
+  };
+  pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
+    ...plugin,
+    source: 'built-in',
+    preload: preloadById[plugin.id],
+  })));
 }
 
 export { builtInPlugins };

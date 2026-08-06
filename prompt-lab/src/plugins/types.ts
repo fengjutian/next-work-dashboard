@@ -104,6 +104,9 @@ export interface Plugin {
   /** 主面板 React 组件 */
   component: ComponentType;
 
+  /** Start downloading an asynchronously split panel before it is activated. */
+  preload?: () => Promise<unknown>;
+
   /** 用户是否启用此插件 */
   enabled: boolean;
 

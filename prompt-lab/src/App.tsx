@@ -58,6 +58,19 @@ export default function App() {
     ? pluginRegistry.get(bottomOverlay)
     : undefined;
   const BottomOverlayPanel = bottomOverlayPlugin?.component;
+  const openPluginOverlay = async (id: 'database' | 'plugin-manager') => {
+    if (bottomOverlay === id) {
+      setBottomOverlay(null);
+      return;
+    }
+    const plugin = pluginRegistry.get(id);
+    try {
+      await plugin?.preload?.();
+      setBottomOverlay(id);
+    } catch (error) {
+      console.error(`[App] Failed to open plugin overlay "${id}"`, error);
+    }
+  };
 
   return (
     <ToastProvider>
@@ -145,7 +158,9 @@ export default function App() {
               ? 'bg-white/20 text-white'
               : 'text-white/80 hover:bg-white/15 hover:text-white'
           }`}
-          onClick={() => setBottomOverlay((current) => current === 'database' ? null : 'database')}
+          onMouseEnter={() => { void pluginRegistry.get('database')?.preload?.().catch(console.error); }}
+          onFocus={() => { void pluginRegistry.get('database')?.preload?.().catch(console.error); }}
+          onClick={() => { void openPluginOverlay('database'); }}
           title="数据库浏览器"
           aria-label="数据库浏览器"
         >
@@ -157,7 +172,9 @@ export default function App() {
               ? 'bg-white/20 text-white'
               : 'text-white/80 hover:bg-white/15 hover:text-white'
           }`}
-          onClick={() => setBottomOverlay((current) => current === 'plugin-manager' ? null : 'plugin-manager')}
+          onMouseEnter={() => { void pluginRegistry.get('plugin-manager')?.preload?.().catch(console.error); }}
+          onFocus={() => { void pluginRegistry.get('plugin-manager')?.preload?.().catch(console.error); }}
+          onClick={() => { void openPluginOverlay('plugin-manager'); }}
           title="插件管理"
           aria-label="插件管理"
         >
