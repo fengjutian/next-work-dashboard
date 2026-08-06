@@ -7,7 +7,7 @@ import { XMarkdown } from '@ant-design/x-markdown';
 import {
   BookOpen, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
   FileText, FolderOpen, Globe, MessageSquare, PanelLeft, PanelRight, Paperclip, Plus, RefreshCw, Robot,
-  RotateCcw, Settings, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
+  RotateCcw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
@@ -25,6 +25,7 @@ import { conversationMemory, type MemoryCitation } from '@/core/conversation-mem
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
 import { configureCodeWorkspace } from '@/core/tools/code-workspace-tools';
 import { CodeChangeDiff, type CodeChangeDiffData } from './CodeChangeDiff';
+import { createOpenAIProvider, type ChatMessage } from '@/core';
 
 interface ChatAttachment {
   key: string;
@@ -136,6 +137,9 @@ const ReasoningPanel: React.FC<{ content?: string; streaming?: boolean }> = ({ c
 
 export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ scene = 'chat', active = true }) => {
   const scenePreset = SCENE_PRESETS[scene];
+  const roles = useStore((state) => state.roles);
+  const activeRoleId = useStore((state) => state.activeRoleId);
+  const activeRole = roles.find((role) => role.id === activeRoleId);
   const [codeWorkspace, setCodeWorkspace] = useState<{ path: string; name: string } | null>(() => {
     if (scene !== 'code') return null;
     try { return JSON.parse(localStorage.getItem('ai-chat.code-workspace') ?? 'null'); }
@@ -155,13 +159,15 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [codeChangeDiff, setCodeChangeDiff] = useState<CodeChangeDiffData | null>(null);
   const sceneSystemPrompt = useMemo(() => [
     scenePreset.systemPrompt,
+    activeRole?.systemPrompt,
     MARKDOWN_RESPONSE_PROMPT,
     scene === 'code' && codeWorkspace
       ? `当前已授权代码工作区：${codeWorkspace.path}。使用 workspace_* 工具分析和修改其中的代码；工具路径参数必须使用相对路径。`
       : '',
-  ].filter(Boolean).join('\n\n'), [codeWorkspace, scene, scenePreset.systemPrompt]);
+  ].filter(Boolean).join('\n\n'), [activeRole?.systemPrompt, codeWorkspace, scene, scenePreset.systemPrompt]);
   const setActiveActivity = useStore((s) => s.setActiveActivity);
   const theme = useStore((s) => s.theme);
+  const aiApi = useStore((s) => s.aiApi);
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
   const [agentTraceOpen, setAgentTraceOpen] = useState(scene === 'code');
   const [memoryScopePickerOpen, setMemoryScopePickerOpen] = useState(false);
@@ -214,6 +220,120 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     updateSessionMeta,
     boundPromptIds, toggleBoundPrompt,
   } = useChatSession(sceneSystemPrompt, scene);
+
+  const [auditModel, setAuditModel] = useState(() => (
+    MODELS.find((model) => model.value !== currentModel)?.value ?? currentModel
+  ));
+  const [auditContent, setAuditContent] = useState('');
+  const [auditError, setAuditError] = useState('');
+  const [auditStreaming, setAuditStreaming] = useState(false);
+  const [auditPanelOpen, setAuditPanelOpen] = useState(true);
+  const [auditPanelResizing, setAuditPanelResizing] = useState(false);
+  const [auditPanelWidth, setAuditPanelWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('ai-chat.audit-panel-width'));
+    return Number.isFinite(saved) && saved >= 240 && saved <= 1280 ? saved : 500;
+  });
+  const auditAbortRef = useRef<AbortController | null>(null);
+
+  const startAuditPanelResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = auditPanelWidth;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    setAuditPanelResizing(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const handleMove = (moveEvent: PointerEvent) => {
+      setAuditPanelWidth(Math.max(240, Math.min(1280, startWidth + startX - moveEvent.clientX)));
+    };
+    const handleUp = (upEvent: PointerEvent) => {
+      const width = Math.max(240, Math.min(1280, startWidth + startX - upEvent.clientX));
+      setAuditPanelWidth(width);
+      setAuditPanelResizing(false);
+      localStorage.setItem('ai-chat.audit-panel-width', String(width));
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+  }, [auditPanelWidth]);
+
+  useEffect(() => {
+    if (auditModel === currentModel) {
+      setAuditModel(MODELS.find((model) => model.value !== currentModel)?.value ?? currentModel);
+    }
+  }, [auditModel, currentModel]);
+
+  useEffect(() => () => auditAbortRef.current?.abort(), []);
+
+  useEffect(() => {
+    auditAbortRef.current?.abort();
+    auditAbortRef.current = null;
+    setAuditContent('');
+    setAuditError('');
+    setAuditStreaming(false);
+  }, [activeSessionId]);
+
+  const runConversationAudit = useCallback(async () => {
+    const reviewable = messages.filter((message) => (
+      (message.role === 'user' || message.role === 'assistant') && message.content.trim()
+    ));
+    if (reviewable.length === 0 || auditStreaming) return;
+
+    const transcript = reviewable.slice(-16).map((message, index) => (
+      `### ${index + 1}. ${message.role === 'user' ? '用户' : `AI（${message.model ?? currentModel}）`}\n${message.content}`
+    )).join('\n\n').slice(-36000);
+    const controller = new AbortController();
+    auditAbortRef.current = controller;
+    setAuditContent('');
+    setAuditError('');
+    setAuditStreaming(true);
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const auditMessages: ChatMessage[] = [
+        {
+          role: 'system',
+          content: `你是独立的 AI 问答评审专家。请审查另一位 AI 与用户的对话，不要盲从原回答，也不要只做措辞或代码风格点评。
+
+评审重点按以下优先级执行：
+1. 问答正确性：判断 AI 是否准确理解用户意图，结论、事实、推理和操作建议是否正确，是否真正解决了用户问题。
+2. 场景完整性：指出回答没有考虑到的使用场景，包括正常流程、边界条件、异常与失败路径、不同用户状态、数据状态、权限、安全、并发、性能、兼容性、可恢复性和实际操作体验。只列与当前问题确实相关的场景，不要机械罗列。
+3. 风险与依据：识别前后矛盾、无依据假设、过度承诺、越权操作以及缺少验证的结论。
+
+如果原回答错误或不完整，请给出你独立理解后的正确答案、补充分析和可执行建议。证据不足时明确说明需要验证什么，不要编造。
+使用中文 Markdown，按“正确性结论、错误或不合理之处、遗漏的场景、独立分析与建议”组织。先给结论，再给依据；没有问题的部分简要说明即可。`,
+        },
+        { role: 'user', content: `请评审以下当前会话：\n\n${transcript}` },
+      ];
+      let result = '';
+      for await (const chunk of provider.chat(auditMessages, {
+        model: auditModel,
+        temperature: 0.2,
+        maxTokens: 4000,
+        signal: controller.signal,
+      })) {
+        result += chunk.delta;
+        setAuditContent(result);
+      }
+      if (!result.trim()) setAuditError('评审模型没有返回内容');
+    }
+    catch (error) {
+      if ((error as Error).name !== 'AbortError') setAuditError((error as Error).message || '评审失败');
+    }
+    finally {
+      if (auditAbortRef.current === controller) auditAbortRef.current = null;
+      setAuditStreaming(false);
+    }
+  }, [aiApi.apiKey, aiApi.baseUrl, auditModel, auditStreaming, currentModel, messages]);
+
+  const stopConversationAudit = useCallback(() => {
+    auditAbortRef.current?.abort();
+    auditAbortRef.current = null;
+    setAuditStreaming(false);
+  }, []);
 
   useEffect(() => {
     if (scene === 'code') setAgentMode(true);
@@ -477,15 +597,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     }
   }, [error, notifApi]);
 
-  // ── 角色 Agent ──
-  const roles = useStore((s) => s.roles);
-  const activeRoleId = useStore((s) => s.activeRoleId);
-  const activeRole = roles.find((r) => r.id === activeRoleId);
-
   useEffect(() => {
     if (!active) return;
     if (activeRole) {
-      updateSessionMeta({ systemPrompt: activeRole.systemPrompt });
       const tools = activeRole.enabledToolIds;
       const workspaceTools = scene === 'code'
         ? scenePreset.enabledToolIds.filter((tool) => tool.startsWith('workspace_'))
@@ -498,6 +612,12 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       ALL_TOOLS.forEach((tool) => setToolEnabled(tool, scenePreset.enabledToolIds.includes(tool)));
     }
   }, [active, activeRoleId, scene]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (activeRole && systemPrompt.trim() === activeRole.systemPrompt.trim()) {
+      updateSessionMeta({ systemPrompt: '' });
+    }
+  }, [activeRole, systemPrompt, updateSessionMeta]);
 
   // ── bubbleItems / conversationItems ──
   const latestComparisonId = useMemo(() => {
@@ -761,7 +881,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     return <span className="whitespace-pre-wrap break-words">{text}</span>;
   };
 
-  const showSysPrompt = sysPromptOpen || (!!systemPrompt && messages.length === 0);
+  const showSysPrompt = !activeRole && (sysPromptOpen || (!!systemPrompt && messages.length === 0));
 
   return (
     <ConfigProvider theme={{ algorithm: isDark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm }}>
@@ -859,8 +979,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               </button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setToolManagerOpen(true)} title="工具管理"><Wrench className="h-3.5 w-3.5" /></Button>
-              <Button variant="ghost" size="icon" className={`h-7 w-7 ${sysPromptOpen || systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}
-                onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词" aria-label="系统提示词"><SlidersHorizontal className="h-3.5 w-3.5" /></Button>
+              {!activeRole && <Button variant="ghost" size="icon" className={`h-7 w-7 ${sysPromptOpen || systemPrompt ? 'text-primary' : 'text-muted-foreground'}`}
+                onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词" aria-label="系统提示词"><SlidersHorizontal className="h-3.5 w-3.5" /></Button>}
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setPromptManagerOpen(true)} title="提示词管理"><MessageSquare className="h-3.5 w-3.5" /></Button>
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>}
@@ -1064,6 +1184,86 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               </div>
             </div>
           </div>
+
+          {scene === 'code' && (
+            <aside className={`relative flex shrink-0 flex-col overflow-hidden border-l bg-background ${auditPanelResizing ? '' : 'transition-[width] duration-200'}`} style={{ width: auditPanelOpen ? auditPanelWidth : 40 }} aria-label="AI 回答评审">
+              {auditPanelOpen && <div role="separator" aria-orientation="vertical" aria-label="拖拽调整 AI 评审面板宽度" onPointerDown={startAuditPanelResize} className="group absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize touch-none">
+                <span className="absolute inset-y-0 left-0 w-px bg-border transition-colors group-hover:w-0.5 group-hover:bg-primary group-active:bg-primary" />
+              </div>}
+              <div className={`flex h-10 shrink-0 items-center border-b ${auditPanelOpen ? 'gap-2 px-3' : 'justify-center'}`}>
+                {auditPanelOpen && <>
+                  <ShieldCheck className={`h-4 w-4 ${auditStreaming ? 'animate-pulse text-primary' : 'text-primary'}`} />
+                  <span className="min-w-0 flex-1 text-xs font-semibold">AI 评审与审计</span>
+                  {auditContent && !auditStreaming && <span className="rounded bg-success/10 px-1.5 py-0.5 text-[9px] text-success">已完成</span>}
+                </>}
+                <Button type="button" variant="ghost" size="icon" className="relative h-7 w-7 shrink-0" onClick={() => setAuditPanelOpen((open) => !open)} title={auditPanelOpen ? '折叠 AI 评审与审计' : '展开 AI 评审与审计'} aria-label={auditPanelOpen ? '折叠 AI 评审与审计' : '展开 AI 评审与审计'}>
+                  <PanelRight className={`h-4 w-4 transition-transform ${auditPanelOpen ? '' : 'rotate-180'} ${auditStreaming ? 'animate-pulse text-primary' : auditContent ? 'text-success' : ''}`} />
+                  {!auditPanelOpen && (auditStreaming || auditContent) && <span className={`absolute -right-1 -top-1 h-2 w-2 rounded-full ${auditStreaming ? 'animate-pulse bg-primary' : 'bg-success'}`} />}
+                </Button>
+              </div>
+              {auditPanelOpen && <>
+                <div className="flex shrink-0 items-center gap-2 border-b p-2">
+                <select
+                  value={auditModel}
+                  onChange={(event) => setAuditModel(event.target.value)}
+                  disabled={auditStreaming}
+                  className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[11px] outline-none focus:border-primary"
+                  aria-label="选择评审模型"
+                >
+                  {MODELS.map((model) => (
+                    <option key={model.value} value={model.value} disabled={model.value === currentModel}>
+                      {model.label}{model.value === currentModel ? '（当前模型）' : ''}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 shrink-0 px-3 text-[11px]"
+                  disabled={!hasKey || messages.every((message) => message.role !== 'assistant')}
+                  onClick={auditStreaming ? stopConversationAudit : () => { void runConversationAudit(); }}
+                >
+                  {auditStreaming ? '停止' : auditContent ? '重新评审' : '开始评审'}
+                </Button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                {auditError ? (
+                  <div className="rounded-md border border-destructive/25 bg-destructive/5 p-3 text-xs text-destructive">
+                    <div className="font-medium">评审失败</div>
+                    <div className="mt-1 break-words text-[10px] leading-4">{auditError}</div>
+                  </div>
+                ) : auditContent ? (
+                  <div className="relative">
+                    {auditStreaming && <div className="mb-2 flex items-center gap-2 text-[10px] text-primary"><span className="h-1.5 w-1.5 animate-ping rounded-full bg-primary" />另一个 AI 正在独立审查…</div>}
+                    <XMarkdown content={auditContent} streaming={{ hasNextChunk: auditStreaming }} className="chat-markdown prose prose-sm max-w-none text-xs dark:prose-invert" />
+                  </div>
+                ) : auditStreaming ? (
+                  <div className="flex h-full min-h-48 flex-col items-center justify-center px-3 text-center">
+                    <div className="relative mb-4 flex h-14 w-14 items-center justify-center">
+                      <span className="absolute inset-0 animate-ping rounded-2xl bg-primary/10" />
+                      <span className="absolute inset-1 animate-pulse rounded-2xl border border-primary/30 bg-primary/5" />
+                      <ShieldCheck className="relative h-6 w-6 animate-pulse text-primary" />
+                    </div>
+                    <div className="text-xs font-medium text-foreground">评审 AI 正在思考</div>
+                    <div className="mt-3 flex items-end gap-1" aria-label="正在思考">
+                      {[0, 1, 2].map((index) => <span key={index} className="h-2 w-2 animate-bounce rounded-full bg-primary" style={{ animationDelay: `${index * 150}ms`, animationDuration: '900ms' }} />)}
+                    </div>
+                    <p className="mt-3 text-[10px] leading-4 text-muted-foreground">正在检查回答的事实、推理、遗漏和改进空间…</p>
+                  </div>
+                ) : (
+                  <div className="flex h-full min-h-48 flex-col items-center justify-center px-3 text-center text-muted-foreground">
+                    <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><ShieldCheck className="h-5 w-5" /></span>
+                    <div className="text-xs font-medium text-foreground">独立评审当前对话</div>
+                    <p className="mt-1.5 text-[10px] leading-4">使用另一个模型检查回答的准确性、遗漏、矛盾和不合理建议，并给出独立分析。</p>
+                  </div>
+                )}
+                </div>
+                <div className="shrink-0 border-t px-3 py-2 text-[9px] leading-4 text-muted-foreground">
+                  评审内容独立显示，不会写入原对话；最多读取最近 16 条用户与 AI 消息。
+                </div>
+              </>}
+            </aside>
+          )}
 
           {scene === 'code' && codeWorkspace && (
             <aside className={`${changesPanelOpen ? 'w-72' : 'w-10'} flex shrink-0 flex-col overflow-hidden border-l bg-background transition-[width] duration-200`} aria-label="文件变化">
