@@ -25,7 +25,7 @@ import { conversationMemory, type MemoryCitation } from '@/core/conversation-mem
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
 import { configureCodeWorkspace } from '@/core/tools/code-workspace-tools';
 import { CodeChangeDiff, type CodeChangeDiffData } from './CodeChangeDiff';
-import { createOpenAIProvider, type ChatMessage } from '@/core';
+import { createOpenAIProvider, runAgent } from '@/core';
 
 interface ChatAttachment {
   key: string;
@@ -154,6 +154,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     modified: string;
   }>>([]);
   const workspaceSnapshotsRef = useRef<Map<string, string>>(new Map());
+  const workspaceGitSignatureRef = useRef('');
   const [changesPanelOpen, setChangesPanelOpen] = useState(true);
   const [workspaceScanPending, setWorkspaceScanPending] = useState(false);
   const [codeChangeDiff, setCodeChangeDiff] = useState<CodeChangeDiffData | null>(null);
@@ -227,6 +228,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [auditContent, setAuditContent] = useState('');
   const [auditError, setAuditError] = useState('');
   const [auditStreaming, setAuditStreaming] = useState(false);
+  const [auditActivity, setAuditActivity] = useState('');
   const [auditPanelOpen, setAuditPanelOpen] = useState(true);
   const [auditPanelResizing, setAuditPanelResizing] = useState(false);
   const [auditPanelWidth, setAuditPanelWidth] = useState(() => {
@@ -274,6 +276,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     auditAbortRef.current = null;
     setAuditContent('');
     setAuditError('');
+    setAuditActivity('');
     setAuditStreaming(false);
   }, [activeSessionId]);
 
@@ -286,52 +289,71 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     const transcript = reviewable.slice(-16).map((message, index) => (
       `### ${index + 1}. ${message.role === 'user' ? '用户' : `AI（${message.model ?? currentModel}）`}\n${message.content}`
     )).join('\n\n').slice(-36000);
+    const evidence = messages.slice(-16).flatMap((message) => {
+      const items: string[] = [];
+      if (message.contextContent?.trim() && message.contextContent.trim() !== message.content.trim()) {
+        items.push(`[消息检索上下文]\n${message.contextContent.trim()}`);
+      }
+      for (const result of message.toolResults ?? []) {
+        items.push(`[工具结果：${result.name}]\n${result.error ?? result.output ?? '无返回内容'}`);
+      }
+      return items;
+    }).join('\n\n').slice(-24000);
     const controller = new AbortController();
     auditAbortRef.current = controller;
     setAuditContent('');
     setAuditError('');
+    setAuditActivity('正在识别需要核验的关键主张');
     setAuditStreaming(true);
     try {
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
-      const auditMessages: ChatMessage[] = [
-        {
-          role: 'system',
-          content: `你是独立的 AI 问答评审专家。请审查另一位 AI 与用户的对话，不要盲从原回答，也不要只做措辞或代码风格点评。
+      const auditSystemPrompt = `你是独立的 AI 回答真实性审计员。首要任务是核验另一位 AI 回答中的事实是否真实、引用是否支持结论，不能把表达质量或个人偏好当作真实性问题。
 
-评审重点按以下优先级执行：
-1. 问答正确性：判断 AI 是否准确理解用户意图，结论、事实、推理和操作建议是否正确，是否真正解决了用户问题。
-2. 场景完整性：指出回答没有考虑到的使用场景，包括正常流程、边界条件、异常与失败路径、不同用户状态、数据状态、权限、安全、并发、性能、兼容性、可恢复性和实际操作体验。只列与当前问题确实相关的场景，不要机械罗列。
-3. 风险与依据：识别前后矛盾、无依据假设、过度承诺、越权操作以及缺少验证的结论。
+审计规则：
+1. 提取回答中可核验的关键事实、数字、文件或接口状态、因果判断和引用结论。
+2. 只依据所提供的对话、检索上下文和工具结果核验。不得假装访问过未提供的网页、文件或系统。
+3. 给每项关键主张标记“已证实 / 与证据矛盾 / 证据不足无法验证 / 属于建议而非事实”。说明对应证据；引用 [S1][S2] 时检查来源内容是否真的支持该主张。
+4. 重点识别虚构事实、虚假引用、数字夸大、把推测写成事实、过时信息、前后矛盾和无证据的确定性表达。
+5. 真实性之后，再简要指出会影响答案正确性的遗漏场景；不要泛泛罗列所有可能场景。
 
-如果原回答错误或不完整，请给出你独立理解后的正确答案、补充分析和可执行建议。证据不足时明确说明需要验证什么，不要编造。
-使用中文 Markdown，按“正确性结论、错误或不合理之处、遗漏的场景、独立分析与建议”组织。先给结论，再给依据；没有问题的部分简要说明即可。`,
-        },
-        { role: 'user', content: `请评审以下当前会话：\n\n${transcript}` },
-      ];
-      let result = '';
-      for await (const chunk of provider.chat(auditMessages, {
-        model: auditModel,
-        temperature: 0.2,
-        maxTokens: 4000,
+若原回答不真实或无法验证，请给出更严谨的改写：删除虚构内容，降低不当确定性，并列出还需要查询或验证的材料。
+使用中文 Markdown，按“真实性结论、关键主张核验、可疑或不实内容、遗漏场景、严谨改写建议”组织。没有证据时必须写“无法验证”，绝不能自行补造证据。
+
+你可以使用只读工作区工具列出和读取当前项目文件，以核验涉及代码、配置、接口和项目状态的主张。只读取与关键主张直接相关的文件，并引用文件路径作为证据。你没有任何写入权限。`;
+      const auditRequest = `请审计以下当前会话中 AI 回答的真实性。\n\n## 对话\n${transcript}\n\n## 已有核验材料\n${evidence || '未提供额外检索上下文或工具结果。'}\n\n${codeWorkspace ? `当前可核验代码工作区：${codeWorkspace.name}。必要时读取文件核验；无法从文件确认的事实标记为“无法验证”。` : '当前未选择代码工作区；没有证据支持的事实必须标记为“无法验证”。'}`;
+      for await (const step of runAgent(provider, auditRequest, [], auditModel, {
+        maxSteps: 8,
         signal: controller.signal,
+        systemPrompt: auditSystemPrompt,
+        allowedToolNames: codeWorkspace ? ['workspace_list_files', 'workspace_read_file'] : [],
       })) {
-        result += chunk.delta;
-        setAuditContent(result);
+        if (step.type === 'act') {
+          const targets = step.toolCalls?.map((call) => String(call.arguments.path ?? call.name)).join('、');
+          setAuditActivity(targets ? `正在读取并核验：${targets}` : '正在调用只读工具核验');
+        } else if (step.type === 'observe') {
+          setAuditActivity('正在对照文件证据分析真实性');
+        } else if (step.type === 'think') {
+          setAuditActivity('正在分析事实与证据');
+        } else if (step.type === 'answer') {
+          setAuditContent(step.content ?? '');
+          if (!step.content?.trim()) setAuditError('评审模型没有返回内容');
+        }
       }
-      if (!result.trim()) setAuditError('评审模型没有返回内容');
     }
     catch (error) {
       if ((error as Error).name !== 'AbortError') setAuditError((error as Error).message || '评审失败');
     }
     finally {
       if (auditAbortRef.current === controller) auditAbortRef.current = null;
+      setAuditActivity('');
       setAuditStreaming(false);
     }
-  }, [aiApi.apiKey, aiApi.baseUrl, auditModel, auditStreaming, currentModel, messages]);
+  }, [aiApi.apiKey, aiApi.baseUrl, auditModel, auditStreaming, codeWorkspace, currentModel, messages]);
 
   const stopConversationAudit = useCallback(() => {
     auditAbortRef.current?.abort();
     auditAbortRef.current = null;
+    setAuditActivity('');
     setAuditStreaming(false);
   }, []);
 
@@ -371,6 +393,10 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       if (disposed) return;
 
       const gitStatus = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      workspaceGitSignatureRef.current = (gitStatus.data ?? [])
+        .map((entry) => `${entry.status}:${entry.path}`)
+        .sort()
+        .join('|');
       if (gitStatus.success && gitStatus.data?.length) {
         const initialChanges: typeof workspaceChanges = [];
         for (let index = 0; index < gitStatus.data.length && !disposed; index += 20) {
@@ -429,6 +455,10 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       else workspaceSnapshotsRef.current.delete(event.path);
       const status = current.success ? (hadSnapshot ? 'modified' as const : 'added' as const) : 'deleted' as const;
       const gitStatusResult = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      workspaceGitSignatureRef.current = (gitStatusResult.data ?? [])
+        .map((entry) => `${entry.status}:${entry.path}`)
+        .sort()
+        .join('|');
       const gitEntry = gitStatusResult.success ? gitStatusResult.data?.find((entry) => entry.path === event.path) : undefined;
       if (!gitEntry) {
         setWorkspaceChanges((previous) => previous.filter((item) => item.path !== event.path));
@@ -455,6 +485,10 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
         notifApi.warning({ message: '刷新文件变化失败', description: gitStatus.error });
         return;
       }
+      workspaceGitSignatureRef.current = (gitStatus.data ?? [])
+        .map((entry) => `${entry.status}:${entry.path}`)
+        .sort()
+        .join('|');
       const refreshed = await Promise.all((gitStatus.data ?? []).map(async (entry) => {
         const [head, current] = await Promise.all([
           window.electronAPI.workspace.gitShowHead(codeWorkspace.path, entry.path),
@@ -486,6 +520,35 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       setWorkspaceScanPending(false);
     }
   }, [codeWorkspace, notifApi, workspaceScanPending]);
+
+  useEffect(() => {
+    if (scene !== 'code' || !codeWorkspace) return;
+    let disposed = false;
+    let checking = false;
+    const checkGitStatus = async () => {
+      if (disposed || checking || workspaceScanPending) return;
+      checking = true;
+      try {
+        const result = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+        if (!result.success || disposed) return;
+        const signature = (result.data ?? [])
+          .map((entry) => `${entry.status}:${entry.path}`)
+          .sort()
+          .join('|');
+        if (signature !== workspaceGitSignatureRef.current) {
+          workspaceGitSignatureRef.current = signature;
+          await refreshWorkspaceChanges();
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = window.setInterval(() => { void checkGitStatus(); }, 600);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [codeWorkspace, refreshWorkspaceChanges, scene, workspaceScanPending]);
 
   const selectCodeWorkspace = useCallback(async () => {
     const folder = await window.electronAPI.workspace.openFolder();
@@ -1018,8 +1081,12 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               <div className="flex-1 overflow-y-auto" style={{ height: 0 }} onClick={handleMessageClick}>
                 <Bubble.List
                   items={bubbleItems as any}
-                  autoScroll
+                  autoScroll={latestComparison.length === 0}
                   style={{ height: latestComparison.length > 0 ? 'auto' : '100%' }}
+                  styles={latestComparison.length > 0 ? {
+                    root: { maxHeight: 'none', overflow: 'visible' },
+                    scroll: { maxHeight: 'none', overflowY: 'visible' },
+                  } : undefined}
                   role={{
                     ai: {
                       placement: 'start', variant: 'outlined',
@@ -1057,11 +1124,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                     tool: { placement: 'start', variant: 'borderless', contentRender },
                   }} />
                 {latestComparison.length > 0 && (
-                  <div className="grid grid-cols-1 items-start gap-3 px-4 pb-4 lg:grid-cols-2">
+                  <div className="grid min-w-0 grid-cols-1 items-start gap-3 px-4 pb-4 lg:grid-cols-2">
                     {latestComparison.map((message) => (
                       <section
                         key={message.id}
-                        className="min-w-0 rounded-lg border border-primary/20 bg-primary-light/40 p-3"
+                        className="min-w-0 overflow-hidden rounded-lg border border-primary/20 bg-primary-light/40 p-3"
                       >
                         <div className="mb-2 flex items-center justify-between border-b border-primary/15 pb-2 text-xs">
                           <span className="font-semibold text-primary">
@@ -1076,8 +1143,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                           </button>
                         </div>
                         {message.content ? (
-                          <div>
-                            <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none dark:prose-invert" />
+                          <div className="min-w-0 overflow-x-auto">
+                            <XMarkdown content={message.content} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm min-w-0 max-w-none break-words dark:prose-invert" />
                             {!!message.memorySources?.length && !streaming && <MemorySourceList sources={message.memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
                           </div>
                         ) : (
@@ -1234,7 +1301,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   </div>
                 ) : auditContent ? (
                   <div className="relative">
-                    {auditStreaming && <div className="mb-2 flex items-center gap-2 text-[10px] text-primary"><span className="h-1.5 w-1.5 animate-ping rounded-full bg-primary" />另一个 AI 正在独立审查…</div>}
+                    {auditStreaming && <div className="mb-2 flex items-center gap-2 text-[10px] text-primary"><span className="h-1.5 w-1.5 animate-ping rounded-full bg-primary" />{auditActivity || '另一个 AI 正在核验真实性…'}</div>}
                     <XMarkdown content={auditContent} streaming={{ hasNextChunk: auditStreaming }} className="chat-markdown prose prose-sm max-w-none text-xs dark:prose-invert" />
                   </div>
                 ) : auditStreaming ? (
@@ -1248,18 +1315,18 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                     <div className="mt-3 flex items-end gap-1" aria-label="正在思考">
                       {[0, 1, 2].map((index) => <span key={index} className="h-2 w-2 animate-bounce rounded-full bg-primary" style={{ animationDelay: `${index * 150}ms`, animationDuration: '900ms' }} />)}
                     </div>
-                    <p className="mt-3 text-[10px] leading-4 text-muted-foreground">正在检查回答的事实、推理、遗漏和改进空间…</p>
+                    <p className="mt-3 text-[10px] leading-4 text-muted-foreground">{auditActivity || '正在核对事实、引用依据和可疑断言…'}</p>
                   </div>
                 ) : (
                   <div className="flex h-full min-h-48 flex-col items-center justify-center px-3 text-center text-muted-foreground">
                     <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><ShieldCheck className="h-5 w-5" /></span>
-                    <div className="text-xs font-medium text-foreground">独立评审当前对话</div>
-                    <p className="mt-1.5 text-[10px] leading-4">使用另一个模型检查回答的准确性、遗漏、矛盾和不合理建议，并给出独立分析。</p>
+                    <div className="text-xs font-medium text-foreground">核验 AI 回答真实性</div>
+                    <p className="mt-1.5 text-[10px] leading-4">使用另一个模型依据对话、知识库上下文和工具结果，检查事实、引用、数字及确定性结论是否可信。</p>
                   </div>
                 )}
                 </div>
                 <div className="shrink-0 border-t px-3 py-2 text-[9px] leading-4 text-muted-foreground">
-                  评审内容独立显示，不会写入原对话；最多读取最近 16 条用户与 AI 消息。
+                  评审内容独立显示，不会写入原对话；可只读访问当前工作区，无法修改文件。
                 </div>
               </>}
             </aside>

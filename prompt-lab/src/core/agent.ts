@@ -18,6 +18,8 @@ export interface AgentOptions {
   maxSteps?: number;
   signal?: AbortSignal;
   systemPrompt?: string;
+  /** Restrict this run to an explicit subset of enabled tools. */
+  allowedToolNames?: string[];
 }
 
 // ── System prompt ──
@@ -75,7 +77,10 @@ export async function* runAgent(
   options: AgentOptions = {},
 ): AsyncIterable<AgentStep> {
   const maxSteps = options.maxSteps ?? 5;
-  const toolSchemas = getEnabledToolSchemas();
+  const allowedToolNames = options.allowedToolNames ? new Set(options.allowedToolNames) : null;
+  const toolSchemas = getEnabledToolSchemas().filter((schema) => (
+    !allowedToolNames || allowedToolNames.has(schema.function.name)
+  ));
   const tools = toolSchemas.map(openAiSchemaToToolDef);
 
   const systemPrompt = options.systemPrompt

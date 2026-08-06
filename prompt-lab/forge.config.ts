@@ -7,10 +7,23 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
+// GitHub release downloads are frequently unavailable on some networks. Keep the
+// mirror overridable for CI/corporate environments, but provide a reliable default
+// for Electron archives and the headers used while rebuilding native modules.
+const electronMirror = process.env.ELECTRON_MIRROR || 'https://npmmirror.com/mirrors/electron/';
+process.env.ELECTRON_MIRROR = electronMirror;
+process.env.npm_config_electron_mirror ||= electronMirror;
+process.env.npm_config_disturl ||= electronMirror;
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb}/**',
+    },
+    download: {
+      mirrorOptions: {
+        mirror: electronMirror,
+      },
     },
   },
   rebuildConfig: {
