@@ -1,5 +1,10 @@
 import type { ToolDefinition } from './types';
 import { conversationMemory } from '../conversation-memory';
+import {
+  getSelectedKnowledgeFilePaths,
+  normalizeMemoryFilePath,
+  readMemoryDirectories,
+} from '../memory-scope';
 
 const searchConversationHistory: ToolDefinition = {
   name: 'search_conversation_history',
@@ -17,7 +22,15 @@ const searchConversationHistory: ToolDefinition = {
     if (!query) return JSON.stringify({ error: 'QUERY_REQUIRED' });
     const requestedLimit = Number(args.limit ?? 5);
     const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(8, Math.floor(requestedLimit))) : 5;
-    const results = await conversationMemory.search(query, limit);
+    const directories = readMemoryDirectories();
+    if (directories.length === 0) {
+      return JSON.stringify({ error: 'KNOWLEDGE_SCOPE_REQUIRED', message: '请先选择要使用的知识库目录。' });
+    }
+    const allowedPaths = await getSelectedKnowledgeFilePaths(directories);
+    const candidates = await conversationMemory.search(query, Math.max(limit * 5, 20), allowedPaths);
+    const results = candidates
+      .filter((source) => allowedPaths.has(normalizeMemoryFilePath(source.filePath)))
+      .slice(0, limit);
     return JSON.stringify({
       query,
       count: results.length,
@@ -54,6 +67,13 @@ const readConversationDocument: ToolDefinition = {
   execute: async (args) => {
     const documentId = String(args.documentId ?? '').trim();
     if (!documentId) return JSON.stringify({ error: 'DOCUMENT_ID_REQUIRED' });
+    const allowedPaths = await getSelectedKnowledgeFilePaths();
+    if (!allowedPaths.has(normalizeMemoryFilePath(documentId))) {
+      return JSON.stringify({
+        error: 'DOCUMENT_OUTSIDE_SELECTED_KNOWLEDGE_SCOPE',
+        message: '该文档不在当前选中的知识库目录中。',
+      });
+    }
     const result = await window.electronAPI.readConversation(documentId);
     if (!result.success) return JSON.stringify({ error: result.error ?? 'READ_FAILED' });
     const lines = (result.content ?? '').split(/\r?\n/);

@@ -21,7 +21,7 @@ import { RoleManagerDialog } from './RoleManagerDialog';
 import { MemoryManagerDialog } from './MemoryManagerDialog';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
 import { buildAttachmentContext, parseAttachment } from './attachment-parser';
-import type { MemoryCitation } from '@/core/conversation-memory';
+import { conversationMemory, type MemoryCitation } from '@/core/conversation-memory';
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
 import { configureCodeWorkspace } from '@/core/tools/code-workspace-tools';
 import { CodeChangeDiff, type CodeChangeDiffData } from './CodeChangeDiff';
@@ -110,15 +110,21 @@ const ReasoningPanel: React.FC<{ content?: string; streaming?: boolean }> = ({ c
   const [open, setOpen] = useState(true);
   if (!content && !streaming) return null;
   return (
-    <div className="mb-2 overflow-hidden rounded-lg border border-primary/15 bg-primary/[0.03]">
-      <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-primary/5" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><Sparkles className="h-3 w-3" /></span>
-        <span className="flex-1 font-medium text-foreground">思考过程</span>
-        {streaming && <span className="inline-flex items-center gap-1 text-[10px] text-primary"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />正在思考</span>}
+    <div className={`relative mb-2 overflow-hidden rounded-lg border bg-primary/[0.03] transition-all duration-300 ${streaming ? 'border-primary/40 shadow-sm shadow-primary/10' : 'border-primary/15'}`}>
+      {streaming && <div className="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-gradient-to-r from-transparent via-primary to-transparent" />}
+      <button type="button" className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-primary/5 ${streaming ? 'bg-primary/[0.04]' : ''}`} aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+          {streaming && <span className="absolute inset-0 animate-ping rounded-md bg-primary/20" />}
+          <Sparkles className={`relative h-3 w-3 ${streaming ? 'animate-pulse' : ''}`} />
+        </span>
+        <span className="flex-1 font-medium text-foreground">{streaming ? 'AI 正在思考' : '思考过程'}</span>
+        {streaming && <span className="inline-flex items-end gap-0.5" aria-label="正在思考">
+          {[0, 1, 2].map((index) => <span key={index} className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary" style={{ animationDelay: `${index * 140}ms`, animationDuration: '900ms' }} />)}
+        </span>}
         <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? '' : '-rotate-90'}`} />
       </button>
       {open && <div className="border-t border-primary/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
-        {content ? <XMarkdown content={content} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none text-muted-foreground dark:prose-invert" /> : <span className="inline-flex items-center gap-2"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />正在分析任务和工作区上下文…</span>}
+        {content ? <div className="relative"><XMarkdown content={content} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none text-muted-foreground dark:prose-invert" />{streaming && <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-primary align-middle" />}</div> : <span className="inline-flex items-center gap-2"><span className="relative flex gap-0.5">{[0, 1, 2].map((index) => <span key={index} className="h-1 w-1 animate-bounce rounded-full bg-primary" style={{ animationDelay: `${index * 140}ms`, animationDuration: '900ms' }} />)}</span>正在分析任务和工作区上下文…</span>}
       </div>}
     </div>
   );
@@ -161,6 +167,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [memoryScopePickerOpen, setMemoryScopePickerOpen] = useState(false);
   const [knowledgeFolders, setKnowledgeFolders] = useState<Array<{ name: string; path: string }>>([]);
   const [knowledgeFoldersLoading, setKnowledgeFoldersLoading] = useState(false);
+  const [savingToKnowledge, setSavingToKnowledge] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
@@ -319,6 +326,47 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     };
   }, [codeWorkspace, notifApi, scene]);
 
+  const refreshWorkspaceChanges = useCallback(async () => {
+    if (!codeWorkspace || workspaceScanPending) return;
+    setWorkspaceScanPending(true);
+    try {
+      const gitStatus = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      if (!gitStatus.success) {
+        notifApi.warning({ message: '刷新文件变化失败', description: gitStatus.error });
+        return;
+      }
+      const refreshed = await Promise.all((gitStatus.data ?? []).map(async (entry) => {
+        const [head, current] = await Promise.all([
+          window.electronAPI.workspace.gitShowHead(codeWorkspace.path, entry.path),
+          window.electronAPI.workspace.readTextFile(codeWorkspace.path, entry.path),
+        ]);
+        const modified = current.success && current.data ? current.data.content : '';
+        if (current.success && current.data) workspaceSnapshotsRef.current.set(entry.path, modified);
+        else workspaceSnapshotsRef.current.delete(entry.path);
+        const status = entry.status.includes('R')
+          ? 'renamed' as const
+          : entry.status.includes('D')
+            ? 'deleted' as const
+            : /[?A]/.test(entry.status)
+              ? 'added' as const
+              : 'modified' as const;
+        return {
+          path: entry.path,
+          status,
+          gitStatus: entry.status,
+          timestamp: Date.now(),
+          original: head.success ? head.data ?? '' : '',
+          modified,
+        };
+      }));
+      setWorkspaceChanges(refreshed);
+    } catch (error) {
+      notifApi.warning({ message: '刷新文件变化失败', description: String(error) });
+    } finally {
+      setWorkspaceScanPending(false);
+    }
+  }, [codeWorkspace, notifApi, workspaceScanPending]);
+
   const selectCodeWorkspace = useCallback(async () => {
     const folder = await window.electronAPI.workspace.openFolder();
     if (folder) setCodeWorkspace(folder);
@@ -338,10 +386,13 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   }, [notifApi, setMemoryDirectories]);
 
   const toggleMemoryDirectory = useCallback((folder: { name: string; path: string }) => {
-    setMemoryDirectories((previous) => previous.some((item) => item.path === folder.path)
-      ? previous.filter((item) => item.path !== folder.path)
-      : [...previous, folder]);
-    setMemoryEnabled(true);
+    setMemoryDirectories((previous) => {
+      const next = previous.some((item) => item.path === folder.path)
+        ? previous.filter((item) => item.path !== folder.path)
+        : [...previous, folder];
+      setMemoryEnabled(next.length > 0);
+      return next;
+    });
   }, [setMemoryDirectories, setMemoryEnabled]);
 
   const openCodeChangeDiff = useCallback((change: typeof workspaceChanges[number]) => {
@@ -359,6 +410,41 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+
+  const saveResponseToKnowledge = useCallback(async (content: string) => {
+    if (!content.trim() || savingToKnowledge) return;
+    const targetFolder = memoryDirectories[0];
+    if (!targetFolder) {
+      notifApi.info({ message: '请先选择知识库目录', description: '选择目录后再次点击“保存到知识库”' });
+      await openMemoryScopePicker();
+      return;
+    }
+    setSavingToKnowledge(true);
+    try {
+      const heading = content.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+      const sessionTitle = activeSession?.title && activeSession.title !== '新对话' ? activeSession.title : '';
+      const title = (heading || sessionTitle || `AI 回复 ${new Date().toLocaleString('zh-CN')}`).slice(0, 100);
+      const saved = await window.electronAPI.saveConversation({
+        site: 'ai-chat',
+        timestamp: Date.now(),
+        requestBody: {},
+        responseContent: content,
+        title,
+        createNew: true,
+        contentMode: 'document',
+      });
+      if (!saved.success || !saved.filePath) throw new Error('知识库文档创建失败');
+      const moved = await window.electronAPI.moveConversation(saved.filePath, targetFolder.path);
+      if (!moved.success) throw new Error(`文档已创建，但移动到“${targetFolder.name}”失败：${moved.error ?? '未知错误'}`);
+      await conversationMemory.sync();
+      useStore.getState().notifyConversationSaved();
+      notifApi.success({ message: '已保存到知识库', description: targetFolder.name });
+    } catch (error) {
+      notifApi.error({ message: '保存到知识库失败', description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSavingToKnowledge(false);
+    }
+  }, [activeSession?.title, memoryDirectories, notifApi, openMemoryScopePicker, savingToKnowledge]);
 
   const toggleCompareModel = useCallback((model: string) => {
     const selected = compareModels.includes(model)
@@ -636,8 +722,35 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       );
     }
     if (origRole === 'assistant') {
+      const showAgentTrace = scene === 'code' && agentMode && extra?.isLastAi
+        && (streaming || thoughtChainItems.length > 0 || latestAgentReasoning);
       return (
         <div>
+          {showAgentTrace && <div className="mb-2 overflow-hidden rounded-lg border bg-background">
+            <div className="flex h-9 items-center hover:bg-accent/40">
+              <button type="button" className="flex min-w-0 flex-1 items-center gap-2 px-3 text-left text-xs" onClick={() => setAgentTraceOpen((open) => !open)} aria-expanded={agentTraceOpen}>
+                <span className={`h-2 w-2 rounded-full ${streaming ? 'animate-pulse bg-warning' : 'bg-success'}`} />
+                <span className="font-medium">{streaming ? 'Agent 正在执行' : 'Agent 执行完成'}</span>
+                <span className="text-muted-foreground">{Math.max(1, thoughtChainItems.length)} 个步骤</span>
+                <span className="flex-1" />
+                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${agentTraceOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {streaming && <Button type="button" size="sm" variant="ghost" className="mr-1 h-6 px-2 text-[10px] text-destructive" onClick={handleStop}>停止</Button>}
+            </div>
+            {agentTraceOpen && <div className="max-h-80 overflow-y-auto border-t px-3 py-2">
+              <div className="relative space-y-2 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-border">
+                {(thoughtChainItems.length ? thoughtChainItems : [{ title: '分析任务', description: '正在理解请求并规划下一步操作', status: 'success' as const }]).map((item, index, items) => {
+                  const activeStep = streaming && index === items.length - 1;
+                  return <div key={`${item.title}-${index}`} className={`relative flex gap-3 rounded-sm pl-5 text-xs transition-colors ${activeStep ? 'bg-primary/[0.03]' : ''}`}>
+                    <span className={`absolute left-0 top-1 h-2.5 w-2.5 rounded-full border-2 border-background ${item.status === 'error' ? 'bg-destructive' : activeStep ? 'animate-pulse bg-warning' : 'bg-success'}`} />
+                    {activeStep && <span className="absolute left-0 top-1 h-2.5 w-2.5 animate-ping rounded-full bg-warning/40" />}
+                    <div className="min-w-0"><p className="font-medium">{item.title}{activeStep && <span className="ml-1.5 text-[9px] font-normal text-warning">进行中</span>}</p><p className="truncate text-[10px] text-muted-foreground" title={item.description}>{item.description}</p></div>
+                  </div>;
+                })}
+              </div>
+              <div className="mt-3 border-t pt-3"><ReasoningPanel content={latestAgentReasoning} streaming={streaming} /></div>
+            </div>}
+          </div>}
           {scene !== 'code' && <ReasoningPanel content={reasoning} streaming={reasoningStreaming} />}
           {toolCalls && toolCalls.length > 0 && <ToolCallCard calls={toolCalls} results={toolResults} />}
           {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none dark:prose-invert" />}
@@ -690,6 +803,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleNewSession} title="新建对话"><Plus className="h-4 w-4" /></Button>
               <span className="text-xs font-medium text-muted-foreground truncate max-w-[120px]">{activeSession?.title || '新对话'}</span>
+              {scene === 'code' && <button type="button" className={`ml-2 inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors hover:bg-accent ${codeWorkspace ? 'border-border bg-card text-foreground' : 'border-warning/40 bg-warning/5 text-warning'}`} onClick={selectCodeWorkspace} title={codeWorkspace ? `${codeWorkspace.path}\n点击更换工作区` : '选择代码工作区'}>
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="truncate">{codeWorkspace?.name ?? '选择代码文件夹'}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{codeWorkspace ? '更改' : ''}</span>
+              </button>}
               <div className="flex-1" />
               <div className="relative">
                 <button
@@ -726,14 +844,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                 <Sparkles className="h-3.5 w-3.5" />
                 {agentMode && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-warning" />}
               </button>
-              <button className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${memoryEnabled ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-                onClick={() => setMemoryEnabled((value) => !value)} title={memoryEnabled ? '关闭知识库检索' : '开启知识库检索'} aria-label={memoryEnabled ? '关闭知识库检索' : '开启知识库检索'} aria-pressed={memoryEnabled}>
+              <button className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${memoryEnabled && memoryDirectories.length ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                onClick={() => { void openMemoryScopePicker(); }} title="选择知识库检索目录" aria-label="选择知识库检索目录" aria-haspopup="dialog">
                 <BookOpen className="h-3.5 w-3.5" />
-                {memoryEnabled && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />}
-              </button>
-              <button className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${memoryDirectories.length ? 'text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-                onClick={() => { void openMemoryScopePicker(); }} title="从知识库选择检索目录" aria-label="从知识库选择检索目录">
-                <FolderOpen className="h-3.5 w-3.5" />
                 {memoryDirectories.length > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-primary px-1 text-[9px] leading-4 text-primary-foreground">{memoryDirectories.length}</span>}
               </button>
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${memoryManagerOpen ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:text-primary'}`}
@@ -755,42 +868,6 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')} title="配置 AI API" aria-label="配置 AI API"><Settings className="h-3.5 w-3.5" /></Button>}
             </div>
 
-            {memoryEnabled && (
-              <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-primary/[0.03] px-3 py-1.5 text-[10px]">
-                <BookOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
-                <span className="shrink-0 font-medium">知识检索范围</span>
-                {memoryDirectories.length === 0 ? (
-                  <span className="text-warning">尚未选择目录，当前不会检索任何知识库文档</span>
-                ) : (
-                  <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-                    {memoryDirectories.map((directory) => (
-                      <span key={directory.path} className="inline-flex max-w-56 items-center gap-1 rounded border bg-background px-1.5 py-0.5 text-muted-foreground" title={directory.path}>
-                        <span className="truncate">{directory.name}</span>
-                        <button type="button" className="rounded p-0.5 hover:bg-accent hover:text-destructive" title={`移除 ${directory.name}`} onClick={() => setMemoryDirectories((previous) => previous.filter((item) => item.path !== directory.path))}><X className="h-2.5 w-2.5" /></button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <Button type="button" size="sm" variant="ghost" className="ml-auto h-6 shrink-0 px-2 text-[10px]" onClick={() => { void openMemoryScopePicker(); }}>从知识库选择</Button>
-              </div>
-            )}
-
-            {scene === 'code' && (
-              <div className="flex shrink-0 items-center gap-3 border-b bg-primary/5 px-3 py-2">
-                <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium">
-                    {codeWorkspace ? codeWorkspace.name : '尚未选择代码文件夹'}
-                  </p>
-                  <p className="truncate text-[10px] text-muted-foreground" title={codeWorkspace?.path}>
-                    {codeWorkspace?.path ?? '选择本地项目后，AI 才能读取、分析和修改其中的代码'}
-                  </p>
-                </div>
-                <Button type="button" size="sm" variant={codeWorkspace ? 'outline' : 'default'} className="h-7 shrink-0 text-xs" onClick={selectCodeWorkspace}>
-                  {codeWorkspace ? '更换文件夹' : '选择代码文件夹'}
-                </Button>
-              </div>
-            )}
             {/* 系统提示词 */}
             {showSysPrompt && (
               <div className="px-3 py-2 border-b bg-background shrink-0">
@@ -800,39 +877,6 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               </div>
             )}
 
-            {/* Agent 执行轨迹 */}
-            {agentMode && (streaming || thoughtChainItems.length > 0 || latestAgentReasoning) && scene === 'code' && (
-              <div className="shrink-0 border-b bg-background">
-                <div className="flex h-9 items-center px-2 hover:bg-accent/50">
-                  <button type="button" className="flex min-w-0 flex-1 items-center gap-2 px-2 text-left text-xs" onClick={() => setAgentTraceOpen((open) => !open)} aria-expanded={agentTraceOpen}>
-                    <span className={`h-2 w-2 rounded-full ${streaming ? 'animate-pulse bg-warning' : 'bg-success'}`} />
-                    <span className="font-medium">{streaming ? 'Agent 正在执行' : 'Agent 执行完成'}</span>
-                    <span className="text-muted-foreground">{Math.max(1, thoughtChainItems.length)} 个步骤</span>
-                    <span className="flex-1" />
-                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${agentTraceOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {streaming && <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive" onClick={handleStop}>停止</Button>}
-                </div>
-                {agentTraceOpen && (
-                  <div className="max-h-80 overflow-y-auto border-t px-4 py-2">
-                    <div className="relative space-y-2 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-border">
-                      {(thoughtChainItems.length ? thoughtChainItems : [{ title: '分析任务', description: '正在理解请求并规划下一步操作', status: 'success' as const }]).map((item, index) => (
-                        <div key={`${item.title}-${index}`} className="relative flex gap-3 pl-5 text-xs">
-                          <span className={`absolute left-0 top-1 h-2.5 w-2.5 rounded-full border-2 border-background ${item.status === 'error' ? 'bg-destructive' : 'bg-success'}`} />
-                          <div className="min-w-0">
-                            <p className="font-medium">{item.title.replace(/^[^\p{L}\p{N}_]+/u, '')}</p>
-                            <p className="truncate text-[10px] text-muted-foreground" title={item.description}>{item.description}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 border-t pt-3">
-                      <ReasoningPanel content={latestAgentReasoning} streaming={streaming} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             {agentMode && thoughtChainItems.length > 0 && scene !== 'code' && (
               <div className="max-h-40 shrink-0 overflow-y-auto border-b bg-background px-4 py-2">
                 <ThoughtChain items={thoughtChainItems} />
@@ -873,8 +917,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                         const text = typeof content === 'string' ? content : '';
                         return (
                           <div className="flex gap-2 text-[10px]">
-                            <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={() => navigator.clipboard.writeText(text)} title="复制"><Copy className="h-3 w-3" />复制</button>
-                            <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={handleRegenerate} title="重新生成"><RotateCcw className="h-3 w-3" />重新生成</button>
+                             <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={() => navigator.clipboard.writeText(text)} title="复制"><Copy className="h-3 w-3" />复制</button>
+                             <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" onClick={handleRegenerate} title="重新生成"><RotateCcw className="h-3 w-3" />重新生成</button>
+                             <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary disabled:cursor-wait disabled:opacity-60" disabled={savingToKnowledge || !text.trim()} onClick={() => { void saveResponseToKnowledge(text); }} title={memoryDirectories[0] ? `保存到知识库：${memoryDirectories[0].name}` : '保存到知识库（请先选择目录）'}><BookOpen className={`h-3 w-3 ${savingToKnowledge ? 'animate-pulse' : ''}`} />{savingToKnowledge ? '保存中…' : '保存到知识库'}</button>
                           </div>
                         );
                       },
@@ -1025,7 +1070,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               <div className={`flex h-10 shrink-0 items-center border-b ${changesPanelOpen ? 'justify-between px-3' : 'justify-center'}`}>
                 {changesPanelOpen && (
                   <div className="flex min-w-0 items-center gap-2">
-                    <RefreshCw className={`h-3.5 w-3.5 ${workspaceChanges.length ? 'text-warning' : 'text-muted-foreground'}`} />
+                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={workspaceScanPending} onClick={() => { void refreshWorkspaceChanges(); }} title="刷新文件变化" aria-label="刷新文件变化">
+                      <RefreshCw className={`h-3.5 w-3.5 ${workspaceScanPending ? 'animate-spin text-primary' : workspaceChanges.length ? 'text-warning' : 'text-muted-foreground'}`} />
+                    </Button>
                     <span className="text-xs font-semibold">文件变化</span>
                     {workspaceChanges.length > 0 && <span className="rounded-full bg-warning/15 px-1.5 text-[10px] text-warning">{workspaceChanges.length}</span>}
                   </div>
@@ -1127,7 +1174,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                       </label>;
                     })}
               </div>
-              <div className="flex items-center justify-between border-t px-4 py-3 text-[10px] text-muted-foreground"><span>已选择 {memoryDirectories.length} 个目录</span><Button type="button" size="sm" className="h-7 px-3 text-xs" onClick={() => setMemoryScopePickerOpen(false)}>完成</Button></div>
+              <div className="flex items-center gap-3 border-t px-4 py-3 text-[10px] text-muted-foreground">
+                <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={memoryEnabled} disabled={memoryDirectories.length === 0} onChange={(event) => setMemoryEnabled(event.target.checked)} /><span>启用知识检索</span></label>
+                <span>已选择 {memoryDirectories.length} 个目录</span>
+                <Button type="button" size="sm" className="ml-auto h-7 px-3 text-xs" onClick={() => setMemoryScopePickerOpen(false)}>完成</Button>
+              </div>
             </div>
           </div>
         )}

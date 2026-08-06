@@ -1,27 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { buildMemoryContext, conversationMemory, selectMemorySourcesForBudget, toMemoryCitation, type MemoryCitation } from '@/core/conversation-memory';
+import {
+  getSelectedKnowledgeFilePaths,
+  MEMORY_DIRECTORIES_KEY,
+  normalizeMemoryFilePath,
+  readMemoryDirectories,
+  type MemoryDirectory,
+} from '@/core/memory-scope';
 import { useStore } from '@/store';
 
 const MEMORY_ENABLED_KEY = 'chat.memory.enabled';
-const MEMORY_DIRECTORIES_KEY = 'chat.memory.directories';
-
-export interface MemoryDirectory {
-  path: string;
-  name: string;
-}
-
-function isPathInsideDirectory(filePath: string, directoryPath: string) {
-  const file = filePath.replace(/\\/g, '/').replace(/\/$/, '').toLocaleLowerCase();
-  const directory = directoryPath.replace(/\\/g, '/').replace(/\/$/, '').toLocaleLowerCase();
-  return file === directory || file.startsWith(`${directory}/`);
-}
+export type { MemoryDirectory } from '@/core/memory-scope';
 
 export function useConversationMemory() {
   const [memoryEnabled, setMemoryEnabled] = useState(() => localStorage.getItem(MEMORY_ENABLED_KEY) === 'true');
-  const [memoryDirectories, setMemoryDirectories] = useState<MemoryDirectory[]>(() => {
-    try { return JSON.parse(localStorage.getItem(MEMORY_DIRECTORIES_KEY) ?? '[]'); }
-    catch { return []; }
-  });
+  const [memoryDirectories, setMemoryDirectories] = useState<MemoryDirectory[]>(readMemoryDirectories);
   const memoryConfig = useStore((state) => state.memoryConfig);
   const setMemoryConfig = useStore((state) => state.setMemoryConfig);
 
@@ -53,8 +46,9 @@ export function useConversationMemory() {
     if (memoryEnabled && memoryDirectories.length > 0) {
       try {
         const searchLimit = Math.max(memoryConfig.recallCount * 5, 20);
-        retrieved = await conversationMemory.search(retrievalQuery, searchLimit);
-        retrieved = retrieved.filter((source) => memoryDirectories.some((directory) => isPathInsideDirectory(source.filePath, directory.path)));
+        const allowedPaths = await getSelectedKnowledgeFilePaths(memoryDirectories);
+        retrieved = await conversationMemory.search(retrievalQuery, searchLimit, allowedPaths);
+        retrieved = retrieved.filter((source) => allowedPaths.has(normalizeMemoryFilePath(source.filePath)));
       }
       catch { /* Retrieval failures must not block the conversation. */ }
     }

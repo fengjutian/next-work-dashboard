@@ -36,7 +36,7 @@ export function toMemoryCitation(source: MemorySource | MemoryCitation): MemoryC
 export interface ConversationMemoryProvider {
   readonly id: string;
   sync(options?: MemorySyncOptions): Promise<MemoryIndexStats>;
-  search(query: string, limit?: number): Promise<MemorySource[]>;
+  search(query: string, limit?: number, allowedFilePaths?: ReadonlySet<string>): Promise<MemorySource[]>;
   removeDocument(filePath: string): Promise<void>;
 }
 
@@ -496,10 +496,14 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     try { await window.electronAPI.memoryIndex?.clear(); } catch { /* IndexedDB is still cleared */ }
   }
 
-  async search(query: string, limit = 6): Promise<MemorySource[]> {
+  async search(query: string, limit = 6, allowedFilePaths?: ReadonlySet<string>): Promise<MemorySource[]> {
     await this.sync();
     const queries = deriveMemoryQueries(query);
     if (!queries.length) return [];
+    const candidateChunks = allowedFilePaths
+      ? this.chunks.filter((chunk) => allowedFilePaths.has(chunk.filePath.replace(/\\/g, '/').replace(/\/$/g, '').toLocaleLowerCase()))
+      : this.chunks;
+    if (!candidateChunks.length) return [];
     const encodedQueries = queries.map(vectorize);
     let queryDenseVectors: number[][] = [];
     try {
@@ -525,9 +529,9 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       } catch { this.lanceIndexReady = false; }
     }
     const normalizedQuery = query.toLocaleLowerCase();
-    const bm25Variants = queries.map((candidate) => bm25Scores(candidate, this.chunks));
+    const bm25Variants = queries.map((candidate) => bm25Scores(candidate, candidateChunks));
     const now = Date.now();
-    const ranked = mergeAdjacentChunks(this.chunks
+    const ranked = mergeAdjacentChunks(candidateChunks
       .map((chunk) => {
         const sparse = Math.max(...encodedQueries.map((encoded) => similarity(encoded.vector, encoded.norm, chunk.vector, chunk.norm)));
         const dense = chunk.denseVector && queryDenseVectors.length

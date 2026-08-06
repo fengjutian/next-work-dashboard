@@ -130,26 +130,90 @@
   animation: slide-in-right 0.2s ease-out;
 }
 
-/* Apple-style native scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Unified floating scrollbars — Chromium/Electron + Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--foreground) / 0.2) transparent;
 }
-::-webkit-scrollbar-track {
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-track-piece {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
+  min-width: 32px;
+  min-height: 32px;
+  border: 3px solid transparent;
   border-radius: 9999px;
-  background: hsl(var(--foreground) / 0.18);
+  background: hsl(var(--foreground) / 0.2);
+  background-clip: padding-box;
+  transition: background-color 160ms ease, border-width 160ms ease;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--foreground) / 0.32);
+  border-width: 2px;
+  background: hsl(var(--foreground) / 0.38);
+  background-clip: padding-box;
 }
+
+::-webkit-scrollbar-thumb:active {
+  border-width: 2px;
+  background: hsl(var(--primary) / 0.72);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.dark * {
+  scrollbar-color: hsl(var(--foreground) / 0.22) transparent;
+}
+
 .dark ::-webkit-scrollbar-thumb {
-  background: hsl(var(--foreground) / 0.15);
+  background: hsl(var(--foreground) / 0.22);
+  background-clip: padding-box;
 }
+
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--foreground) / 0.25);
+  background: hsl(var(--foreground) / 0.4);
+  background-clip: padding-box;
+}
+
+/* Keep nested panes from propagating wheel movement to the page behind them. */
+:where(.ant-modal-body, .ant-drawer-body, .ant-table-body, .ant-select-dropdown, .chat-markdown, pre) {
+  overscroll-behavior: contain;
+}
+
+/* Monaco draws its own scrollbar instead of using the browser pseudo-elements. */
+.monaco-scrollable-element > .scrollbar {
+  background: transparent !important;
+}
+
+.monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: 9999px !important;
+  background: hsl(var(--foreground) / 0.18) !important;
+  transition: background-color 160ms ease, opacity 160ms ease !important;
+}
+
+.monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: hsl(var(--foreground) / 0.34) !important;
+}
+
+.monaco-scrollable-element > .scrollbar > .slider:active {
+  background: hsl(var(--primary) / 0.68) !important;
 }
 
 /* AI chat Markdown document typography */
