@@ -185,7 +185,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [agentMode, setAgentMode] = useState(false);
-  const { memoryEnabled, setMemoryEnabled, enrichUserMessage } = useConversationMemory();
+  const { memoryEnabled, setMemoryEnabled, memoryDirectories, setMemoryDirectories, enrichUserMessage } = useConversationMemory();
   const [error, setError] = useState<string | null>(null);
   const [sysPromptOpen, setSysPromptOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -575,7 +575,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     // state
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
     messages, systemPrompt, currentModel, compareModels, hasKey,
-    input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, error,
+    input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, memoryDirectories, setMemoryDirectories, error,
     sysPromptOpen, setSysPromptOpen,
     pendingInputPrompt, setPendingInputPrompt, confirmInputPrompt,
     // handlers

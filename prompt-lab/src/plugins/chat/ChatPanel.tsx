@@ -158,6 +158,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const theme = useStore((s) => s.theme);
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
   const [agentTraceOpen, setAgentTraceOpen] = useState(scene === 'code');
+  const [memoryScopePickerOpen, setMemoryScopePickerOpen] = useState(false);
+  const [knowledgeFolders, setKnowledgeFolders] = useState<Array<{ name: string; path: string }>>([]);
+  const [knowledgeFoldersLoading, setKnowledgeFoldersLoading] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
@@ -195,7 +198,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
     messages, systemPrompt, currentModel, compareModels, hasKey,
-    input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, error,
+    input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, memoryDirectories, setMemoryDirectories, error,
     sysPromptOpen, setSysPromptOpen,
     pendingInputPrompt, setPendingInputPrompt, confirmInputPrompt,
     handleNewSession, handleDeleteSession, handleRenameSession, handleExport,
@@ -320,6 +323,26 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     const folder = await window.electronAPI.workspace.openFolder();
     if (folder) setCodeWorkspace(folder);
   }, []);
+
+  const openMemoryScopePicker = useCallback(async () => {
+    setMemoryScopePickerOpen(true);
+    setKnowledgeFoldersLoading(true);
+    try {
+      const folders = await window.electronAPI.listConversationFolders();
+      setKnowledgeFolders(folders);
+      const availablePaths = new Set(folders.map((folder) => folder.path));
+      setMemoryDirectories((previous) => previous.filter((directory) => availablePaths.has(directory.path)));
+    }
+    catch { notifApi.error({ message: '无法读取知识库文件夹' }); }
+    finally { setKnowledgeFoldersLoading(false); }
+  }, [notifApi, setMemoryDirectories]);
+
+  const toggleMemoryDirectory = useCallback((folder: { name: string; path: string }) => {
+    setMemoryDirectories((previous) => previous.some((item) => item.path === folder.path)
+      ? previous.filter((item) => item.path !== folder.path)
+      : [...previous, folder]);
+    setMemoryEnabled(true);
+  }, [setMemoryDirectories, setMemoryEnabled]);
 
   const openCodeChangeDiff = useCallback((change: typeof workspaceChanges[number]) => {
     setCodeChangeDiff({ path: change.path, original: change.original, modified: change.modified });
@@ -504,13 +527,30 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   const openMemorySource = useCallback(async (source: MemoryCitation, sources?: MemoryCitation[]) => {
     const result = await window.electronAPI.readConversation(source.filePath);
+    let content = result.success ? result.content ?? '' : '';
     if (!result.success) {
-      notifApi.error({ message: '无法读取历史原文件', description: result.error });
-      return;
+      const normalizedFile = source.filePath.replace(/\\/g, '/');
+      const directory = memoryDirectories.find((item) => {
+        const root = item.path.replace(/\\/g, '/').replace(/\/$/, '');
+        return normalizedFile === root || normalizedFile.startsWith(`${root}/`);
+      });
+      if (directory) {
+        const root = directory.path.replace(/\\/g, '/').replace(/\/$/, '');
+        const relativePath = normalizedFile.slice(root.length).replace(/^\//, '');
+        const workspaceResult = await window.electronAPI.workspace.readTextFile(directory.path, relativePath);
+        if (workspaceResult.success && workspaceResult.data) content = workspaceResult.data.content;
+        else {
+          notifApi.error({ message: '无法读取知识库文档', description: workspaceResult.error });
+          return;
+        }
+      } else {
+        notifApi.error({ message: '无法读取知识库文档', description: result.error });
+        return;
+      }
     }
     if (sources) setMemoryPreviewSources(sources);
-    setMemoryPreview({ source, content: result.content ?? '' });
-  }, [notifApi]);
+    setMemoryPreview({ source, content });
+  }, [memoryDirectories, notifApi]);
 
   // ── Sources 数据（Agent 工具结果中的搜索引用） ──
   const sourcesItems = useMemo(() => {
@@ -691,6 +731,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                 <BookOpen className="h-3.5 w-3.5" />
                 {memoryEnabled && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />}
               </button>
+              <button className={`relative flex h-7 w-7 items-center justify-center rounded-md transition-colors ${memoryDirectories.length ? 'text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                onClick={() => { void openMemoryScopePicker(); }} title="从知识库选择检索目录" aria-label="从知识库选择检索目录">
+                <FolderOpen className="h-3.5 w-3.5" />
+                {memoryDirectories.length > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-primary px-1 text-[9px] leading-4 text-primary-foreground">{memoryDirectories.length}</span>}
+              </button>
               <Button variant="ghost" size="icon" className={`h-7 w-7 ${memoryManagerOpen ? 'bg-primary-light text-primary' : 'text-muted-foreground hover:text-primary'}`}
                 onClick={() => setMemoryManagerOpen(true)} title="记忆管理"><Database className="h-3.5 w-3.5" /></Button>
               <button onClick={() => setRoleManagerOpen(true)}
@@ -709,6 +754,26 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={handleExport} title="导出 Markdown"><Download className="h-3.5 w-3.5" /></Button>}
               {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')} title="配置 AI API" aria-label="配置 AI API"><Settings className="h-3.5 w-3.5" /></Button>}
             </div>
+
+            {memoryEnabled && (
+              <div className="flex min-h-9 shrink-0 items-center gap-2 border-b bg-primary/[0.03] px-3 py-1.5 text-[10px]">
+                <BookOpen className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="shrink-0 font-medium">知识检索范围</span>
+                {memoryDirectories.length === 0 ? (
+                  <span className="text-warning">尚未选择目录，当前不会检索任何知识库文档</span>
+                ) : (
+                  <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                    {memoryDirectories.map((directory) => (
+                      <span key={directory.path} className="inline-flex max-w-56 items-center gap-1 rounded border bg-background px-1.5 py-0.5 text-muted-foreground" title={directory.path}>
+                        <span className="truncate">{directory.name}</span>
+                        <button type="button" className="rounded p-0.5 hover:bg-accent hover:text-destructive" title={`移除 ${directory.name}`} onClick={() => setMemoryDirectories((previous) => previous.filter((item) => item.path !== directory.path))}><X className="h-2.5 w-2.5" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <Button type="button" size="sm" variant="ghost" className="ml-auto h-6 shrink-0 px-2 text-[10px]" onClick={() => { void openMemoryScopePicker(); }}>从知识库选择</Button>
+              </div>
+            )}
 
             {scene === 'code' && (
               <div className="flex shrink-0 items-center gap-3 border-b bg-primary/5 px-3 py-2">
@@ -1041,6 +1106,31 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
             />
           )}
         </div>
+
+        {memoryScopePickerOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => setMemoryScopePickerOpen(false)}>
+            <div className="flex max-h-[70vh] w-full max-w-md flex-col overflow-hidden rounded-xl border bg-card shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="memory-scope-title" onClick={(event) => event.stopPropagation()}>
+              <div className="flex items-center gap-2 border-b px-4 py-3">
+                <BookOpen className="h-4 w-4 text-primary" />
+                <div className="min-w-0 flex-1"><h2 id="memory-scope-title" className="text-sm font-semibold">选择知识库目录</h2><p className="mt-0.5 text-[10px] text-muted-foreground">仅检索知识库模块中勾选目录内的文档</p></div>
+                <button type="button" className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setMemoryScopePickerOpen(false)}><X className="h-4 w-4" /></button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                {knowledgeFoldersLoading ? <div className="p-8 text-center text-xs text-muted-foreground">正在读取知识库目录…</div>
+                  : knowledgeFolders.length === 0 ? <div className="p-8 text-center text-xs text-muted-foreground"><FolderOpen className="mx-auto mb-2 h-7 w-7 opacity-50" /><p>知识库中暂无目录</p><p className="mt-1 text-[10px]">请先在知识库模块中新建目录并整理文档</p></div>
+                    : knowledgeFolders.map((folder) => {
+                      const selected = memoryDirectories.some((item) => item.path === folder.path);
+                      return <label key={folder.path} className={`mb-1 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 transition-colors ${selected ? 'border-primary/40 bg-primary/5' : 'hover:bg-accent/50'}`}>
+                        <input type="checkbox" checked={selected} onChange={() => toggleMemoryDirectory(folder)} />
+                        <FolderOpen className={`h-4 w-4 shrink-0 ${selected ? 'text-primary' : 'text-muted-foreground'}`} />
+                        <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{folder.name}</span><span className="block truncate text-[10px] text-muted-foreground" title={folder.path}>{folder.path}</span></span>
+                      </label>;
+                    })}
+              </div>
+              <div className="flex items-center justify-between border-t px-4 py-3 text-[10px] text-muted-foreground"><span>已选择 {memoryDirectories.length} 个目录</span><Button type="button" size="sm" className="h-7 px-3 text-xs" onClick={() => setMemoryScopePickerOpen(false)}>完成</Button></div>
+            </div>
+          </div>
+        )}
 
         {/* URL 预览弹层 */}
         {previewUrl && (
