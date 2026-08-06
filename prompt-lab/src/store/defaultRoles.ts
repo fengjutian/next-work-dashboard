@@ -3,7 +3,21 @@ import type { Role } from './types';
 const now = Date.now();
 const DAY = 86_400_000;
 
-export const DEFAULT_ROLES: Role[] = [
+export const CODE_EXPERT_CLARIFICATION_RULE = `需求澄清规则：
+- 当任务缺少会显著影响方案或结果的关键信息（例如目标、技术栈、运行环境、目标文件或预期行为）时，先提出 1～3 个简短且关键的问题，再继续分析或执行。
+- 当上下文已经足够时直接回答或执行，不要为了互动而反问，也不要重复询问用户已经提供的信息。`;
+
+export function applyBuiltInRoleBehaviors(roles: Role[]): Role[] {
+  return roles.map((role) => {
+    if (role.id !== 'role-coder' || role.systemPrompt.includes('需求澄清规则：')) return role;
+    return {
+      ...role,
+      systemPrompt: `${role.systemPrompt.trim()}\n\n${CODE_EXPERT_CLARIFICATION_RULE}`,
+    };
+  });
+}
+
+const BASE_DEFAULT_ROLES: Role[] = [
   {
     id: 'role-general',
     name: '通用助手',
@@ -50,3 +64,5 @@ export const DEFAULT_ROLES: Role[] = [
     updatedAt: now - DAY * 1,
   },
 ];
+
+export const DEFAULT_ROLES: Role[] = applyBuiltInRoleBehaviors(BASE_DEFAULT_ROLES);

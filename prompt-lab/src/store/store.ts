@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, MemoryConfig, Role } from './types';
 import { DEFAULT_SITES } from './types';
-import { DEFAULT_ROLES } from './defaultRoles';
+import { applyBuiltInRoleBehaviors, DEFAULT_ROLES } from './defaultRoles';
 import { createPromptSlice, type PromptSlice } from './prompt-slice';
 import {
   isDbReady,
@@ -345,7 +345,14 @@ export const useStore = create<AppState>((set, get) => ({
       const raw = dbGetSetting('roles');
       if (raw) {
         const saved = JSON.parse(raw) as Role[];
-        if (saved.length > 0) set({ roles: saved });
+        if (saved.length > 0) {
+          const roles = applyBuiltInRoleBehaviors(saved);
+          set({ roles });
+          if (roles.some((role, index) => role !== saved[index])) {
+            dbSetSetting('roles', JSON.stringify(roles));
+            void flushDbToDisk();
+          }
+        }
       }
     } catch { /* ignore */ }
 
