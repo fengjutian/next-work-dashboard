@@ -377,7 +377,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
         case 'act':
           thinkingText = step.content || ''; currentToolCalls = step.toolCalls || [];
           updateSession((prev) => prev.map((message) => message.id === assistantId
-            ? { ...message, content: '', reasoning: thinkingText || message.reasoning || '', toolCalls: [...currentToolCalls] }
+            ? { ...message, content: '', reasoning: [message.reasoning, thinkingText].filter(Boolean).join('\n\n'), toolCalls: [...currentToolCalls] }
             : message));
           break;
         case 'observe':
@@ -391,7 +391,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
                 const assistant = u[assistantIndex];
                 const sources = [...(assistant.memorySources ?? []), ...recalledSources]
                   .filter((source, index, all) => all.findIndex((item) => item.filePath === source.filePath && item.startLine === source.startLine) === index);
-                u[assistantIndex] = { ...assistant, toolResults: step.toolResults, content: '', reasoning: thinkingText || assistant.reasoning || '', memorySources: sources };
+                u[assistantIndex] = { ...assistant, toolResults: step.toolResults, content: '', reasoning: assistant.reasoning || thinkingText, memorySources: sources };
               }
               u.push(toolMsg);
               return u;

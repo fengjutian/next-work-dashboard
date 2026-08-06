@@ -560,6 +560,18 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     return items;
   }, [agentMode, messages]);
 
+  const latestAgentReasoning = useMemo(() => {
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') { lastUserIndex = index; break; }
+    }
+    return messages
+      .slice(Math.max(0, lastUserIndex + 1))
+      .filter((message) => message.role === 'assistant' && message.reasoning?.trim())
+      .map((message) => message.reasoning?.trim() ?? '')
+      .join('\n\n');
+  }, [messages]);
+
   // ── 自定义消息渲染 ──
   const contentRender: BubbleProps['contentRender'] = (content, info) => {
     const extra = (info as any)?.extraInfo;
@@ -568,6 +580,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     const toolResults = extra?.toolResults;
     const memorySources = extra?.memorySources as MemoryCitation[] | undefined;
     const reasoning = extra?.reasoning as string | undefined;
+    const reasoningStreaming = Boolean(streaming && extra?.isLastAi);
     const text = typeof content === 'string' ? content : String(content ?? '');
 
     if (origRole === 'tool') {
@@ -585,7 +598,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     if (origRole === 'assistant') {
       return (
         <div>
-          <ReasoningPanel content={reasoning} streaming={streaming} />
+          {scene !== 'code' && <ReasoningPanel content={reasoning} streaming={reasoningStreaming} />}
           {toolCalls && toolCalls.length > 0 && <ToolCallCard calls={toolCalls} results={toolResults} />}
           {text && <XMarkdown content={text} streaming={{ hasNextChunk: streaming }} className="chat-markdown prose prose-sm max-w-none dark:prose-invert" />}
           {!!memorySources?.length && !streaming && <MemorySourceList sources={memorySources} onOpen={(source, sources) => void openMemorySource(source, sources)} />}
@@ -723,7 +736,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
             )}
 
             {/* Agent 执行轨迹 */}
-            {agentMode && (streaming || thoughtChainItems.length > 0) && scene === 'code' && (
+            {agentMode && (streaming || thoughtChainItems.length > 0 || latestAgentReasoning) && scene === 'code' && (
               <div className="shrink-0 border-b bg-background">
                 <div className="flex h-9 items-center px-2 hover:bg-accent/50">
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-2 px-2 text-left text-xs" onClick={() => setAgentTraceOpen((open) => !open)} aria-expanded={agentTraceOpen}>
@@ -736,7 +749,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   {streaming && <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-destructive" onClick={handleStop}>停止</Button>}
                 </div>
                 {agentTraceOpen && (
-                  <div className="max-h-52 overflow-y-auto border-t px-4 py-2">
+                  <div className="max-h-80 overflow-y-auto border-t px-4 py-2">
                     <div className="relative space-y-2 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-border">
                       {(thoughtChainItems.length ? thoughtChainItems : [{ title: '分析任务', description: '正在理解请求并规划下一步操作', status: 'success' as const }]).map((item, index) => (
                         <div key={`${item.title}-${index}`} className="relative flex gap-3 pl-5 text-xs">
@@ -747,6 +760,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                           </div>
                         </div>
                       ))}
+                    </div>
+                    <div className="mt-3 border-t pt-3">
+                      <ReasoningPanel content={latestAgentReasoning} streaming={streaming} />
                     </div>
                   </div>
                 )}
