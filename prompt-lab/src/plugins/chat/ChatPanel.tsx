@@ -683,20 +683,34 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   }, [activeRole, systemPrompt, updateSessionMeta]);
 
   // ── bubbleItems / conversationItems ──
-  const latestComparisonId = useMemo(() => {
-    return messages[messages.length - 1]?.comparisonId;
+  const latestComparison = useMemo(() => {
+    const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+    if (latestAssistant?.comparisonId) {
+      return messages.filter((message) => message.comparisonId === latestAssistant.comparisonId);
+    }
+
+    // Compatibility fallback for restored/legacy sessions where comparisonId was
+    // not persisted: multiple model answers after the latest user message still
+    // represent one comparison request and must render side by side.
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') {
+        lastUserIndex = index;
+        break;
+      }
+    }
+    const candidates = messages.slice(lastUserIndex + 1).filter((message) => message.role === 'assistant');
+    const distinctModels = new Set(candidates.map((message) => message.model).filter(Boolean));
+    return candidates.length >= 2 && distinctModels.size >= 2 ? candidates : [];
   }, [messages]);
-  const latestComparison = useMemo(
-    () => latestComparisonId
-      ? messages.filter((message) => message.comparisonId === latestComparisonId)
-      : [],
-    [messages, latestComparisonId],
-  );
   const bubbleMessages = useMemo(
-    () => (latestComparisonId
-      ? messages.filter((message) => message.comparisonId !== latestComparisonId)
-      : messages).filter((message) => scene !== 'code' || message.role !== 'tool'),
-    [messages, latestComparisonId, scene],
+    () => {
+      const comparisonIds = new Set(latestComparison.map((message) => message.id));
+      return messages
+        .filter((message) => !comparisonIds.has(message.id))
+        .filter((message) => scene !== 'code' || message.role !== 'tool');
+    },
+    [latestComparison, messages, scene],
   );
   const bubbleItems = useMemo(
     () => toBubbleItems(bubbleMessages, streaming && latestComparison.length === 0, error),

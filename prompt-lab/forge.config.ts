@@ -6,6 +6,8 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // GitHub release downloads are frequently unavailable on some networks. Keep the
 // mirror overridable for CI/corporate environments, but provide a reliable default
@@ -15,7 +17,50 @@ process.env.ELECTRON_MIRROR = electronMirror;
 process.env.npm_config_electron_mirror ||= electronMirror;
 process.env.npm_config_disturl ||= electronMirror;
 
+const projectRoot = process.cwd();
+
+function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
+  const segments = name.split('/');
+  let cursor = fromDirectory;
+  while (cursor.startsWith(projectRoot)) {
+    const candidate = path.join(cursor, 'node_modules', ...segments);
+    if (fs.existsSync(path.join(candidate, 'package.json'))) return candidate;
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  return null;
+}
+
+function copyProductionDependencyTree(name: string, buildPath: string, fromDirectory = projectRoot, copied = new Set<string>()): void {
+  const source = resolveInstalledPackage(name, fromDirectory);
+  if (!source || copied.has(source)) return;
+  copied.add(source);
+
+  const relativePath = path.relative(projectRoot, source);
+  const destination = path.join(buildPath, relativePath);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, { recursive: true, force: true });
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+  const dependencies = new Set([
+    ...Object.keys(packageJson.dependencies ?? {}),
+    ...Object.keys(packageJson.optionalDependencies ?? {}),
+  ]);
+  dependencies.forEach((dependency) => copyProductionDependencyTree(dependency, buildPath, source, copied));
+}
+
 const config: ForgeConfig = {
+  hooks: {
+    packageAfterCopy: async (_forgeConfig, buildPath) => {
+      const copied = new Set<string>();
+      copyProductionDependencyTree('node-pty', buildPath, projectRoot, copied);
+      copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied);
+    },
+  },
   packagerConfig: {
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb}/**',
