@@ -1,6 +1,11 @@
 import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/editor/editor.all.js';
+import 'monaco-editor/esm/vs/basic-languages/monaco.contribution.js';
+import 'monaco-editor/esm/vs/language/css/monaco.contribution.js';
+import 'monaco-editor/esm/vs/language/html/monaco.contribution.js';
+import 'monaco-editor/esm/vs/language/json/monaco.contribution.js';
+import 'monaco-editor/esm/vs/language/typescript/monaco.contribution.js';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 // Vite worker query modules expose constructors at runtime; ESLint cannot infer that virtual-module shape.
 // eslint-disable-next-line import/default

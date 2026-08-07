@@ -132,7 +132,10 @@ export const ComparePanel: React.FC = () => {
   const displayRight = useMemo(() => prepareTextForComparison(structuredComparison.right, preferences), [preferences, structuredComparison.right]);
   const { hunks, computing: diffComputing, error: diffError, worker: usingWorker } = useTextDiffHunks(displayLeft, displayRight);
   const filtered = preferences.ignoreCase || preferences.ignoreBlankLines || preferences.mode !== 'plain';
-  const language = preferences.mode === 'json' ? 'json' : languageIdFromName(right.label || left.label);
+  const structuredLanguages: Partial<Record<CompareMode, string>> = {
+    json: 'json', yaml: 'yaml', xml: 'xml', csv: 'plaintext', markdown: 'markdown', env: 'ini',
+  };
+  const language = structuredLanguages[preferences.mode] ?? languageIdFromName(right.label || left.label);
   const dark = theme === 'dark' || (theme === 'system' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   useEffect(() => {
@@ -513,7 +516,28 @@ export const ComparePanel: React.FC = () => {
             maxComputationTime: 5000,
             maxFileSize: 20,
             renderOverviewRuler: true,
-            minimap: { enabled: false },
+            minimap: {
+              enabled: true,
+              side: 'right',
+              showSlider: 'mouseover',
+              renderCharacters: true,
+              maxColumn: 120,
+            },
+            folding: true,
+            foldingStrategy: 'auto',
+            showFoldingControls: 'always',
+            unfoldOnClickAfterEndOfLine: true,
+            stickyScroll: { enabled: true, maxLineCount: 5 },
+            bracketPairColorization: { enabled: true, independentColorPoolPerBracketType: true },
+            guides: {
+              indentation: true,
+              bracketPairs: true,
+              bracketPairsHorizontal: true,
+              highlightActiveIndentation: true,
+              highlightActiveBracketPair: true,
+            },
+            colorDecorators: true,
+            matchBrackets: 'always',
             wordWrap: 'on',
           }}
         /> : <div ref={unifiedViewRef} className="h-full"><UnifiedDiffView

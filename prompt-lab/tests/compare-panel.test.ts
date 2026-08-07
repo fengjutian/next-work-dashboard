@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 
 vi.mock('@/lib/monaco-setup', () => ({ configureMonaco: vi.fn() }));
 vi.mock('@monaco-editor/react', () => ({
-  DiffEditor: ({ original, modified, onMount }: { original: string; modified: string; onMount?: (editor: unknown) => void }) => {
+  DiffEditor: ({ original, modified, language, options, onMount }: { original: string; modified: string; language?: string; options?: Record<string, unknown>; onMount?: (editor: unknown) => void }) => {
     const listeners = { original: [] as Array<() => void>, modified: [] as Array<() => void> };
     const values = { original, modified };
     const makeEditor = (side: 'original' | 'modified') => ({
@@ -20,7 +20,7 @@ vi.mock('@monaco-editor/react', () => ({
     const originalEditor = makeEditor('original');
     const modifiedEditor = makeEditor('modified');
     onMount?.({ getOriginalEditor: () => originalEditor, getModifiedEditor: () => modifiedEditor, getLineChanges: () => [] });
-    return createElement('div', { 'data-testid': 'diff-editor', 'data-original': original, 'data-modified': modified },
+    return createElement('div', { 'data-testid': 'diff-editor', 'data-original': original, 'data-modified': modified, 'data-language': language, 'data-options': JSON.stringify(options) },
       createElement('textarea', { 'aria-label': '左侧文本', value: original, onChange: (event: { target: { value: string } }) => { values.original = event.target.value; listeners.original.forEach((listener) => listener()); } }),
       createElement('textarea', { 'aria-label': '右侧文本', value: modified, onChange: (event: { target: { value: string } }) => { values.modified = event.target.value; listeners.modified.forEach((listener) => listener()); } }),
     );
@@ -87,6 +87,18 @@ describe('ComparePanel', () => {
     expect(view.textContent).toContain('欢迎使用 React');
     expect(view.textContent).toContain('欢迎体验 React');
     expect(screen.queryByTestId('diff-editor')).toBeNull();
+  });
+
+  it('enables syntax language, minimap, folding, and scope guides in the diff editor', () => {
+    render(createElement(ComparePanel));
+    const editor = screen.getByTestId('diff-editor');
+    const options = JSON.parse(editor.getAttribute('data-options') ?? '{}');
+    expect(editor.getAttribute('data-language')).toBe('typescript');
+    expect(options.minimap.enabled).toBe(true);
+    expect(options.folding).toBe(true);
+    expect(options.stickyScroll.enabled).toBe(true);
+    expect(options.bracketPairColorization.enabled).toBe(true);
+    expect(options.guides.highlightActiveBracketPair).toBe(true);
   });
 
   it('opens two files and safely saves an edited side with its metadata', async () => {
