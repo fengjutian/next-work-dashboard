@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Database, FileText, Loader2, Send, Trash2, Upload } from '@/components/icons';
 import { createOpenAIProvider } from '@/core/llm';
 import { useStore } from '@/store';
+import { toast } from '@/components/Toast';
 import { indexDocument, embedQuestion } from './pipeline';
 import type { EmbeddingMode } from './pipeline';
 import { buildRagContext, retrieve } from './retrieval';
@@ -49,7 +50,9 @@ export const DocumentKnowledgePanel: React.FC = () => {
       }
       setStage('ready'); setStatus(`已建立索引：${accepted.length} 个文件`); setProgress(100);
     } catch (error) {
-      setStage('error'); setStatus(error instanceof Error ? error.message : '处理文档失败');
+      const message = error instanceof Error ? error.message : '处理文档失败';
+      setStage('error'); setStatus(message);
+      toast.error(`文档处理失败：${message}`, { duration: 7000 });
     }
   }, [embeddingMode, memoryConfig]);
 
@@ -77,7 +80,9 @@ export const DocumentKnowledgePanel: React.FC = () => {
       }
       setStage('ready'); setStatus(`已从 ${hits.length} 个片段生成回答`);
     } catch (error) {
-      setStage('error'); setStatus(error instanceof Error ? error.message : '问答失败');
+      const message = error instanceof Error ? error.message : '问答失败';
+      setStage('error'); setStatus(message);
+      toast.error(`文档问答失败：${message}`, { duration: 7000 });
       setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: '生成回答失败，请检查模型与向量配置。' } : message));
     }
   }, [aiApi, chunks, embeddingMode, memoryConfig, question, stage]);

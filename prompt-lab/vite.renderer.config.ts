@@ -2,12 +2,16 @@ import { defineConfig } from 'vite';
 import path from 'path';
 
 export default defineConfig({
+  worker: {
+    format: 'es',
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
   },
   build: {
+    target: 'esnext',
     rollupOptions: {
       onwarn(warning, warn) {
         // Ant Design marks browser components with React's `use client`
