@@ -11,6 +11,7 @@ import { WereadKnowledgeNetwork } from './WereadKnowledgeNetwork';
 import { WereadInsightsActions } from './WereadInsightsActions';
 import { WereadAISummary } from './WereadAISummary';
 import { WereadAIRecommend } from './WereadAIRecommend';
+import { formatReadingDuration, type WereadReadingActivity } from './readingActivity';
 
 echarts.use([
   BarChart, GraphChart, HeatmapChart, LineChart, PieChart, ScatterChart,
@@ -93,7 +94,7 @@ function Chart({ option, height = 300, onClick }: { option: EChartsCoreOption; h
   return <div ref={containerRef} style={{ height }} className="w-full" />;
 }
 
-export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (bookId: string) => void }> = ({ books, onSelectBook }) => {
+export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; readingActivities?: WereadReadingActivity[]; onSelectBook: (bookId: string) => void }> = ({ books, readingActivities = [], onSelectBook }) => {
   const theme = useThemePalette();
   const [section, setSection] = useState<'overview' | 'habits' | 'topics' | 'interest' | 'network' | 'actions' | 'knowledge' | 'ai' | 'recommend'>('overview');
   const [visited, setVisited] = useState<Set<typeof section>>(() => new Set(['overview']));
@@ -209,8 +210,15 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
   }, [books, dataReady]);
 
   const totals = useMemo(() => books.reduce((sum, book) => ({ highlights: sum.highlights + book.noteCount, reviews: sum.reviews + book.reviewCount, bookmarks: sum.bookmarks + book.bookmarkCount }), { highlights: 0, reviews: 0, bookmarks: 0 }), [books]);
+  const readingStats = useMemo(() => {
+    const totalSeconds = readingActivities.reduce((sum, item) => sum + item.totalSeconds, 0);
+    const days = new Map<string, number>();
+    for (const item of readingActivities) for (const [day, seconds] of Object.entries(item.dailySeconds)) days.set(day, (days.get(day) || 0) + seconds);
+    const ranking = [...readingActivities].sort((left, right) => right.totalSeconds - left.totalSeconds);
+    return { totalSeconds, days, ranking, topBook: ranking[0] };
+  }, [readingActivities]);
 
-  if (!books.length) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">请先获取微信读书笔记，分析将基于本地 SQLite 缓存生成。</div>;
+  if (!books.length && !readingActivities.length) return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">开始阅读或获取微信读书笔记后，这里将生成本地阅读分析。</div>;
   if (!data) return (
     <div className="flex h-full items-center justify-center bg-background/40">
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
@@ -262,6 +270,10 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; onSelectBook: (
         <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">全部笔记活跃日历</h3><Chart option={calendarOption} height={calendarYears.length * 145 + 80} /></section>
       </>}
       {section === 'habits' && <>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[['累计阅读', formatReadingDuration(readingStats.totalSeconds)], ['实际阅读天数', `${readingStats.days.size} 天`], ['已记录书籍', `${readingActivities.length} 本`], ['阅读最久', readingStats.topBook?.title || '暂无']].map(([label, value]) => <div key={label} className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-2 truncate text-xl font-semibold" title={value}>{value}</p></div>)}
+        </div>
+        {readingStats.ranking.length > 0 && <section className="rounded-lg border bg-card p-4"><h3 className="text-sm font-medium">按书阅读时长</h3><div className="mt-3 grid gap-2 md:grid-cols-2">{readingStats.ranking.slice(0, 10).map((item) => <div key={item.bookId} className="rounded-md border bg-background p-3"><div className="flex items-center justify-between gap-3"><p className="truncate text-sm font-medium" title={item.title}>{item.title}</p><span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatReadingDuration(item.totalSeconds)}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary/70" style={{ width: `${Math.max(2, (item.totalSeconds / Math.max(1, readingStats.ranking[0].totalSeconds)) * 100)}%` }} /></div><p className="mt-1 truncate text-[10px] text-muted-foreground">{item.chapter || `阅读进度 ${Math.round(item.progress * 100)}%`}</p></div>)}</div></section>}
         <div className="grid gap-4 lg:grid-cols-3"><div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">最长连续记录</p><p className="mt-2 text-2xl font-semibold text-primary">{data.longestStreak} 天</p></div><div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">当前连续记录</p><p className="mt-2 text-2xl font-semibold text-primary">{data.currentStreak} 天</p></div><div className="rounded-lg border bg-card p-4"><p className="text-xs text-muted-foreground">最活跃星期</p><p className="mt-2 text-2xl font-semibold text-primary">{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][data.weekday.indexOf(Math.max(...data.weekday))]}</p></div></div>
         <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">星期笔记习惯</h3><Chart option={weekdayOption} height={280} /></section>
         <section className="rounded-lg border bg-card p-3"><h3 className="px-2 text-sm font-medium">阅读时段分布（小时 × 星期）</h3><p className="px-2 pt-1 text-xs text-muted-foreground">颜色越深表示该时段笔记越多，可用于发现自己的阅读节奏。</p><Chart option={hourlyOption} height={320} /></section>
