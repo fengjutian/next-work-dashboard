@@ -1,5 +1,4 @@
 import React from 'react';
-import { X } from '@/components/icons';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { SettingsAISites } from '@/components/settings/SettingsAISites';
@@ -10,7 +9,6 @@ import { SettingsAbout } from '@/components/settings/SettingsAbout';
 import { SettingsAiApi } from '@/components/settings/SettingsAiApi';
 import { SettingsMemory } from '@/components/settings/SettingsMemory';
 import { SettingsPlugins } from '@/components/settings/SettingsPlugins';
-import { useStore } from '@/store';
 
 // ── Tab 配置 ──
 
@@ -43,26 +41,9 @@ const ALL_PANELS: { id: SettingsTab; Component: React.FC }[] = [
 
 export const SettingsSidebar: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<SettingsTab>('ai-api');
-  const setActiveActivity = useStore((s) => s.setActiveActivity);
 
   return (
     <div className="h-full flex-1 flex flex-col bg-card">
-      {/* 标题行 + 关闭按钮 */}
-      <div className="px-3 py-2.5 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">
-          设置
-        </h3>
-        <button
-          className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          onClick={() => setActiveActivity(null)}
-          title="关闭设置"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <Separator />
-
       {/* Tab 导航栏 */}
       <div className="px-3 py-2">
         <div className="flex items-center gap-1 bg-muted rounded-md p-1">

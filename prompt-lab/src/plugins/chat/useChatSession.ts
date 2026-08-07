@@ -100,6 +100,8 @@ export const QWEN_MODELS = [
   { value: 'qwen3.8-max-preview', label: 'Qwen 3.8 Max Preview' },
   { value: 'qwen3.7-plus', label: 'Qwen 3.7 Plus' },
   { value: 'qwen3.7-flash', label: 'Qwen 3.7 Flash' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（千问平台）' },
+  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash（千问平台）' },
 ];
 
 // ── 会话类型 ──

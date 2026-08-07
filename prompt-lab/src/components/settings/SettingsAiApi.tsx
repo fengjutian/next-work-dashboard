@@ -10,7 +10,7 @@ import { clearLlmMemoryCaches, getLlmCacheMetrics, getSemanticShadowMetrics, res
 
 const PROVIDERS = {
   deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', models: [{ value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }] },
-  qwen: { label: '千问（DashScope）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', models: [{ value: 'qwen3.8-max-preview', label: 'Qwen 3.8 Max Preview' }, { value: 'qwen3.7-plus', label: 'Qwen 3.7 Plus' }, { value: 'qwen3.7-flash', label: 'Qwen 3.7 Flash' }] },
+  qwen: { label: '千问（DashScope）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', models: [{ value: 'qwen3.8-max-preview', label: 'Qwen 3.8 Max Preview' }, { value: 'qwen3.7-plus', label: 'Qwen 3.7 Plus' }, { value: 'qwen3.7-flash', label: 'Qwen 3.7 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（千问平台）' }, { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash（千问平台）' }] },
   custom: { label: '自定义 OpenAI 兼容', baseUrl: '', model: '', models: [] },
 } as const;
 const QWEN_URLS = {
@@ -32,6 +32,7 @@ export const SettingsAiApi: React.FC = () => {
   const [cacheMetrics, setCacheMetrics] = React.useState(() => getLlmCacheMetrics());
   const [shadowMetrics, setShadowMetrics] = React.useState(() => getSemanticShadowMetrics());
   const [persistentStats, setPersistentStats] = React.useState(() => dbGetLlmCacheStats());
+  const [activeSection, setActiveSection] = React.useState<'api' | 'cache'>('api');
 
   const refreshCacheStats = () => {
     setCacheCount(dbGetLlmCacheCount());
@@ -99,11 +100,12 @@ export const SettingsAiApi: React.FC = () => {
 
   return (
     <section>
-      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-        AI API
-      </h4>
+      <div className="mb-4 flex w-fit rounded-md bg-muted p-1">
+        <button type="button" onClick={() => setActiveSection('api')} className={`rounded px-4 py-1.5 text-xs ${activeSection === 'api' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'}`}>AI API</button>
+        <button type="button" onClick={() => { setActiveSection('cache'); refreshCacheStats(); }} className={`rounded px-4 py-1.5 text-xs ${activeSection === 'cache' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'}`}>AI 响应缓存</button>
+      </div>
 
-      <div className="space-y-4">
+      <div className="space-y-4" style={{ display: activeSection === 'api' ? 'block' : 'none' }}>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">供应商</label>
           <select value={aiApi.provider} onChange={(event) => changeProvider(event.target.value as keyof typeof PROVIDERS)} className="flex h-8 w-full rounded-md border border-border bg-card px-2.5 text-xs">
@@ -203,7 +205,9 @@ export const SettingsAiApi: React.FC = () => {
           )}
         </div>
 
-        <div className="space-y-3 border-t pt-4">
+      </div>
+
+      <div className="space-y-3" style={{ display: activeSection === 'cache' ? 'block' : 'none' }}>
           <div className="flex items-center justify-between gap-3">
             <div><div className="text-xs font-medium">AI 响应缓存</div><div className="text-[10px] text-muted-foreground">普通对话使用本地精确缓存；Agent 与工具调用不会缓存</div></div>
             <input type="checkbox" checked={llmCacheConfig.enabled} onChange={(event) => setLlmCacheConfig({ enabled: event.target.checked })} />
@@ -231,7 +235,6 @@ export const SettingsAiApi: React.FC = () => {
             <Button variant="outline" size="sm" className="h-7 text-xs" onClick={refreshCacheStats}>刷新统计</Button>
             <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => void clearCache()}>清空缓存</Button>
           </div>
-        </div>
       </div>
     </section>
   );

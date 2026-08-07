@@ -274,7 +274,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [auditError, setAuditError] = useState('');
   const [auditStreaming, setAuditStreaming] = useState(false);
   const [auditActivity, setAuditActivity] = useState('');
-  const [auditPanelOpen, setAuditPanelOpen] = useState(true);
+  const [auditPanelOpen, setAuditPanelOpen] = useState(false);
   const [auditPanelResizing, setAuditPanelResizing] = useState(false);
   const [auditPanelWidth, setAuditPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem('ai-chat.audit-panel-width'));
@@ -1087,20 +1087,26 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   title="选择一个或多个模型"
                 >
                   <Sparkles className="h-3 w-3" />
-                  {compareModels.length > 1 ? `${compareModels.length} 个模型对比` : availableModels.find((m) => m.value === currentModel)?.label ?? currentModel}
+                  <span
+                    className="max-w-36 truncate"
+                    title={compareModels.length > 1 ? `${compareModels.length} 个模型对比` : availableModels.find((m) => m.value === currentModel)?.label ?? currentModel}
+                  >
+                    {compareModels.length > 1 ? `${compareModels.length} 个模型对比` : availableModels.find((m) => m.value === currentModel)?.label ?? currentModel}
+                  </span>
                   <ChevronDown className={`h-3 w-3 transition-transform ${modelPickerOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {modelPickerOpen && (
-                  <div className="absolute right-0 top-7 z-40 min-w-48 rounded-md border bg-card p-2 shadow-lg">
+                  <div className="absolute right-0 top-7 z-40 w-60 rounded-md border bg-card p-2 shadow-lg">
                     <div className="mb-1.5 text-[10px] text-muted-foreground">可多选；Agent 模式仅使用主模型</div>
                     {availableModels.map((model) => (
                       <label key={model.value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent">
                         <input
                           type="checkbox"
+                          className="h-3.5 w-3.5 shrink-0 accent-primary"
                           checked={compareModels.includes(model.value)}
                           onChange={() => toggleCompareModel(model.value)}
                         />
-                        <span>{model.label}</span>
+                        <span className="min-w-0 flex-1 truncate" title={model.label}>{model.label}</span>
                       </label>
                     ))}
                   </div>
