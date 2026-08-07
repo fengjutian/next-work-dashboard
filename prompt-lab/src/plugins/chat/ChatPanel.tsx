@@ -6,14 +6,14 @@ import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
   BookOpen, Blocks, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
-  FileText, FolderOpen, Globe, PanelLeft, PanelRight, Paperclip, Plus, RefreshCw, Robot,
+  FileText, FolderOpen, Globe, MessageSquare, PanelLeft, PanelRight, Paperclip, Plus, RefreshCw, Robot,
   RotateCcw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { useChatSession, MODELS, toBubbleItems } from './useChatSession';
 import { ToolCallCard } from './MessageBubble';
-import { setToolEnabled } from '@/core/tools';
+import { isToolEnabled, listTools, setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './ToolManagerDialog';
 import { McpApprovalDialog } from './McpApprovalDialog';
 import { ConversationResourcesDialog } from './ConversationResourcesDialog';
@@ -36,6 +36,8 @@ interface ChatAttachment {
   parseStatus: 'pending' | 'parsing' | 'ready' | 'error';
   error?: string;
 }
+
+type MentionResourceTab = 'skills' | 'tools' | 'prompts';
 
 // ── 常量 ──
 const ALL_TOOLS = [
@@ -167,6 +169,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       : '',
   ].filter(Boolean).join('\n\n'), [activeRole?.systemPrompt, codeWorkspace, scene, scenePreset.systemPrompt]);
   const setActiveActivity = useStore((s) => s.setActiveActivity);
+  const skills = useStore((s) => s.skills);
+  const prompts = useStore((s) => s.prompts);
   const theme = useStore((s) => s.theme);
   const aiApi = useStore((s) => s.aiApi);
   const [toolManagerOpen, setToolManagerOpen] = useState(false);
@@ -176,6 +180,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [knowledgeFoldersLoading, setKnowledgeFoldersLoading] = useState(false);
   const [savingToKnowledge, setSavingToKnowledge] = useState(false);
   const [conversationResourcesOpen, setConversationResourcesOpen] = useState(false);
+  const [invokedSkillIds, setInvokedSkillIds] = useState<string[]>([]);
+  const [invokedPromptIds, setInvokedPromptIds] = useState<string[]>([]);
+  const [invokedToolNames, setInvokedToolNames] = useState<string[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionResourceTab, setMentionResourceTab] = useState<MentionResourceTab>('skills');
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -222,6 +231,39 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     boundPromptIds, toggleBoundPrompt,
     boundSkillIds, toggleBoundSkill,
   } = useChatSession(sceneSystemPrompt, scene);
+
+  const invokedSkills = useMemo(
+    () => skills.filter((skill) => invokedSkillIds.includes(skill.id) && skill.enabled),
+    [invokedSkillIds, skills],
+  );
+  const invokedPrompts = useMemo(
+    () => prompts.filter((prompt) => invokedPromptIds.includes(prompt.id) && prompt.enabled !== false),
+    [invokedPromptIds, prompts],
+  );
+  const enabledTools = listTools().filter((tool) => isToolEnabled(tool.name));
+  const invokedTools = enabledTools.filter((tool) => invokedToolNames.includes(tool.name));
+  const mentionGroups = useMemo(() => {
+    if (mentionQuery === null) return { skills: [], prompts: [], tools: [] };
+    const query = mentionQuery.toLocaleLowerCase();
+    const matches = (name: string, description: string) => !query || name.toLocaleLowerCase().includes(query) || description.toLocaleLowerCase().includes(query);
+    return {
+      skills: skills.filter((skill) => skill.enabled && !invokedSkillIds.includes(skill.id) && matches(skill.name, skill.description)).slice(0, 5),
+      prompts: prompts.filter((prompt) => prompt.enabled !== false && !invokedPromptIds.includes(prompt.id) && matches(prompt.title, prompt.content)).slice(0, 5),
+      tools: enabledTools.filter((tool) => !invokedToolNames.includes(tool.name) && matches(tool.name, tool.description)).slice(0, 5),
+    };
+  }, [enabledTools, invokedPromptIds, invokedSkillIds, invokedToolNames, mentionQuery, prompts, skills]);
+
+  const handleSenderChange = useCallback((value: string) => {
+    setInput(value);
+    const mention = value.match(/(?:^|\s)@([^\s@]*)$/);
+    setMentionQuery(mention ? mention[1] : null);
+  }, [setInput]);
+
+  const finishMention = useCallback(() => {
+    setInput((current) => current.replace(/@[^\s@]*$/, '').trimEnd());
+    setMentionQuery(null);
+    setTimeout(() => senderRef.current?.focus(), 0);
+  }, [setInput]);
 
   const [auditModel, setAuditModel] = useState(() => (
     MODELS.find((model) => model.value !== currentModel)?.value ?? currentModel
@@ -724,9 +766,22 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   // ── Sender 提交（含附件处理 + 自动聚焦） ──
   const onSenderSubmit = useCallback(async (text: string) => {
+    const invocationPrefix = [
+      ...invokedSkills.map((skill) => `@${skill.name}`),
+      ...invokedPrompts.map((prompt) => `@${prompt.title}`),
+      ...invokedTools.map((tool) => `@${tool.name}`),
+    ].join(' ');
+    const visibleText = [invocationPrefix, text].filter(Boolean).join(' ');
+    const currentInvokedSkillIds = invokedSkills.map((skill) => skill.id);
+    const currentInvokedPromptIds = invokedPrompts.map((prompt) => prompt.id);
+    const currentInvokedToolNames = invokedTools.map((tool) => tool.name);
     if (attachments.length === 0) {
       setInput('');
-      await handleSend(text);
+      setInvokedSkillIds([]);
+      setInvokedPromptIds([]);
+      setInvokedToolNames([]);
+      setMentionQuery(null);
+      await handleSend(visibleText, undefined, currentInvokedSkillIds, currentInvokedPromptIds, currentInvokedToolNames);
       setTimeout(() => senderRef.current?.focus(), 50);
       return;
     }
@@ -768,8 +823,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     if (parsed.length === 0) return;
 
     const names = parsed.map((file) => file.name).join(', ');
-    const displayText = text
-      ? `[附件：${names}]\n${text}`
+    const displayText = visibleText
+      ? `[附件：${names}]\n${visibleText}`
       : `[附件：${names}]\n请阅读并分析附件内容。`;
     const contextText = [
       buildAttachmentContext(parsed),
@@ -778,9 +833,13 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
     setInput('');
     setAttachments([]);
-    await handleSend(displayText, contextText);
+    setInvokedSkillIds([]);
+    setInvokedPromptIds([]);
+    setInvokedToolNames([]);
+    setMentionQuery(null);
+    await handleSend(displayText, contextText, currentInvokedSkillIds, currentInvokedPromptIds, currentInvokedToolNames);
     setTimeout(() => senderRef.current?.focus(), 50);
-  }, [handleSend, setInput, attachments, notifApi]);
+  }, [handleSend, setInput, attachments, notifApi, invokedPrompts, invokedSkills, invokedTools]);
 
   // ── 提示词点击 → 填充到输入框（不自动发送） ──
   const onPromptClick = useCallback((info: { data: { key: string; label: string; value: string } }) => {
@@ -1248,11 +1307,53 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   />
                 </div>
               )}
-              <div className="p-3">
+              <div className="relative p-3">
                 {/* 隐藏的文件 input */}
                 <input type="file" ref={fileInputRef} className="hidden" multiple
                   onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
-                <Sender ref={senderRef} value={input} onChange={setInput}
+                {mentionQuery !== null && (
+                  <div className="absolute bottom-[calc(100%-8px)] left-3 right-3 z-30 flex max-h-72 flex-col overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-xl">
+                    <div className="flex shrink-0 items-center gap-1 border-b px-2 pt-2">
+                      {([
+                        ['skills', '技能', mentionGroups.skills.length],
+                        ['tools', '工具', mentionGroups.tools.length],
+                        ['prompts', '提示词', mentionGroups.prompts.length],
+                      ] as const).map(([tab, label, count]) => (
+                        <button key={tab} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setMentionResourceTab(tab)} className={`flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-1 text-xs font-medium transition-colors ${mentionResourceTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+                          {tab === 'skills' ? <Blocks className="h-3.5 w-3.5" /> : tab === 'tools' ? <Wrench className="h-3.5 w-3.5" /> : <MessageSquare className="h-3.5 w-3.5" />}
+                          {label}<span className="rounded-full bg-muted px-1.5 text-[9px] leading-4">{count}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="min-h-0 overflow-y-auto p-1.5">
+                      {mentionGroups[mentionResourceTab].length === 0 && <div className="px-3 py-7 text-center text-xs text-muted-foreground">当前页签没有匹配的可用资源</div>}
+                      {mentionResourceTab === 'skills' && mentionGroups.skills.map((skill) => <button key={skill.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setInvokedSkillIds((current) => [...current, skill.id]); finishMention(); }} className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent"><Blocks className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span className="min-w-0"><span className="block truncate text-xs font-medium">{skill.name}</span><span className="mt-0.5 block line-clamp-1 text-[10px] text-muted-foreground">{skill.description || '暂无技能说明'}</span></span></button>)}
+                      {mentionResourceTab === 'tools' && mentionGroups.tools.map((tool) => <button key={tool.name} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setInvokedToolNames((current) => [...current, tool.name]); finishMention(); }} className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent"><Wrench className="mt-0.5 h-4 w-4 shrink-0 text-warning" /><span className="min-w-0"><span className="block truncate text-xs font-medium">{tool.name}</span><span className="mt-0.5 block line-clamp-1 text-[10px] text-muted-foreground">{tool.description}</span></span></button>)}
+                      {mentionResourceTab === 'prompts' && mentionGroups.prompts.map((prompt) => <button key={prompt.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setInvokedPromptIds((current) => [...current, prompt.id]); finishMention(); }} className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent"><MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span className="min-w-0"><span className="block truncate text-xs font-medium">{prompt.title}</span><span className="mt-0.5 block line-clamp-1 text-[10px] text-muted-foreground">{prompt.content}</span></span></button>)}
+                    </div>
+                  </div>
+                )}
+                {(invokedSkills.length + invokedPrompts.length + invokedTools.length) > 0 && (
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] text-muted-foreground">本轮调用</span>
+                    {invokedSkills.map((skill) => (
+                      <button key={skill.id} type="button" onClick={() => setInvokedSkillIds((current) => current.filter((id) => id !== skill.id))} className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/15" title="移除本轮技能">
+                        <Blocks className="h-3 w-3" />{skill.name}<X className="h-3 w-3" />
+                      </button>
+                    ))}
+                    {invokedTools.map((tool) => (
+                      <button key={tool.name} type="button" onClick={() => setInvokedToolNames((current) => current.filter((name) => name !== tool.name))} className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-1 text-[10px] text-warning hover:bg-warning/15" title="移除本轮工具">
+                        <Wrench className="h-3 w-3" />{tool.name}<X className="h-3 w-3" />
+                      </button>
+                    ))}
+                    {invokedPrompts.map((prompt) => (
+                      <button key={prompt.id} type="button" onClick={() => setInvokedPromptIds((current) => current.filter((id) => id !== prompt.id))} className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-1 text-[10px] text-success hover:bg-success/15" title="移除本轮提示词">
+                        <MessageSquare className="h-3 w-3" />{prompt.title}<X className="h-3 w-3" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <Sender ref={senderRef} value={input} onChange={handleSenderChange}
                   onSubmit={onSenderSubmit} onCancel={handleStop}
                   loading={streaming} disabled={!hasKey}
                   prefix={
@@ -1264,7 +1365,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                       </button>
                     </div>
                   }
-                  placeholder={!hasKey ? '请先在设置中配置 API Key' : agentMode ? 'Agent 模式：输入任务...' : '输入消息... (Enter 发送)'}
+                  placeholder={!hasKey ? '请先在设置中配置 API Key' : agentMode ? 'Agent 模式：输入任务，@ 调用资源...' : '输入消息，@ 调用技能、工具或提示词...'}
                   style={{ borderRadius: 8 }} />
               </div>
             </div>

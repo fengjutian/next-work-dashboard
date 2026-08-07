@@ -274,6 +274,24 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       .join('\n\n---\n\n');
   }, [activeSession, skills]);
 
+  /** 获取本轮通过 @ 显式调用的技能内容。 */
+  const getInvokedSkillsContent = useCallback((ids: string[]): string => {
+    if (ids.length === 0) return '';
+    return skills
+      .filter((skill) => skill.enabled && ids.includes(skill.id))
+      .map((skill) => `# 本轮调用技能：${skill.name}\n\n${buildSkillPrompt(skill)}`)
+      .join('\n\n---\n\n');
+  }, [skills]);
+
+  /** 获取本轮通过 @ 显式调用的提示词内容。 */
+  const getInvokedPromptsContent = useCallback((ids: string[]): string => {
+    if (ids.length === 0) return '';
+    return prompts
+      .filter((prompt) => prompt.enabled !== false && ids.includes(prompt.id))
+      .map((prompt) => `# 本轮调用提示词：${prompt.title}\n\n${prompt.content}`)
+      .join('\n\n---\n\n');
+  }, [prompts]);
+
   /** 切换技能是否绑定到当前对话 */
   const toggleBoundSkill = useCallback((skillId: string) => {
     setSessions((prev) => prev.map((s) => {
@@ -340,12 +358,16 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     assistantId: string,
     model = currentModel,
     signal?: AbortSignal,
+    invokedSkillIds: string[] = [],
+    invokedPromptIds: string[] = [],
   ) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const boundContent = getBoundPromptsContent();
     const skillContent = getEnabledSkillsContent();
-    const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim(), boundContent, skillContent].filter(Boolean).join('\n\n');
+    const invokedSkillContent = getInvokedSkillsContent(invokedSkillIds);
+    const invokedPromptContent = getInvokedPromptsContent(invokedPromptIds);
+    const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim(), boundContent, skillContent, invokedSkillContent, invokedPromptContent].filter(Boolean).join('\n\n');
     const sysMsg = fullSystemPrompt ? [{ role: 'system' as const, content: fullSystemPrompt }] : [];
     const chatMessages: ChatMessage[] = [
       ...sysMsg,
@@ -373,9 +395,9 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       const title = history[0]?.content?.slice(0, 30) + (history[0]?.content?.length > 30 ? '...' : '') || '新对话';
       updateSessionMeta({ title });
     }
-  }, [currentModel, sceneSystemPrompt, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent, getProvider, updateSession, updateSessionMeta]);
+  }, [currentModel, sceneSystemPrompt, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent, getInvokedSkillsContent, getInvokedPromptsContent, getProvider, updateSession, updateSessionMeta]);
 
-  const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal) => {
+  const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal, invokedSkillIds: string[] = [], invokedPromptIds: string[] = [], invokedToolNames: string[] = []) => {
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const chatHistory: ChatMessage[] = history
@@ -389,14 +411,23 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     // 注入绑定提示词和技能到 system prompt 层面
     const boundContent = getBoundPromptsContent();
     const skillContent = getEnabledSkillsContent();
-    const agentUserContent = [boundContent, skillContent, userContent]
+    const invokedSkillContent = getInvokedSkillsContent(invokedSkillIds);
+    const invokedPromptContent = getInvokedPromptsContent(invokedPromptIds);
+    const toolInstruction = invokedToolNames.length > 0
+      ? `本轮必须优先调用以下指定工具完成任务：${invokedToolNames.join(', ')}。不要仅描述如何调用。`
+      : '';
+    const agentUserContent = [boundContent, skillContent, invokedSkillContent, invokedPromptContent, toolInstruction, userContent]
       .filter(Boolean)
       .join('\n\n---\n\n');
 
     let thinkingText = '';
     let currentToolCalls: ToolCall[] = [];
     const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim()].filter(Boolean).join('\n\n');
-    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, { signal, systemPrompt: fullSystemPrompt })) {
+    for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, {
+      signal,
+      systemPrompt: fullSystemPrompt,
+      allowedToolNames: invokedToolNames.length > 0 ? invokedToolNames : undefined,
+    })) {
       switch (step.type) {
         case 'think':
           updateSession((prev) => prev.map((message) => message.id === assistantId
@@ -434,10 +465,10 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
           break;
       }
     }
-  }, [currentModel, getProvider, sceneSystemPrompt, updateSession, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent]);
+  }, [currentModel, getProvider, sceneSystemPrompt, updateSession, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent, getInvokedSkillsContent, getInvokedPromptsContent]);
 
   // ── 发送 ──
-  const handleSend = useCallback(async (directText?: string, contextText?: string) => {
+  const handleSend = useCallback(async (directText?: string, contextText?: string, invokedSkillIds: string[] = [], invokedPromptIds: string[] = [], invokedToolNames: string[] = []) => {
     const text = (directText ?? input).trim();
     if (!text || streaming) return;
     if (!directText) setInput('');
@@ -451,7 +482,8 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       timestamp: Date.now(),
     };
     const comparisonId = `cmp-${Date.now()}`;
-    const models = agentMode ? [currentModel] : [...new Set(compareModels)];
+    const useAgent = agentMode || invokedToolNames.length > 0;
+    const models = useAgent ? [currentModel] : [...new Set(compareModels)];
     const assistantMsgs: Message[] = models.map((model, index) => ({
       id: `a-${Date.now()}-${index}`,
       role: 'assistant',
@@ -467,17 +499,20 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     const controllers = models.map(() => new AbortController());
     abortRef.current = controllers;
     try {
-      if (agentMode) {
+      if (useAgent) {
         await runAgentChat(
           newHistory,
           assistantMsgs[0].id,
           userMsg.contextContent ?? text,
           controllers[0].signal,
+          invokedSkillIds,
+          invokedPromptIds,
+          invokedToolNames,
         );
       } else {
         const results = await Promise.allSettled(
           assistantMsgs.map((message, index) =>
-            runChat(newHistory, message.id, message.model, controllers[index].signal)
+            runChat(newHistory, message.id, message.model, controllers[index].signal, invokedSkillIds, invokedPromptIds)
           )
         );
         const failures = results
