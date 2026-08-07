@@ -1,6 +1,6 @@
 import { BrowserWindow, app } from 'electron';
 import path from 'node:path';
-import { setMainWindow, getTray } from './globals';
+import { setMainWindow, removeMainWindow, getTray } from './globals';
 
 export function createWindow(preloadPath: string) {
   const win = new BrowserWindow({
@@ -22,6 +22,8 @@ export function createWindow(preloadPath: string) {
   });
 
   setMainWindow(win);
+  win.on('focus', () => setMainWindow(win));
+  win.once('closed', () => removeMainWindow(win));
 
   const publishMaximizedState = () => {
     win.webContents.send('window-maximized-changed', win.isMaximized());

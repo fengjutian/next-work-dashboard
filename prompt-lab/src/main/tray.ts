@@ -1,5 +1,5 @@
 import { Tray, Menu, app, nativeImage } from 'electron';
-import { getMainWindow, setTray, getTray } from './globals';
+import { getMainWindow, getMainWindows, setTray, getTray } from './globals';
 
 export function createTray() {
   const icon = nativeImage.createEmpty();
@@ -18,7 +18,7 @@ export function createTray() {
     {
       label: '退出 next-work-dashboard',
       click: () => {
-        getMainWindow()?.webContents.send('save-before-quit');
+        getMainWindows().forEach((win) => win.webContents.send('save-before-quit'));
         setTimeout(() => {
           t.destroy();
           setTray(null);

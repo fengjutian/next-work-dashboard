@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import AutoLaunch from 'electron-auto-launch';
-import { getMainWindow } from './globals';
 import { fetchSiteFavicon } from './favicon';
 import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionAvailable } from '../auth/token-store';
 import { createSession, write, resize, destroySession } from '../plugins/terminal/backend/terminal-manager';
@@ -129,40 +128,45 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 }
 
 export function setupIPC(webviewPreloadPath: string) {
-  const mw = getMainWindow();
-  if (!mw) return;
-  let workspaceWatcher: fs.FSWatcher | null = null;
+  const workspaceWatchers = new Map<number, fs.FSWatcher>();
+
+  const configureWindow = (win: BrowserWindow) => {
+    const webContentsId = win.webContents.id;
+    win.webContents.on('context-menu', (_event, params) => {
+      Menu.buildFromTemplate([
+        {
+          label: '注入选中提示词',
+          enabled: !!params,
+          click: () => win.webContents.send('inject-from-context-menu'),
+        },
+        { type: 'separator' },
+        { label: '复制', role: 'copy' },
+        { label: '粘贴', role: 'paste' },
+      ]).popup();
+    });
+    win.webContents.once('destroyed', () => {
+      workspaceWatchers.get(webContentsId)?.close();
+      workspaceWatchers.delete(webContentsId);
+    });
+  };
+
+  BrowserWindow.getAllWindows().forEach(configureWindow);
+  app.on('browser-window-created', (_event, win) => configureWindow(win));
 
   // 暴露 webview preload 路径给渲染进程
   ipcMain.handle('get-webview-preload-path', () => {
     return webviewPreloadPath;
   });
 
-  // WebView 右键菜单 (B05)
-  mw.webContents.on('context-menu', (_event, params) => {
-    Menu.buildFromTemplate([
-      {
-        label: '注入选中提示词',
-        enabled: !!params,
-        click: () => {
-          mw.webContents.send('inject-from-context-menu');
-        },
-      },
-      { type: 'separator' },
-      { label: '复制', role: 'copy' },
-      { label: '粘贴', role: 'paste' },
-    ]).popup();
-  });
-
   // ── 提示词注入 ──
-  ipcMain.handle('inject-prompt', async (_event, payload: {
+  ipcMain.handle('inject-prompt', async (event, payload: {
     webviewId: number;
     text: string;
     inputSelector: string;
     submitSelector?: string;
     autoSubmit: boolean;
   }) => {
-    const webview = mw.webContents;
+    const webview = event.sender;
     if (!webview) return { success: false, error: 'NO_WINDOW' };
 
     try {
@@ -204,18 +208,21 @@ export function setupIPC(webviewPreloadPath: string) {
   });
 
   // ── 窗口控制 ──
-  ipcMain.handle('window-minimize', () => mw.minimize());
-  ipcMain.handle('window-maximize', () => {
-    if (mw.isMaximized()) mw.unmaximize();
-    else mw.maximize();
+  ipcMain.handle('window-minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  ipcMain.handle('window-maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win?.isMaximized()) win.unmaximize();
+    else win?.maximize();
   });
-  ipcMain.handle('window-is-maximized', () => mw.isMaximized());
-  ipcMain.handle('window-close', () => mw.close());
+  ipcMain.handle('window-is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false);
+  ipcMain.handle('window-close', (event) => BrowserWindow.fromWebContents(event.sender)?.close());
 
   // ── 窗口置顶 ──
-  ipcMain.handle('window-toggle-always-on-top', () => {
-    const ontop = !mw.isAlwaysOnTop();
-    mw.setAlwaysOnTop(ontop);
+  ipcMain.handle('window-toggle-always-on-top', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return false;
+    const ontop = !win.isAlwaysOnTop();
+    win.setAlwaysOnTop(ontop);
     return ontop;
   });
 
@@ -1809,7 +1816,7 @@ export function setupIPC(webviewPreloadPath: string) {
   });
 
   ipcMain.handle('workspace:gitOperation', async (
-    _event,
+    event,
     rootPath: string,
     operation: string,
     payload: Record<string, unknown> = {},
@@ -1817,7 +1824,9 @@ export function setupIPC(webviewPreloadPath: string) {
     const root = resolveWorkspacePath(rootPath);
     const operationId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const progress = (state: 'started' | 'completed' | 'failed' | 'cancelled', message: string) => {
-      mw.webContents.send('workspace:gitProgress', { operationId, operation, state, message });
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('workspace:gitProgress', { operationId, operation, state, message });
+      }
     };
 
     const timeoutMs = networkOps.has(operation) ? GIT_NETWORK_TIMEOUT_MS : GIT_LOCAL_TIMEOUT_MS;
@@ -2007,30 +2016,33 @@ export function setupIPC(webviewPreloadPath: string) {
     });
   });
 
-  ipcMain.handle('workspace:watch', async (_event, rootPath: string) => {
+  ipcMain.handle('workspace:watch', async (event, rootPath: string) => {
     try {
-      workspaceWatcher?.close();
+      const webContentsId = event.sender.id;
+      workspaceWatchers.get(webContentsId)?.close();
       const root = resolveWorkspacePath(rootPath);
-      workspaceWatcher = fs.watch(root, { recursive: true }, (eventType, fileName) => {
+      const watcher = fs.watch(root, { recursive: true }, (eventType, fileName) => {
         if (!fileName) return;
         const relativePath = String(fileName);
         if (relativePath.split(/[\\/]/).some((part) => WORKSPACE_IGNORED_NAMES.has(part))) return;
-        mw.webContents.send('workspace:fileChanged', {
-          path: relativePath,
-          type: eventType === 'rename' ? 'rename' : 'change',
-        });
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('workspace:fileChanged', {
+            path: relativePath,
+            type: eventType === 'rename' ? 'rename' : 'change',
+          });
+        }
       });
+      workspaceWatchers.set(webContentsId, watcher);
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
-  ipcMain.handle('workspace:unwatch', () => {
-    workspaceWatcher?.close();
-    workspaceWatcher = null;
+  ipcMain.handle('workspace:unwatch', (event) => {
+    workspaceWatchers.get(event.sender.id)?.close();
+    workspaceWatchers.delete(event.sender.id);
   });
-  mw.webContents.once('destroyed', () => workspaceWatcher?.close());
 
   ipcMain.handle('dialog:saveFile', async (_event, content: string, defaultName?: string) => {
     try {
@@ -2116,15 +2128,15 @@ export function setupIPC(webviewPreloadPath: string) {
   // ── 终端 ──
   ipcMain.handle('terminal:profiles', () => ({ success: true, data: discoverShellProfiles() }));
 
-  ipcMain.handle('terminal:create', async (_event, id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => {
+  ipcMain.handle('terminal:create', async (event, id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => {
     try {
       const safeProfile = profile ? { ...profile, env: resolveSecretReferences(profile.env ?? {}, (name) => getToken(`terminal-env:${name}`)) } : undefined;
       const session = createSession(id, cwd, safeProfile);
       session.pty.onData((data: string) => {
-        mw.webContents.send(`terminal:data:${id}`, data);
+        if (!event.sender.isDestroyed()) event.sender.send(`terminal:data:${id}`, data);
       });
       session.pty.onExit(({ exitCode }) => {
-        mw.webContents.send(`terminal:exit:${id}`, exitCode);
+        if (!event.sender.isDestroyed()) event.sender.send(`terminal:exit:${id}`, exitCode);
       });
       return { success: true };
     } catch (err) {

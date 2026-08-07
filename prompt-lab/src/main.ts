@@ -30,11 +30,30 @@ function configureSessionDataPath(): void {
 }
 
 function showMainWindow(): void {
-  const win = BrowserWindow.getAllWindows()[0];
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows().at(-1);
   if (!win) return;
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+}
+
+function configureWindowsJumpList(): void {
+  if (process.platform !== 'win32') return;
+
+  const arguments_ = app.isPackaged
+    ? '--new-window'
+    : `"${app.getAppPath().replace(/"/g, '\\"')}" --new-window`;
+
+  app.setUserTasks([
+    {
+      program: process.execPath,
+      arguments: arguments_,
+      iconPath: process.execPath,
+      iconIndex: 0,
+      title: 'New Window',
+      description: 'Open a new next-work-dashboard window',
+    },
+  ]);
 }
 
 if (started) {
@@ -44,18 +63,21 @@ if (started) {
 } else {
   configureSessionDataPath();
 
-  app.on('second-instance', showMainWindow);
+  const openMainWindow = () => createWindow(path.join(__dirname, 'preload.js'));
+
+  app.on('second-instance', () => {
+    if (app.isReady()) openMainWindow();
+  });
 
   // 应用生命周期
   app.whenReady().then(() => {
-    const preloadPath = path.join(__dirname, 'preload.js');
     const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
 
-    createWindow(preloadPath);
-    // createWindow synchronously publishes the BrowserWindow through globals;
-    // setupIPC depends on that window and must run afterwards.
+    openMainWindow();
+    // setupIPC configures the existing window and observes future windows.
     setupIPC(webviewPreloadPath);
     createTray();
+    configureWindowsJumpList();
     registerShortcuts();
   });
 
@@ -65,8 +87,7 @@ if (started) {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      const preloadPath = path.join(__dirname, 'preload.js');
-      createWindow(preloadPath);
+      openMainWindow();
     } else {
       showMainWindow();
     }
