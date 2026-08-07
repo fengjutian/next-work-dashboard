@@ -140,9 +140,12 @@ export const DEFAULT_SITES: SiteConfig[] = [
 ];
 
 export interface AiApiConfig {
+  provider: 'deepseek' | 'qwen' | 'custom';
+  qwenPlan?: 'payg' | 'token-plan';
   apiKey: string;
-  model: 'deepseek-v4-flash' | 'deepseek-v4-pro';
+  model: string;
   baseUrl: string;
+  providerApiKeys?: Partial<Record<'deepseek' | 'qwen' | 'custom', string>>;
 }
 
 export interface LlmCacheConfig {

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '@/store';
 import { createCachedEmbeddings, createCachedProvider, createOpenAIProvider, evaluateSemanticShadow, registerTools, runAgent, storeSemanticShadow } from '@/core';
 import { createLocalEmbeddings } from '@/core/memory/local-embedding';
@@ -96,6 +96,11 @@ export const MODELS = [
   { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
   { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
 ];
+export const QWEN_MODELS = [
+  { value: 'qwen3.8-max-preview', label: 'Qwen 3.8 Max Preview' },
+  { value: 'qwen3.7-plus', label: 'Qwen 3.7 Plus' },
+  { value: 'qwen3.7-flash', label: 'Qwen 3.7 Flash' },
+];
 
 // ── 会话类型 ──
 export interface Session {
@@ -181,6 +186,19 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   }, [sessions.length, aiApi.model, scene]);
 
   const currentModel = activeSession?.model ?? aiApi.model;
+  const availableModels = useMemo(() => aiApi.provider === 'qwen' ? QWEN_MODELS : aiApi.provider === 'custom'
+    ? [{ value: currentModel, label: currentModel }]
+    : MODELS, [aiApi.provider, currentModel]);
+  useEffect(() => {
+    if (!activeSession) return;
+    const valid = aiApi.provider === 'custom'
+      ? activeSession.model === aiApi.model
+      : availableModels.some((model) => model.value === activeSession.model);
+    if (valid) return;
+    setSessions((previous) => previous.map((session) => session.id === activeSession.id
+      ? { ...session, model: aiApi.model, compareModels: [aiApi.model] }
+      : session));
+  }, [activeSession, aiApi.model, aiApi.provider, availableModels]);
   const compareModels = activeSession?.compareModels?.length
     ? activeSession.compareModels
     : [currentModel];
@@ -669,7 +687,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   return {
     // state
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
-    messages, systemPrompt, currentModel, compareModels, hasKey,
+    messages, systemPrompt, currentModel, compareModels, availableModels, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, memoryDirectories, setMemoryDirectories, error,
     sysPromptOpen, setSysPromptOpen,
     pendingInputPrompt, setPendingInputPrompt, confirmInputPrompt,

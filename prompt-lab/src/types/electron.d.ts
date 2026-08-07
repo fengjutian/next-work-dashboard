@@ -32,6 +32,7 @@ export interface ElectronAPI {
   onSaveBeforeQuit: (callback: () => void) => () => void;
   copyText: (text: string) => void;
   fetchFavicon: (siteUrl: string) => Promise<string | null>;
+  llmChat: (payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => Promise<{ ok: boolean; status: number; data?: any; error?: string }>;
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) => Promise<{
     ok: boolean;
     status: number;

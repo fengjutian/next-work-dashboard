@@ -11,7 +11,7 @@ import {
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import { useChatSession, MODELS, toBubbleItems } from './useChatSession';
+import { useChatSession, toBubbleItems } from './useChatSession';
 import { ToolCallCard } from './MessageBubble';
 import { isToolEnabled, listTools, setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './ToolManagerDialog';
@@ -221,7 +221,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   const {
     sessions, activeSessionId, setActiveSessionId, showHistory, setShowHistory,
-    messages, systemPrompt, currentModel, compareModels, hasKey,
+    messages, systemPrompt, currentModel, compareModels, availableModels, hasKey,
     input, setInput, streaming, agentMode, setAgentMode, memoryEnabled, setMemoryEnabled, memoryDirectories, setMemoryDirectories, error,
     sysPromptOpen, setSysPromptOpen,
     pendingInputPrompt, setPendingInputPrompt, confirmInputPrompt,
@@ -268,7 +268,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   }, [setInput]);
 
   const [auditModel, setAuditModel] = useState(() => (
-    MODELS.find((model) => model.value !== currentModel)?.value ?? currentModel
+    availableModels.find((model) => model.value !== currentModel)?.value ?? currentModel
   ));
   const [auditContent, setAuditContent] = useState('');
   const [auditError, setAuditError] = useState('');
@@ -310,9 +310,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   useEffect(() => {
     if (auditModel === currentModel) {
-      setAuditModel(MODELS.find((model) => model.value !== currentModel)?.value ?? currentModel);
+      setAuditModel(availableModels.find((model) => model.value !== currentModel)?.value ?? currentModel);
     }
-  }, [auditModel, currentModel]);
+  }, [auditModel, availableModels, currentModel]);
 
   useEffect(() => () => auditAbortRef.current?.abort(), []);
 
@@ -1087,13 +1087,13 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   title="选择一个或多个模型"
                 >
                   <Sparkles className="h-3 w-3" />
-                  {compareModels.length > 1 ? `${compareModels.length} 个模型对比` : MODELS.find((m) => m.value === currentModel)?.label ?? currentModel}
+                  {compareModels.length > 1 ? `${compareModels.length} 个模型对比` : availableModels.find((m) => m.value === currentModel)?.label ?? currentModel}
                   <ChevronDown className={`h-3 w-3 transition-transform ${modelPickerOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {modelPickerOpen && (
                   <div className="absolute right-0 top-7 z-40 min-w-48 rounded-md border bg-card p-2 shadow-lg">
                     <div className="mb-1.5 text-[10px] text-muted-foreground">可多选；Agent 模式仅使用主模型</div>
-                    {MODELS.map((model) => (
+                    {availableModels.map((model) => (
                       <label key={model.value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent">
                         <input
                           type="checkbox"
@@ -1219,7 +1219,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                       >
                         <div className="mb-2 flex items-center justify-between border-b border-primary/15 pb-2 text-xs">
                           <span className="font-semibold text-primary">
-                            {MODELS.find((model) => model.value === message.model)?.label ?? message.model}
+                            {availableModels.find((model) => model.value === message.model)?.label ?? message.model}
                           </span>
                           <button
                             className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
@@ -1426,7 +1426,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-[11px] outline-none focus:border-primary"
                   aria-label="选择评审模型"
                 >
-                  {MODELS.map((model) => (
+                  {availableModels.map((model) => (
                     <option key={model.value} value={model.value} disabled={model.value === currentModel}>
                       {model.label}{model.value === currentModel ? '（当前模型）' : ''}
                     </option>

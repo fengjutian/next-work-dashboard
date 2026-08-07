@@ -8,10 +8,15 @@ import { clearLlmMemoryCaches, getLlmCacheMetrics, getSemanticShadowMetrics, res
 
 // ── AI API 设置 Tab ──
 
-const MODELS = [
-  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-] as const;
+const PROVIDERS = {
+  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', models: [{ value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }] },
+  qwen: { label: '千问（DashScope）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', models: [{ value: 'qwen3.8-max-preview', label: 'Qwen 3.8 Max Preview' }, { value: 'qwen3.7-plus', label: 'Qwen 3.7 Plus' }, { value: 'qwen3.7-flash', label: 'Qwen 3.7 Flash' }] },
+  custom: { label: '自定义 OpenAI 兼容', baseUrl: '', model: '', models: [] },
+} as const;
+const QWEN_URLS = {
+  payg: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  'token-plan': 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+} as const;
 
 type TestStatus = 'idle' | 'testing' | 'ok' | 'fail';
 
@@ -46,6 +51,22 @@ export const SettingsAiApi: React.FC = () => {
     refreshCacheStats();
   };
 
+  const changeProvider = (provider: keyof typeof PROVIDERS) => {
+    const preset = PROVIDERS[provider];
+    const providerApiKeys = { ...(aiApi.providerApiKeys ?? {}), [aiApi.provider]: aiApi.apiKey };
+    const nextKey = (providerApiKeys[provider] ?? '').trim();
+    const qwenPlan = provider === 'qwen' && nextKey.startsWith('sk-sp-') ? 'token-plan' : (aiApi.qwenPlan ?? 'payg');
+    setAiApi({ provider, qwenPlan, providerApiKeys, apiKey: nextKey, baseUrl: provider === 'qwen' ? QWEN_URLS[qwenPlan] : preset.baseUrl, model: preset.model });
+    setTestStatus('idle'); setTestMessage('');
+  };
+  const models = PROVIDERS[aiApi.provider].models;
+  const changeQwenPlan = (qwenPlan: 'payg' | 'token-plan') => setAiApi({ qwenPlan, baseUrl: QWEN_URLS[qwenPlan] });
+  const changeApiKey = (value: string) => {
+    const apiKey = value.trim();
+    const detectedPlan = aiApi.provider === 'qwen' && apiKey.startsWith('sk-sp-') ? 'token-plan' : aiApi.qwenPlan;
+    setAiApi({ apiKey, qwenPlan: detectedPlan, baseUrl: detectedPlan ? QWEN_URLS[detectedPlan] : aiApi.baseUrl, providerApiKeys: { ...(aiApi.providerApiKeys ?? {}), [aiApi.provider]: apiKey } });
+  };
+
   const handleTest = async () => {
     if (!aiApi.apiKey) {
       setTestStatus('fail');
@@ -56,16 +77,19 @@ export const SettingsAiApi: React.FC = () => {
     setTestMessage('');
     try {
       const base = aiApi.baseUrl.replace(/\/+$/, '');
-      const res = await fetch(`${base}/models`, {
-        headers: { Authorization: `Bearer ${aiApi.apiKey}` },
-      });
+      const res = aiApi.provider === 'qwen'
+        ? await fetch(`${base}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${aiApi.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: aiApi.model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1, stream: false }) })
+        : await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${aiApi.apiKey}` } });
       if (res.ok) {
         setTestStatus('ok');
         setTestMessage('连接成功');
       } else {
         const body = await res.text().catch(() => '');
         setTestStatus('fail');
-        setTestMessage(`HTTP ${res.status}${body ? ': ' + body.slice(0, 120) : ''}`);
+        const qwenHint = aiApi.provider === 'qwen' && res.status === 401
+          ? `；请确认 ${aiApi.qwenPlan === 'token-plan' ? 'sk-sp Key 对应 Token Plan 地址' : 'sk-ws/sk Key 对应按量付费地址'}，并检查 Key 是否完整`
+          : '';
+        setTestMessage(`HTTP ${res.status}${body ? ': ' + body.slice(0, 120) : ''}${qwenHint}`);
       }
     } catch (err: any) {
       setTestStatus('fail');
@@ -80,6 +104,18 @@ export const SettingsAiApi: React.FC = () => {
       </h4>
 
       <div className="space-y-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">供应商</label>
+          <select value={aiApi.provider} onChange={(event) => changeProvider(event.target.value as keyof typeof PROVIDERS)} className="flex h-8 w-full rounded-md border border-border bg-card px-2.5 text-xs">
+            {Object.entries(PROVIDERS).map(([value, provider]) => <option key={value} value={value}>{provider.label}</option>)}
+          </select>
+        </div>
+        {aiApi.provider === 'qwen' && <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">千问计费类型</label>
+          <select value={aiApi.qwenPlan ?? 'payg'} onChange={(event) => changeQwenPlan(event.target.value as 'payg' | 'token-plan')} className="flex h-8 w-full rounded-md border border-border bg-card px-2.5 text-xs">
+            <option value="payg">按量付费（sk-ws / sk）</option><option value="token-plan">Token Plan（sk-sp）</option>
+          </select>
+        </div>}
         {/* API Key */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">
@@ -89,8 +125,8 @@ export const SettingsAiApi: React.FC = () => {
             <Input
               type={showKey ? 'text' : 'password'}
               value={aiApi.apiKey}
-              onChange={(e) => setAiApi({ apiKey: e.target.value })}
-              placeholder="sk-..."
+              onChange={(e) => changeApiKey(e.target.value)}
+              placeholder={aiApi.provider === 'qwen' ? 'sk-ws-...' : 'sk-...'}
               className="pr-8 h-8 text-xs"
             />
             <button
@@ -112,19 +148,19 @@ export const SettingsAiApi: React.FC = () => {
           <label className="text-xs font-medium text-muted-foreground">
             模型
           </label>
-          <select
+          {aiApi.provider !== 'custom' ? <select
             value={aiApi.model}
             onChange={(e) =>
-              setAiApi({ model: e.target.value as typeof aiApi.model })
+              setAiApi({ model: e.target.value })
             }
             className="flex h-8 w-full rounded-md border border-border bg-card px-2.5 text-xs text-foreground focus:outline-none focus:ring-2 ring-ring"
           >
-            {MODELS.map((m) => (
+            {models.map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
             ))}
-          </select>
+          </select> : <Input value={aiApi.model} onChange={(event) => setAiApi({ model: event.target.value })} placeholder="模型名称" className="h-8 text-xs" />}
         </div>
 
         {/* Base URL */}
