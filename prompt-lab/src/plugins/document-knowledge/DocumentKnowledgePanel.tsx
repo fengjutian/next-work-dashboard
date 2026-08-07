@@ -5,6 +5,7 @@ import { Database, FileText, Loader2, Send, Trash2, Upload } from '@/components/
 import { createOpenAIProvider } from '@/core/llm';
 import { useStore } from '@/store';
 import { indexDocument, embedQuestion } from './pipeline';
+import type { EmbeddingMode } from './pipeline';
 import { buildRagContext, retrieve } from './retrieval';
 import { isSupportedDocument } from './parser';
 import type { DocumentChunk, ParsedDocument, RagMessage } from './types';
@@ -22,6 +23,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
   const [stage, setStage] = useState<Stage>('idle');
   const [status, setStatus] = useState('上传 PDF 或 Office 文件开始');
   const [progress, setProgress] = useState(0);
+  const [embeddingMode, setEmbeddingMode] = useState<EmbeddingMode>();
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = useMemo(() => documents.find((item) => item.id === selectedId) ?? documents[0], [documents, selectedId]);
 
@@ -34,10 +36,13 @@ export const DocumentKnowledgePanel: React.FC = () => {
     if (!accepted.length) { setStage('error'); setStatus('仅支持 PDF、DOCX、XLSX、XLS 和 PPTX'); return; }
     setStage('indexing');
     try {
+      let activeMode = embeddingMode;
       for (const file of accepted) {
         const result = await indexDocument(file, memoryConfig, (label, value) => {
           setStatus(`${file.name} · ${label}`); setProgress(value);
-        });
+        }, activeMode);
+        activeMode = result.embeddingMode;
+        setEmbeddingMode(result.embeddingMode);
         setDocuments((current) => [...current.filter((item) => item.id !== result.document.id), result.document]);
         setChunks((current) => [...current.filter((item) => item.documentId !== result.document.id), ...result.chunks]);
         setSelectedId(result.document.id);
@@ -46,7 +51,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
     } catch (error) {
       setStage('error'); setStatus(error instanceof Error ? error.message : '处理文档失败');
     }
-  }, [memoryConfig]);
+  }, [embeddingMode, memoryConfig]);
 
   const ask = useCallback(async () => {
     const content = question.trim();
@@ -57,7 +62,8 @@ export const DocumentKnowledgePanel: React.FC = () => {
     const assistantId = `a-${Date.now()}`;
     setMessages((current) => [...current, userMessage, { id: assistantId, role: 'assistant', content: '' }]);
     try {
-      const vector = await embedQuestion(content, memoryConfig);
+      if (!embeddingMode) throw new Error('文档索引模式不可用，请重新上传文档');
+      const vector = await embedQuestion(content, memoryConfig, embeddingMode);
       const hits = retrieve(chunks, vector, memoryConfig.recallCount || 5);
       const provider = createOpenAIProvider(aiApi);
       const prompt = `仅根据以下资料回答问题。资料不足时明确说明，不要编造。引用结论时使用 [资料 N] 标记。\n\n${buildRagContext(hits)}\n\n问题：${content}`;
@@ -74,13 +80,14 @@ export const DocumentKnowledgePanel: React.FC = () => {
       setStage('error'); setStatus(error instanceof Error ? error.message : '问答失败');
       setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: '生成回答失败，请检查模型与向量配置。' } : message));
     }
-  }, [aiApi, chunks, memoryConfig, question, stage]);
+  }, [aiApi, chunks, embeddingMode, memoryConfig, question, stage]);
 
   const removeDocument = useCallback((id: string) => {
     const target = documents.find((item) => item.id === id);
     if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
     setDocuments((current) => current.filter((item) => item.id !== id));
     setChunks((current) => current.filter((item) => item.documentId !== id));
+    if (documents.length === 1) setEmbeddingMode(undefined);
     setSelectedId(undefined);
   }, [documents]);
 
@@ -106,6 +113,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
         {!documents.length && <div className="p-4 text-center text-xs text-muted-foreground">尚未添加文档</div>}
       </div>
       <div className="border-t p-3 text-[11px] text-muted-foreground"><div className="flex items-center gap-1"><Database className="h-3.5 w-3.5" />{status}</div>
+        {embeddingMode && <div className="mt-1">索引模式：{embeddingMode === 'remote-semantic' ? '远程语义' : embeddingMode === 'local-semantic' ? '本地语义' : '关键词降级'}</div>}
         {stage === 'indexing' && <div className="mt-2 h-1 bg-muted rounded"><div className="h-full bg-primary rounded" style={{ width: `${progress}%` }} /></div>}
       </div>
     </aside>

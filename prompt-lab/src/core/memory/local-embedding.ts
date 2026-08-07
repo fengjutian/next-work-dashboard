@@ -34,6 +34,10 @@ async function loadPipeline(
     installTypedArrayHexCompatibility();
     cached = import('@huggingface/transformers').then(async ({ env, pipeline }) => {
       env.useBrowserCache = true;
+      if (env.backends.onnx?.wasm) {
+        env.backends.onnx.wasm.proxy = false;
+        env.backends.onnx.wasm.numThreads = 1;
+      }
       const extractor = await pipeline('feature-extraction', model, {
         dtype: 'q8',
         progress_callback: (event: LocalEmbeddingProgress) => onProgress?.(event),
