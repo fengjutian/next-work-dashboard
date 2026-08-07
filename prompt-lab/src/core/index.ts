@@ -31,6 +31,8 @@ export type {
   LLMProvider,
   OpenAIConfig,
 } from './llm';
+export { createCachedProvider, createLlmCacheKey, getLlmCacheMetrics, resetLlmCacheMetrics } from './llm-cache';
+export type { CachedProviderOptions, LlmCacheEntry, LlmCacheMetrics, LlmCacheStorage } from './llm-cache';
 
 // 工具系统
 export type {

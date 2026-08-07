@@ -1,6 +1,6 @@
 # 🚀 next-work-dashboard — 项目介绍与部署
 
-> 基于 Electron 的 AI 提示词注入桌面工作台 · v0.2.0
+> 基于 Electron 的 AI 提示词注入桌面工作台 · v0.1.0
 
 ---
 
@@ -26,8 +26,8 @@
 | 📝 **提示词管理** | 完整 CRUD + 分类 / 标签 / 搜索 / 收藏 / 置顶 / 变量模板 |
 | ⚡ **一键注入** | 点击提示词 → 自动填入 AI 输入框，支持填充后自动发送 |
 | 💬 **对话保存** | 提取 WebView 对话历史，保存为 Markdown |
-| 🕸️ **知识图谱** | G6 可视化提示词与对话之间的关联 |
-| 🔌 **插件系统** | 统一 Registry：18 个内置插件 + Sandbox 用户插件 |
+| 🕸️ **知识图谱** | ECharts 可视化提示词与对话之间的关联 |
+| 🔌 **插件系统** | 统一 Registry：20 个内置插件 + Sandbox 用户插件 |
 | ⌨️ **浮动面板** | 全局 `Ctrl+K` 唤出 Spotlight 风格搜索面板 |
 | 🎨 **主题切换** | 亮色 / 暗色 / 跟随系统 |
 
@@ -55,7 +55,7 @@
 | UI | shadcn/ui + Tailwind CSS 3 |
 | 状态管理 | Zustand 5 |
 | 持久化 | sql.js + drizzle-orm |
-| 图可视化 | @antv/g6 5 |
+| 图可视化 | echarts 6 |
 | 构建 | electron-forge 7 + Vite 5 |
 | 测试 | Vitest 2 + Testing Library |
 
@@ -113,7 +113,7 @@ prompt-lab/
 │   ├── db/                      # sql.js 数据库 + Drizzle schema
 │   ├── store/                   # Zustand 全局状态
 │   ├── components/              # UI 组件（ActivityBar、设置面板等）
-│   ├── plugins/                 # 插件系统（18 个内置 + Sandbox）
+│   ├── plugins/                 # 插件系统（20 个内置 + Sandbox）
 │   ├── core/                    # 核心纯函数（注入/提取/LLM/知识库）
 │   ├── hooks/                   # React Hooks
 │   ├── auth/                    # Token 安全存储

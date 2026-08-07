@@ -3,6 +3,8 @@ import { Eye, EyeOff, CheckCircle, XCircle, Loader2 } from '@/components/icons';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
+import { dbClearLlmCache, dbGetLlmCacheCount, flushDbToDisk } from '@/db';
+import { getLlmCacheMetrics, resetLlmCacheMetrics } from '@/core';
 
 // ── AI API 设置 Tab ──
 
@@ -16,9 +18,25 @@ type TestStatus = 'idle' | 'testing' | 'ok' | 'fail';
 export const SettingsAiApi: React.FC = () => {
   const aiApi = useStore((s) => s.aiApi);
   const setAiApi = useStore((s) => s.setAiApi);
+  const llmCacheConfig = useStore((s) => s.llmCacheConfig);
+  const setLlmCacheConfig = useStore((s) => s.setLlmCacheConfig);
   const [showKey, setShowKey] = React.useState(false);
   const [testStatus, setTestStatus] = React.useState<TestStatus>('idle');
   const [testMessage, setTestMessage] = React.useState('');
+  const [cacheCount, setCacheCount] = React.useState(() => dbGetLlmCacheCount());
+  const [cacheMetrics, setCacheMetrics] = React.useState(() => getLlmCacheMetrics());
+
+  const refreshCacheStats = () => {
+    setCacheCount(dbGetLlmCacheCount());
+    setCacheMetrics(getLlmCacheMetrics());
+  };
+
+  const clearCache = async () => {
+    dbClearLlmCache();
+    resetLlmCacheMetrics();
+    await flushDbToDisk();
+    refreshCacheStats();
+  };
 
   const handleTest = async () => {
     if (!aiApi.apiKey) {
@@ -139,6 +157,29 @@ export const SettingsAiApi: React.FC = () => {
               <XCircle className="h-3.5 w-3.5" /> {testMessage}
             </span>
           )}
+        </div>
+
+        <div className="space-y-3 border-t pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div><div className="text-xs font-medium">AI 响应缓存</div><div className="text-[10px] text-muted-foreground">普通对话使用本地精确缓存；Agent 与工具调用不会缓存</div></div>
+            <input type="checkbox" checked={llmCacheConfig.enabled} onChange={(event) => setLlmCacheConfig({ enabled: event.target.checked })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1 text-[10px] text-muted-foreground">有效期（小时）
+              <Input type="number" min={1} max={720} value={llmCacheConfig.ttlHours} onChange={(event) => setLlmCacheConfig({ ttlHours: Number(event.target.value) })} className="h-8 text-xs" />
+            </label>
+            <label className="space-y-1 text-[10px] text-muted-foreground">最大条目数
+              <Input type="number" min={100} max={50000} step={100} value={llmCacheConfig.maxEntries} onChange={(event) => setLlmCacheConfig({ maxEntries: Number(event.target.value) })} className="h-8 text-xs" />
+            </label>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2 text-[10px] text-muted-foreground">
+            <div>本地条目 {cacheCount} · L1 命中 {cacheMetrics.memoryHits} · L2 命中 {cacheMetrics.persistentHits}</div>
+            <div>未命中 {cacheMetrics.misses} · 合并请求 {cacheMetrics.coalescedHits} · 主动绕过 {cacheMetrics.bypasses}</div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={refreshCacheStats}>刷新统计</Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => void clearCache()}>清空缓存</Button>
+          </div>
         </div>
       </div>
     </section>

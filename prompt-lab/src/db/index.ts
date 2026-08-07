@@ -193,6 +193,19 @@ function ensureSchema(): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS llm_response_cache (
+      key TEXT PRIMARY KEY,
+      response TEXT NOT NULL,
+      reasoning TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_accessed_at INTEGER NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_response_cache_expiry ON llm_response_cache(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_response_cache_access ON llm_response_cache(last_accessed_at);
     CREATE TABLE IF NOT EXISTS weread_books (
       book_id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -400,6 +413,57 @@ export function dbGetSetting(key: string): string | null {
 export function dbSetSetting(key: string, value: string): void {
   getDb().delete(schema.settings).where(eq(schema.settings.key, key)).run();
   getDb().insert(schema.settings).values({ key, value } as never).run();
+}
+
+export interface DbLlmCacheEntry {
+  key: string;
+  response: string;
+  reasoning: string;
+  model: string;
+  provider: string;
+  createdAt: number;
+  expiresAt: number;
+  lastAccessedAt: number;
+  hitCount: number;
+}
+
+export function dbGetLlmCache(key: string, now = Date.now()): DbLlmCacheEntry | null {
+  if (!_sqlDb) return null;
+  const result = _sqlDb.exec(
+    'SELECT key, response, reasoning, model, provider, created_at, expires_at, last_accessed_at, hit_count FROM llm_response_cache WHERE key = ? AND expires_at > ?',
+    [key, now],
+  )[0];
+  const row = result?.values[0];
+  if (!row) return null;
+  _sqlDb.run('UPDATE llm_response_cache SET last_accessed_at = ?, hit_count = hit_count + 1 WHERE key = ?', [now, key]);
+  return {
+    key: String(row[0]), response: String(row[1]), reasoning: String(row[2]), model: String(row[3]), provider: String(row[4]),
+    createdAt: Number(row[5]), expiresAt: Number(row[6]), lastAccessedAt: now, hitCount: Number(row[8]) + 1,
+  };
+}
+
+export function dbPutLlmCache(entry: DbLlmCacheEntry, maxEntries = 5000): void {
+  if (!_sqlDb) return;
+  _sqlDb.run(`INSERT OR REPLACE INTO llm_response_cache
+    (key, response, reasoning, model, provider, created_at, expires_at, last_accessed_at, hit_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+    entry.key, entry.response, entry.reasoning, entry.model, entry.provider, entry.createdAt,
+    entry.expiresAt, entry.lastAccessedAt, entry.hitCount,
+  ]);
+  _sqlDb.run('DELETE FROM llm_response_cache WHERE expires_at <= ?', [Date.now()]);
+  _sqlDb.run(`DELETE FROM llm_response_cache WHERE key IN (
+    SELECT key FROM llm_response_cache ORDER BY last_accessed_at DESC LIMIT -1 OFFSET ?
+  )`, [Math.max(1, maxEntries)]);
+}
+
+export function dbClearLlmCache(): void {
+  _sqlDb?.run('DELETE FROM llm_response_cache');
+}
+
+export function dbGetLlmCacheCount(now = Date.now()): number {
+  if (!_sqlDb) return 0;
+  const row = _sqlDb.exec('SELECT COUNT(*) FROM llm_response_cache WHERE expires_at > ?', [now])[0]?.values[0];
+  return Number(row?.[0] ?? 0);
 }
 
 export interface WereadCachedBook {

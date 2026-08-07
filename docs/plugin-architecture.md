@@ -154,28 +154,30 @@ Registry 内部维护稳定版本号，每次有效变化递增并通知订阅�
 
 ## 5. 内置插件
 
-`registerBuiltInPlugins()` 注册 **18 个内置插件**：
+`registerBuiltInPlugins()` 注册 **20 个内置插件**：
 
-| # | ID | 面板 | 默认启用 | order |
-|---:|------|------|:---:|---:|
-| 0 | `ai` | 🤖 AI 工作台 | ✅ | 0 |
-| 1 | `chat` | 💬 AI 对话 | ✅ | 1 |
-| 2 | `prompts` | 📝 提示词管理 | ✅ | 2 |
-| 3 | `history` | 📜 知识库/会话历史 | ✅ | 3 |
-| 4 | `graph` | 🕸️ 知识图谱 | ✅ | 4 |
-| 5 | `notes` | 📋 便签 | ❌ | 5 |
-| 6 | `weread` | 📚 微信读书 | ❌ | 6 |
-| 7 | `windy` | 🌤️ Windy | ❌ | 7 |
-| 8 | `plugin-manager` | 🔧 插件管理 | ✅ | 8 |
-| 9 | `terminal` | 🖥️ 终端 | ❌ | 9 |
-| 10 | `database` | 🗄️ 数据库浏览器 | ✅ | 10 |
-| 11 | `translator` | 🌐 百度翻译 | ❌ | 11 |
-| 12 | `word-preview` | 📄 Word 预览 | ❌ | 12 |
-| 13 | `excel-preview` | 📊 Excel 编辑 | ❌ | 13 |
-| 14 | `ppt-preview` | 📽️ PPT 演示 | ❌ | 14 |
-| 15 | `excalidraw` | 🎨 Excalidraw 白板 | ✅ | 15 |
-| 16 | `pdf-preview` | 📑 PDF 预览 | ✅ | 16 |
-| 17 | `code-editor` | 💻 代码编辑器 | ✅ | 17 |
+| # | ID | 面板 | 默认启用 | 常驻 | order |
+|---:|------|------|:---:|:---:|---:|
+| 0 | `ai` | 🤖 AI 工作台 | ✅ | ❌ | 0 |
+| 1 | `chat` | 💬 AI 对话 | ✅ | ✅ | 1 |
+| 2 | `prompts` | 📝 提示词与技能 | ✅ | ❌ | 2 |
+| 3 | `history` | 📜 知识库 | ✅ | ❌ | 3 |
+| 4 | `graph` | 🕸️ 知识图谱 | ✅ | ❌ | 4 |
+| 5 | `notes` | 📋 便签 | ❌ | ❌ | 5 |
+| 6 | `weread` | 📚 微信读书 | ❌ | ❌ | 6 |
+| 7 | `windy` | 🌤️ Windy | ❌ | ❌ | 7 |
+| 8 | `plugin-manager` | 🔧 插件管理 | ✅ | ❌ | 8 |
+| 9 | `terminal` | 🖥️ 终端 | ❌ | ✅ | 9 |
+| 10 | `database` | 🗄️ 数据库 | ✅ | ❌ | 10 |
+| 11 | `translator` | 🌐 百度翻译 | ❌ | ❌ | 11 |
+| 12 | `word-preview` | 📄 Word 预览 | ❌ | ❌ | 12 |
+| 13 | `excel-preview` | 📊 Excel 编辑 | 视配置 | ✅ | 13 |
+| 14 | `ppt-preview` | 📽️ PPT 演示 | ❌ | ❌ | 14 |
+| 15 | `excalidraw` | 🎨 Excalidraw 白板 | ✅ | ✅ | 15 |
+| 16 | `pdf-preview` | 📑 PDF 预览 | ✅ | ❌ | 16 |
+| 17 | `code-editor` | 💻 代码编辑 | ✅ | ✅ | 17 |
+| 18 | `compare` | 🔍 文本比较 | ✅ | ✅ | 18 |
+| 19 | `document-knowledge` | 📖 文档知识库 | ✅ | ✅ | 19 |
 
 默认状态以 `built-in/index.ts` 和 `plugins/defaults.ts` 为准。数据库中的用户启用差量可覆盖默认值。
 

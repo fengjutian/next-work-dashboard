@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
-import { createOpenAIProvider, registerTools, runAgent } from '@/core';
+import { createCachedProvider, createOpenAIProvider, registerTools, runAgent } from '@/core';
 import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
 import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools';
 import { knowledgeTools } from '@/core/tools/knowledge-tools';
 import { codeWorkspaceTools } from '@/core/tools/code-workspace-tools';
 import { syncMcpTools } from '@/core/tools/mcp-tools';
-import { dbLoadChatSessions, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
+import { dbGetLlmCache, dbLoadChatSessions, dbPutLlmCache, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 import { useConversationMemory } from './useConversationMemory';
@@ -116,6 +116,7 @@ export interface Session {
 // ── Hook ──
 export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] = 'chat') {
   const aiApi = useStore((s) => s.aiApi);
+  const llmCacheConfig = useStore((s) => s.llmCacheConfig);
   const prompts = useStore((s) => s.prompts);
   const skills = useStore((s) => s.skills);
 
@@ -194,15 +195,30 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   const [pendingInputPrompt, setPendingInputPrompt] = useState<Prompt | null>(null);
   const abortRef = useRef<AbortController[]>([]);
   const providerRef = useRef<LLMProvider | null>(null);
+  const rawProviderRef = useRef<LLMProvider | null>(null);
 
-  useEffect(() => { providerRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl]);
+  useEffect(() => { providerRef.current = null; rawProviderRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.enabled, llmCacheConfig.maxEntries, llmCacheConfig.ttlHours]);
 
-  const getProvider = useCallback((): LLMProvider | null => {
+  const getProvider = useCallback((uncached = false): LLMProvider | null => {
     if (!aiApi.apiKey) return null;
+    if (uncached) {
+      if (!rawProviderRef.current) rawProviderRef.current = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      return rawProviderRef.current;
+    }
     if (providerRef.current) return providerRef.current;
-    providerRef.current = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+    const raw = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+    rawProviderRef.current = raw;
+    providerRef.current = createCachedProvider(raw, {
+      namespace: aiApi.baseUrl.replace(/\/+$/, '').toLowerCase(),
+      enabled: () => useStore.getState().llmCacheConfig.enabled,
+      ttlMs: llmCacheConfig.ttlHours * 60 * 60 * 1000,
+      storage: {
+        get: (key) => dbGetLlmCache(key),
+        put: (entry) => { dbPutLlmCache(entry, llmCacheConfig.maxEntries); void flushDbToDisk(); },
+      },
+    });
     return providerRef.current;
-  }, [aiApi.apiKey, aiApi.baseUrl]);
+  }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.maxEntries, llmCacheConfig.ttlHours]);
 
   const confirmInputPrompt = useCallback((values: Record<string, string>) => {
     if (!pendingInputPrompt) return;
@@ -347,8 +363,9 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     signal?: AbortSignal,
     invokedSkillIds: string[] = [],
     invokedPromptIds: string[] = [],
+    bypassCache = false,
   ) => {
-    const provider = getProvider();
+    const provider = getProvider(bypassCache);
     if (!provider) throw new Error('请先配置 API Key');
     const boundContent = getBoundPromptsContent();
     const skillContent = getEnabledSkillsContent();
@@ -385,7 +402,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   }, [currentModel, sceneSystemPrompt, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent, getInvokedSkillsContent, getInvokedPromptsContent, getProvider, updateSession, updateSessionMeta]);
 
   const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal, invokedSkillIds: string[] = [], invokedPromptIds: string[] = [], invokedToolNames: string[] = []) => {
-    const provider = getProvider();
+    const provider = getProvider(true);
     if (!provider) throw new Error('请先配置 API Key');
     const chatHistory: ChatMessage[] = history
       .filter((m) => m.content.trim() && m.role !== 'tool')
@@ -562,7 +579,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
         lastUser.contextContent ?? lastUser.content,
         ctrl.signal,
       );
-      else await runChat(trimmed, assistantMsg.id, currentModel, ctrl.signal);
+      else await runChat(trimmed, assistantMsg.id, currentModel, ctrl.signal, [], [], true);
     } catch (err: any) { if (err.name !== 'AbortError') setError(err?.message ?? '请求失败'); }
     finally { setStreaming(false); }
   }, [streaming, messages, agentMode, currentModel, runChat, runAgentChat, updateSession]);

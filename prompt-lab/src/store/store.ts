@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, MemoryConfig, Role } from './types';
+import type { SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, LlmCacheConfig, MemoryConfig, Role } from './types';
 import { DEFAULT_SITES } from './types';
 import { applyBuiltInRoleBehaviors, DEFAULT_ROLES } from './defaultRoles';
 import { createPromptSlice, type PromptSlice } from './prompt-slice';
@@ -59,6 +59,8 @@ interface AppState extends PromptSlice, SkillSlice {
   // AI API
   aiApi: AiApiConfig;
   setAiApi: (patch: Partial<AiApiConfig>) => void;
+  llmCacheConfig: LlmCacheConfig;
+  setLlmCacheConfig: (patch: Partial<LlmCacheConfig>) => void;
 
   memoryConfig: MemoryConfig;
   setMemoryConfig: (patch: Partial<MemoryConfig>) => void;
@@ -232,6 +234,22 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
+  llmCacheConfig: { enabled: true, ttlHours: 168, maxEntries: 5000 },
+  setLlmCacheConfig: (patch) => {
+    set((state) => {
+      const next = {
+        enabled: typeof patch.enabled === 'boolean' ? patch.enabled : state.llmCacheConfig.enabled,
+        ttlHours: Math.max(1, Math.min(720, Math.floor(patch.ttlHours ?? state.llmCacheConfig.ttlHours))),
+        maxEntries: Math.max(100, Math.min(50000, Math.floor(patch.maxEntries ?? state.llmCacheConfig.maxEntries))),
+      };
+      if (isDbReady()) {
+        try { dbSetSetting('llmCacheConfig', JSON.stringify(next)); } catch { /* ignore */ }
+        void flushDbToDisk();
+      }
+      return { llmCacheConfig: next };
+    });
+  },
+
   memoryConfig: DEFAULT_MEMORY_CONFIG,
   setMemoryConfig: (patch) => {
     set((state) => {
@@ -320,6 +338,14 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       console.warn('[store] Failed to load aiApi from DB:', err);
     }
+
+    try {
+      const raw = dbGetSetting('llmCacheConfig');
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<LlmCacheConfig>;
+        get().setLlmCacheConfig(saved);
+      }
+    } catch { /* ignore */ }
 
     try {
       const raw = dbGetSetting('memoryConfig');

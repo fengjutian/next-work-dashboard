@@ -212,7 +212,7 @@ partition = `persist:site_${site.id}`
 
 详见 [插件架构文档](./plugin-architecture.md)。核心要点：
 
-- **18 个内置插件**，`React.lazy()` 动态 import
+- **20 个内置插件**，`React.lazy()` 动态 import
 - **Sandbox 用户插件**，`sandbox="allow-scripts"` iframe 隔离
 - **PluginRegistry** 统一管理生命周期、命令、React 订阅
 - Kernel 执行链已完全移除

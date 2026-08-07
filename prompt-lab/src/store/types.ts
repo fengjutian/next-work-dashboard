@@ -145,6 +145,12 @@ export interface AiApiConfig {
   baseUrl: string;
 }
 
+export interface LlmCacheConfig {
+  enabled: boolean;
+  ttlHours: number;
+  maxEntries: number;
+}
+
 export interface MemoryConfig {
   provider: 'local' | 'openai';
   contextBudget: number;
