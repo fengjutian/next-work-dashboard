@@ -10,6 +10,13 @@ import { createUnifiedDiffAsync } from '@/lib/text-diff-client';
 import { decodeBase64Utf8, languageIdFromName } from '@/plugins/code-editor/editor-utils';
 import type { FilePickResult, WorkspaceEncoding } from '@/types/electron';
 import { DIFF_WORKER_THRESHOLD, useTextDiffHunks } from './useTextDiffHunks';
+import { applyUnifiedPatch, parseUnifiedPatch, type UnifiedPatch } from '@/lib/unified-patch';
+import {
+  applyJsonPatch, canonicalizeJson, changesOnlyText, createJsonPatch, diffJsonTree,
+  formatCsvForComparison, formatEnvForComparison, formatJsonForComparison, formatMarkdownForComparison,
+  formatXmlForComparison, formatYamlForComparison, normalizeChineseText, normalizeParagraphs,
+  type CompareMode, type JsonPatchOperation,
+} from '@/lib/comparison-modes';
 
 configureMonaco();
 
@@ -35,25 +42,43 @@ interface SaveConflict {
   };
 }
 
+interface PatchSession {
+  name: string;
+  patch: UnifiedPatch;
+  reverse: boolean;
+}
+
 const sampleLeft = `function greet(name: string) {\n  return 'Hello, ' + name;\n}\n`;
 const sampleRight = `function greet(name: string) {\n  return \`Hello, \${name}!\`;\n}\n`;
 
 interface ComparePreferences {
+  mode: CompareMode;
   sideBySide: boolean;
   ignoreWhitespace: boolean;
   ignoreCase: boolean;
   ignoreBlankLines: boolean;
   hideUnchanged: boolean;
   inputsVisible: boolean;
+  normalizeWidth: boolean;
+  ignorePunctuation: boolean;
+  jsonArrayKey: string;
+  jsonOnlyChanges: boolean;
+  envRedactSecrets: boolean;
 }
 
 const defaultPreferences: ComparePreferences = {
+  mode: 'plain',
   sideBySide: true,
   ignoreWhitespace: false,
   ignoreCase: false,
   ignoreBlankLines: false,
   hideUnchanged: true,
   inputsVisible: true,
+  normalizeWidth: true,
+  ignorePunctuation: false,
+  jsonArrayKey: '',
+  jsonOnlyChanges: false,
+  envRedactSecrets: true,
 };
 
 function readPreferences(): ComparePreferences {
@@ -73,12 +98,40 @@ export const ComparePanel: React.FC = () => {
   const [activeChange, setActiveChange] = useState(-1);
   const [status, setStatus] = useState('可直接粘贴文本，或从文件载入');
   const [saveConflict, setSaveConflict] = useState<SaveConflict | null>(null);
+  const [patchSession, setPatchSession] = useState<PatchSession | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
-  const displayLeft = useMemo(() => prepareTextForComparison(left.content, preferences), [left.content, preferences]);
-  const displayRight = useMemo(() => prepareTextForComparison(right.content, preferences), [preferences, right.content]);
+  const structuredComparison = useMemo(() => {
+    try {
+      if (preferences.mode === 'chinese-word') {
+        const options = { normalizeWidth: preferences.normalizeWidth, ignorePunctuation: preferences.ignorePunctuation };
+        return { left: normalizeChineseText(left.content, options), right: normalizeChineseText(right.content, options), jsonChanges: [] };
+      }
+      if (preferences.mode === 'paragraph') return { left: normalizeParagraphs(left.content), right: normalizeParagraphs(right.content), jsonChanges: [] };
+      if (preferences.mode === 'csv') return { left: formatCsvForComparison(left.content), right: formatCsvForComparison(right.content), jsonChanges: [] };
+      if (preferences.mode === 'markdown') return { left: formatMarkdownForComparison(left.content), right: formatMarkdownForComparison(right.content), jsonChanges: [] };
+      if (preferences.mode === 'env') return { left: formatEnvForComparison(left.content, preferences.envRedactSecrets), right: formatEnvForComparison(right.content, preferences.envRedactSecrets), jsonChanges: [] };
+      if (preferences.mode === 'yaml') return { left: formatYamlForComparison(left.content, preferences.jsonArrayKey || undefined), right: formatYamlForComparison(right.content, preferences.jsonArrayKey || undefined), jsonChanges: [] };
+      if (preferences.mode === 'xml') return { left: formatXmlForComparison(left.content), right: formatXmlForComparison(right.content), jsonChanges: [] };
+      if (preferences.mode === 'json') {
+        const before = canonicalizeJson(JSON.parse(left.content) as unknown, preferences.jsonArrayKey || undefined);
+        const after = canonicalizeJson(JSON.parse(right.content) as unknown, preferences.jsonArrayKey || undefined);
+        const jsonChanges = diffJsonTree(before, after);
+        return {
+          left: preferences.jsonOnlyChanges ? changesOnlyText(jsonChanges, 'before') : formatJsonForComparison(left.content, { arrayKey: preferences.jsonArrayKey || undefined }),
+          right: preferences.jsonOnlyChanges ? changesOnlyText(jsonChanges, 'after') : formatJsonForComparison(right.content, { arrayKey: preferences.jsonArrayKey || undefined }),
+          jsonChanges,
+        };
+      }
+      return { left: left.content, right: right.content, jsonChanges: [] };
+    } catch (error) {
+      return { left: left.content, right: right.content, jsonChanges: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }, [left.content, preferences, right.content]);
+  const displayLeft = useMemo(() => prepareTextForComparison(structuredComparison.left, preferences), [preferences, structuredComparison.left]);
+  const displayRight = useMemo(() => prepareTextForComparison(structuredComparison.right, preferences), [preferences, structuredComparison.right]);
   const { hunks, computing: diffComputing, error: diffError, worker: usingWorker } = useTextDiffHunks(displayLeft, displayRight);
-  const filtered = preferences.ignoreCase || preferences.ignoreBlankLines;
-  const language = languageIdFromName(right.label || left.label);
+  const filtered = preferences.ignoreCase || preferences.ignoreBlankLines || preferences.mode !== 'plain';
+  const language = preferences.mode === 'json' ? 'json' : languageIdFromName(right.label || left.label);
   const dark = theme === 'dark' || (theme === 'system' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   useEffect(() => {
@@ -220,6 +273,76 @@ export const ComparePanel: React.FC = () => {
     }
   };
 
+  const exportPatch = async () => {
+    setStatus('正在生成 Patch 文件…');
+    try {
+      const patch = left.content.length + right.content.length >= DIFF_WORKER_THRESHOLD
+        ? await createUnifiedDiffAsync(left.content, right.content, left.label, right.label)
+        : createUnifiedDiff(left.content, right.content, left.label, right.label);
+      if (!patch) {
+        setStatus('两侧内容没有差异');
+        return;
+      }
+      const defaultName = `${right.label.replace(/\.[^.]+$/, '') || 'comparison'}.patch`;
+      const result = await window.electronAPI.saveFile(patch, defaultName, { encoding: 'utf8', lineEnding: 'LF' });
+      setStatus(result.success ? `已导出 ${result.path?.split(/[\\/]/).pop() ?? defaultName}` : result.error ?? '导出已取消');
+    } catch (error) {
+      setStatus(error instanceof Error && error.message === 'DIFF_TIMEOUT' ? 'Patch 生成超时' : 'Patch 导出失败');
+    }
+  };
+
+  const importPatch = async () => {
+    const result = await window.electronAPI.pickFile({ accept: '.patch,.diff' });
+    const file = Array.isArray(result) ? result[0] : result;
+    if (!file) return;
+    try {
+      const patch = parseUnifiedPatch(file.text ?? decodeBase64Utf8(file.content));
+      setPatchSession({ name: file.name, patch, reverse: false });
+      setStatus(`已解析 ${file.name}：${patch.hunks.length} 个变更块`);
+    } catch (error) {
+      setPatchSession(null);
+      setStatus(`Patch 解析失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const previewPatch = (sourceSide: 'left' | 'right') => {
+    if (!patchSession) return;
+    const source = sourceSide === 'left' ? left : right;
+    const result = applyUnifiedPatch(source.content, patchSession.patch, patchSession.reverse);
+    if (!result.success) {
+      setStatus(`Patch 应用失败（块 ${(result.failedHunk ?? 0) + 1}）：${result.error}`);
+      return;
+    }
+    const targetSide = sourceSide === 'left' ? 'right' : 'left';
+    const targetLabel = patchSession.reverse ? patchSession.patch.originalLabel : patchSession.patch.modifiedLabel;
+    const preview: CompareDocument = { label: targetLabel.split(/[\\/]/).pop() ?? 'Patch 预览', content: result.content };
+    if (targetSide === 'right') setRight(preview); else setLeft(preview);
+    setActiveChange(-1);
+    setStatus(`Patch 预览完成：已应用 ${result.appliedHunks} 个变更块，尚未写入磁盘`);
+  };
+
+  const exportJsonPatch = async () => {
+    try {
+      const patch = createJsonPatch(JSON.parse(left.content) as unknown, JSON.parse(right.content) as unknown);
+      const result = await window.electronAPI.saveFile(`${JSON.stringify(patch, null, 2)}\n`, `${right.label.replace(/\.[^.]+$/, '') || 'comparison'}.jsonpatch`, { encoding: 'utf8', lineEnding: 'LF' });
+      setStatus(result.success ? `已导出 JSON Patch（${patch.length} 个操作）` : result.error ?? '导出已取消');
+    } catch (error) { setStatus(`JSON Patch 导出失败：${error instanceof Error ? error.message : String(error)}`); }
+  };
+
+  const importJsonPatch = async () => {
+    const result = await window.electronAPI.pickFile({ accept: '.jsonpatch,.json' });
+    const file = Array.isArray(result) ? result[0] : result;
+    if (!file) return;
+    try {
+      const operations = JSON.parse(file.text ?? decodeBase64Utf8(file.content)) as JsonPatchOperation[];
+      if (!Array.isArray(operations) || operations.some((item) => !item || !['add', 'remove', 'replace'].includes(item.op) || typeof item.path !== 'string')) throw new Error('JSON_PATCH_INVALID');
+      const preview = applyJsonPatch(JSON.parse(left.content) as unknown, operations);
+      setRight({ label: 'JSON Patch 预览.json', content: `${JSON.stringify(preview, null, 2)}\n` });
+      setActiveChange(-1);
+      setStatus(`JSON Patch 预览完成：${operations.length} 个操作，尚未写入磁盘`);
+    } catch (error) { setStatus(`JSON Patch 导入失败：${error instanceof Error ? error.message : String(error)}`); }
+  };
+
   const applyCurrent = (direction: 'left-to-right' | 'right-to-left') => {
     if (hunks.length === 0 || filtered) {
       if (filtered) setStatus('关闭忽略大小写/空行后才能应用差异');
@@ -269,6 +392,9 @@ export const ComparePanel: React.FC = () => {
     <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b bg-card px-3 py-2">
         <h1 className="mr-2 text-sm font-semibold">文本比较</h1>
+        <select className="h-7 rounded border bg-background px-2 text-xs" value={preferences.mode} onChange={(event) => updatePreference('mode', event.target.value as CompareMode)} aria-label="比较模式">
+          <option value="plain">普通文本/代码</option><option value="chinese-word">中文词级</option><option value="paragraph">段落</option><option value="json">JSON 结构</option><option value="yaml">YAML 结构</option><option value="xml">XML 节点</option><option value="csv">CSV 表格</option><option value="markdown">Markdown 结构</option><option value="env">.env 键值</option>
+        </select>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void openTwoFiles()}><FileText className="mr-1 h-3.5 w-3.5" />选择两个文件</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void openFile('left')}><FileText className="mr-1 h-3.5 w-3.5" />载入左侧</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void openFile('right')}><FileText className="mr-1 h-3.5 w-3.5" />载入右侧</Button>
@@ -290,7 +416,17 @@ export const ComparePanel: React.FC = () => {
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => updatePreference('sideBySide', !preferences.sideBySide)}>{preferences.sideBySide ? '行内视图' : '双栏视图'}</Button>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => updatePreference('inputsVisible', !preferences.inputsVisible)}>{preferences.inputsVisible ? '隐藏输入' : '显示输入'}</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void copyPatch()}><Copy className="mr-1 h-3.5 w-3.5" />复制 Diff</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void exportPatch()}>导出 Patch</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void importPatch()}>导入 Patch</Button>
+        {preferences.mode === 'json' && <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void exportJsonPatch()}>导出 JSON Patch</Button>}
+        {preferences.mode === 'json' && <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void importJsonPatch()}>导入 JSON Patch</Button>}
       </header>
+
+      {preferences.mode === 'chinese-word' && <div className="flex h-8 shrink-0 items-center gap-4 border-b px-3 text-xs"><label className="flex items-center gap-1"><input type="checkbox" checked={preferences.normalizeWidth} onChange={(event) => updatePreference('normalizeWidth', event.target.checked)} />全角/半角归一化</label><label className="flex items-center gap-1"><input type="checkbox" checked={preferences.ignorePunctuation} onChange={(event) => updatePreference('ignorePunctuation', event.target.checked)} />忽略标点</label></div>}
+      {preferences.mode === 'json' && <div className="flex h-8 shrink-0 items-center gap-4 border-b px-3 text-xs"><label>数组匹配字段 <input className="ml-1 h-6 w-28 rounded border bg-background px-2" value={preferences.jsonArrayKey} onChange={(event) => updatePreference('jsonArrayKey', event.target.value)} placeholder="如 id" /></label><label className="flex items-center gap-1"><input type="checkbox" checked={preferences.jsonOnlyChanges} onChange={(event) => updatePreference('jsonOnlyChanges', event.target.checked)} />只显示值变化</label>{structuredComparison.error && <span className="text-destructive">JSON 解析失败：{structuredComparison.error}</span>}</div>}
+      {preferences.mode === 'env' && <div className="flex h-8 shrink-0 items-center gap-4 border-b px-3 text-xs"><label className="flex items-center gap-1"><input type="checkbox" checked={preferences.envRedactSecrets} onChange={(event) => updatePreference('envRedactSecrets', event.target.checked)} />隐藏密钥值</label><span className="text-muted-foreground">匹配 KEY、TOKEN、SECRET、PASSWORD、PWD、PRIVATE_KEY、CREDENTIAL</span>{structuredComparison.error && <span className="text-destructive">.env 解析失败：{structuredComparison.error}</span>}</div>}
+      {preferences.mode === 'yaml' && <div className="flex h-8 shrink-0 items-center gap-4 border-b px-3 text-xs"><label>数组匹配字段 <input className="ml-1 h-6 w-28 rounded border bg-background px-2" value={preferences.jsonArrayKey} onChange={(event) => updatePreference('jsonArrayKey', event.target.value)} placeholder="如 id" /></label><span className="text-muted-foreground">自动按键名规范化</span></div>}
+      {preferences.mode !== 'json' && preferences.mode !== 'env' && structuredComparison.error && <div className="shrink-0 border-b bg-destructive/10 px-3 py-2 text-xs text-destructive">结构化解析失败：{structuredComparison.error}</div>}
 
       {saveConflict && (
         <div role="alert" className="flex min-h-10 shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 text-xs">
@@ -302,6 +438,27 @@ export const ComparePanel: React.FC = () => {
           <Button size="sm" className="h-7 px-2 text-xs" onClick={() => void saveDocument(saveConflict.side, false, true)}>强制覆盖</Button>
           <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setSaveConflict(null)}>取消</Button>
         </div>
+      )}
+
+      {patchSession && (
+        <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-primary/30 bg-primary/5 px-3 text-xs">
+          <span className="font-medium">{patchSession.name}</span>
+          <span className="text-muted-foreground">{patchSession.patch.originalLabel} → {patchSession.patch.modifiedLabel} · {patchSession.patch.hunks.length} 个块</span>
+          <label className="ml-2 flex items-center gap-1"><input type="checkbox" checked={patchSession.reverse} onChange={(event) => setPatchSession((current) => current ? { ...current, reverse: event.target.checked } : null)} />反向应用</label>
+          <div className="flex-1" />
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => previewPatch('left')}>以左侧为基准预览 →</Button>
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => previewPatch('right')}>← 以右侧为基准预览</Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setPatchSession(null)}>关闭 Patch</Button>
+        </div>
+      )}
+
+      {preferences.mode === 'json' && structuredComparison.jsonChanges.length > 0 && (
+        <details className="shrink-0 border-b bg-muted/20 text-xs">
+          <summary className="cursor-pointer px-3 py-2 font-medium">JSON 树状差异（{structuredComparison.jsonChanges.length}）</summary>
+          <div className="max-h-36 overflow-auto border-t px-3 py-2 font-mono">
+            {structuredComparison.jsonChanges.slice(0, 200).map((change) => <div key={`${change.type}:${change.path}`} className="grid grid-cols-[5rem_minmax(10rem,1fr)_2fr_2fr] gap-2 py-0.5"><span>{change.type}</span><span>{change.path}</span><span className="truncate text-destructive">{change.before === undefined ? '' : JSON.stringify(change.before)}</span><span className="truncate text-success">{change.after === undefined ? '' : JSON.stringify(change.after)}</span></div>)}
+          </div>
+        </details>
       )}
 
       {preferences.inputsVisible && (

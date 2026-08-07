@@ -64,6 +64,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.10",
     "@ant-design/icons": "^6.3.2",
     "@ant-design/x": "^2.9.0",
     "@ant-design/x-markdown": "^2.9.0",
@@ -92,6 +93,7 @@
     "electron-auto-launch": "^5.0.7",
     "electron-squirrel-startup": "^1.0.1",
     "iconv-lite": "^0.6.3",
+    "js-yaml": "^4.3.0",
     "lucide-react": "^1.25.0",
     "mammoth": "^1.12.0",
     "monaco-editor": "^0.52.2",

@@ -108,4 +108,18 @@ describe('ComparePanel', () => {
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
     await waitFor(() => expect(writeTextFile).toHaveBeenCalledOnce());
   });
+
+  it('imports a patch and previews it without writing a file', async () => {
+    pickFile.mockResolvedValue({
+      path: 'C:\\tmp\\change.patch', name: 'change.patch', size: 56, content: '', mimeType: 'text/plain',
+      text: ['--- old.txt', '+++ new.txt', '@@ -1,1 +1,1 @@', '-old', '+new', ''].join('\n'),
+    });
+    render(createElement(ComparePanel));
+    fireEvent.change(screen.getByLabelText('左侧文本'), { target: { value: 'old' } });
+    fireEvent.click(screen.getByRole('button', { name: '导入 Patch' }));
+    const preview = await screen.findByRole('button', { name: '以左侧为基准预览 →' });
+    fireEvent.click(preview);
+    expect((screen.getByLabelText('右侧文本') as HTMLTextAreaElement).value).toBe('new');
+    expect(writeTextFile).not.toHaveBeenCalled();
+  });
 });
