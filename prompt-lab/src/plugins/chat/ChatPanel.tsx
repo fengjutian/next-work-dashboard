@@ -23,7 +23,7 @@ import { VariableFillDialog } from '@/components/VariableFillDialog';
 import { buildAttachmentContext, parseAttachment } from './attachment-parser';
 import { conversationMemory, type MemoryCitation } from '@/core/conversation-memory';
 import { MemoryDocumentDialog, MemorySourceList, type MemoryDocumentPreview } from './MemorySourceView';
-import { configureCodeWorkspace } from '@/core/tools/code-workspace-tools';
+import { configureCodeWorkspace, restoreCodeWorkspaceIsolation } from '@/core/tools/code-workspace-tools';
 import { CodeChangeDiff, type CodeChangeDiffData } from './CodeChangeDiff';
 import { createOpenAIProvider, runAgent } from '@/core';
 
@@ -150,6 +150,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   });
   const [chatWorktree, setChatWorktree] = useState<{ path: string; branch: string; dirty: boolean } | null>(null);
   const [chatWorktreeBusy, setChatWorktreeBusy] = useState(false);
+  const monitoredCodeWorkspace = useMemo(() => chatWorktree && codeWorkspace
+    ? { path: chatWorktree.path, name: `${codeWorkspace.name} · ${chatWorktree.branch}` }
+    : codeWorkspace, [chatWorktree, codeWorkspace]);
   const [workspaceChanges, setWorkspaceChanges] = useState<Array<{
     path: string;
     status: 'added' | 'modified' | 'deleted' | 'renamed';
@@ -424,7 +427,16 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     let disposed = false;
     const refresh = async () => {
       const result = await window.electronAPI.workspace.getAgentWorktreeStatus(codeWorkspace.path, activeSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100));
-      if (!disposed && result.success) setChatWorktree(result.data ? { path: result.data.path, branch: result.data.branch, dirty: result.data.dirty } : null);
+      if (!disposed && result.success) {
+        if (result.data) {
+          const worktree = result.data;
+          setChatWorktree((current) => {
+            if (current?.path !== worktree.path) restoreCodeWorkspaceIsolation(worktree.path, worktree.branch);
+            if (current?.path === worktree.path && current.branch === worktree.branch && current.dirty === worktree.dirty) return current;
+            return { path: worktree.path, branch: worktree.branch, dirty: worktree.dirty };
+          });
+        } else setChatWorktree(null);
+      }
     };
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, 2000);
@@ -432,9 +444,17 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   }, [activeSessionId, codeWorkspace, scene]);
 
   const mergeChatWorktree = useCallback(async () => {
-    if (!codeWorkspace || !chatWorktree || !window.confirm(`将隔离分支 ${chatWorktree.branch} 的修改合并到主工作区？`)) return;
+    if (!codeWorkspace || !chatWorktree) return;
     setChatWorktreeBusy(true);
     try {
+      const preview = await window.electronAPI.workspace.previewAgentWorktreeMerge(codeWorkspace.path, activeSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100));
+      if (!preview.success || !preview.data) throw new Error(preview.error ?? '无法预览合并');
+      if (preview.data.mainDirty) throw new Error('主工作区存在未提交修改，请先提交或存入 Git Stash');
+      if (preview.data.conflictingPaths.length) throw new Error(`以下文件存在冲突：${preview.data.conflictingPaths.join('、')}`);
+      if (!preview.data.canMerge) throw new Error('当前隔离分支没有可合并的修改');
+      const files = preview.data.changedPaths.slice(0, 8).join('\n');
+      const more = preview.data.changedPaths.length > 8 ? `\n…另有 ${preview.data.changedPaths.length - 8} 个文件` : '';
+      if (!window.confirm(`将隔离分支 ${chatWorktree.branch} 的 ${preview.data.changedPaths.length} 个文件合并到主工作区？\n\n${files}${more}`)) return;
       const result = await window.electronAPI.workspace.mergeAgentWorktree(codeWorkspace.path, activeSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100), `Merge AI chat ${activeSessionId}`);
       if (!result.success) throw new Error(result.error ?? '合并失败');
       setChatWorktree(null);
@@ -460,19 +480,19 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   }, [activeSessionId, chatWorktree, codeWorkspace, notifApi]);
 
   useEffect(() => {
-    if (scene !== 'code' || !codeWorkspace) return;
+    if (scene !== 'code' || !monitoredCodeWorkspace) return;
     let disposed = false;
     setWorkspaceChanges([]);
     setWorkspaceScanPending(true);
     workspaceSnapshotsRef.current.clear();
 
     const initializeSnapshots = async () => {
-      const listed = await window.electronAPI.workspace.listFiles(codeWorkspace.path);
+      const listed = await window.electronAPI.workspace.listFiles(monitoredCodeWorkspace.path);
       if (!listed.success || disposed) return;
       const files = (listed.data ?? []).filter((entry) => entry.type === 'file' && (entry.size ?? 0) <= 1024 * 1024);
       for (let index = 0; index < files.length && !disposed; index += 20) {
         const batch = files.slice(index, index + 20);
-        const contents = await Promise.all(batch.map((file) => window.electronAPI.workspace.readTextFile(codeWorkspace.path, file.path)));
+        const contents = await Promise.all(batch.map((file) => window.electronAPI.workspace.readTextFile(monitoredCodeWorkspace.path, file.path)));
         batch.forEach((file, fileIndex) => {
           const result = contents[fileIndex];
           if (result.success && result.data) workspaceSnapshotsRef.current.set(file.path, result.data.content);
@@ -480,7 +500,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       }
       if (disposed) return;
 
-      const gitStatus = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      const gitStatus = await window.electronAPI.workspace.gitStatus(monitoredCodeWorkspace.path);
       workspaceGitSignatureRef.current = (gitStatus.data ?? [])
         .map((entry) => `${entry.status}:${entry.path}`)
         .sort()
@@ -491,10 +511,10 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
           const batch = gitStatus.data.slice(index, index + 20);
           const comparisons = await Promise.all(batch.map(async (entry) => {
             const [head, current] = await Promise.all([
-              window.electronAPI.workspace.gitShowHead(codeWorkspace.path, entry.path),
+              window.electronAPI.workspace.gitShowHead(monitoredCodeWorkspace.path, entry.path),
               workspaceSnapshotsRef.current.has(entry.path)
                 ? Promise.resolve(null)
-                : window.electronAPI.workspace.readTextFile(codeWorkspace.path, entry.path),
+                : window.electronAPI.workspace.readTextFile(monitoredCodeWorkspace.path, entry.path),
             ]);
             const modified = workspaceSnapshotsRef.current.get(entry.path)
               ?? (current?.success && current.data ? current.data.content : '');
@@ -521,7 +541,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       }
       if (disposed) return;
       setWorkspaceScanPending(false);
-      const result = await window.electronAPI.workspace.watch(codeWorkspace.path);
+      const result = await window.electronAPI.workspace.watch(monitoredCodeWorkspace.path);
       if (!result.success) notifApi.warning({ message: '文件变化检测不可用', description: result.error });
     };
     void initializeSnapshots().catch((error) => {
@@ -535,14 +555,14 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       if (disposed) return;
       const hadSnapshot = workspaceSnapshotsRef.current.has(event.path);
       const original = workspaceSnapshotsRef.current.get(event.path) ?? '';
-      const current = await window.electronAPI.workspace.readTextFile(codeWorkspace.path, event.path);
+      const current = await window.electronAPI.workspace.readTextFile(monitoredCodeWorkspace.path, event.path);
       if (disposed) return;
       const modified = current.success && current.data ? current.data.content : '';
       if (original === modified) return;
       if (current.success) workspaceSnapshotsRef.current.set(event.path, modified);
       else workspaceSnapshotsRef.current.delete(event.path);
       const status = current.success ? (hadSnapshot ? 'modified' as const : 'added' as const) : 'deleted' as const;
-      const gitStatusResult = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      const gitStatusResult = await window.electronAPI.workspace.gitStatus(monitoredCodeWorkspace.path);
       workspaceGitSignatureRef.current = (gitStatusResult.data ?? [])
         .map((entry) => `${entry.status}:${entry.path}`)
         .sort()
@@ -562,13 +582,13 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       unsubscribe();
       void window.electronAPI.workspace.unwatch();
     };
-  }, [codeWorkspace, notifApi, scene]);
+  }, [monitoredCodeWorkspace, notifApi, scene]);
 
   const refreshWorkspaceChanges = useCallback(async () => {
-    if (!codeWorkspace || workspaceScanPending) return;
+    if (!monitoredCodeWorkspace || workspaceScanPending) return;
     setWorkspaceScanPending(true);
     try {
-      const gitStatus = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+      const gitStatus = await window.electronAPI.workspace.gitStatus(monitoredCodeWorkspace.path);
       if (!gitStatus.success) {
         notifApi.warning({ message: '刷新文件变化失败', description: gitStatus.error });
         return;
@@ -579,8 +599,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
         .join('|');
       const refreshed = await Promise.all((gitStatus.data ?? []).map(async (entry) => {
         const [head, current] = await Promise.all([
-          window.electronAPI.workspace.gitShowHead(codeWorkspace.path, entry.path),
-          window.electronAPI.workspace.readTextFile(codeWorkspace.path, entry.path),
+          window.electronAPI.workspace.gitShowHead(monitoredCodeWorkspace.path, entry.path),
+          window.electronAPI.workspace.readTextFile(monitoredCodeWorkspace.path, entry.path),
         ]);
         const modified = current.success && current.data ? current.data.content : '';
         if (current.success && current.data) workspaceSnapshotsRef.current.set(entry.path, modified);
@@ -607,17 +627,17 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     } finally {
       setWorkspaceScanPending(false);
     }
-  }, [codeWorkspace, notifApi, workspaceScanPending]);
+  }, [monitoredCodeWorkspace, notifApi, workspaceScanPending]);
 
   useEffect(() => {
-    if (scene !== 'code' || !codeWorkspace) return;
+    if (scene !== 'code' || !monitoredCodeWorkspace) return;
     let disposed = false;
     let checking = false;
     const checkGitStatus = async () => {
       if (disposed || checking || workspaceScanPending) return;
       checking = true;
       try {
-        const result = await window.electronAPI.workspace.gitStatus(codeWorkspace.path);
+        const result = await window.electronAPI.workspace.gitStatus(monitoredCodeWorkspace.path);
         if (!result.success || disposed) return;
         const signature = (result.data ?? [])
           .map((entry) => `${entry.status}:${entry.path}`)
@@ -636,7 +656,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [codeWorkspace, refreshWorkspaceChanges, scene, workspaceScanPending]);
+  }, [monitoredCodeWorkspace, refreshWorkspaceChanges, scene, workspaceScanPending]);
 
   const selectCodeWorkspace = useCallback(async () => {
     const folder = await window.electronAPI.workspace.openFolder();

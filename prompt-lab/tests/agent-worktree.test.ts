@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildAgentWorktreeSpec, parsePorcelainPaths, parseWorktreeList } from '../src/main/agent-worktree';
+import { assertCleanAgentWorktreeBase, buildAgentWorktreeSpec, parsePorcelainPaths, parseWorktreeList } from '../src/main/agent-worktree';
 
 describe('agent worktree safety', () => {
   it('builds a deterministic target below the storage root', () => {
@@ -24,5 +24,10 @@ describe('agent worktree safety', () => {
     expect(parsePorcelainPaths(' M src/a.ts\0?? src/new.ts\0R  src/next.ts\0src/old.ts\0')).toEqual([
       'src/a.ts', 'src/new.ts', 'src/next.ts', 'src/old.ts',
     ]);
+  });
+
+  it('refuses to create a new isolated baseline from a dirty workspace', () => {
+    expect(() => assertCleanAgentWorktreeBase(' M src/app.ts\0')).toThrow('MAIN_WORKSPACE_DIRTY_CREATE_WORKTREE');
+    expect(() => assertCleanAgentWorktreeBase('')).not.toThrow();
   });
 });

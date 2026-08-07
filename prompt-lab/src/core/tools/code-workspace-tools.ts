@@ -17,6 +17,12 @@ export function configureCodeWorkspace(root: string | null, sessionId = 'chat'):
   workspaceSessionId = safeSessionId;
 }
 
+export function restoreCodeWorkspaceIsolation(path: string, branch: string): void {
+  isolatedWorkspace = { path, branch };
+  workspaceRoot = path;
+  readVersions.clear();
+}
+
 function requireWorkspace(): string {
   if (!workspaceRoot) throw new Error('请先在代码编程场景中选择本地代码文件夹');
   return workspaceRoot;
@@ -26,7 +32,10 @@ async function requireIsolatedWorkspace(): Promise<{ root: string; branch: strin
   if (isolatedWorkspace) return { root: isolatedWorkspace.path, branch: isolatedWorkspace.branch };
   if (!sourceWorkspaceRoot) throw new Error('请先选择代码工作区');
   const result = await window.electronAPI.workspace.createAgentWorktree(sourceWorkspaceRoot, workspaceSessionId);
-  if (!result.success || !result.data) throw new Error(result.error ?? '无法创建隔离 Worktree');
+  if (!result.success || !result.data) {
+    if (result.error === 'MAIN_WORKSPACE_DIRTY_CREATE_WORKTREE') throw new Error('主工作区存在未提交修改。为避免 AI 基于旧版本或混入用户改动，请先提交或暂存到 Git Stash，再运行写入任务。');
+    throw new Error(result.error ?? '无法创建隔离 Worktree');
+  }
   isolatedWorkspace = { path: result.data.path, branch: result.data.branch };
   workspaceRoot = result.data.path;
   readVersions.clear();

@@ -53,6 +53,10 @@ export function parseWorktreeList(output: string): Array<{ path: string; head?: 
   }).filter((item) => Boolean(item.path));
 }
 
+export function assertCleanAgentWorktreeBase(status: string): void {
+  if (status.trim()) throw new Error('MAIN_WORKSPACE_DIRTY_CREATE_WORKTREE');
+}
+
 export function parsePorcelainPaths(output: string): string[] {
   const records = output.split('\0').filter(Boolean);
   const paths: string[] = [];
@@ -89,7 +93,10 @@ export async function createAgentWorktree(rootPath: string, storageRoot: string,
   if (topLevel !== root) throw new Error('WORKSPACE_NOT_GIT_ROOT');
   const existing = parseWorktreeList(await runGit(root, ['worktree', 'list', '--porcelain']))
     .find((item) => path.resolve(item.path) === spec.path);
-  if (!existing) await runGit(root, ['worktree', 'add', '-b', spec.branch, spec.path, 'HEAD']);
+  if (!existing) {
+    assertCleanAgentWorktreeBase(await runGit(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']));
+    await runGit(root, ['worktree', 'add', '-b', spec.branch, spec.path, 'HEAD']);
+  }
   const status = await runGit(spec.path, ['status', '--porcelain=v1', '--untracked-files=all']);
   const head = await runGit(spec.path, ['rev-parse', 'HEAD']);
   return { ...spec, head, dirty: Boolean(status) };
