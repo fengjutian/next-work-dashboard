@@ -176,9 +176,9 @@ export interface ElectronAPI {
     renameDocument: (rootPath: string, relativePath: string, nextRelativePath: string) => Promise<WorkspaceResult<{ path: string; updatedReferences: string[] }>>;
   };
   /** 保存文件对话框，写入内容 */
-  saveFile: (content: string, defaultName?: string) => Promise<{ success: boolean; path?: string }>;
+  saveFile: (content: string, defaultName?: string, options?: Pick<WorkspaceWriteOptions, 'encoding' | 'lineEnding'>) => Promise<{ success: boolean; path?: string; modifiedAt?: number; error?: string }>;
   /** 保存到已经打开的文本文件。 */
-  writeTextFile: (filePath: string, content: string) => Promise<{ success: boolean; path?: string; error?: string }>;
+  writeTextFile: (filePath: string, content: string, options?: WorkspaceWriteOptions) => Promise<{ success: boolean; path?: string; modifiedAt?: number; error?: string }>;
   /** 按路径读取文件，返回 base64 内容（供 AI 工具使用） */
   readFileBuffer: (filePath: string) => Promise<{
     success: boolean;
@@ -243,6 +243,12 @@ export interface FilePickResult {
   size: number;
   content: string;  // base64
   mimeType: string;
+  text?: string;
+  encoding?: WorkspaceEncoding;
+  lineEnding?: 'LF' | 'CRLF';
+  mixedLineEndings?: boolean;
+  modifiedAt?: number;
+  readOnly?: boolean;
 }
 
 export interface FolderPickResult {

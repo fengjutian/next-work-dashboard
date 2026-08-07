@@ -1,12 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import 'monaco-editor/esm/vs/editor/editor.all.js';
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
-import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
-import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
-import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
-import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import type {
@@ -43,6 +36,8 @@ import {
 } from './hooks';
 import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
+import { configureMonaco } from '@/lib/monaco-setup';
+import { computeTextDiffHunks } from '@/lib/text-diff';
 import {
   type BottomPanelTab,
   type EditorPreferences,
@@ -59,63 +54,11 @@ import {
 export { decodeBase64Utf8, languageFromName, languageIdFromName } from './editor-utils';
 export { type BottomPanelTab, type EditorPreferences, type EditorProblem, type EditorSymbol, type OpenDocument, type TreeNode, type TreeEditState, DEFAULT_PREFERENCES, displayError, encodingLabel } from './editor-types';
 
-loader.config({ monaco });
+configureMonaco();
 const flattenAgentScopeNodes = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => [node, ...flattenAgentScopeNodes(node.children ?? [])]);
-if (typeof self !== 'undefined') {
-  (self as typeof self & {
-    MonacoEnvironment?: { getWorker: (_moduleId: string, label: string) => Worker };
-  }).MonacoEnvironment = {
-    getWorker: (_moduleId, label) => {
-      if (label === 'json') return new JsonWorker();
-      if (label === 'css' || label === 'scss' || label === 'less') return new CssWorker();
-      if (label === 'html' || label === 'handlebars' || label === 'razor') return new HtmlWorker();
-      if (label === 'typescript' || label === 'javascript') return new TsWorker();
-      return new EditorWorker();
-    },
-  };
-}
 
 function computeDiffHunks(original: string, modified: string): AiHunk[] {
-  const o = original.split('\n');
-  const m = modified.split('\n');
-  const hunks: AiHunk[] = [];
-  let oIdx = 0;
-  let mIdx = 0;
-  let hunkIdx = 0;
-
-  while (oIdx < o.length || mIdx < m.length) {
-    while (oIdx < o.length && mIdx < m.length && o[oIdx] === m[mIdx]) { oIdx += 1; mIdx += 1; }
-    if (oIdx >= o.length && mIdx >= m.length) break;
-
-    const originalStart = oIdx + 1;
-    const modifiedStart = mIdx + 1;
-    const originalLines: string[] = [];
-    const modifiedLines: string[] = [];
-
-    while (oIdx < o.length) {
-      const lookAhead = m.slice(mIdx, mIdx + 8);
-      if (lookAhead.includes(o[oIdx])) break;
-      originalLines.push(o[oIdx]);
-      oIdx += 1;
-    }
-    while (mIdx < m.length) {
-      const lookAhead = o.slice(oIdx, oIdx + 8);
-      if (lookAhead.includes(m[mIdx])) break;
-      modifiedLines.push(m[mIdx]);
-      mIdx += 1;
-    }
-
-    if (originalLines.length > 0 || modifiedLines.length > 0) {
-      hunks.push({ index: hunkIdx, originalStart, modifiedStart, originalLines, modifiedLines });
-      hunkIdx += 1;
-    } else {
-      if (oIdx < o.length) { originalLines.push(o[oIdx]); oIdx += 1; }
-      if (mIdx < m.length) { modifiedLines.push(m[mIdx]); mIdx += 1; }
-      hunks.push({ index: hunkIdx, originalStart, modifiedStart, originalLines, modifiedLines });
-      hunkIdx += 1;
-    }
-  }
-  return hunks;
+  return computeTextDiffHunks(original, modified);
 }
 export const CodeEditorWorkspaceController: React.FC = () => {
   const { theme, aiApi } = useStore();

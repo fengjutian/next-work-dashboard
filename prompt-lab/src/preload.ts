@@ -220,10 +220,10 @@ const electronAPI: ElectronAPI = {
     renameDocument: (rootPath: string, relativePath: string, nextRelativePath: string) =>
       ipcRenderer.invoke('knowledge:renameDocument', rootPath, relativePath, nextRelativePath),
   },
-  saveFile: (content: string, defaultName?: string) =>
-    ipcRenderer.invoke('dialog:saveFile', content, defaultName),
-  writeTextFile: (filePath: string, content: string) =>
-    ipcRenderer.invoke('dialog:writeTextFile', filePath, content),
+  saveFile: (content: string, defaultName?: string, options?: Pick<import('./types/electron').WorkspaceWriteOptions, 'encoding' | 'lineEnding'>) =>
+    ipcRenderer.invoke('dialog:saveFile', content, defaultName, options),
+  writeTextFile: (filePath: string, content: string, options?: import('./types/electron').WorkspaceWriteOptions) =>
+    ipcRenderer.invoke('dialog:writeTextFile', filePath, content, options),
 
   // 按路径读取文件（供 AI 工具使用）
   readFileBuffer: (filePath: string) =>

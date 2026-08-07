@@ -129,6 +129,7 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 
 export function setupIPC(webviewPreloadPath: string) {
   const workspaceWatchers = new Map<number, fs.FSWatcher>();
+  const dialogAuthorizedFiles = new Set<string>();
 
   const configureWindow = (win: BrowserWindow) => {
     const webContentsId = win.webContents.id;
@@ -1067,7 +1068,7 @@ export function setupIPC(webviewPreloadPath: string) {
         ? [{ name: '文件', extensions: options.accept.split(',').map((e) => e.replace(/^\./, '')) }]
         : [];
       const result = await dialog.showOpenDialog(win!, {
-        properties: ['openFile'],
+        properties: options?.multiple ? ['openFile', 'multiSelections'] : ['openFile'],
         filters: filters.length > 0 ? filters : undefined,
       });
       if (result.canceled || result.filePaths.length === 0) return null;
@@ -1077,6 +1078,7 @@ export function setupIPC(webviewPreloadPath: string) {
           const buf = fs.readFileSync(filePath);
           const name = path.basename(filePath);
           const ext = path.extname(name).toLowerCase();
+          const stat = fs.statSync(filePath);
           const mimeMap: Record<string, string> = {
             '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             '.xls': 'application/vnd.ms-excel',
@@ -1089,12 +1091,26 @@ export function setupIPC(webviewPreloadPath: string) {
             '.jpg': 'image/jpeg',
             '.jpeg': 'image/jpeg',
           };
+          let decoded: ReturnType<typeof decodeWorkspaceText> | undefined;
+          if (buf.length <= MAX_READ_ONLY_FILE_SIZE) {
+            try { decoded = decodeWorkspaceText(buf); } catch { /* binary file */ }
+          }
+          const resolvedPath = path.resolve(filePath);
+          dialogAuthorizedFiles.add(resolvedPath);
           return {
-            path: filePath,
+            path: resolvedPath,
             name,
             size: buf.length,
             content: buf.toString('base64'),
             mimeType: mimeMap[ext] ?? 'application/octet-stream',
+            ...(decoded ? {
+              text: decoded.content,
+              encoding: decoded.encoding,
+              lineEnding: decoded.lineEnding,
+              mixedLineEndings: decoded.mixedLineEndings,
+              modifiedAt: stat.mtimeMs,
+              readOnly: (stat.mode & 0o200) === 0,
+            } : {}),
           };
         }),
       );
@@ -2044,28 +2060,34 @@ export function setupIPC(webviewPreloadPath: string) {
     workspaceWatchers.delete(event.sender.id);
   });
 
-  ipcMain.handle('dialog:saveFile', async (_event, content: string, defaultName?: string) => {
+  ipcMain.handle('dialog:saveFile', async (_event, content: string, defaultName?: string, options?: { encoding?: 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk'; lineEnding?: 'LF' | 'CRLF' }) => {
     try {
       const win = BrowserWindow.getFocusedWindow();
       const result = await dialog.showSaveDialog(win!, {
         defaultPath: defaultName ?? 'untitled.txt',
       });
       if (result.canceled || !result.filePath) return { success: false };
-      fs.writeFileSync(result.filePath, content, 'utf-8');
-      return { success: true, path: result.filePath };
-    } catch {
-      return { success: false };
+      const resolved = path.resolve(result.filePath);
+      fs.writeFileSync(resolved, encodeWorkspaceText(content, options));
+      dialogAuthorizedFiles.add(resolved);
+      return { success: true, path: resolved, modifiedAt: fs.statSync(resolved).mtimeMs };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
-  ipcMain.handle('dialog:writeTextFile', async (_event, filePath: string, content: string) => {
+  ipcMain.handle('dialog:writeTextFile', async (_event, filePath: string, content: string, options?: { encoding?: 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk'; lineEnding?: 'LF' | 'CRLF'; expectedModifiedAt?: number; force?: boolean }) => {
     try {
       const resolved = path.resolve(filePath);
+      if (!dialogAuthorizedFiles.has(resolved)) return { success: false, error: 'ACCESS_DENIED' };
       if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
         return { success: false, error: 'FILE_NOT_FOUND' };
       }
-      fs.writeFileSync(resolved, content, 'utf-8');
-      return { success: true, path: resolved };
+      const stat = fs.statSync(resolved);
+      if ((stat.mode & 0o200) === 0) return { success: false, error: 'FILE_READ_ONLY' };
+      if (!options?.force && fileWasModified(stat.mtimeMs, options?.expectedModifiedAt)) return { success: false, error: 'FILE_MODIFIED_EXTERNALLY' };
+      fs.writeFileSync(resolved, encodeWorkspaceText(content, options));
+      return { success: true, path: resolved, modifiedAt: fs.statSync(resolved).mtimeMs };
     } catch (err) {
       return { success: false, error: String(err) };
     }

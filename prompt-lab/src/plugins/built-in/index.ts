@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, MessageSquare, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code } from '@/components/icons';
+import { Sparkles, MessageSquare, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -39,6 +39,7 @@ const windy = preloadable(() => import('../windy').then((m) => ({ default: m.Win
 const terminal = preloadable(() => import('../terminal').then((m) => ({ default: m.TerminalPluginPanel })));
 const database = preloadable(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
 const codeEditor = preloadable(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
+const compare = preloadable(() => import('../compare').then((m) => ({ default: m.ComparePanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -51,6 +52,7 @@ const WindyPanel = windy.component;
 const TerminalPluginPanel = terminal.component;
 const DatabaseBrowser = database.component;
 const CodeEditorPanel = codeEditor.component;
+const ComparePanel = compare.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -249,6 +251,19 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'compare',
+    name: '文本比较',
+    icon: FileText,
+    component: ComparePanel,
+    enabled: true,
+    order: 18,
+    keepAlive: true,
+    contributions: {
+      commands: [{ id: 'compare.open', title: '打开文本比较', category: '文本比较' }],
+      views: [{ id: 'compare.main', title: '文本比较', component: ComparePanel, location: 'main' }],
+    },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -305,6 +320,7 @@ export function registerBuiltInPlugins(): void {
     terminal: terminal.preload,
     database: database.preload,
     'code-editor': codeEditor.preload,
+    compare: compare.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
