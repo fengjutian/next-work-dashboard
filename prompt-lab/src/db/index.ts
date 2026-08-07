@@ -220,6 +220,11 @@ function ensureSchema(): void {
       response TEXT NOT NULL, vector TEXT NOT NULL, created_at INTEGER NOT NULL, last_accessed_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_semantic_shadow_scope ON semantic_shadow_cache(namespace, model, last_accessed_at DESC);
+    CREATE TABLE IF NOT EXISTS llm_cache_events (
+      id TEXT PRIMARY KEY, event TEXT NOT NULL, namespace TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+      value INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_cache_events_time ON llm_cache_events(created_at DESC);
     CREATE TABLE IF NOT EXISTS weread_books (
       book_id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -534,6 +539,33 @@ export function dbPutSemanticShadow(entry: DbSemanticShadowEntry, maxEntries = 5
 }
 export function dbClearSemanticShadow(): void { _sqlDb?.run('DELETE FROM semantic_shadow_cache'); }
 export function dbGetSemanticShadowCount(): number { return Number(_sqlDb?.exec('SELECT COUNT(*) FROM semantic_shadow_cache')[0]?.values[0]?.[0] ?? 0); }
+
+export type LlmCacheEventName = 'memory_hit' | 'persistent_hit' | 'coalesced_hit' | 'miss' | 'bypass' | 'write' | 'shadow_none' | 'shadow_medium' | 'shadow_high';
+export function dbRecordLlmCacheEvent(event: LlmCacheEventName, namespace = '', model = '', value = 0): void {
+  if (!_sqlDb) return;
+  const now = Date.now();
+  _sqlDb.run('INSERT INTO llm_cache_events (id, event, namespace, model, value, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [`${now}-${Math.random().toString(36).slice(2, 10)}`, event, namespace, model, Math.round(value * 1_000_000), now]);
+  _sqlDb.run('DELETE FROM llm_cache_events WHERE created_at < ?', [now - 90 * 24 * 60 * 60 * 1000]);
+}
+
+export interface LlmCachePersistentStats { total: number; memoryHits: number; persistentHits: number; coalescedHits: number; misses: number; bypasses: number; writes: number; shadowNone: number; shadowMedium: number; shadowHigh: number; averageShadowSimilarity: number }
+export function dbGetLlmCacheStats(since = Date.now() - 30 * 24 * 60 * 60 * 1000): LlmCachePersistentStats {
+  const stats: LlmCachePersistentStats = { total: 0, memoryHits: 0, persistentHits: 0, coalescedHits: 0, misses: 0, bypasses: 0, writes: 0, shadowNone: 0, shadowMedium: 0, shadowHigh: 0, averageShadowSimilarity: 0 };
+  if (!_sqlDb) return stats;
+  const rows = _sqlDb.exec(`SELECT event, COUNT(*), AVG(value) FROM llm_cache_events WHERE created_at >= ${Math.floor(since)} GROUP BY event`)[0]?.values ?? [];
+  const map: Record<string, keyof LlmCachePersistentStats> = { memory_hit: 'memoryHits', persistent_hit: 'persistentHits', coalesced_hit: 'coalescedHits', miss: 'misses', bypass: 'bypasses', write: 'writes', shadow_none: 'shadowNone', shadow_medium: 'shadowMedium', shadow_high: 'shadowHigh' };
+  for (const row of rows) {
+    const field = map[String(row[0])]; if (field) (stats[field] as number) = Number(row[1]);
+    if (String(row[0]).startsWith('shadow_')) stats.averageShadowSimilarity += Number(row[2] ?? 0) / 1_000_000 * Number(row[1]);
+  }
+  stats.total = stats.memoryHits + stats.persistentHits + stats.coalescedHits + stats.misses;
+  const shadowTotal = stats.shadowNone + stats.shadowMedium + stats.shadowHigh;
+  stats.averageShadowSimilarity = shadowTotal ? stats.averageShadowSimilarity / shadowTotal : 0;
+  return stats;
+}
+
+export function dbClearLlmCacheEvents(): void { _sqlDb?.run('DELETE FROM llm_cache_events'); }
 
 export interface WereadCachedBook {
   bookId: string;

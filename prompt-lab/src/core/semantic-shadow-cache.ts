@@ -1,4 +1,4 @@
-import { dbListSemanticShadow, dbPutSemanticShadow, flushDbToDisk, isDbReady } from '@/db';
+import { dbListSemanticShadow, dbPutSemanticShadow, dbRecordLlmCacheEvent, flushDbToDisk, isDbReady } from '@/db';
 
 export interface SemanticShadowMetrics { checks: number; candidates: number; highConfidence: number; mediumConfidence: number; stores: number; errors: number; bestSimilarity: number }
 const metrics: SemanticShadowMetrics = { checks: 0, candidates: 0, highConfidence: 0, mediumConfidence: 0, stores: 0, errors: 0, bestSimilarity: 0 };
@@ -25,6 +25,7 @@ export async function evaluateSemanticShadow(input: {
     if (bestSimilarity >= 0.94) metrics.candidates += 1;
     if (bestSimilarity >= 0.97) metrics.highConfidence += 1;
     else if (bestSimilarity >= 0.94) metrics.mediumConfidence += 1;
+    dbRecordLlmCacheEvent(bestSimilarity >= 0.97 ? 'shadow_high' : bestSimilarity >= 0.94 ? 'shadow_medium' : 'shadow_none', input.namespace, input.model, Math.max(0, bestSimilarity));
     metrics.bestSimilarity = Math.max(metrics.bestSimilarity, bestSimilarity);
     return { ...input, vector, bestSimilarity };
   } catch { metrics.errors += 1; return null; }

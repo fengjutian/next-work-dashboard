@@ -8,7 +8,7 @@ import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools'
 import { knowledgeTools } from '@/core/tools/knowledge-tools';
 import { codeWorkspaceTools } from '@/core/tools/code-workspace-tools';
 import { syncMcpTools } from '@/core/tools/mcp-tools';
-import { dbGetLlmCache, dbLoadChatSessions, dbPutLlmCache, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
+import { dbGetLlmCache, dbLoadChatSessions, dbPutLlmCache, dbRecordLlmCacheEvent, dbSaveChatSessions, flushDbToDisk, isDbReady } from '@/db';
 import type { ChatMessage, LLMProvider, ToolCall, ToolResult } from '@/core';
 import type { Message } from './MessageBubble';
 import { useConversationMemory } from './useConversationMemory';
@@ -234,6 +234,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
         },
         store: (context, response) => storeSemanticShadow(context as Awaited<ReturnType<typeof evaluateSemanticShadow>>, response, llmCacheConfig.maxEntries),
       } : undefined,
+      onEvent: (event, model) => dbRecordLlmCacheEvent(event, aiApi.baseUrl.replace(/\/+$/, '').toLowerCase(), model),
     });
     return providerRef.current;
   }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.maxEntries, llmCacheConfig.semanticShadowEnabled, llmCacheConfig.ttlHours, memoryConfig]);

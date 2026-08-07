@@ -3,7 +3,7 @@ import { Eye, EyeOff, CheckCircle, XCircle, Loader2 } from '@/components/icons';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import { dbClearLlmCache, dbClearSemanticShadow, dbGetLlmCacheCount, dbGetSemanticShadowCount, flushDbToDisk } from '@/db';
+import { dbClearLlmCache, dbClearLlmCacheEvents, dbClearSemanticShadow, dbGetLlmCacheCount, dbGetLlmCacheStats, dbGetSemanticShadowCount, flushDbToDisk } from '@/db';
 import { clearLlmMemoryCaches, getLlmCacheMetrics, getSemanticShadowMetrics, resetLlmCacheMetrics, resetSemanticShadowMetrics } from '@/core';
 
 // ── AI API 设置 Tab ──
@@ -26,16 +26,19 @@ export const SettingsAiApi: React.FC = () => {
   const [cacheCount, setCacheCount] = React.useState(() => dbGetLlmCacheCount());
   const [cacheMetrics, setCacheMetrics] = React.useState(() => getLlmCacheMetrics());
   const [shadowMetrics, setShadowMetrics] = React.useState(() => getSemanticShadowMetrics());
+  const [persistentStats, setPersistentStats] = React.useState(() => dbGetLlmCacheStats());
 
   const refreshCacheStats = () => {
     setCacheCount(dbGetLlmCacheCount());
     setCacheMetrics(getLlmCacheMetrics());
     setShadowMetrics(getSemanticShadowMetrics());
+    setPersistentStats(dbGetLlmCacheStats());
   };
 
   const clearCache = async () => {
     dbClearLlmCache();
     dbClearSemanticShadow();
+    dbClearLlmCacheEvents();
     clearLlmMemoryCaches();
     resetLlmCacheMetrics();
     resetSemanticShadowMetrics();
@@ -185,6 +188,8 @@ export const SettingsAiApi: React.FC = () => {
             <div>本地条目 {cacheCount} · L1 命中 {cacheMetrics.memoryHits} · L2 命中 {cacheMetrics.persistentHits}</div>
             <div>未命中 {cacheMetrics.misses} · 合并请求 {cacheMetrics.coalescedHits} · 主动绕过 {cacheMetrics.bypasses}</div>
             <div>影子条目 {dbGetSemanticShadowCount()} · 候选 {shadowMetrics.candidates} · ≥0.97 {shadowMetrics.highConfidence} · 最佳 {Math.max(0, shadowMetrics.bestSimilarity).toFixed(3)}</div>
+            <div>近30天有效命中率 {persistentStats.total ? (((persistentStats.memoryHits + persistentStats.persistentHits + persistentStats.coalescedHits) / persistentStats.total) * 100).toFixed(1) : '0.0'}% · 请求 {persistentStats.total}</div>
+            <div>影子分布：低 {persistentStats.shadowNone} · 中 {persistentStats.shadowMedium} · 高 {persistentStats.shadowHigh} · 均值 {persistentStats.averageShadowSimilarity.toFixed(3)}</div>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="h-7 text-xs" onClick={refreshCacheStats}>刷新统计</Button>

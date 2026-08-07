@@ -5,6 +5,7 @@ vi.mock('../src/db', () => ({
   isDbReady: () => true,
   dbListSemanticShadow: (namespace: string, model: string) => entries.filter((entry) => entry.namespace === namespace && entry.model === model),
   dbPutSemanticShadow: (entry: typeof entries[number]) => entries.push(entry),
+  dbRecordLlmCacheEvent: vi.fn(),
   flushDbToDisk: vi.fn(),
 }));
 

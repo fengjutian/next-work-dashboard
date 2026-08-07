@@ -62,4 +62,14 @@ describe('LLM response cache', () => {
     expect(counter.calls).toBe(2);
     expect(getLlmCacheMetrics().bypasses).toBe(2);
   });
+
+  it('emits persistent metric events for misses, writes, and hits', async () => {
+    const counter = { calls: 0 };
+    const events: string[] = [];
+    const cached = createCachedProvider(provider(counter), { onEvent: (event) => events.push(event) });
+    const messages = [{ role: 'user' as const, content: 'metrics' }];
+    await collect(cached.chat(messages, { model: 'm' }));
+    await collect(cached.chat(messages, { model: 'm' }));
+    expect(events).toEqual(['miss', 'write', 'memory_hit']);
+  });
 });

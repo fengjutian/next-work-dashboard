@@ -42,6 +42,7 @@ export interface CachedProviderOptions {
     evaluate: (key: string, messages: ChatMessage[], options: ChatOptions) => Promise<unknown>;
     store: (context: unknown, response: string) => void;
   };
+  onEvent?: (event: 'memory_hit' | 'persistent_hit' | 'coalesced_hit' | 'miss' | 'bypass' | 'write', model: string) => void;
 }
 
 const metrics: LlmCacheMetrics = {
@@ -116,7 +117,7 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
     async *chat(messages, chatOptions) {
       if (observedGeneration !== cacheGeneration) { memory.clear(); observedGeneration = cacheGeneration; }
       const bypass = options.enabled?.() === false || chatOptions.tools?.length || options.bypass?.(messages, chatOptions);
-      if (bypass) { metrics.bypasses += 1; yield* provider.chat(messages, chatOptions); return; }
+      if (bypass) { metrics.bypasses += 1; options.onEvent?.('bypass', chatOptions.model); yield* provider.chat(messages, chatOptions); return; }
       metrics.eligibleRequests += 1;
       let key: string;
       try { key = await createLlmCacheKey(provider.id, options.namespace ?? '', messages, chatOptions); }
@@ -124,25 +125,25 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
 
       const cached = memory.get(key);
       if (cached && cached.expiresAt > Date.now()) {
-        metrics.memoryHits += 1; cached.hitCount += 1; cached.lastAccessedAt = Date.now();
+        metrics.memoryHits += 1; options.onEvent?.('memory_hit', chatOptions.model); cached.hitCount += 1; cached.lastAccessedAt = Date.now();
         yield* replay(cached, chunkSize); return;
       }
       memory.delete(key);
       try {
         const persisted = await options.storage?.get(key);
         if (persisted && persisted.expiresAt > Date.now()) {
-          metrics.persistentHits += 1; remember(persisted); yield* replay(persisted, chunkSize); return;
+          metrics.persistentHits += 1; options.onEvent?.('persistent_hit', chatOptions.model); remember(persisted); yield* replay(persisted, chunkSize); return;
         }
       } catch { metrics.errors += 1; }
 
       const pending = inflight.get(key);
       if (pending) {
-        metrics.coalescedHits += 1;
+        metrics.coalescedHits += 1; options.onEvent?.('coalesced_hit', chatOptions.model);
         try { const entry = await pending; yield* replay(entry, chunkSize); return; }
         catch { yield* provider.chat(messages, chatOptions); return; }
       }
 
-      metrics.misses += 1;
+      metrics.misses += 1; options.onEvent?.('miss', chatOptions.model);
       const shadowContext = options.semanticShadow?.evaluate(key, messages, chatOptions).catch(() => null);
       let resolveEntry!: (entry: LlmCacheEntry) => void;
       let rejectEntry!: (reason: unknown) => void;
@@ -161,7 +162,7 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
         const now = Date.now();
         const entry: LlmCacheEntry = { key, response, reasoning, model: chatOptions.model, provider: provider.id, createdAt: now, expiresAt: now + ttlMs, lastAccessedAt: now, hitCount: 0 };
         remember(entry);
-        try { await options.storage?.put(entry); metrics.writes += 1; } catch { metrics.errors += 1; }
+        try { await options.storage?.put(entry); metrics.writes += 1; options.onEvent?.('write', chatOptions.model); } catch { metrics.errors += 1; }
         if (shadowContext) options.semanticShadow?.store(await shadowContext, response);
         resolveEntry(entry);
       } catch (error) { rejectEntry(error); throw error; }
