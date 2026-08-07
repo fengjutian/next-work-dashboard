@@ -6,6 +6,8 @@ import { conversationMemory } from '@/core/conversation-memory';
 import type { MemorySyncProgress } from '@/core/conversation-memory';
 import { TencentDbMemoryAdapter } from '@/core/tencentdb-memory-adapter';
 import { testLocalEmbedding } from '@/core/memory/local-embedding';
+import { dbClearEmbeddingCache, flushDbToDisk } from '@/db';
+import { resetEmbeddingCacheMetrics } from '@/core/embedding-cache';
 
 export const SettingsMemory: React.FC = () => {
   const config = useStore((state) => state.memoryConfig);
@@ -55,6 +57,9 @@ export const SettingsMemory: React.FC = () => {
 
   const clearIndex = async () => {
     await conversationMemory.clear();
+    dbClearEmbeddingCache();
+    resetEmbeddingCacheMetrics();
+    await flushDbToDisk();
     setProgress(null);
     setStatus('本地索引缓存已清空，可随时重新构建');
   };

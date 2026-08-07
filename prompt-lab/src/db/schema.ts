@@ -54,6 +54,15 @@ export const llmResponseCache = sqliteTable('llm_response_cache', {
   hitCount: integer('hit_count').notNull().default(0),
 });
 
+export const embeddingCache = sqliteTable('embedding_cache', {
+  key: text('key').primaryKey(),
+  identity: text('identity').notNull(),
+  vector: text('vector').notNull(),
+  createdAt: integer('created_at').notNull(),
+  lastAccessedAt: integer('last_accessed_at').notNull(),
+  hitCount: integer('hit_count').notNull().default(0),
+});
+
 // 微信读书离线缓存。完整笔记保留为 JSON，同时用 searchable_text 提供本地搜索。
 export const wereadBooks = sqliteTable('weread_books', {
   bookId: text('book_id').primaryKey(),

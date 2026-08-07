@@ -33,6 +33,8 @@ export type {
 } from './llm';
 export { clearLlmMemoryCaches, createCachedProvider, createLlmCacheKey, getLlmCacheMetrics, resetLlmCacheMetrics } from './llm-cache';
 export type { CachedProviderOptions, LlmCacheEntry, LlmCacheMetrics, LlmCacheStorage } from './llm-cache';
+export { createCachedEmbeddings, getEmbeddingCacheMetrics, resetEmbeddingCacheMetrics } from './embedding-cache';
+export type { EmbeddingCacheMetrics } from './embedding-cache';
 
 // 工具系统
 export type {

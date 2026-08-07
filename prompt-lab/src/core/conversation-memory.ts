@@ -1,6 +1,7 @@
 import type { ConversationFile } from '@/types/electron';
 import type { MemoryConfig } from '@/store/types';
 import { createLocalEmbeddings } from './memory/local-embedding';
+import { createCachedEmbeddings } from './embedding-cache';
 
 type EmbeddingBackend = 'remote' | 'local' | 'sparse';
 
@@ -320,14 +321,14 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
       let embeddings: number[][];
       try {
         if (backend === 'remote') {
-          const result = await window.electronAPI.createEmbeddings({
-            baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
-            model: this.searchConfig.embeddingModel, inputs: batch.map((chunk) => chunk.content),
+          const inputs = batch.map((chunk) => chunk.content);
+          embeddings = await createCachedEmbeddings(inputs, `remote:${this.searchConfig.embeddingBaseUrl}:${this.searchConfig.embeddingModel}`, async (missing) => {
+            const result = await window.electronAPI.createEmbeddings({ baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey, model: this.searchConfig.embeddingModel, inputs: missing });
+            if (!result.success) throw new Error(result.error ?? 'EMBEDDING_FAILED');
+            return result.embeddings ?? [];
           });
-          if (!result.success || result.embeddings?.length !== batch.length) return false;
-          embeddings = result.embeddings;
         } else {
-          embeddings = await createLocalEmbeddings(batch.map((chunk) => chunk.content), this.searchConfig.localEmbeddingModel);
+          embeddings = await createCachedEmbeddings(batch.map((chunk) => chunk.content), `local:${this.searchConfig.localEmbeddingModel}`, (missing) => createLocalEmbeddings(missing, this.searchConfig.localEmbeddingModel));
         }
       } catch { return false; }
       embeddings.forEach((embedding, index) => {
@@ -508,13 +509,13 @@ export class LocalConversationMemoryProvider implements ConversationMemoryProvid
     let queryDenseVectors: number[][] = [];
     try {
       if (this.embeddingBackend === 'remote') {
-        const result = await window.electronAPI.createEmbeddings({
-          baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey,
-          model: this.searchConfig.embeddingModel, inputs: queries,
+        queryDenseVectors = await createCachedEmbeddings(queries, `remote:${this.searchConfig.embeddingBaseUrl}:${this.searchConfig.embeddingModel}`, async (missing) => {
+          const result = await window.electronAPI.createEmbeddings({ baseUrl: this.searchConfig.embeddingBaseUrl, apiKey: this.searchConfig.embeddingApiKey, model: this.searchConfig.embeddingModel, inputs: missing });
+          if (!result.success) throw new Error(result.error ?? 'EMBEDDING_FAILED');
+          return result.embeddings ?? [];
         });
-        queryDenseVectors = result.success ? (result.embeddings ?? []) : [];
       } else if (this.embeddingBackend === 'local') {
-        queryDenseVectors = await createLocalEmbeddings(queries, this.searchConfig.localEmbeddingModel);
+        queryDenseVectors = await createCachedEmbeddings(queries, `local:${this.searchConfig.localEmbeddingModel}`, (missing) => createLocalEmbeddings(missing, this.searchConfig.localEmbeddingModel));
       }
     } catch { queryDenseVectors = []; }
     const queryDenseNorms = queryDenseVectors.map(denseNorm);

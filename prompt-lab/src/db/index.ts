@@ -206,6 +206,15 @@ function ensureSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_llm_response_cache_expiry ON llm_response_cache(expires_at);
     CREATE INDEX IF NOT EXISTS idx_llm_response_cache_access ON llm_response_cache(last_accessed_at);
+    CREATE TABLE IF NOT EXISTS embedding_cache (
+      key TEXT PRIMARY KEY,
+      identity TEXT NOT NULL,
+      vector TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_accessed_at INTEGER NOT NULL,
+      hit_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_embedding_cache_access ON embedding_cache(last_accessed_at);
     CREATE TABLE IF NOT EXISTS weread_books (
       book_id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -464,6 +473,44 @@ export function dbGetLlmCacheCount(now = Date.now()): number {
   if (!_sqlDb) return 0;
   const row = _sqlDb.exec(`SELECT COUNT(*) FROM llm_response_cache WHERE expires_at > ${Math.floor(now)}`)[0]?.values[0];
   return Number(row?.[0] ?? 0);
+}
+
+export function dbGetEmbeddingCache(keys: string[]): Map<string, number[]> {
+  const result = new Map<string, number[]>();
+  if (!_sqlDb || !keys.length) return result;
+  const quoted = keys.map((key) => `'${key.replace(/'/g, "''")}'`).join(',');
+  const rows = _sqlDb.exec(`SELECT key, vector FROM embedding_cache WHERE key IN (${quoted})`)[0]?.values ?? [];
+  const now = Date.now();
+  for (const row of rows) {
+    try {
+      const vector = JSON.parse(String(row[1]));
+      if (Array.isArray(vector) && vector.every((value) => typeof value === 'number')) result.set(String(row[0]), vector);
+    } catch { /* ignore invalid cache records */ }
+  }
+  if (result.size) {
+    const hits = [...result.keys()].map((key) => `'${key.replace(/'/g, "''")}'`).join(',');
+    _sqlDb.run(`UPDATE embedding_cache SET last_accessed_at = ${now}, hit_count = hit_count + 1 WHERE key IN (${hits})`);
+  }
+  return result;
+}
+
+export function dbPutEmbeddingCache(entries: Array<{ key: string; identity: string; vector: number[] }>, maxEntries = 20000): void {
+  if (!_sqlDb || !entries.length) return;
+  const now = Date.now();
+  for (const entry of entries) {
+    _sqlDb.run(`INSERT OR REPLACE INTO embedding_cache
+      (key, identity, vector, created_at, last_accessed_at, hit_count) VALUES (?, ?, ?, ?, ?, 0)`,
+    [entry.key, entry.identity, JSON.stringify(entry.vector), now, now]);
+  }
+  _sqlDb.run(`DELETE FROM embedding_cache WHERE key IN (
+    SELECT key FROM embedding_cache ORDER BY last_accessed_at DESC LIMIT -1 OFFSET ?
+  )`, [Math.max(100, maxEntries)]);
+}
+
+export function dbClearEmbeddingCache(): void { _sqlDb?.run('DELETE FROM embedding_cache'); }
+export function dbGetEmbeddingCacheCount(): number {
+  if (!_sqlDb) return 0;
+  return Number(_sqlDb.exec('SELECT COUNT(*) FROM embedding_cache')[0]?.values[0]?.[0] ?? 0);
 }
 
 export interface WereadCachedBook {

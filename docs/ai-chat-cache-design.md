@@ -114,7 +114,8 @@ schemaVersion + providerId + providerScope + model
 1. 增加缓存核心、稳定键、L1、SQLite L2 和 singleflight。
 2. 普通 Chat 接入，Agent 保持绕过；重新生成显式绕过读取。
 3. 增加设置、统计、清空能力及单元测试。
-4. 收集命中数据，再实现 Embedding 缓存和语义缓存影子模式。
+4. Embedding 按 `backend + baseUrl/model + normalizedText` 的 SHA-256 持久化，索引和查询只计算缺失输入。
+5. 收集命中数据，再实现语义缓存影子模式。
 
 ## 社区方案参考
 
