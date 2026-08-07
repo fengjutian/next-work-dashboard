@@ -221,12 +221,17 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
 
   const getProvider = useCallback((uncached = false): LLMProvider | null => {
     if (!aiApi.apiKey) return null;
+    const createProvider = () => createOpenAIProvider({
+      apiKey: aiApi.apiKey,
+      baseUrl: aiApi.baseUrl,
+      chatProxy: aiApi.provider === 'qwen' ? window.electronAPI.llmChat : undefined,
+    });
     if (uncached) {
-      if (!rawProviderRef.current) rawProviderRef.current = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      if (!rawProviderRef.current) rawProviderRef.current = createProvider();
       return rawProviderRef.current;
     }
     if (providerRef.current) return providerRef.current;
-    const raw = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+    const raw = createProvider();
     rawProviderRef.current = raw;
     providerRef.current = createCachedProvider(raw, {
       namespace: aiApi.baseUrl.replace(/\/+$/, '').toLowerCase(),
@@ -255,7 +260,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       onEvent: (event, model) => dbRecordLlmCacheEvent(event, aiApi.baseUrl.replace(/\/+$/, '').toLowerCase(), model),
     });
     return providerRef.current;
-  }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.maxEntries, llmCacheConfig.semanticShadowEnabled, llmCacheConfig.ttlHours, memoryConfig]);
+  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.provider, llmCacheConfig.maxEntries, llmCacheConfig.semanticShadowEnabled, llmCacheConfig.ttlHours, memoryConfig]);
 
   const confirmInputPrompt = useCallback((values: Record<string, string>) => {
     if (!pendingInputPrompt) return;

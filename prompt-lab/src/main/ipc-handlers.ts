@@ -248,6 +248,28 @@ export function setupIPC(webviewPreloadPath: string) {
     return await fetchSiteFavicon(siteUrl);
   });
 
+  ipcMain.handle('llm:chat', async (_event, payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => {
+    try {
+      const url = new URL(String(payload.baseUrl || '').replace(/\/+$/, '') + '/chat/completions');
+      const allowedHosts = new Set(['dashscope.aliyuncs.com', 'token-plan.cn-beijing.maas.aliyuncs.com']);
+      if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname)) return { ok: false, status: 400, error: 'UNSUPPORTED_LLM_PROXY_HOST' };
+      const apiKey = String(payload.apiKey ?? '').trim();
+      if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
+      const body = { ...payload.body, stream: false };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+      try {
+        const response = await fetch(url, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
+        const text = await response.text();
+        let data: unknown;
+        try { data = text ? JSON.parse(text) : {}; } catch { data = undefined; }
+        return response.ok ? { ok: true, status: response.status, data } : { ok: false, status: response.status, error: text.slice(0, 1000) };
+      } finally { clearTimeout(timeout); }
+    } catch (error) {
+      return { ok: false, status: 0, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('embedding:create', async (_event, payload: {
     baseUrl: string; apiKey: string; model: string; inputs: string[];
   }) => {

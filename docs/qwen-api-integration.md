@@ -23,4 +23,6 @@ Token Plan 的 `sk-sp-` Key 使用专属地址 `https://token-plan.cn-beijing.ma
 
 千问未依赖 `/models` 探测。设置页使用官方 Chat Completions 端点发送最多 1 Token 的最小请求验证 API Key、Base URL 和模型权限。
 
+千问域名不保证允许 Electron 渲染进程跨域访问，因此千问 Chat Completions 统一由主进程发起，并限制为官方 DashScope 与 Token Plan 域名。DeepSeek 和其他现有 OpenAI 兼容配置保持原传输方式。
+
 参考：<https://platform.qianwenai.com/docs/developer-guides/getting-started/first-api-call>

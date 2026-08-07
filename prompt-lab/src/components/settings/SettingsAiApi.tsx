@@ -77,19 +77,19 @@ export const SettingsAiApi: React.FC = () => {
     setTestMessage('');
     try {
       const base = aiApi.baseUrl.replace(/\/+$/, '');
-      const res = aiApi.provider === 'qwen'
-        ? await fetch(`${base}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${aiApi.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: aiApi.model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1, stream: false }) })
-        : await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${aiApi.apiKey}` } });
-      if (res.ok) {
+      const proxyResult = aiApi.provider === 'qwen' ? await window.electronAPI.llmChat({ baseUrl: base, apiKey: aiApi.apiKey, body: { model: aiApi.model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1, stream: false } }) : null;
+      const res = proxyResult ? null : await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${aiApi.apiKey}` } });
+      if (proxyResult?.ok || res?.ok) {
         setTestStatus('ok');
         setTestMessage('连接成功');
       } else {
-        const body = await res.text().catch(() => '');
+        const status = proxyResult?.status ?? res?.status ?? 0;
+        const body = proxyResult?.error ?? await res?.text().catch(() => '') ?? '';
         setTestStatus('fail');
-        const qwenHint = aiApi.provider === 'qwen' && res.status === 401
+        const qwenHint = aiApi.provider === 'qwen' && status === 401
           ? `；请确认 ${aiApi.qwenPlan === 'token-plan' ? 'sk-sp Key 对应 Token Plan 地址' : 'sk-ws/sk Key 对应按量付费地址'}，并检查 Key 是否完整`
           : '';
-        setTestMessage(`HTTP ${res.status}${body ? ': ' + body.slice(0, 120) : ''}${qwenHint}`);
+        setTestMessage(`${status ? `HTTP ${status}` : '网络请求失败'}${body ? ': ' + body.slice(0, 120) : ''}${qwenHint}`);
       }
     } catch (err: any) {
       setTestStatus('fail');

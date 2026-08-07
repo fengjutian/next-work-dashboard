@@ -76,6 +76,11 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
   const apiKey = config.apiKey.trim();
   const { baseUrl } = config;
   const normalizedBase = baseUrl.replace(/\/$/, '');
+  let providerHost = '';
+  try { providerHost = new URL(normalizedBase).hostname; } catch { /* fetch will report the invalid URL */ }
+  const chatProxy = config.chatProxy ?? (typeof window !== 'undefined' && /(?:dashscope\.aliyuncs\.com|token-plan\.cn-beijing\.maas\.aliyuncs\.com)$/i.test(providerHost)
+    ? window.electronAPI?.llmChat
+    : undefined);
 
   return {
     id: 'openai-compatible',
@@ -99,9 +104,9 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
       }
       if (options.responseFormat) body.response_format = { type: options.responseFormat };
 
-      if (config.chatProxy) {
+      if (chatProxy) {
         body.stream = false;
-        const proxied = await config.chatProxy({ baseUrl: normalizedBase, apiKey, body });
+        const proxied = await chatProxy({ baseUrl: normalizedBase, apiKey, body });
         if (!proxied.ok) throw new Error(`LLM API error ${proxied.status}: ${proxied.error ?? 'Request failed'}`);
         const choice = proxied.data?.choices?.[0];
         const content = choice?.message?.content ?? choice?.text ?? proxied.data?.output_text ?? proxied.data?.content ?? '';
