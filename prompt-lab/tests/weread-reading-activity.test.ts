@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatReadingDuration, loadReadingActivities, saveReadingActivity, type WereadReadingActivity } from '../src/plugins/weread/readingActivity';
 
 function activity(bookId: string, lastReadAt: number): WereadReadingActivity {
@@ -6,7 +6,15 @@ function activity(bookId: string, lastReadAt: number): WereadReadingActivity {
 }
 
 describe('WeRead reading activity', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+    });
+  });
 
   it('updates a book without creating duplicates and sorts by recent time', () => {
     saveReadingActivity(activity('book-a', 1));
