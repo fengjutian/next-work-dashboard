@@ -185,6 +185,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [invokedToolNames, setInvokedToolNames] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionResourceTab, setMentionResourceTab] = useState<MentionResourceTab>('skills');
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -257,6 +258,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     setInput(value);
     const mention = value.match(/(?:^|\s)@([^\s@]*)$/);
     setMentionQuery(mention ? mention[1] : null);
+    if (mention) setComposerMenuOpen(false);
   }, [setInput]);
 
   const finishMention = useCallback(() => {
@@ -766,6 +768,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   // ── Sender 提交（含附件处理 + 自动聚焦） ──
   const onSenderSubmit = useCallback(async (text: string) => {
+    setComposerMenuOpen(false);
     const invocationPrefix = [
       ...invokedSkills.map((skill) => `@${skill.name}`),
       ...invokedPrompts.map((prompt) => `@${prompt.title}`),
@@ -1021,7 +1024,14 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const showSysPrompt = !activeRole && (sysPromptOpen || (!!systemPrompt && messages.length === 0));
 
   return (
-    <ConfigProvider theme={{ algorithm: isDark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm }}>
+    <ConfigProvider theme={{
+      algorithm: isDark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm,
+      token: {
+        colorPrimary: 'hsl(var(--primary))',
+        colorPrimaryHover: 'hsl(var(--primary-hover))',
+        colorPrimaryActive: 'hsl(var(--primary-hover))',
+      },
+    }}>
       <XProvider>
         {contextHolder}
         <div className="flex-1 flex h-full bg-card">
@@ -1333,6 +1343,26 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                     </div>
                   </div>
                 )}
+                {composerMenuOpen && (
+                  <div className="absolute bottom-[calc(100%-8px)] left-3 z-40 w-[min(560px,calc(100%-24px))] overflow-hidden rounded-xl border bg-popover p-2 text-popover-foreground shadow-xl">
+                    <button type="button" onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-accent">
+                      <Paperclip className="h-4 w-4 shrink-0 text-primary" /><span className="text-xs font-medium">添加照片和文件</span><span className="text-xs text-muted-foreground">从电脑上传</span>
+                    </button>
+                    <button type="button" onClick={() => { setComposerMenuOpen(false); void openMemoryScopePicker(); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-accent">
+                      <BookOpen className="h-4 w-4 shrink-0 text-primary" /><span className="text-xs font-medium">从知识库添加</span><span className="text-xs text-muted-foreground">选择对话检索目录</span>
+                    </button>
+                    <button type="button" onClick={() => { setInvokedToolNames((current) => current.includes('web_search') ? current : [...current, 'web_search']); setComposerMenuOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-accent">
+                      <Globe className="h-4 w-4 shrink-0 text-primary" /><span className="text-xs font-medium">网页搜索</span><span className="text-xs text-muted-foreground">查找实时信息</span>
+                    </button>
+                    <button type="button" onClick={() => { setInvokedToolNames((current) => [...new Set([...current, 'web_search', 'fetch_url'])]); setComposerMenuOpen(false); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-accent">
+                      <Sparkles className="h-4 w-4 shrink-0 text-primary" /><span className="text-xs font-medium">深度研究</span><span className="text-xs text-muted-foreground">搜索并读取多个来源</span>
+                    </button>
+                    <div className="my-1 border-t" />
+                    <button type="button" onClick={() => { setComposerMenuOpen(false); setMentionResourceTab('skills'); setInput((current) => `${current}${current && !current.endsWith(' ') ? ' ' : ''}@`); setMentionQuery(''); setTimeout(() => senderRef.current?.focus(), 0); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-accent">
+                      <Blocks className="h-4 w-4 shrink-0 text-primary" /><span className="text-xs font-medium">技能、工具与提示词</span><span className="text-xs text-muted-foreground">选择本轮调用资源</span>
+                    </button>
+                  </div>
+                )}
                 {(invokedSkills.length + invokedPrompts.length + invokedTools.length) > 0 && (
                   <div className="mb-2 flex flex-wrap items-center gap-1.5">
                     <span className="text-[10px] text-muted-foreground">本轮调用</span>
@@ -1358,10 +1388,10 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                   loading={streaming} disabled={!hasKey}
                   prefix={
                     <div className="flex items-center">
-                      <button className="p-1 text-muted-foreground hover:text-foreground"
-                        onClick={() => fileInputRef.current?.click()} title="选择文件"
-                        aria-label="选择文件" disabled={!hasKey}>
-                        <Paperclip className="h-4 w-4" />
+                      <button type="button" className={`rounded-full p-1.5 transition-colors ${composerMenuOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-primary'}`}
+                        onClick={() => { setMentionQuery(null); setComposerMenuOpen((open) => !open); }} title="添加附件或调用能力"
+                        aria-label="添加附件或调用能力" disabled={!hasKey}>
+                        <Plus className={`h-4 w-4 transition-transform ${composerMenuOpen ? 'rotate-45' : ''}`} />
                       </button>
                     </div>
                   }

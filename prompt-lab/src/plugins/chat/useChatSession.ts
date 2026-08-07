@@ -413,10 +413,18 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     const skillContent = getEnabledSkillsContent();
     const invokedSkillContent = getInvokedSkillsContent(invokedSkillIds);
     const invokedPromptContent = getInvokedPromptsContent(invokedPromptIds);
-    const toolInstruction = invokedToolNames.length > 0
-      ? `本轮必须优先调用以下指定工具完成任务：${invokedToolNames.join(', ')}。不要仅描述如何调用。`
+    const containsUrl = /https?:\/\/[^\s)\]}>]+/i.test(userContent);
+    const effectiveToolNames = [...new Set([
+      ...invokedToolNames,
+      ...(containsUrl && invokedToolNames.includes('web_search') ? ['fetch_url'] : []),
+    ])];
+    const urlInstruction = containsUrl && effectiveToolNames.includes('fetch_url')
+      ? '用户提供了明确 URL。必须先使用 fetch_url 直接读取该地址；仅当直接读取失败或需要补充资料时才使用 web_search，禁止重复进行无关关键词搜索。'
       : '';
-    const agentUserContent = [boundContent, skillContent, invokedSkillContent, invokedPromptContent, toolInstruction, userContent]
+    const toolInstruction = invokedToolNames.length > 0
+      ? `本轮必须使用以下指定工具完成任务：${invokedToolNames.join(', ')}。必要的伴随工具已由系统开放，不要仅描述如何调用。`
+      : '';
+    const agentUserContent = [boundContent, skillContent, invokedSkillContent, invokedPromptContent, toolInstruction, urlInstruction, userContent]
       .filter(Boolean)
       .join('\n\n---\n\n');
 
@@ -426,7 +434,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     for await (const step of runAgent(provider, agentUserContent, chatHistory, currentModel, {
       signal,
       systemPrompt: fullSystemPrompt,
-      allowedToolNames: invokedToolNames.length > 0 ? invokedToolNames : undefined,
+      allowedToolNames: effectiveToolNames.length > 0 ? effectiveToolNames : undefined,
     })) {
       switch (step.type) {
         case 'think':
