@@ -5,7 +5,7 @@ import type { BubbleProps } from '@ant-design/x';
 import { ConfigProvider, theme as antTheme, notification } from 'antd';
 import { XMarkdown } from '@ant-design/x-markdown';
 import {
-  BookOpen, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
+  BookOpen, Blocks, Bot, ChevronDown, Copy, Database, Download, ExternalLink,
   FileText, FolderOpen, Globe, MessageSquare, PanelLeft, PanelRight, Paperclip, Plus, RefreshCw, Robot,
   RotateCcw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Wrench, X,
 } from '@/components/icons';
@@ -17,6 +17,7 @@ import { setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './ToolManagerDialog';
 import { McpApprovalDialog } from './McpApprovalDialog';
 import { PromptManagerDialog } from './PromptManagerDialog';
+import { SkillManagerDialog } from './SkillManagerDialog';
 import { RoleManagerDialog } from './RoleManagerDialog';
 import { MemoryManagerDialog } from './MemoryManagerDialog';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
@@ -176,6 +177,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const [knowledgeFoldersLoading, setKnowledgeFoldersLoading] = useState(false);
   const [savingToKnowledge, setSavingToKnowledge] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
+  const [skillManagerOpen, setSkillManagerOpen] = useState(false);
   const [roleManagerOpen, setRoleManagerOpen] = useState(false);
   const [memoryManagerOpen, setMemoryManagerOpen] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -220,6 +222,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     handleEditConfirm,
     updateSessionMeta,
     boundPromptIds, toggleBoundPrompt,
+    boundSkillIds, toggleBoundSkill,
   } = useChatSession(sceneSystemPrompt, scene);
 
   const [auditModel, setAuditModel] = useState(() => (
@@ -1060,6 +1063,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                 onClick={() => setSysPromptOpen((v) => !v)} title="系统提示词" aria-label="系统提示词"><SlidersHorizontal className="h-3.5 w-3.5" /></Button>}
               <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={() => setPromptManagerOpen(true)} title="提示词管理"><MessageSquare className="h-3.5 w-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={() => setSkillManagerOpen(true)} title="技能管理"><Blocks className="h-3.5 w-3.5" /></Button>
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={handleClear} title="清空对话"><Trash2 className="h-3.5 w-3.5" /></Button>}
               {messages.length > 0 && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={handleExport} title="导出 Markdown"><Download className="h-3.5 w-3.5" /></Button>}
               {!hasKey && <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setActiveActivity('settings')} title="配置 AI API" aria-label="配置 AI API"><Settings className="h-3.5 w-3.5" /></Button>}
@@ -1423,6 +1428,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
           <McpApprovalDialog />
           <PromptManagerDialog open={promptManagerOpen} onClose={() => setPromptManagerOpen(false)}
             boundPromptIds={boundPromptIds} onToggleBound={toggleBoundPrompt} />
+          <SkillManagerDialog open={skillManagerOpen} onClose={() => setSkillManagerOpen(false)}
+            boundSkillIds={boundSkillIds} onToggleBound={toggleBoundSkill} />
           <RoleManagerDialog open={roleManagerOpen} onClose={() => setRoleManagerOpen(false)} />
           <MemoryManagerDialog open={memoryManagerOpen} onClose={() => setMemoryManagerOpen(false)} />
           {pendingInputPrompt && (

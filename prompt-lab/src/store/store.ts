@@ -3,17 +3,19 @@ import type { SiteConfig, Tab, InjectMode, InjectStrategy, AiApiConfig, MemoryCo
 import { DEFAULT_SITES } from './types';
 import { applyBuiltInRoleBehaviors, DEFAULT_ROLES } from './defaultRoles';
 import { createPromptSlice, type PromptSlice } from './prompt-slice';
+import { createSkillSlice, type SkillSlice } from './skill-slice';
 import {
   isDbReady,
   dbLoadPrompts, dbLoadSites,
   dbInsertPrompt,
   dbInsertSite, dbUpdateSite,
   dbGetSetting, dbSetSetting, flushDbToDisk,
+  dbLoadSkills,
 } from '@/db';
 
 // ── Store 类型 ──
 
-interface AppState extends PromptSlice {
+interface AppState extends PromptSlice, SkillSlice {
 
   // ── 站点 ──
   sites: SiteConfig[];
@@ -113,6 +115,7 @@ function normalizeMemoryConfig(value: Partial<MemoryConfig>): MemoryConfig {
 
 export const useStore = create<AppState>((set, get) => ({
   ...createPromptSlice<AppState>(set),
+  ...createSkillSlice<AppState>(set),
 
   // ── 站点（初始用默认值，DB 有数据时覆盖）──
   sites: DEFAULT_SITES,
@@ -373,6 +376,16 @@ export const useStore = create<AppState>((set, get) => ({
       const v = dbGetSetting('injectStrategy');
       if (v === 'replace' || v === 'append') set({ injectStrategy: v });
     } catch { /* ignore */ }
+
+    // 加载 skills
+    try {
+      const skills = dbLoadSkills();
+      if (skills.length > 0) {
+        set({ skills } as Partial<AppState>);
+      }
+    } catch (err) {
+      console.warn('[store] Failed to load skills from DB:', err);
+    }
 
     // 加载用户分类
     try {

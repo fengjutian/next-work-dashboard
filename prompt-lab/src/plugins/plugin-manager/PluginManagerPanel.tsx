@@ -1,7 +1,7 @@
 import React from 'react';
 import { Puzzle, Plus, Blocks, Trash2, Code, Download, Upload } from '@/components/icons';
 import { pluginRegistry } from '../registry';
-import { isDbReady, dbSetSetting } from '@/db';
+import { isDbReady, dbSetSetting, flushDbToDisk } from '@/db';
 import { loadUserPlugins, saveUserPlugins } from './user-plugin-store';
 import { builtInPlugins } from '../built-in';
 import { CreatePluginDialog } from './CreatePluginDialog';
@@ -147,6 +147,9 @@ export const PluginManagerPanel: React.FC = () => {
                           }
                         }
                         dbSetSetting('plugin.enabled.delta', JSON.stringify(delta));
+                        // Plugin visibility is user intent, so persist it before a reload can
+                        // restore built-in defaults. The periodic flush remains a safety net.
+                        void flushDbToDisk();
                       }
                     }
                   }}

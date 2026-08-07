@@ -155,3 +155,22 @@ export const agentTasks = sqliteTable("agent_tasks", {
   endedAt: integer("ended_at"),
   updatedAt: integer("updated_at").notNull(),
 });
+
+// ── Skills (imported SKILL.md bundles) ──
+export const skills = sqliteTable("skills", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  body: text("body").notNull().default(""),
+  source: text("source").notNull().default(""),
+  enabled: integer("enabled").notNull().default(1),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const skillFiles = sqliteTable("skill_files", {
+  id: text("id").primaryKey(),
+  skillId: text("skill_id").notNull().references(() => skills.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  content: text("content").notNull().default(""),
+});

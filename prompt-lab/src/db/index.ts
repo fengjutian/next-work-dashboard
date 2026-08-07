@@ -2,6 +2,7 @@ import initSqlJs, { type Database as SqlJsDatabase, type QueryExecResult } from 
 import { drizzle, type SQLJsDatabase } from 'drizzle-orm/sql-js';
 import { eq, inArray, desc, like, or } from 'drizzle-orm';
 import * as schema from './schema';
+import type { Skill, SkillFile } from '@/core/skill';
 
 let _db: SQLJsDatabase<typeof schema> | null = null;
 let _sqlDb: SqlJsDatabase | null = null;
@@ -124,6 +125,7 @@ function ensureSchema(): void {
       compare_models TEXT NOT NULL DEFAULT '[]',
       system_prompt TEXT NOT NULL DEFAULT '',
       bound_prompt_ids TEXT NOT NULL DEFAULT '[]',
+      bound_skill_ids TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -224,9 +226,30 @@ function ensureSchema(): void {
       total_books INTEGER NOT NULL, total_notes INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_weread_sync_time ON weread_sync_history(synced_at DESC);
+    CREATE TABLE IF NOT EXISTS skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT "",
+      body TEXT NOT NULL DEFAULT "",
+      source TEXT NOT NULL DEFAULT "",
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS skill_files (
+      id TEXT PRIMARY KEY,
+      skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT ""
+    );
+    CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(skill_id);
   `);
   const sessionColumns = new Set((_sqlDb.exec('PRAGMA table_info(agent_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!sessionColumns.has('payload')) _sqlDb.run("ALTER TABLE agent_sessions ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'");
+
+  // Migration: add bound_skill_ids to chat_sessions if missing
+  const chatColumns = new Set((_sqlDb.exec('PRAGMA table_info(chat_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
+  if (!chatColumns.has('bound_skill_ids')) _sqlDb.run("ALTER TABLE chat_sessions ADD COLUMN bound_skill_ids TEXT NOT NULL DEFAULT '[]'");
 }
 
 // ═══════════════════════════════════════════
@@ -569,6 +592,7 @@ export function dbLoadChatSessions<T = unknown>(scene = 'chat'): T | null {
       id: String(row.id), scene: String(row.scene), title: String(row.title), model: String(row.model),
       compareModels: JSON.parse(String(row.compare_models ?? '[]')),
       systemPrompt: String(row.system_prompt), boundPromptIds: JSON.parse(String(row.bound_prompt_ids ?? '[]')),
+      boundSkillIds: JSON.parse(String(row.bound_skill_ids ?? '[]')),
       createdAt: Number(row.created_at), messages,
     });
   }
@@ -786,11 +810,11 @@ export function dbSaveChatSessions(sessions: unknown, scene = 'chat'): void {
     for (const session of sessions as any[]) {
       const now = Date.now();
       _sqlDb.run(`INSERT OR REPLACE INTO chat_sessions
-        (id, scene, title, model, compare_models, system_prompt, bound_prompt_ids, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        (id, scene, title, model, compare_models, system_prompt, bound_prompt_ids, bound_skill_ids, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
         String(session.id), scene, String(session.title ?? '新对话'), String(session.model ?? ''),
         JSON.stringify(session.compareModels ?? []), String(session.systemPrompt ?? ''),
-        JSON.stringify(session.boundPromptIds ?? []), Number(session.createdAt ?? now), now,
+        JSON.stringify(session.boundPromptIds ?? []), JSON.stringify(session.boundSkillIds ?? []), Number(session.createdAt ?? now), now,
       ]);
       _sqlDb.run('DELETE FROM chat_messages WHERE session_id = ?', [String(session.id)]);
       (session.messages ?? []).forEach((message: any, seq: number) => {
@@ -891,4 +915,91 @@ export function migrateFromLocalStorage(): { success: boolean; migrated: number;
   } catch (error) {
     return { success: false, migrated, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+// ═══════════════════════════════════════════
+// Skills CRUD
+// ═══════════════════════════════════════════
+
+interface SkillRow {
+  id: string; name: string; description: string;
+  body: string; source: string; enabled: number;
+  createdAt: number; updatedAt: number;
+}
+
+interface SkillFileRow {
+  id: string; skillId: string; path: string; content: string;
+}
+
+function skillToRow(s: Skill): SkillRow {
+  return {
+    id: s.id, name: s.name, description: s.description,
+    body: s.body, source: s.source,
+    enabled: s.enabled ? 1 : 0,
+    createdAt: s.createdAt, updatedAt: s.updatedAt,
+  };
+}
+
+function rowToSkill(row: SkillRow, files: SkillFile[]): Skill {
+  return {
+    id: row.id, name: row.name, description: row.description,
+    body: row.body, source: row.source,
+    enabled: row.enabled === 1,
+    files,
+    createdAt: row.createdAt, updatedAt: row.updatedAt,
+  };
+}
+
+export function dbLoadSkills(): Skill[] {
+  try {
+    const rows = getDb().select().from(schema.skills).all() as unknown as SkillRow[];
+    return rows.map((row) => {
+      const fileRows = getDb().select().from(schema.skillFiles)
+        .where(eq(schema.skillFiles.skillId, row.id)).all() as unknown as SkillFileRow[];
+      const files: SkillFile[] = fileRows.map((f) => ({ path: f.path, content: f.content }));
+      return rowToSkill(row, files);
+    });
+  } catch { return []; }
+}
+
+export function dbInsertSkill(s: Skill): void {
+  const db = getDb();
+  db.insert(schema.skills).values(skillToRow(s) as never).run();
+  for (const f of s.files) {
+    db.insert(schema.skillFiles).values({
+      id: f.path ? `sf-${s.id}-${f.path.replace(/[^a-zA-Z0-9]/g, '-')}` : `sf-${s.id}-${Math.random().toString(36).slice(2, 8)}`,
+      skillId: s.id,
+      path: f.path,
+      content: f.content,
+    } as never).run();
+  }
+}
+
+export function dbUpdateSkill(id: string, patch: Partial<Skill>): void {
+  const db = getDb();
+  const setObj: Record<string, unknown> = {};
+  if (patch.name !== undefined) setObj.name = patch.name;
+  if (patch.description !== undefined) setObj.description = patch.description;
+  if (patch.body !== undefined) setObj.body = patch.body;
+  if (patch.source !== undefined) setObj.source = patch.source;
+  if (patch.enabled !== undefined) setObj.enabled = patch.enabled ? 1 : 0;
+  if (patch.updatedAt !== undefined) setObj.updatedAt = patch.updatedAt;
+  if (Object.keys(setObj).length > 0) {
+    db.update(schema.skills).set(setObj as never).where(eq(schema.skills.id, id)).run();
+  }
+  if (patch.files) {
+    db.delete(schema.skillFiles).where(eq(schema.skillFiles.skillId, id)).run();
+    for (const f of patch.files) {
+      db.insert(schema.skillFiles).values({
+        id: `sf-${id}-${f.path.replace(/[^a-zA-Z0-9]/g, '-')}`,
+        skillId: id, path: f.path, content: f.content,
+      } as never).run();
+    }
+  }
+}
+
+export function dbDeleteSkill(id: string): void {
+  const db = getDb();
+  db.delete(schema.skillFiles).where(eq(schema.skillFiles.skillId, id)).run();
+  db.delete(schema.skills).where(eq(schema.skills.id, id)).run();
 }

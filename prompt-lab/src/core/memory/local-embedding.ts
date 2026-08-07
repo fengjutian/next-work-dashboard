@@ -11,12 +11,27 @@ type FeatureExtractor = (
 
 const pipelines = new Map<string, Promise<FeatureExtractor>>();
 
+function installTypedArrayHexCompatibility(): void {
+  const prototype = Uint8Array.prototype as Uint8Array & { toHex?: () => string };
+  if (typeof prototype.toHex === 'function') return;
+  Object.defineProperty(prototype, 'toHex', {
+    configurable: true,
+    writable: true,
+    value(this: Uint8Array): string {
+      let result = '';
+      for (const byte of this) result += byte.toString(16).padStart(2, '0');
+      return result;
+    },
+  });
+}
+
 async function loadPipeline(
   model: string,
   onProgress?: (progress: LocalEmbeddingProgress) => void,
 ): Promise<FeatureExtractor> {
   let cached = pipelines.get(model);
   if (!cached) {
+    installTypedArrayHexCompatibility();
     cached = import('@huggingface/transformers').then(async ({ env, pipeline }) => {
       env.useBrowserCache = true;
       const extractor = await pipeline('feature-extraction', model, {

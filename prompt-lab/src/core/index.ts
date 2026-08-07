@@ -67,3 +67,6 @@ export type {
   TencentDbMemoryCapabilities,
   TencentDbMemoryConfig,
 } from './tencentdb-memory-adapter';
+
+// Skill 系统
+export * from './skill';

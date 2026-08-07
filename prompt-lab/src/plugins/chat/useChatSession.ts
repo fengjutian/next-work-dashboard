@@ -15,6 +15,7 @@ import { toMemoryCitation } from '@/core/conversation-memory';
 import type { MemoryCitation } from '@/core/conversation-memory';
 import type { Prompt } from '@/store/types';
 import { buildBoundPromptContent, preparePromptExecution } from '@/features/prompts/execution';
+import { buildSkillPrompt } from '@/core/skill';
 
 // ── Bubble.List 兼容的消息状态 ──
 export type MessageStatus = 'local' | 'loading' | 'updating' | 'success' | 'error' | 'abort';
@@ -107,6 +108,8 @@ export interface Session {
   systemPrompt: string;
   /** 绑定到该会话的提示词 ID 列表 — 自动合并到 systemPrompt */
   boundPromptIds: string[];
+  /** 绑定到该会话的 Skill ID 列表 — 自动注入到 system prompt */
+  boundSkillIds: string[];
   createdAt: number;
 }
 
@@ -115,6 +118,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   const aiApi = useStore((s) => s.aiApi);
   const selectedPromptId = useStore((s) => s.selectedPromptId);
   const prompts = useStore((s) => s.prompts);
+  const skills = useStore((s) => s.skills);
   const promptDrawerOpen = useStore((s) => s.promptDrawerOpen);
 
   // ── 会话管理 ──
@@ -169,7 +173,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   // 确保至少有一个默认会话
   useEffect(() => {
     if (sessions.length === 0) {
-      const def: Session = { id: `default-${scene}`, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
+      const def: Session = { id: `default-${scene}`, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], boundSkillIds: [], createdAt: Date.now() };
       setSessions([def]);
       setActiveSessionId(def.id);
     }
@@ -259,10 +263,33 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     return buildBoundPromptContent(prompts, ids);
   }, [activeSession, prompts]);
 
+  /** 获取所有绑定技能的合并内容 */
+  const boundSkillIds = activeSession?.boundSkillIds ?? [];
+  const getEnabledSkillsContent = useCallback((): string => {
+    const ids = activeSession?.boundSkillIds ?? [];
+    if (ids.length === 0) return '';
+    return skills
+      .filter((s) => s.enabled && ids.includes(s.id))
+      .map(buildSkillPrompt)
+      .join('\n\n---\n\n');
+  }, [activeSession, skills]);
+
+  /** 切换技能是否绑定到当前对话 */
+  const toggleBoundSkill = useCallback((skillId: string) => {
+    setSessions((prev) => prev.map((s) => {
+      if (s.id !== activeSessionId) return s;
+      const ids = s.boundSkillIds ?? [];
+      const next = ids.includes(skillId)
+        ? ids.filter((id) => id !== skillId)
+        : [...ids, skillId];
+      return { ...s, boundSkillIds: next };
+    }));
+  }, [activeSessionId]);
+
   // ── 新建/删除/导出会话 ──
   const handleNewSession = useCallback(() => {
     const id = `s-${Date.now()}`;
-    const s: Session = { id, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
+    const s: Session = { id, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], boundSkillIds: [], createdAt: Date.now() };
     setSessions((prev) => [...prev, s]);
     setActiveSessionId(id);
     setShowHistory(false);
@@ -275,7 +302,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       if (activeSessionId === id) {
         if (next.length > 0) setActiveSessionId(next[0].id);
         else {
-          const def: Session = { id: `default-${scene}`, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], createdAt: Date.now() };
+          const def: Session = { id: `default-${scene}`, scene, title: '新对话', messages: [], model: aiApi.model, systemPrompt: '', boundPromptIds: [], boundSkillIds: [], createdAt: Date.now() };
           setActiveSessionId(def.id);
           return [def];
         }
@@ -317,7 +344,8 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     const provider = getProvider();
     if (!provider) throw new Error('请先配置 API Key');
     const boundContent = getBoundPromptsContent();
-    const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim(), boundContent].filter(Boolean).join('\n\n');
+    const skillContent = getEnabledSkillsContent();
+    const fullSystemPrompt = [sceneSystemPrompt, systemPrompt.trim(), boundContent, skillContent].filter(Boolean).join('\n\n');
     const sysMsg = fullSystemPrompt ? [{ role: 'system' as const, content: fullSystemPrompt }] : [];
     const chatMessages: ChatMessage[] = [
       ...sysMsg,
@@ -345,7 +373,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       const title = history[0]?.content?.slice(0, 30) + (history[0]?.content?.length > 30 ? '...' : '') || '新对话';
       updateSessionMeta({ title });
     }
-  }, [currentModel, sceneSystemPrompt, systemPrompt, getBoundPromptsContent, getProvider, updateSession, updateSessionMeta]);
+  }, [currentModel, sceneSystemPrompt, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent, getProvider, updateSession, updateSessionMeta]);
 
   const runAgentChat = useCallback(async (history: Message[], assistantId: string, userContent: string, signal?: AbortSignal) => {
     const provider = getProvider();
@@ -358,11 +386,12 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
       }));
     if (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].role === 'user') chatHistory.pop();
 
-    // 注入绑定提示词到 system prompt 层面
+    // 注入绑定提示词和技能到 system prompt 层面
     const boundContent = getBoundPromptsContent();
-    const agentUserContent = boundContent
-      ? `[系统绑定提示词]\n${boundContent}\n\n---\n\n${userContent}`
-      : userContent;
+    const skillContent = getEnabledSkillsContent();
+    const agentUserContent = [boundContent, skillContent, userContent]
+      .filter(Boolean)
+      .join('\n\n---\n\n');
 
     let thinkingText = '';
     let currentToolCalls: ToolCall[] = [];
@@ -405,7 +434,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
           break;
       }
     }
-  }, [currentModel, getProvider, sceneSystemPrompt, updateSession, systemPrompt]);
+  }, [currentModel, getProvider, sceneSystemPrompt, updateSession, systemPrompt, getBoundPromptsContent, getEnabledSkillsContent]);
 
   // ── 发送 ──
   const handleSend = useCallback(async (directText?: string, contextText?: string) => {
@@ -585,5 +614,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     updateSessionMeta,
     // 绑定提示词
     boundPromptIds, toggleBoundPrompt, getBoundPromptsContent,
+    // 绑定技能
+    boundSkillIds, toggleBoundSkill, getEnabledSkillsContent,
   };
 }

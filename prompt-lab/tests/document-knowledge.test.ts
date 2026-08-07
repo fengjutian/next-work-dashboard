@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { chunkDocument } from '../src/plugins/document-knowledge/chunking';
 import { buildRagContext, cosineSimilarity, retrieve } from '../src/plugins/document-knowledge/retrieval';
+import { createHashEmbeddings } from '../src/plugins/document-knowledge/hash-embedding';
 import type { DocumentChunk, ParsedDocument } from '../src/plugins/document-knowledge/types';
 
 const document: ParsedDocument = {
@@ -26,5 +27,12 @@ describe('document knowledge pipeline', () => {
     const hits = retrieve(chunks, [0.9, 0.1], 1);
     expect(hits[0].id).toBe('a');
     expect(buildRagContext(hits)).toContain('[资料 1] manual.pdf / 安装 / 第 1 页');
+  });
+
+  it('creates stable local vectors without a model runtime', () => {
+    const [query, related, unrelated] = createHashEmbeddings(['安装依赖', '项目安装依赖说明', '财务报表']);
+    expect(query).toHaveLength(512);
+    expect(cosineSimilarity(query, related)).toBeGreaterThan(cosineSimilarity(query, unrelated));
+    expect(createHashEmbeddings(['安装依赖'])[0]).toEqual(query);
   });
 });

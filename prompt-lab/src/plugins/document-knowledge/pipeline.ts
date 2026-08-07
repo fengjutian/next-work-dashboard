@@ -1,14 +1,14 @@
-import { createLocalEmbeddings } from '@/core/memory/local-embedding';
 import type { MemoryConfig } from '@/store';
 import { chunkDocument } from './chunking';
+import { createHashEmbeddings } from './hash-embedding';
 import { parseDocument } from './parser';
 import type { DocumentChunk, ParsedDocument } from './types';
 
 const BATCH_SIZE = 16;
 
 async function embed(inputs: string[], config: MemoryConfig): Promise<number[][]> {
-  if (config.provider === 'local' || config.localEmbeddingEnabled) {
-    return createLocalEmbeddings(inputs, config.localEmbeddingModel);
+  if (config.provider === 'local') {
+    return createHashEmbeddings(inputs);
   }
   const result = await window.electronAPI.createEmbeddings({
     baseUrl: config.embeddingBaseUrl,
