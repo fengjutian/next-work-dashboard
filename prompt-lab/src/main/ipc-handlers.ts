@@ -45,6 +45,7 @@ import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getA
 import { agentTaskService } from './agent-task-service';
 import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, type PRDeliveryConfig } from './pr-delivery';
 import type { AgentTaskConfig } from './agent-task-types';
+import { loadPackageScripts, runAgentPackageScript } from './agent-script-runner';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -1456,6 +1457,25 @@ export function setupIPC(webviewPreloadPath: string) {
     try {
       const root = resolveWorkspacePath(rootPath);
       return { success: true, data: loadWorkspaceTaskDefinitions(root) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:listAgentScripts', async (_event, rootPath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      return { success: true, data: loadPackageScripts(root) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('workspace:runAgentScript', async (_event, rootPath: string, script: string, timeoutMs?: number) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const data = await runAgentPackageScript(root, script, { timeoutMs });
+      return { success: true, data };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

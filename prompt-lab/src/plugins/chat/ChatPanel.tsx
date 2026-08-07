@@ -47,6 +47,7 @@ const ALL_TOOLS = [
   'read_excel_spreadsheet', 'read_ppt_presentation', 'open_image',
   'search_conversation_history', 'read_conversation_document',
   'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'workspace_edit_file',
+  'workspace_list_scripts', 'workspace_run_script',
 ];
 
 export type ChatScene = 'chat' | 'code' | 'workbench';
@@ -69,7 +70,7 @@ const SCENE_PRESETS: Record<ChatScene, {
     systemPrompt: `你是代码编程 Agent。优先理解现有代码和工程约束，并使用 workspace_* 工具完成任务。
 当用户明确要求修改、修复、实现、重构或删除代码时，该请求本身就是对本次工作区修改的授权：直接读取相关文件并执行修改，不要再次询问“是否确认”“是否继续”或只提供修改建议。
 只有目标文件或需求存在会显著改变结果的歧义、操作超出已选择工作区、或文件版本冲突时才暂停询问。修改完成后简要列出已改文件和验证结果。`,
-    enabledToolIds: ['calculator', 'web_search', 'fetch_url', 'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'workspace_edit_file', 'open_image'],
+    enabledToolIds: ['calculator', 'web_search', 'fetch_url', 'workspace_list_files', 'workspace_read_file', 'workspace_write_file', 'workspace_edit_file', 'workspace_list_scripts', 'workspace_run_script', 'open_image'],
   },
   workbench: {
     title: '工作台',
@@ -147,6 +148,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
     try { return JSON.parse(localStorage.getItem('ai-chat.code-workspace') ?? 'null'); }
     catch { return null; }
   });
+  const [chatWorktree, setChatWorktree] = useState<{ path: string; branch: string; dirty: boolean } | null>(null);
+  const [chatWorktreeBusy, setChatWorktreeBusy] = useState(false);
   const [workspaceChanges, setWorkspaceChanges] = useState<Array<{
     path: string;
     status: 'added' | 'modified' | 'deleted' | 'renamed';
@@ -408,13 +411,53 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
   useEffect(() => {
     if (scene !== 'code') return;
-    configureCodeWorkspace(codeWorkspace?.path ?? null);
+    configureCodeWorkspace(codeWorkspace?.path ?? null, activeSessionId);
     if (codeWorkspace) {
       localStorage.setItem('ai-chat.code-workspace', JSON.stringify(codeWorkspace));
       void window.electronAPI.workspace.reauthorize(codeWorkspace.path);
     }
-    return () => configureCodeWorkspace(null);
-  }, [codeWorkspace, scene]);
+    return () => configureCodeWorkspace(null, activeSessionId);
+  }, [activeSessionId, codeWorkspace, scene]);
+
+  useEffect(() => {
+    if (scene !== 'code' || !codeWorkspace) { setChatWorktree(null); return; }
+    let disposed = false;
+    const refresh = async () => {
+      const result = await window.electronAPI.workspace.getAgentWorktreeStatus(codeWorkspace.path, activeSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100));
+      if (!disposed && result.success) setChatWorktree(result.data ? { path: result.data.path, branch: result.data.branch, dirty: result.data.dirty } : null);
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 2000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [activeSessionId, codeWorkspace, scene]);
+
+  const mergeChatWorktree = useCallback(async () => {
+    if (!codeWorkspace || !chatWorktree || !window.confirm(`将隔离分支 ${chatWorktree.branch} 的修改合并到主工作区？`)) return;
+    setChatWorktreeBusy(true);
+    try {
+      const result = await window.electronAPI.workspace.mergeAgentWorktree(codeWorkspace.path, activeSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100), `Merge AI chat ${activeSessionId}`);
+      if (!result.success) throw new Error(result.error ?? '合并失败');
+      setChatWorktree(null);
+      configureCodeWorkspace(null, activeSessionId);
+      configureCodeWorkspace(codeWorkspace.path, activeSessionId);
+      notifApi.success({ message: '隔离修改已合并', description: `${result.data?.changedPaths.length ?? 0} 个文件` });
+    } catch (error) { notifApi.error({ message: '合并失败', description: error instanceof Error ? error.message : String(error) }); }
+    finally { setChatWorktreeBusy(false); }
+  }, [activeSessionId, chatWorktree, codeWorkspace, notifApi]);
+
+  const discardChatWorktree = useCallback(async () => {
+    if (!codeWorkspace || !chatWorktree || !window.confirm(`放弃隔离分支 ${chatWorktree.branch} 及其中全部修改？此操作无法撤销。`)) return;
+    setChatWorktreeBusy(true);
+    try {
+      const result = await window.electronAPI.workspace.discardAgentWorktree(codeWorkspace.path, activeSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100));
+      if (!result.success) throw new Error(result.error ?? '放弃失败');
+      setChatWorktree(null);
+      configureCodeWorkspace(null, activeSessionId);
+      configureCodeWorkspace(codeWorkspace.path, activeSessionId);
+      notifApi.success({ message: '已放弃隔离修改' });
+    } catch (error) { notifApi.error({ message: '放弃失败', description: error instanceof Error ? error.message : String(error) }); }
+    finally { setChatWorktreeBusy(false); }
+  }, [activeSessionId, chatWorktree, codeWorkspace, notifApi]);
 
   useEffect(() => {
     if (scene !== 'code' || !codeWorkspace) return;
@@ -1075,6 +1118,11 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
                 <span className="truncate">{codeWorkspace?.name ?? '选择代码文件夹'}</span>
                 <span className="shrink-0 text-[10px] text-muted-foreground">{codeWorkspace ? '更改' : ''}</span>
               </button>}
+              {scene === 'code' && chatWorktree && <div className="ml-1 flex h-7 items-center gap-1 rounded-md border border-success/30 bg-success/5 px-1.5 text-[10px] text-success" title={chatWorktree.path}>
+                <span className="max-w-28 truncate">{chatWorktree.branch}</span>
+                <button type="button" disabled={chatWorktreeBusy || !chatWorktree.dirty} className="rounded px-1 py-0.5 hover:bg-success/10 disabled:opacity-40" onClick={() => void mergeChatWorktree()}>合并</button>
+                <button type="button" disabled={chatWorktreeBusy} className="rounded px-1 py-0.5 text-destructive hover:bg-destructive/10 disabled:opacity-40" onClick={() => void discardChatWorktree()}>放弃</button>
+              </div>}
               <div className="flex-1" />
               <div className="relative">
                 <button

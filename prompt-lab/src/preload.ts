@@ -155,6 +155,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke('workspace:copyEntry', rootPath, sourcePath, targetPath),
     revealEntry: (rootPath: string, relativePath: string) => ipcRenderer.invoke('workspace:revealEntry', rootPath, relativePath),
     listTasks: (rootPath: string) => ipcRenderer.invoke('workspace:listTasks', rootPath),
+    listAgentScripts: (rootPath: string) => ipcRenderer.invoke('workspace:listAgentScripts', rootPath),
+    runAgentScript: (rootPath: string, script: string, timeoutMs?: number) => ipcRenderer.invoke('workspace:runAgentScript', rootPath, script, timeoutMs),
     runTask: (rootPath: string, taskName: string, runId: string, environment?: Record<string, string>) => ipcRenderer.invoke('workspace:runTask', rootPath, taskName, runId, environment),
     cancelTask: (runId: string) => ipcRenderer.invoke('workspace:cancelTask', runId),
     onTaskEvent: (callback: (event: import('./types/electron').WorkspaceTaskEvent) => void) => {

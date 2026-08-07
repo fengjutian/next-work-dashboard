@@ -126,6 +126,8 @@ export interface ElectronAPI {
     copyEntry: (rootPath: string, sourcePath: string, targetPath: string) => Promise<WorkspaceResult<void>>;
     revealEntry: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<void>>;
     listTasks: (rootPath: string) => Promise<WorkspaceResult<WorkspaceTask[]>>;
+    listAgentScripts: (rootPath: string) => Promise<WorkspaceResult<Record<string, string>>>;
+    runAgentScript: (rootPath: string, script: string, timeoutMs?: number) => Promise<WorkspaceResult<AgentScriptResult>>;
     runTask: (rootPath: string, taskName: string, runId: string, environment?: Record<string, string>) => Promise<WorkspaceResult<WorkspaceTaskRunResult>>;
     cancelTask: (runId: string) => Promise<{ success: boolean }>;
     onTaskEvent: (callback: (event: WorkspaceTaskEvent) => void) => () => void;
@@ -281,6 +283,15 @@ export interface WorkspaceSearchOptions {
 export interface WorkspaceGitStatus {
   path: string;
   status: string;
+}
+
+export interface AgentScriptResult {
+  script: string;
+  command: string;
+  output: string;
+  exitCode: number;
+  startedAt: number;
+  endedAt: number;
 }
 
 export interface AgentWorktreeInfo {

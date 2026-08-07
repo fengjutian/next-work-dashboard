@@ -1,11 +1,20 @@
 import type { ToolDefinition } from './types';
 
 let workspaceRoot: string | null = null;
+let sourceWorkspaceRoot: string | null = null;
+let workspaceSessionId = 'chat';
+let isolatedWorkspace: { path: string; branch: string } | null = null;
 const readVersions = new Map<string, number>();
 
-export function configureCodeWorkspace(root: string | null): void {
-  if (workspaceRoot !== root) readVersions.clear();
+export function configureCodeWorkspace(root: string | null, sessionId = 'chat'): void {
+  const safeSessionId = sessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 100) || 'chat';
+  if (sourceWorkspaceRoot !== root || workspaceSessionId !== safeSessionId) {
+    readVersions.clear();
+    isolatedWorkspace = null;
+  }
+  sourceWorkspaceRoot = root;
   workspaceRoot = root;
+  workspaceSessionId = safeSessionId;
 }
 
 function requireWorkspace(): string {
@@ -13,7 +22,52 @@ function requireWorkspace(): string {
   return workspaceRoot;
 }
 
+async function requireIsolatedWorkspace(): Promise<{ root: string; branch: string }> {
+  if (isolatedWorkspace) return { root: isolatedWorkspace.path, branch: isolatedWorkspace.branch };
+  if (!sourceWorkspaceRoot) throw new Error('请先选择代码工作区');
+  const result = await window.electronAPI.workspace.createAgentWorktree(sourceWorkspaceRoot, workspaceSessionId);
+  if (!result.success || !result.data) throw new Error(result.error ?? '无法创建隔离 Worktree');
+  isolatedWorkspace = { path: result.data.path, branch: result.data.branch };
+  workspaceRoot = result.data.path;
+  readVersions.clear();
+  return { root: result.data.path, branch: result.data.branch };
+}
+
 export const codeWorkspaceTools: ToolDefinition[] = [
+  {
+    name: 'workspace_list_scripts',
+    description: '列出当前代码工作区 package.json 中允许 Agent 运行的 npm scripts。',
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async () => {
+      const result = await window.electronAPI.workspace.listAgentScripts(requireWorkspace());
+      if (!result.success) throw new Error(result.error ?? '无法读取项目脚本');
+      const scripts = result.data ?? {};
+      return Object.entries(scripts).map(([name, command]) => `${name}: ${command}`).join('\n') || '当前项目没有 package.json scripts';
+    },
+  },
+  {
+    name: 'workspace_run_script',
+    description: '运行当前工作区 package.json 中已经存在的 npm script。不能执行任意 Shell 命令；子进程不会继承 API Key 等敏感环境变量，并受超时和输出上限约束。运行前应先使用 workspace_list_scripts 确认脚本名称。',
+    parameters: {
+      type: 'object',
+      properties: {
+        script: { type: 'string', description: 'package.json scripts 中的准确名称，例如 lint、test、typecheck' },
+        timeoutMs: { type: 'number', description: '可选超时时间，1000 至 600000 毫秒，默认 120000' },
+      },
+      required: ['script'],
+    },
+    execute: async (args) => {
+      const isolation = await requireIsolatedWorkspace();
+      const timeout = Number(args.timeoutMs);
+      const result = await window.electronAPI.workspace.runAgentScript(
+        isolation.root,
+        String(args.script ?? ''),
+        Number.isFinite(timeout) ? Math.max(1000, Math.min(600_000, timeout)) : undefined,
+      );
+      if (!result.success || !result.data) throw new Error(result.error ?? '项目脚本执行失败');
+      return [`隔离分支: ${isolation.branch}`, `脚本: ${result.data.script}`, `命令: ${result.data.command}`, `退出码: ${result.data.exitCode}`, result.data.output || '无输出'].join('\n');
+    },
+  },
   {
     name: 'workspace_list_files',
     description: '列出当前代码工作区中的文件，用于了解项目结构。',
@@ -52,8 +106,9 @@ export const codeWorkspaceTools: ToolDefinition[] = [
     },
     execute: async (args) => {
       const path = String(args.path);
+      const isolation = await requireIsolatedWorkspace();
       const result = await window.electronAPI.workspace.writeTextFile(
-        requireWorkspace(),
+        isolation.root,
         path,
         String(args.content),
         { expectedModifiedAt: readVersions.get(path) },
@@ -63,7 +118,7 @@ export const codeWorkspaceTools: ToolDefinition[] = [
         throw new Error(result.error ?? '无法写入文件');
       }
       if (result.data) readVersions.set(path, result.data.modifiedAt);
-      return `已更新 ${path}`;
+      return `已在隔离分支 ${isolation.branch} 更新 ${path}`;
     },
   },
   {
@@ -89,7 +144,8 @@ export const codeWorkspaceTools: ToolDefinition[] = [
       required: ['path', 'edits'],
     },
     execute: async (args) => {
-      const root = requireWorkspace();
+      const isolation = await requireIsolatedWorkspace();
+      const root = isolation.root;
       const path = String(args.path);
       const edits = Array.isArray(args.edits) ? args.edits as Array<{ oldString?: unknown; newString?: unknown }> : [];
       if (!edits.length) throw new Error('没有收到有效的编辑内容');
@@ -105,7 +161,7 @@ export const codeWorkspaceTools: ToolDefinition[] = [
       const written = await window.electronAPI.workspace.writeTextFile(root, path, content, { expectedModifiedAt: read.data.modifiedAt });
       if (!written.success) throw new Error(written.error === 'FILE_MODIFIED_EXTERNALLY' ? `${path} 已被外部修改，请重新读取` : written.error ?? `无法写入 ${path}`);
       if (written.data) readVersions.set(path, written.data.modifiedAt);
-      return `已对 ${path} 应用 ${edits.length} 处修改`;
+      return `已在隔离分支 ${isolation.branch} 对 ${path} 应用 ${edits.length} 处修改`;
     },
   },
 ];
