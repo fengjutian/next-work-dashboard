@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { getPdfJs } from '@/lib/pdfjs';
 
 export interface ParsedAttachment {
   name: string;
@@ -21,9 +22,9 @@ function extensionOf(name: string): string {
 }
 
 async function parsePdf(file: File): Promise<string> {
-  const pdfjs: any = await import('pdfjs-dist');
+  const pdfjs = await getPdfJs();
   const data = new Uint8Array(await file.arrayBuffer());
-  const document = await pdfjs.getDocument({ data, disableWorker: true }).promise;
+  const document = await pdfjs.getDocument({ data }).promise;
   const pages: string[] = [];
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);

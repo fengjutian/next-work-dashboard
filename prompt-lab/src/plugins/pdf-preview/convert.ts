@@ -6,6 +6,7 @@
  */
 
 import type { PdfPreviewState } from './types';
+import { getPdfJs } from '@/lib/pdfjs';
 
 /**
  * 将 PDF 文件解析为内部数据结构。
@@ -18,7 +19,7 @@ export async function loadPdfDocument(
     throw new Error('仅支持 .pdf 格式文件');
   }
 
-  const pdfjsLib: any = await import('pdfjs-dist');
+  const pdfjsLib = await getPdfJs();
 
   // 设置 worker 路径
   if (!pdfjsLib.GlobalWorkerOptions?.workerSrc) {

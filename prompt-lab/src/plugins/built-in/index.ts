@@ -40,6 +40,7 @@ const terminal = preloadable(() => import('../terminal').then((m) => ({ default:
 const database = preloadable(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
 const codeEditor = preloadable(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
 const compare = preloadable(() => import('../compare').then((m) => ({ default: m.ComparePanel })));
+const documentKnowledge = preloadable(() => import('../document-knowledge').then((m) => ({ default: m.DocumentKnowledgePanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -53,6 +54,7 @@ const TerminalPluginPanel = terminal.component;
 const DatabaseBrowser = database.component;
 const CodeEditorPanel = codeEditor.component;
 const ComparePanel = compare.component;
+const DocumentKnowledgePanel = documentKnowledge.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -264,6 +266,21 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'document-knowledge',
+    name: '文档知识库',
+    icon: Database,
+    component: DocumentKnowledgePanel,
+    enabled: true,
+    order: 19,
+    keepAlive: true,
+    contributions: {
+      commands: [
+        { id: 'document-knowledge.upload', title: '上传并解析文档', category: '文档知识库' },
+      ],
+      views: [{ id: 'document-knowledge.main', title: '文档知识库', component: DocumentKnowledgePanel, location: 'main' }],
+    },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -321,6 +338,7 @@ export function registerBuiltInPlugins(): void {
     database: database.preload,
     'code-editor': codeEditor.preload,
     compare: compare.preload,
+    'document-knowledge': documentKnowledge.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,

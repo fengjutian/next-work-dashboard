@@ -77,7 +77,8 @@ const readPdfTool: ToolDefinition = {
       const buffer = await readFileAsBuffer(filePath);
       const fileName = filePath.split(/[/\\]/).pop() || filePath;
 
-      const pdfjsLib: any = await import('pdfjs-dist');
+      const { getPdfJs } = await import('@/lib/pdfjs');
+      const pdfjsLib = await getPdfJs();
 
       // 设置 worker 路径
       if (!pdfjsLib.GlobalWorkerOptions?.workerSrc) {
