@@ -215,6 +215,11 @@ function ensureSchema(): void {
       hit_count INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_embedding_cache_access ON embedding_cache(last_accessed_at);
+    CREATE TABLE IF NOT EXISTS semantic_shadow_cache (
+      key TEXT PRIMARY KEY, namespace TEXT NOT NULL, model TEXT NOT NULL, prompt TEXT NOT NULL,
+      response TEXT NOT NULL, vector TEXT NOT NULL, created_at INTEGER NOT NULL, last_accessed_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_semantic_shadow_scope ON semantic_shadow_cache(namespace, model, last_accessed_at DESC);
     CREATE TABLE IF NOT EXISTS weread_books (
       book_id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -512,6 +517,23 @@ export function dbGetEmbeddingCacheCount(): number {
   if (!_sqlDb) return 0;
   return Number(_sqlDb.exec('SELECT COUNT(*) FROM embedding_cache')[0]?.values[0]?.[0] ?? 0);
 }
+
+export interface DbSemanticShadowEntry { key: string; namespace: string; model: string; prompt: string; response: string; vector: number[]; createdAt: number }
+export function dbListSemanticShadow(namespace: string, model: string, limit = 1000): DbSemanticShadowEntry[] {
+  if (!_sqlDb) return [];
+  const scope = namespace.replace(/'/g, "''"); const safeModel = model.replace(/'/g, "''");
+  const rows = _sqlDb.exec(`SELECT key, namespace, model, prompt, response, vector, created_at FROM semantic_shadow_cache
+    WHERE namespace = '${scope}' AND model = '${safeModel}' ORDER BY last_accessed_at DESC LIMIT ${Math.max(1, Math.min(5000, limit))}`)[0]?.values ?? [];
+  return rows.flatMap((row) => { try { return [{ key: String(row[0]), namespace: String(row[1]), model: String(row[2]), prompt: String(row[3]), response: String(row[4]), vector: JSON.parse(String(row[5])) as number[], createdAt: Number(row[6]) }]; } catch { return []; } });
+}
+export function dbPutSemanticShadow(entry: DbSemanticShadowEntry, maxEntries = 5000): void {
+  if (!_sqlDb) return; const now = Date.now();
+  _sqlDb.run(`INSERT OR REPLACE INTO semantic_shadow_cache (key, namespace, model, prompt, response, vector, created_at, last_accessed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [entry.key, entry.namespace, entry.model, entry.prompt, entry.response, JSON.stringify(entry.vector), entry.createdAt, now]);
+  _sqlDb.run(`DELETE FROM semantic_shadow_cache WHERE key IN (SELECT key FROM semantic_shadow_cache ORDER BY last_accessed_at DESC LIMIT -1 OFFSET ?)`, [Math.max(100, maxEntries)]);
+}
+export function dbClearSemanticShadow(): void { _sqlDb?.run('DELETE FROM semantic_shadow_cache'); }
+export function dbGetSemanticShadowCount(): number { return Number(_sqlDb?.exec('SELECT COUNT(*) FROM semantic_shadow_cache')[0]?.values[0]?.[0] ?? 0); }
 
 export interface WereadCachedBook {
   bookId: string;

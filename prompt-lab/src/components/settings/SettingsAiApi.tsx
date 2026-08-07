@@ -3,8 +3,8 @@ import { Eye, EyeOff, CheckCircle, XCircle, Loader2 } from '@/components/icons';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
-import { dbClearLlmCache, dbGetLlmCacheCount, flushDbToDisk } from '@/db';
-import { clearLlmMemoryCaches, getLlmCacheMetrics, resetLlmCacheMetrics } from '@/core';
+import { dbClearLlmCache, dbClearSemanticShadow, dbGetLlmCacheCount, dbGetSemanticShadowCount, flushDbToDisk } from '@/db';
+import { clearLlmMemoryCaches, getLlmCacheMetrics, getSemanticShadowMetrics, resetLlmCacheMetrics, resetSemanticShadowMetrics } from '@/core';
 
 // ── AI API 设置 Tab ──
 
@@ -25,16 +25,20 @@ export const SettingsAiApi: React.FC = () => {
   const [testMessage, setTestMessage] = React.useState('');
   const [cacheCount, setCacheCount] = React.useState(() => dbGetLlmCacheCount());
   const [cacheMetrics, setCacheMetrics] = React.useState(() => getLlmCacheMetrics());
+  const [shadowMetrics, setShadowMetrics] = React.useState(() => getSemanticShadowMetrics());
 
   const refreshCacheStats = () => {
     setCacheCount(dbGetLlmCacheCount());
     setCacheMetrics(getLlmCacheMetrics());
+    setShadowMetrics(getSemanticShadowMetrics());
   };
 
   const clearCache = async () => {
     dbClearLlmCache();
+    dbClearSemanticShadow();
     clearLlmMemoryCaches();
     resetLlmCacheMetrics();
+    resetSemanticShadowMetrics();
     await flushDbToDisk();
     refreshCacheStats();
   };
@@ -173,9 +177,14 @@ export const SettingsAiApi: React.FC = () => {
               <Input type="number" min={100} max={50000} step={100} value={llmCacheConfig.maxEntries} onChange={(event) => setLlmCacheConfig({ maxEntries: Number(event.target.value) })} className="h-8 text-xs" />
             </label>
           </div>
+          <label className="flex items-center justify-between rounded border p-2 text-xs">
+            <span><span className="block font-medium">语义影子模式</span><span className="text-[10px] text-muted-foreground">只评估相似候选，不返回缓存答案；需要配置 Embedding</span></span>
+            <input type="checkbox" checked={llmCacheConfig.semanticShadowEnabled} onChange={(event) => setLlmCacheConfig({ semanticShadowEnabled: event.target.checked })} />
+          </label>
           <div className="rounded-md bg-muted/40 p-2 text-[10px] text-muted-foreground">
             <div>本地条目 {cacheCount} · L1 命中 {cacheMetrics.memoryHits} · L2 命中 {cacheMetrics.persistentHits}</div>
             <div>未命中 {cacheMetrics.misses} · 合并请求 {cacheMetrics.coalescedHits} · 主动绕过 {cacheMetrics.bypasses}</div>
+            <div>影子条目 {dbGetSemanticShadowCount()} · 候选 {shadowMetrics.candidates} · ≥0.97 {shadowMetrics.highConfidence} · 最佳 {Math.max(0, shadowMetrics.bestSimilarity).toFixed(3)}</div>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="h-7 text-xs" onClick={refreshCacheStats}>刷新统计</Button>

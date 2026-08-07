@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
-import { createCachedProvider, createOpenAIProvider, registerTools, runAgent } from '@/core';
+import { createCachedEmbeddings, createCachedProvider, createOpenAIProvider, evaluateSemanticShadow, registerTools, runAgent, storeSemanticShadow } from '@/core';
+import { createLocalEmbeddings } from '@/core/memory/local-embedding';
 import { builtInTools } from '@/core/tools';
 import { pluginTools } from '@/core/tools/plugin-tools';
 import { conversationMemoryTools } from '@/core/tools/conversation-memory-tools';
@@ -117,6 +118,7 @@ export interface Session {
 export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] = 'chat') {
   const aiApi = useStore((s) => s.aiApi);
   const llmCacheConfig = useStore((s) => s.llmCacheConfig);
+  const memoryConfig = useStore((s) => s.memoryConfig);
   const prompts = useStore((s) => s.prompts);
   const skills = useStore((s) => s.skills);
 
@@ -197,7 +199,7 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
   const providerRef = useRef<LLMProvider | null>(null);
   const rawProviderRef = useRef<LLMProvider | null>(null);
 
-  useEffect(() => { providerRef.current = null; rawProviderRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.enabled, llmCacheConfig.maxEntries, llmCacheConfig.ttlHours]);
+  useEffect(() => { providerRef.current = null; rawProviderRef.current = null; }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.enabled, llmCacheConfig.maxEntries, llmCacheConfig.semanticShadowEnabled, llmCacheConfig.ttlHours, memoryConfig]);
 
   const getProvider = useCallback((uncached = false): LLMProvider | null => {
     if (!aiApi.apiKey) return null;
@@ -216,9 +218,25 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
         get: (key) => dbGetLlmCache(key),
         put: (entry) => { dbPutLlmCache(entry, llmCacheConfig.maxEntries); void flushDbToDisk(); },
       },
+      semanticShadow: llmCacheConfig.semanticShadowEnabled ? {
+        evaluate: async (key, requestMessages, requestOptions) => {
+          const prompt = [...requestMessages].reverse().find((message) => message.role === 'user')?.content ?? '';
+          const useRemote = memoryConfig.provider === 'openai' && Boolean(memoryConfig.embeddingBaseUrl && memoryConfig.embeddingApiKey);
+          if (!prompt || (!useRemote && !memoryConfig.localEmbeddingEnabled)) return null;
+          const identity = useRemote ? `remote:${memoryConfig.embeddingBaseUrl}:${memoryConfig.embeddingModel}` : `local:${memoryConfig.localEmbeddingModel}`;
+          const embed = async (text: string) => (await createCachedEmbeddings([text], identity, async (missing) => {
+            if (!useRemote) return createLocalEmbeddings(missing, memoryConfig.localEmbeddingModel);
+            const result = await window.electronAPI.createEmbeddings({ baseUrl: memoryConfig.embeddingBaseUrl, apiKey: memoryConfig.embeddingApiKey, model: memoryConfig.embeddingModel, inputs: missing });
+            if (!result.success) throw new Error(result.error ?? 'EMBEDDING_FAILED');
+            return result.embeddings ?? [];
+          }))[0] ?? [];
+          return evaluateSemanticShadow({ key, namespace: aiApi.baseUrl.replace(/\/+$/, '').toLowerCase(), model: requestOptions.model, prompt, embed });
+        },
+        store: (context, response) => storeSemanticShadow(context as Awaited<ReturnType<typeof evaluateSemanticShadow>>, response, llmCacheConfig.maxEntries),
+      } : undefined,
     });
     return providerRef.current;
-  }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.maxEntries, llmCacheConfig.ttlHours]);
+  }, [aiApi.apiKey, aiApi.baseUrl, llmCacheConfig.maxEntries, llmCacheConfig.semanticShadowEnabled, llmCacheConfig.ttlHours, memoryConfig]);
 
   const confirmInputPrompt = useCallback((values: Record<string, string>) => {
     if (!pendingInputPrompt) return;

@@ -35,6 +35,8 @@ export { clearLlmMemoryCaches, createCachedProvider, createLlmCacheKey, getLlmCa
 export type { CachedProviderOptions, LlmCacheEntry, LlmCacheMetrics, LlmCacheStorage } from './llm-cache';
 export { createCachedEmbeddings, getEmbeddingCacheMetrics, resetEmbeddingCacheMetrics } from './embedding-cache';
 export type { EmbeddingCacheMetrics } from './embedding-cache';
+export { evaluateSemanticShadow, getSemanticShadowMetrics, resetSemanticShadowMetrics, storeSemanticShadow } from './semantic-shadow-cache';
+export type { SemanticShadowContext, SemanticShadowMetrics } from './semantic-shadow-cache';
 
 // 工具系统
 export type {

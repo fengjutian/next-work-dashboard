@@ -63,6 +63,12 @@ export const embeddingCache = sqliteTable('embedding_cache', {
   hitCount: integer('hit_count').notNull().default(0),
 });
 
+export const semanticShadowCache = sqliteTable('semantic_shadow_cache', {
+  key: text('key').primaryKey(), namespace: text('namespace').notNull(), model: text('model').notNull(),
+  prompt: text('prompt').notNull(), response: text('response').notNull(), vector: text('vector').notNull(),
+  createdAt: integer('created_at').notNull(), lastAccessedAt: integer('last_accessed_at').notNull(),
+});
+
 // 微信读书离线缓存。完整笔记保留为 JSON，同时用 searchable_text 提供本地搜索。
 export const wereadBooks = sqliteTable('weread_books', {
   bookId: text('book_id').primaryKey(),

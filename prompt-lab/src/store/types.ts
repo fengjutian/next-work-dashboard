@@ -147,6 +147,7 @@ export interface AiApiConfig {
 
 export interface LlmCacheConfig {
   enabled: boolean;
+  semanticShadowEnabled: boolean;
   ttlHours: number;
   maxEntries: number;
 }

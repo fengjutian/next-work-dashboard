@@ -38,6 +38,10 @@ export interface CachedProviderOptions {
   maxMemoryEntries?: number;
   replayChunkSize?: number;
   bypass?: (messages: ChatMessage[], options: ChatOptions) => boolean;
+  semanticShadow?: {
+    evaluate: (key: string, messages: ChatMessage[], options: ChatOptions) => Promise<unknown>;
+    store: (context: unknown, response: string) => void;
+  };
 }
 
 const metrics: LlmCacheMetrics = {
@@ -139,6 +143,7 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
       }
 
       metrics.misses += 1;
+      const shadowContext = options.semanticShadow?.evaluate(key, messages, chatOptions).catch(() => null);
       let resolveEntry!: (entry: LlmCacheEntry) => void;
       let rejectEntry!: (reason: unknown) => void;
       const promise = new Promise<LlmCacheEntry>((resolve, reject) => { resolveEntry = resolve; rejectEntry = reject; });
@@ -157,6 +162,7 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
         const entry: LlmCacheEntry = { key, response, reasoning, model: chatOptions.model, provider: provider.id, createdAt: now, expiresAt: now + ttlMs, lastAccessedAt: now, hitCount: 0 };
         remember(entry);
         try { await options.storage?.put(entry); metrics.writes += 1; } catch { metrics.errors += 1; }
+        if (shadowContext) options.semanticShadow?.store(await shadowContext, response);
         resolveEntry(entry);
       } catch (error) { rejectEntry(error); throw error; }
       finally { inflight.delete(key); }

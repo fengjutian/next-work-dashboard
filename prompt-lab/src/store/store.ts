@@ -234,11 +234,12 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  llmCacheConfig: { enabled: true, ttlHours: 168, maxEntries: 5000 },
+  llmCacheConfig: { enabled: true, semanticShadowEnabled: false, ttlHours: 168, maxEntries: 5000 },
   setLlmCacheConfig: (patch) => {
     set((state) => {
       const next = {
         enabled: typeof patch.enabled === 'boolean' ? patch.enabled : state.llmCacheConfig.enabled,
+        semanticShadowEnabled: typeof patch.semanticShadowEnabled === 'boolean' ? patch.semanticShadowEnabled : state.llmCacheConfig.semanticShadowEnabled,
         ttlHours: Math.max(1, Math.min(720, Math.floor(patch.ttlHours ?? state.llmCacheConfig.ttlHours))),
         maxEntries: Math.max(100, Math.min(50000, Math.floor(patch.maxEntries ?? state.llmCacheConfig.maxEntries))),
       };
