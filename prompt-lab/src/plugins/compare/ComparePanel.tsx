@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { ArrowLeft, ArrowRight, Copy, FileText } from '@/components/icons';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, Columns2, Copy, Download, FileDiff, FileText, Rows3, Save, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { configureMonaco } from '@/lib/monaco-setup';
@@ -14,9 +14,10 @@ import { applyUnifiedPatch, parseUnifiedPatch, type UnifiedPatch } from '@/lib/u
 import {
   applyJsonPatch, canonicalizeJson, changesOnlyText, createJsonPatch, diffJsonTree,
   formatCsvForComparison, formatEnvForComparison, formatJsonForComparison, formatMarkdownForComparison,
-  formatXmlForComparison, formatYamlForComparison, normalizeChineseText, normalizeParagraphs,
+  formatXmlForComparison, formatYamlForComparison, normalizeChineseLines, normalizeParagraphs,
   type CompareMode, type JsonPatchOperation,
 } from '@/lib/comparison-modes';
+import { UnifiedDiffView } from './UnifiedDiffView';
 
 configureMonaco();
 
@@ -58,7 +59,6 @@ interface ComparePreferences {
   ignoreCase: boolean;
   ignoreBlankLines: boolean;
   hideUnchanged: boolean;
-  inputsVisible: boolean;
   normalizeWidth: boolean;
   ignorePunctuation: boolean;
   jsonArrayKey: string;
@@ -73,7 +73,6 @@ const defaultPreferences: ComparePreferences = {
   ignoreCase: false,
   ignoreBlankLines: false,
   hideUnchanged: true,
-  inputsVisible: true,
   normalizeWidth: true,
   ignorePunctuation: false,
   jsonArrayKey: '',
@@ -100,11 +99,13 @@ export const ComparePanel: React.FC = () => {
   const [saveConflict, setSaveConflict] = useState<SaveConflict | null>(null);
   const [patchSession, setPatchSession] = useState<PatchSession | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const editorListenersRef = useRef<monaco.IDisposable[]>([]);
+  const unifiedViewRef = useRef<HTMLDivElement | null>(null);
   const structuredComparison = useMemo(() => {
     try {
       if (preferences.mode === 'chinese-word') {
         const options = { normalizeWidth: preferences.normalizeWidth, ignorePunctuation: preferences.ignorePunctuation };
-        return { left: normalizeChineseText(left.content, options), right: normalizeChineseText(right.content, options), jsonChanges: [] };
+        return { left: normalizeChineseLines(left.content, options), right: normalizeChineseLines(right.content, options), jsonChanges: [] };
       }
       if (preferences.mode === 'paragraph') return { left: normalizeParagraphs(left.content), right: normalizeParagraphs(right.content), jsonChanges: [] };
       if (preferences.mode === 'csv') return { left: formatCsvForComparison(left.content), right: formatCsvForComparison(right.content), jsonChanges: [] };
@@ -181,7 +182,7 @@ export const ComparePanel: React.FC = () => {
       setLeft(documentFromFile(files[0]));
       setRight(documentFromFile(files[1]));
       setActiveChange(-1);
-      setStatus(`正在比较 ${files[0].name} 与 ${files[1].name}`);
+      setStatus(`已直接比较 ${files[0].name} 与 ${files[1].name}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法读取选择的文件');
     }
@@ -236,6 +237,17 @@ export const ComparePanel: React.FC = () => {
   };
 
   const navigate = (direction: 1 | -1) => {
+    if (!preferences.sideBySide) {
+      if (hunks.length === 0) {
+        setStatus('两侧内容没有差异');
+        return;
+      }
+      const next = (activeChange + direction + hunks.length) % hunks.length;
+      unifiedViewRef.current?.querySelector<HTMLElement>(`[data-hunk-index="${next}"]`)?.scrollIntoView({ block: 'center' });
+      setActiveChange(next);
+      setStatus(`差异 ${next + 1}/${hunks.length}`);
+      return;
+    }
     const changes = editorRef.current?.getLineChanges() ?? [];
     if (changes.length === 0) {
       setStatus('两侧内容没有差异');
@@ -364,8 +376,25 @@ export const ComparePanel: React.FC = () => {
   };
 
   const handleMount: DiffOnMount = (editor) => {
+    editorListenersRef.current.forEach((listener) => listener.dispose());
     editorRef.current = editor;
+    const originalEditor = editor.getOriginalEditor();
+    const modifiedEditor = editor.getModifiedEditor();
+    editorListenersRef.current = [
+      originalEditor.onDidChangeModelContent(() => {
+        const content = originalEditor.getValue();
+        setLeft((current) => current.content === content ? current : { ...current, content });
+        setActiveChange(-1);
+      }),
+      modifiedEditor.onDidChangeModelContent(() => {
+        const content = modifiedEditor.getValue();
+        setRight((current) => current.content === content ? current : { ...current, content });
+        setActiveChange(-1);
+      }),
+    ];
   };
+
+  useEffect(() => () => editorListenersRef.current.forEach((listener) => listener.dispose()), []);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -395,31 +424,30 @@ export const ComparePanel: React.FC = () => {
         <select className="h-7 rounded border bg-background px-2 text-xs" value={preferences.mode} onChange={(event) => updatePreference('mode', event.target.value as CompareMode)} aria-label="比较模式">
           <option value="plain">普通文本/代码</option><option value="chinese-word">中文词级</option><option value="paragraph">段落</option><option value="json">JSON 结构</option><option value="yaml">YAML 结构</option><option value="xml">XML 节点</option><option value="csv">CSV 表格</option><option value="markdown">Markdown 结构</option><option value="env">.env 键值</option>
         </select>
-        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void openTwoFiles()}><FileText className="mr-1 h-3.5 w-3.5" />选择两个文件</Button>
+        <Button size="sm" variant="default" className="h-7 px-2 text-xs" onClick={() => void openTwoFiles()} title="选择两个文件后立即比较"><FileDiff className="h-3.5 w-3.5" />比较文件</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void openFile('left')}><FileText className="mr-1 h-3.5 w-3.5" />载入左侧</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void openFile('right')}><FileText className="mr-1 h-3.5 w-3.5" />载入右侧</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={swap}>交换左右</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!left.path || left.content === left.savedContent} onClick={() => void saveDocument('left')}>保存左侧</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!right.path || right.content === right.savedContent} onClick={() => void saveDocument('right')}>保存右侧</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void saveDocument('right', true)}>右侧另存为</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={swap}><ArrowLeftRight className="h-3.5 w-3.5" />交换左右</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!left.path || left.content === left.savedContent} onClick={() => void saveDocument('left')}><Save className="h-3.5 w-3.5" />保存左侧</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!right.path || right.content === right.savedContent} onClick={() => void saveDocument('right')}><Save className="h-3.5 w-3.5" />保存右侧</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void saveDocument('right', true)}><Download className="h-3.5 w-3.5" />右侧另存为</Button>
         <span className="mx-1 h-5 w-px bg-border" />
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => navigate(-1)}><ArrowLeft className="mr-1 h-3.5 w-3.5" />上一处</Button>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => navigate(1)}>下一处<ArrowRight className="ml-1 h-3.5 w-3.5" /></Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={hunks.length === 0 || filtered} onClick={() => applyCurrent('right-to-left')}>← 应用</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={hunks.length === 0 || filtered} onClick={() => applyCurrent('left-to-right')}>应用 →</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={hunks.length === 0 || filtered} onClick={() => { setRight((current) => ({ ...current, content: left.content })); setActiveChange(-1); setStatus('已将左侧全部内容应用到右侧'); }}>全部应用 →</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" aria-label="向左应用当前差异" disabled={hunks.length === 0 || filtered} onClick={() => applyCurrent('right-to-left')}><ArrowLeft className="h-3.5 w-3.5" />应用</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" aria-label="向右应用当前差异" disabled={hunks.length === 0 || filtered} onClick={() => applyCurrent('left-to-right')}>应用<ArrowRight className="h-3.5 w-3.5" /></Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" aria-label="向右应用全部差异" disabled={hunks.length === 0 || filtered} onClick={() => { setRight((current) => ({ ...current, content: left.content })); setActiveChange(-1); setStatus('已将左侧全部内容应用到右侧'); }}><ArrowRight className="h-3.5 w-3.5" />全部应用</Button>
         <div className="flex-1" />
         <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={preferences.ignoreWhitespace} onChange={(event) => updatePreference('ignoreWhitespace', event.target.checked)} />忽略首尾空白</label>
         <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={preferences.ignoreCase} onChange={(event) => updatePreference('ignoreCase', event.target.checked)} />忽略大小写</label>
         <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={preferences.ignoreBlankLines} onChange={(event) => updatePreference('ignoreBlankLines', event.target.checked)} />忽略空行</label>
         <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={preferences.hideUnchanged} onChange={(event) => updatePreference('hideUnchanged', event.target.checked)} />折叠未变化</label>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => updatePreference('sideBySide', !preferences.sideBySide)}>{preferences.sideBySide ? '行内视图' : '双栏视图'}</Button>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => updatePreference('inputsVisible', !preferences.inputsVisible)}>{preferences.inputsVisible ? '隐藏输入' : '显示输入'}</Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => updatePreference('sideBySide', !preferences.sideBySide)}>{preferences.sideBySide ? <Rows3 className="h-3.5 w-3.5" /> : <Columns2 className="h-3.5 w-3.5" />}{preferences.sideBySide ? '单栏视图' : '双栏视图'}</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void copyPatch()}><Copy className="mr-1 h-3.5 w-3.5" />复制 Diff</Button>
-        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void exportPatch()}>导出 Patch</Button>
-        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void importPatch()}>导入 Patch</Button>
-        {preferences.mode === 'json' && <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void exportJsonPatch()}>导出 JSON Patch</Button>}
-        {preferences.mode === 'json' && <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void importJsonPatch()}>导入 JSON Patch</Button>}
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void exportPatch()}><Download className="h-3.5 w-3.5" />导出 Patch</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void importPatch()}><Upload className="h-3.5 w-3.5" />导入 Patch</Button>
+        {preferences.mode === 'json' && <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void exportJsonPatch()}><Download className="h-3.5 w-3.5" />导出 JSON Patch</Button>}
+        {preferences.mode === 'json' && <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void importJsonPatch()}><Upload className="h-3.5 w-3.5" />导入 JSON Patch</Button>}
       </header>
 
       {preferences.mode === 'chinese-word' && <div className="flex h-8 shrink-0 items-center gap-4 border-b px-3 text-xs"><label className="flex items-center gap-1"><input type="checkbox" checked={preferences.normalizeWidth} onChange={(event) => updatePreference('normalizeWidth', event.target.checked)} />全角/半角归一化</label><label className="flex items-center gap-1"><input type="checkbox" checked={preferences.ignorePunctuation} onChange={(event) => updatePreference('ignorePunctuation', event.target.checked)} />忽略标点</label></div>}
@@ -461,26 +489,11 @@ export const ComparePanel: React.FC = () => {
         </details>
       )}
 
-      {preferences.inputsVisible && (
-        <div className="grid h-44 shrink-0 grid-cols-2 gap-px border-b bg-border">
-          {([
-            { side: 'left' as const, value: left, setter: setLeft },
-            { side: 'right' as const, value: right, setter: setRight },
-          ]).map(({ side, value, setter }) => (
-            <label key={side} className="flex min-w-0 flex-col bg-background">
-              <div className="flex h-8 items-center border-b bg-muted/40 px-3 text-xs">
-                <input className="min-w-0 flex-1 bg-transparent font-medium outline-none" value={value.label} onChange={(event) => setter((current) => ({ ...current, label: event.target.value }))} aria-label={`${side === 'left' ? '左' : '右'}侧名称`} />
-                {value.content !== value.savedContent && value.path && <span className="ml-2 text-warning">未保存</span>}
-                {value.encoding && <span className="ml-2 text-muted-foreground">{value.encoding.toUpperCase()} · {value.lineEnding}</span>}
-              </div>
-              <textarea className="min-h-0 flex-1 resize-none bg-background p-3 font-mono text-xs leading-5 outline-none" value={value.content} onChange={(event) => { setter((current) => ({ ...current, content: event.target.value })); setActiveChange(-1); }} spellCheck={false} aria-label={`${side === 'left' ? '左' : '右'}侧文本`} />
-            </label>
-          ))}
-        </div>
-      )}
-
+      <div className="grid h-8 shrink-0 grid-cols-2 border-b bg-muted/30 text-xs">
+        {([left, right] as const).map((document, index) => <div key={index} className="flex min-w-0 items-center border-r px-3 last:border-r-0"><span className="truncate font-medium">{document.label}</span>{document.content !== document.savedContent && document.path && <span className="ml-2 text-warning">未保存</span>}{document.encoding && <span className="ml-2 text-muted-foreground">{document.encoding.toUpperCase()} · {document.lineEnding}</span>}</div>)}
+      </div>
       <div className="min-h-0 flex-1">
-        <DiffEditor
+        {preferences.sideBySide ? <DiffEditor
           original={displayLeft}
           modified={displayRight}
           language={language}
@@ -490,9 +503,10 @@ export const ComparePanel: React.FC = () => {
           onMount={handleMount}
           options={{
             automaticLayout: true,
-            readOnly: true,
+            readOnly: false,
+            originalEditable: true,
             diffAlgorithm: 'advanced',
-            renderSideBySide: preferences.sideBySide,
+            renderSideBySide: true,
             useInlineViewWhenSpaceIsLimited: true,
             ignoreTrimWhitespace: preferences.ignoreWhitespace,
             hideUnchangedRegions: { enabled: preferences.hideUnchanged, contextLineCount: 3, minimumLineCount: 8, revealLineCount: 20 },
@@ -502,7 +516,14 @@ export const ComparePanel: React.FC = () => {
             minimap: { enabled: false },
             wordWrap: 'on',
           }}
-        />
+        /> : <div ref={unifiedViewRef} className="h-full"><UnifiedDiffView
+          original={displayLeft}
+          modified={displayRight}
+          hunks={hunks}
+          activeHunk={activeChange}
+          hideUnchanged={preferences.hideUnchanged}
+          wordLevel={preferences.mode === 'chinese-word'}
+        /></div>}
       </div>
       <footer className="flex h-7 shrink-0 items-center gap-3 border-t px-3 text-[11px] text-muted-foreground">
         <span>{diffComputing ? '正在计算差异…' : `${hunks.length} 个差异块`}</span><span>{language}</span>{usingWorker && <span>后台计算</span>}<span>F7/Shift+F7 导航</span>{filtered && <span className="text-warning">筛选模式仅影响显示</span>}{diffError && <span className="text-warning">{diffError}</span>}<span className="truncate">{status}</span>

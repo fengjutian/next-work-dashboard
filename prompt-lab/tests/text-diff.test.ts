@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyTextDiffHunk, computeTextDiffHunks, createUnifiedDiff, prepareTextForComparison } from '../src/lib/text-diff';
+import { applyTextDiffHunk, buildUnifiedDiffRows, computeTextDiffHunks, computeWordDiffSegments, createUnifiedDiff, prepareTextForComparison } from '../src/lib/text-diff';
 
 describe('text diff', () => {
   it('returns no hunks for identical text', () => {
@@ -44,5 +44,25 @@ describe('text diff', () => {
   it('normalizes case and blank lines for display-only comparison', () => {
     const options = { ignoreCase: true, ignoreBlankLines: true };
     expect(prepareTextForComparison('Hello\n  \nWORLD', options)).toBe('hello\nworld');
+  });
+
+  it('computes Chinese and English word changes without modifying unchanged text', () => {
+    const result = computeWordDiffSegments('欢迎使用 React 文本比较', '欢迎体验 React 中文比较');
+    expect(result.original.map((part) => part.value).join('')).toBe('欢迎使用 React 文本比较');
+    expect(result.modified.map((part) => part.value).join('')).toBe('欢迎体验 React 中文比较');
+    expect(result.original.filter((part) => part.type === 'delete').map((part) => part.value).join('')).toContain('使用');
+    expect(result.modified.filter((part) => part.type === 'insert').map((part) => part.value).join('')).toContain('体验');
+  });
+
+  it('builds a single-column diff and only applies word diff to paired changed lines', () => {
+    const original = ['相同', '欢迎使用 React', '删除行', '结尾'].join('\n');
+    const modified = ['相同', '欢迎体验 React', '结尾'].join('\n');
+    const rows = buildUnifiedDiffRows(original, modified, undefined, { hideUnchanged: false, wordLevel: true });
+    const deleted = rows.filter((row) => row.kind === 'delete');
+    const inserted = rows.filter((row) => row.kind === 'insert');
+    expect(deleted.map((row) => row.text)).toEqual(['欢迎使用 React', '删除行']);
+    expect(inserted.map((row) => row.text)).toEqual(['欢迎体验 React']);
+    expect(deleted[0].segments?.some((part) => part.type === 'delete' && part.value.includes('使用'))).toBe(true);
+    expect(deleted[1].segments).toBeUndefined();
   });
 });

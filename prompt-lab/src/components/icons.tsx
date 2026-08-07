@@ -9,6 +9,7 @@
 import type { ComponentProps } from 'react';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   Blocks,
   BookOpen,
@@ -21,6 +22,7 @@ import {
   Clipboard,
   Code,
   Copy,
+  Columns2,
   Database,
   Download,
   Edit3,
@@ -31,6 +33,7 @@ import {
   FileChartColumn,
   FileSpreadsheet,
   FileText,
+  FileDiff,
   FolderOpen,
   GitBranch,
   Globe,
@@ -53,6 +56,7 @@ import {
   Presentation,
   Puzzle,
   RefreshCw,
+  Rows3,
   RotateCcw,
   Search,
   Save,
@@ -89,6 +93,7 @@ function Loader2({ className, ...props }: LoaderProps) {
 
 export {
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   Blocks,
   BookOpen,
@@ -100,6 +105,7 @@ export {
   Clipboard as StickyNote,
   Code,
   Copy,
+  Columns2,
   Database,
   Download,
   Edit3,
@@ -110,6 +116,7 @@ export {
   FileChartColumn as Pdf,
   FileSpreadsheet as Excel,
   FileText,
+  FileDiff,
   FileText as Word,
   FolderOpen,
   GitBranch,
@@ -133,6 +140,7 @@ export {
   Presentation as Ppt,
   Puzzle,
   RefreshCw,
+  Rows3,
   RotateCcw,
   Search,
   Save,

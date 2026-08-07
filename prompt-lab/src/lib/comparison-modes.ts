@@ -44,6 +44,13 @@ export function normalizeChineseText(text: string, options: ChineseComparisonOpt
     .trim();
 }
 
+/** Preserves line boundaries and original word spacing for the first, line-level diff pass. */
+export function normalizeChineseLines(text: string, options: ChineseComparisonOptions = {}): string {
+  let value = options.normalizeWidth ? text.normalize('NFKC') : text;
+  if (options.ignorePunctuation) value = value.replace(punctuationPattern(), '');
+  return value.replace(/\r\n/g, '\n');
+}
+
 export function normalizeParagraphs(text: string): string {
   return text.replace(/\r\n/g, '\n').split(/\n\s*\n+/).map((paragraph) => paragraph.split('\n').map((line) => line.trim()).filter(Boolean).join(' ')).filter(Boolean).join('\n\n');
 }

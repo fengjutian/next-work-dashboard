@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyJsonPatch, canonicalizeJson, changesOnlyText, createJsonPatch, diffJsonTree, formatCsvForComparison, formatEnvForComparison, formatJsonForComparison, formatMarkdownForComparison, formatXmlForComparison, formatYamlForComparison, normalizeChineseText, normalizeParagraphs, parseCsv } from '../src/lib/comparison-modes';
+import { applyJsonPatch, canonicalizeJson, changesOnlyText, createJsonPatch, diffJsonTree, formatCsvForComparison, formatEnvForComparison, formatJsonForComparison, formatMarkdownForComparison, formatXmlForComparison, formatYamlForComparison, normalizeChineseLines, normalizeChineseText, normalizeParagraphs, parseCsv } from '../src/lib/comparison-modes';
 
 describe('comparison modes', () => {
   it('segments mixed Chinese and English while normalizing width and punctuation', () => {
@@ -12,6 +12,11 @@ describe('comparison modes', () => {
 
   it('compares text by paragraphs', () => {
     expect(normalizeParagraphs('第一行\n 第二行\n\n\n第三段')).toBe('第一行 第二行\n\n第三段');
+  });
+
+  it('preserves Chinese line structure during the line-level comparison pass', () => {
+    expect(normalizeChineseLines('你好，Ｗｏｒｌｄ！\n第二行。', { normalizeWidth: true, ignorePunctuation: true }))
+      .toBe('你好World\n第二行');
   });
 
   it('sorts object keys and arrays by a selected key', () => {

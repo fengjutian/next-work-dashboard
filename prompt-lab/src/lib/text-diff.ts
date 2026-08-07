@@ -11,14 +11,29 @@ export interface TextComparisonOptions {
   ignoreBlankLines?: boolean;
 }
 
-type Edit = { type: 'equal' | 'delete' | 'insert'; value: string };
+type Edit<T> = { type: 'equal' | 'delete' | 'insert'; value: T };
+
+export interface InlineDiffSegment {
+  type: 'equal' | 'delete' | 'insert';
+  value: string;
+}
+
+export interface UnifiedDiffRow {
+  kind: 'context' | 'delete' | 'insert' | 'collapsed';
+  hunkIndex?: number;
+  originalLine?: number;
+  modifiedLine?: number;
+  text: string;
+  segments?: InlineDiffSegment[];
+  collapsedLines?: number;
+}
 
 function valueAt(map: Map<number, number>, key: number): number {
   return map.get(key) ?? Number.NEGATIVE_INFINITY;
 }
 
 /** Myers line diff. It avoids the repeated-line and fixed-lookahead failures of the old heuristic. */
-function lineEdits(original: string[], modified: string[]): Edit[] {
+function sequenceEdits<T>(original: T[], modified: T[]): Edit<T>[] {
   const max = original.length + modified.length;
   const frontier = new Map<number, number>([[1, 0]]);
   const trace: Array<Map<number, number>> = [];
@@ -39,7 +54,7 @@ function lineEdits(original: string[], modified: string[]): Edit[] {
       frontier.set(diagonal, x);
       if (x < original.length || y < modified.length) continue;
 
-      const edits: Edit[] = [];
+      const edits: Edit<T>[] = [];
       let backX = original.length;
       let backY = modified.length;
       for (let backDepth = depth; backDepth >= 0; backDepth -= 1) {
@@ -70,6 +85,76 @@ function lineEdits(original: string[], modified: string[]): Edit[] {
     }
   }
   return [];
+}
+
+function lineEdits(original: string[], modified: string[]): Edit<string>[] {
+  return sequenceEdits(original, modified);
+}
+
+function wordTokens(value: string, locale = 'zh-CN'): string[] {
+  if (typeof Intl.Segmenter === 'function') {
+    return Array.from(new Intl.Segmenter(locale, { granularity: 'word' }).segment(value), (part) => part.segment);
+  }
+  return Array.from(value);
+}
+
+/** Computes inline changes without altering the source text or inserting separator spaces. */
+export function computeWordDiffSegments(original: string, modified: string, locale = 'zh-CN'): {
+  original: InlineDiffSegment[];
+  modified: InlineDiffSegment[];
+} {
+  const edits = sequenceEdits(wordTokens(original, locale), wordTokens(modified, locale));
+  return {
+    original: edits.filter((edit) => edit.type !== 'insert'),
+    modified: edits.filter((edit) => edit.type !== 'delete'),
+  };
+}
+
+export function buildUnifiedDiffRows(
+  originalText: string,
+  modifiedText: string,
+  hunks: TextDiffHunk[] = computeTextDiffHunks(originalText, modifiedText),
+  options: { contextLines?: number; hideUnchanged?: boolean; wordLevel?: boolean; locale?: string } = {},
+): UnifiedDiffRow[] {
+  const original = originalText.split('\n');
+  const contextLines = Math.max(0, options.contextLines ?? 3);
+  const hideUnchanged = options.hideUnchanged ?? true;
+  const rows: UnifiedDiffRow[] = [];
+  let originalCursor = 1;
+  let modifiedCursor = 1;
+
+  const appendContext = (start: number, end: number, beforeChange: boolean) => {
+    const count = Math.max(0, end - start);
+    if (count === 0) return;
+    const visibleStart = hideUnchanged && beforeChange && count > contextLines ? end - contextLines : start;
+    const visibleEnd = hideUnchanged && !beforeChange && count > contextLines ? start + contextLines : end;
+    if (visibleStart > start) rows.push({ kind: 'collapsed', text: '', collapsedLines: visibleStart - start });
+    for (let line = visibleStart; line < visibleEnd; line += 1) {
+      rows.push({ kind: 'context', originalLine: line, modifiedLine: modifiedCursor + (line - originalCursor), text: original[line - 1] ?? '' });
+    }
+    if (visibleEnd < end) rows.push({ kind: 'collapsed', text: '', collapsedLines: end - visibleEnd });
+  };
+
+  hunks.forEach((hunk, hunkIndex) => {
+    appendContext(originalCursor, hunk.originalStart, true);
+    const paired = Math.min(hunk.originalLines.length, hunk.modifiedLines.length);
+    hunk.originalLines.forEach((text, index) => {
+      const segments = options.wordLevel && index < paired
+        ? computeWordDiffSegments(text, hunk.modifiedLines[index], options.locale).original
+        : undefined;
+      rows.push({ kind: 'delete', hunkIndex, originalLine: hunk.originalStart + index, text, segments });
+    });
+    hunk.modifiedLines.forEach((text, index) => {
+      const segments = options.wordLevel && index < paired
+        ? computeWordDiffSegments(hunk.originalLines[index], text, options.locale).modified
+        : undefined;
+      rows.push({ kind: 'insert', hunkIndex, modifiedLine: hunk.modifiedStart + index, text, segments });
+    });
+    originalCursor = hunk.originalStart + hunk.originalLines.length;
+    modifiedCursor = hunk.modifiedStart + hunk.modifiedLines.length;
+  });
+  appendContext(originalCursor, original.length + 1, false);
+  return rows;
 }
 
 export function computeTextDiffHunks(originalText: string, modifiedText: string): TextDiffHunk[] {

@@ -5,11 +5,26 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 
 vi.mock('@/lib/monaco-setup', () => ({ configureMonaco: vi.fn() }));
 vi.mock('@monaco-editor/react', () => ({
-  DiffEditor: ({ original, modified }: { original: string; modified: string }) => createElement('div', {
-    'data-testid': 'diff-editor',
-    'data-original': original,
-    'data-modified': modified,
-  }),
+  DiffEditor: ({ original, modified, onMount }: { original: string; modified: string; onMount?: (editor: unknown) => void }) => {
+    const listeners = { original: [] as Array<() => void>, modified: [] as Array<() => void> };
+    const values = { original, modified };
+    const makeEditor = (side: 'original' | 'modified') => ({
+      getValue: () => values[side],
+      onDidChangeModelContent: (listener: () => void) => {
+        listeners[side].push(listener);
+        return { dispose: vi.fn() };
+      },
+      revealLineInCenter: vi.fn(),
+      setPosition: vi.fn(),
+    });
+    const originalEditor = makeEditor('original');
+    const modifiedEditor = makeEditor('modified');
+    onMount?.({ getOriginalEditor: () => originalEditor, getModifiedEditor: () => modifiedEditor, getLineChanges: () => [] });
+    return createElement('div', { 'data-testid': 'diff-editor', 'data-original': original, 'data-modified': modified },
+      createElement('textarea', { 'aria-label': '左侧文本', value: original, onChange: (event: { target: { value: string } }) => { values.original = event.target.value; listeners.original.forEach((listener) => listener()); } }),
+      createElement('textarea', { 'aria-label': '右侧文本', value: modified, onChange: (event: { target: { value: string } }) => { values.modified = event.target.value; listeners.modified.forEach((listener) => listener()); } }),
+    );
+  },
 }));
 
 import { ComparePanel } from '../src/plugins/compare/ComparePanel';
@@ -46,7 +61,7 @@ describe('ComparePanel', () => {
     render(createElement(ComparePanel));
     fireEvent.change(screen.getByLabelText('左侧文本'), { target: { value: 'a\nleft\nz' } });
     fireEvent.change(screen.getByLabelText('右侧文本'), { target: { value: 'a\nright\nz' } });
-    fireEvent.click(screen.getByRole('button', { name: '应用 →' }));
+    fireEvent.click(screen.getByRole('button', { name: '向右应用当前差异' }));
     expect((screen.getByLabelText('右侧文本') as HTMLTextAreaElement).value).toBe('a\nleft\nz');
   });
 
@@ -62,6 +77,18 @@ describe('ComparePanel', () => {
     expect(JSON.parse(localStorage.getItem('compare.preferences.v1') ?? '{}')).toMatchObject({ ignoreCase: true, ignoreBlankLines: true });
   });
 
+  it('switches to a single-column diff with Chinese word-level highlighting', () => {
+    render(createElement(ComparePanel));
+    fireEvent.change(screen.getByLabelText('比较模式'), { target: { value: 'chinese-word' } });
+    fireEvent.change(screen.getByLabelText('左侧文本'), { target: { value: '欢迎使用 React' } });
+    fireEvent.change(screen.getByLabelText('右侧文本'), { target: { value: '欢迎体验 React' } });
+    fireEvent.click(screen.getByRole('button', { name: '单栏视图' }));
+    const view = screen.getByRole('table', { name: '单栏差异视图' });
+    expect(view.textContent).toContain('欢迎使用 React');
+    expect(view.textContent).toContain('欢迎体验 React');
+    expect(screen.queryByTestId('diff-editor')).toBeNull();
+  });
+
   it('opens two files and safely saves an edited side with its metadata', async () => {
     pickFile.mockResolvedValue([
       { path: 'C:\\tmp\\left.txt', name: 'left.txt', size: 4, content: '', mimeType: 'text/plain', text: 'left', encoding: 'utf8bom', lineEnding: 'CRLF', modifiedAt: 10 },
@@ -69,8 +96,9 @@ describe('ComparePanel', () => {
     ]);
     writeTextFile.mockResolvedValue({ success: true, path: 'C:\\tmp\\right.txt', modifiedAt: 30 });
     render(createElement(ComparePanel));
-    fireEvent.click(screen.getByRole('button', { name: '选择两个文件' }));
-    await waitFor(() => expect((screen.getByLabelText('右侧文本') as HTMLTextAreaElement).value).toBe('right'));
+    fireEvent.click(screen.getByRole('button', { name: '比较文件' }));
+    await waitFor(() => expect(screen.getByTestId('diff-editor').getAttribute('data-modified')).toBe('right'));
+    expect(screen.getByTestId('diff-editor').getAttribute('data-original')).toBe('left');
     fireEvent.change(screen.getByLabelText('右侧文本'), { target: { value: 'right edited' } });
     fireEvent.click(screen.getByRole('button', { name: '保存右侧' }));
     await waitFor(() => expect(writeTextFile).toHaveBeenCalledWith('C:\\tmp\\right.txt', 'right edited', {
