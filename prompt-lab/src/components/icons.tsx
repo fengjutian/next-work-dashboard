@@ -6,7 +6,7 @@
  * of reaching into an icon package directly.
  */
 
-import type { ComponentProps } from 'react';
+import type { ComponentProps, SVGProps } from 'react';
 import {
   ArrowLeft,
   ArrowLeftRight,
@@ -92,6 +92,15 @@ function Loader2({ className, ...props }: LoaderProps) {
   );
 }
 
+function Weread({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...props}>
+    <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="#2F7CF6" />
+    <path d="M5.4 6.8c2.45-.12 4.55.55 6.6 2.04v8.35c-1.9-1.23-3.96-1.82-6.6-1.7V6.8Z" fill="white" />
+    <path d="M18.6 6.8c-2.45-.12-4.55.55-6.6 2.04v8.35c1.9-1.23 3.96-1.82 6.6-1.7V6.8Z" fill="white" opacity=".92" />
+    <path d="M12 8.84v8.35" stroke="#2F7CF6" strokeWidth=".65" opacity=".45" />
+  </svg>;
+}
+
 export {
   ArrowLeft,
   ArrowLeftRight,
@@ -126,6 +135,7 @@ export {
   History,
   Info,
   Loader2,
+  Weread,
   Maximize2,
   Menu,
   Minus,

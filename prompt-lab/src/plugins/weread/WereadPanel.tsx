@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, EyeOff, Loader2, RefreshCw, Search } from '@/components/icons';
+import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, EyeOff, Loader2, Maximize2, RefreshCw, Rows3, Search, StickyNote, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { dbLoadWereadCache, dbReplaceWereadCache, flushDbToDisk, isDbReady } from '@/db';
@@ -104,6 +104,7 @@ function makeMarkdown(books: ExportedBook[]): string {
 }
 
 export const WereadPanel: React.FC = () => {
+  const panelRef = useRef<HTMLDivElement>(null);
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const [mode, setMode] = useState<'reader' | 'notes' | 'analytics'>('reader');
   const visitedModes = useRef(new Set<'reader' | 'notes' | 'analytics'>(['reader']));
@@ -116,6 +117,7 @@ export const WereadPanel: React.FC = () => {
   const [openBookId, setOpenBookId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [webviewReady, setWebviewReady] = useState(false);
+  const [zenMode, setZenMode] = useState(false);
 
   useEffect(() => {
     void window.electronAPI.auth.getToken(TOKEN_SERVICE).then((token) => {
@@ -126,10 +128,32 @@ export const WereadPanel: React.FC = () => {
   useEffect(() => {
     const webview = webviewRef.current;
     if (!webview) return;
-    const onFinish = () => setWebviewReady(true);
+    const onFinish = () => {
+      setWebviewReady(true);
+      void webview.insertCSS(`
+        html { scrollbar-width: thin; scrollbar-color: rgba(127,127,127,.35) transparent; }
+        ::-webkit-scrollbar { width: 7px; height: 7px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: rgba(127,127,127,.32); background-clip: padding-box; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(127,127,127,.55); background-clip: padding-box; }
+      `);
+    };
     webview.addEventListener('did-finish-load', onFinish);
     return () => { webview.removeEventListener('did-finish-load', onFinish); };
   }, []);
+
+  useEffect(() => {
+    const syncFullscreen = () => setZenMode(document.fullscreenElement === panelRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+  }, []);
+
+  const toggleZenMode = async () => {
+    try {
+      if (document.fullscreenElement === panelRef.current) await document.exitFullscreen();
+      else await panelRef.current?.requestFullscreen();
+    } catch { setError('当前系统无法进入全屏模式'); }
+  };
 
   useEffect(() => {
     let attempts = 0;
@@ -260,18 +284,21 @@ export const WereadPanel: React.FC = () => {
   }
 
   return (
-    <div className="flex h-full flex-col bg-card">
-      <div className="flex h-10 items-center gap-1 border-b bg-background px-2">
+    <div ref={panelRef} className="weread-panel flex h-full flex-col bg-card">
+      {!zenMode && <div className="flex h-10 items-center gap-1 border-b bg-background px-2">
         {mode === 'reader' && <>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => webviewRef.current?.goBack()}><ArrowLeft /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => webviewRef.current?.goForward()}><ArrowRight /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => webviewRef.current?.reload()}><RefreshCw /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" title="后退" aria-label="后退" onClick={() => webviewRef.current?.goBack()}><ArrowLeft /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" title="前进" aria-label="前进" onClick={() => webviewRef.current?.goForward()}><ArrowRight /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" title="刷新" aria-label="刷新" onClick={() => webviewRef.current?.reload()}><RefreshCw /></Button>
         </>}
         <span className="flex-1 truncate px-2 text-xs text-muted-foreground">微信读书</span>
-        <Button size="sm" variant={mode === 'reader' ? 'secondary' : 'ghost'} onClick={() => { visitedModes.current.add('reader'); setMode('reader'); }}>阅读</Button>
-        <Button size="sm" variant={mode === 'notes' ? 'secondary' : 'ghost'} onClick={() => setMode('notes')}><BookOpen />笔记导出</Button>
-        <Button size="sm" variant={mode === 'analytics' ? 'secondary' : 'ghost'} onClick={() => { visitedModes.current.add('analytics'); setMode('analytics'); }}>阅读分析</Button>
-      </div>
+        <Button size="icon" className="h-8 w-8" variant={mode === 'reader' ? 'secondary' : 'ghost'} title="阅读" aria-label="阅读" onClick={() => { visitedModes.current.add('reader'); setMode('reader'); }}><BookOpen className="h-4 w-4" /></Button>
+        <Button size="icon" className="h-8 w-8" variant={mode === 'notes' ? 'secondary' : 'ghost'} title="笔记导出" aria-label="笔记导出" onClick={() => setMode('notes')}><StickyNote className="h-4 w-4" /></Button>
+        <Button size="icon" className="h-8 w-8" variant={mode === 'analytics' ? 'secondary' : 'ghost'} title="阅读分析" aria-label="阅读分析" onClick={() => { visitedModes.current.add('analytics'); setMode('analytics'); }}><Rows3 className="h-4 w-4" /></Button>
+        {mode === 'reader' && <Button size="icon" className="h-8 w-8" variant="ghost" title="禅模式：全屏看书" aria-label="禅模式：全屏看书" onClick={() => void toggleZenMode()}><Maximize2 className="h-4 w-4" /></Button>}
+      </div>}
+
+      {zenMode && <Button size="icon" variant="secondary" className="fixed right-4 top-4 z-[100] h-9 w-9 rounded-full opacity-45 shadow-lg transition-opacity hover:opacity-100" title="退出禅模式（Esc）" aria-label="退出禅模式" onClick={() => void toggleZenMode()}><X className="h-4 w-4" /></Button>}
 
       {visitedModes.current.has('reader') && (
         <div style={{ flex: mode === 'reader' ? 1 : 0, display: mode === 'reader' ? undefined : 'none', position: 'relative' }}>
@@ -296,7 +323,7 @@ export const WereadPanel: React.FC = () => {
         </div>
       )}
       <div style={{ flex: mode === 'notes' ? 1 : 0, display: mode === 'notes' ? undefined : 'none', overflow: 'hidden' }}>
-        <div className="flex-1 overflow-auto p-5">
+        <div className="weread-scroll flex-1 overflow-auto p-5">
           <div className="mx-auto max-w-4xl space-y-5">
             <div>
               <h2 className="text-lg font-semibold">导出全部读书笔记</h2>

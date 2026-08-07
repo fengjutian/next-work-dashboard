@@ -197,6 +197,17 @@
   overscroll-behavior: contain;
 }
 
+.weread-panel:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: hsl(var(--card));
+}
+
+.weread-scroll {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 /* Monaco draws its own scrollbar instead of using the browser pseudo-elements. */
 .monaco-scrollable-element > .scrollbar {
   background: transparent !important;
