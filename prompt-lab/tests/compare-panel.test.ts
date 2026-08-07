@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('@/lib/monaco-setup', () => ({ configureMonaco: vi.fn() }));
 vi.mock('@monaco-editor/react', () => ({
@@ -13,6 +13,7 @@ vi.mock('@monaco-editor/react', () => ({
 }));
 
 import { ComparePanel } from '../src/plugins/compare/ComparePanel';
+import { useStore } from '../src/store';
 
 const pickFile = vi.fn();
 const writeTextFile = vi.fn();
@@ -22,6 +23,7 @@ describe('ComparePanel', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    useStore.getState().setActiveActivity('ai');
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
       value: { pickFile, writeTextFile, saveFile },
@@ -72,7 +74,38 @@ describe('ComparePanel', () => {
     fireEvent.change(screen.getByLabelText('右侧文本'), { target: { value: 'right edited' } });
     fireEvent.click(screen.getByRole('button', { name: '保存右侧' }));
     await waitFor(() => expect(writeTextFile).toHaveBeenCalledWith('C:\\tmp\\right.txt', 'right edited', {
-      encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: 20,
+      encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: 20, force: false,
     }));
+  });
+
+  it('offers recovery actions when the file changed externally', async () => {
+    pickFile.mockResolvedValue({ path: 'C:\\tmp\\right.txt', name: 'right.txt', size: 5, content: '', mimeType: 'text/plain', text: 'right', encoding: 'utf8', lineEnding: 'LF', modifiedAt: 20 });
+    writeTextFile.mockResolvedValue({
+      success: false,
+      error: 'FILE_MODIFIED_EXTERNALLY',
+      current: { content: 'external', encoding: 'utf8', lineEnding: 'LF', mixedLineEndings: false, modifiedAt: 30 },
+    });
+    render(createElement(ComparePanel));
+    fireEvent.click(screen.getByRole('button', { name: '载入右侧' }));
+    await waitFor(() => expect((screen.getByLabelText('右侧文本') as HTMLTextAreaElement).value).toBe('right'));
+    fireEvent.change(screen.getByLabelText('右侧文本'), { target: { value: 'local edit' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存右侧' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('已被外部修改');
+    fireEvent.click(screen.getByRole('button', { name: '载入外部版本' }));
+    expect((screen.getByLabelText('右侧文本') as HTMLTextAreaElement).value).toBe('external');
+  });
+
+  it('handles save shortcuts only while the compare plugin is active', async () => {
+    pickFile.mockResolvedValue({ path: 'C:\\tmp\\right.txt', name: 'right.txt', size: 5, content: '', mimeType: 'text/plain', text: 'right', encoding: 'utf8', lineEnding: 'LF', modifiedAt: 20 });
+    writeTextFile.mockResolvedValue({ success: true, path: 'C:\\tmp\\right.txt', modifiedAt: 30 });
+    render(createElement(ComparePanel));
+    fireEvent.click(screen.getByRole('button', { name: '载入右侧' }));
+    await waitFor(() => expect((screen.getByLabelText('右侧文本') as HTMLTextAreaElement).value).toBe('right'));
+    fireEvent.change(screen.getByLabelText('右侧文本'), { target: { value: 'edited' } });
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    expect(writeTextFile).not.toHaveBeenCalled();
+    act(() => useStore.getState().setActiveActivity('compare'));
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(writeTextFile).toHaveBeenCalledOnce());
   });
 });

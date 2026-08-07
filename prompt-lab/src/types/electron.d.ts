@@ -178,7 +178,13 @@ export interface ElectronAPI {
   /** 保存文件对话框，写入内容 */
   saveFile: (content: string, defaultName?: string, options?: Pick<WorkspaceWriteOptions, 'encoding' | 'lineEnding'>) => Promise<{ success: boolean; path?: string; modifiedAt?: number; error?: string }>;
   /** 保存到已经打开的文本文件。 */
-  writeTextFile: (filePath: string, content: string, options?: WorkspaceWriteOptions) => Promise<{ success: boolean; path?: string; modifiedAt?: number; error?: string }>;
+  writeTextFile: (filePath: string, content: string, options?: WorkspaceWriteOptions) => Promise<{
+    success: boolean;
+    path?: string;
+    modifiedAt?: number;
+    error?: string;
+    current?: Pick<WorkspaceTextFile, 'content' | 'encoding' | 'lineEnding' | 'mixedLineEndings' | 'modifiedAt'>;
+  }>;
   /** 按路径读取文件，返回 base64 内容（供 AI 工具使用） */
   readFileBuffer: (filePath: string) => Promise<{
     success: boolean;

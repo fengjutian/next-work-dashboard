@@ -2085,7 +2085,10 @@ export function setupIPC(webviewPreloadPath: string) {
       }
       const stat = fs.statSync(resolved);
       if ((stat.mode & 0o200) === 0) return { success: false, error: 'FILE_READ_ONLY' };
-      if (!options?.force && fileWasModified(stat.mtimeMs, options?.expectedModifiedAt)) return { success: false, error: 'FILE_MODIFIED_EXTERNALLY' };
+      if (!options?.force && fileWasModified(stat.mtimeMs, options?.expectedModifiedAt)) {
+        const current = decodeWorkspaceText(fs.readFileSync(resolved));
+        return { success: false, error: 'FILE_MODIFIED_EXTERNALLY', current: { ...current, modifiedAt: stat.mtimeMs } };
+      }
       fs.writeFileSync(resolved, encodeWorkspaceText(content, options));
       return { success: true, path: resolved, modifiedAt: fs.statSync(resolved).mtimeMs };
     } catch (err) {

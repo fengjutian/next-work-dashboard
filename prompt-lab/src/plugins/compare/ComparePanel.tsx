@@ -5,9 +5,11 @@ import { ArrowLeft, ArrowRight, Copy, FileText } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { configureMonaco } from '@/lib/monaco-setup';
-import { applyTextDiffHunk, computeTextDiffHunks, createUnifiedDiff, prepareTextForComparison } from '@/lib/text-diff';
+import { applyTextDiffHunk, createUnifiedDiff, prepareTextForComparison } from '@/lib/text-diff';
+import { createUnifiedDiffAsync } from '@/lib/text-diff-client';
 import { decodeBase64Utf8, languageIdFromName } from '@/plugins/code-editor/editor-utils';
 import type { FilePickResult, WorkspaceEncoding } from '@/types/electron';
+import { DIFF_WORKER_THRESHOLD, useTextDiffHunks } from './useTextDiffHunks';
 
 configureMonaco();
 
@@ -20,6 +22,17 @@ interface CompareDocument {
   lineEnding?: 'LF' | 'CRLF';
   modifiedAt?: number;
   readOnly?: boolean;
+}
+
+interface SaveConflict {
+  side: 'left' | 'right';
+  current: {
+    content: string;
+    encoding: WorkspaceEncoding;
+    lineEnding: 'LF' | 'CRLF';
+    mixedLineEndings: boolean;
+    modifiedAt: number;
+  };
 }
 
 const sampleLeft = `function greet(name: string) {\n  return 'Hello, ' + name;\n}\n`;
@@ -53,15 +66,17 @@ function readPreferences(): ComparePreferences {
 
 export const ComparePanel: React.FC = () => {
   const theme = useStore((state) => state.theme);
+  const activeActivity = useStore((state) => state.activeActivity);
   const [left, setLeft] = useState<CompareDocument>({ label: '原始文本.ts', content: sampleLeft });
   const [right, setRight] = useState<CompareDocument>({ label: '修改后.ts', content: sampleRight });
   const [preferences, setPreferences] = useState(readPreferences);
   const [activeChange, setActiveChange] = useState(-1);
   const [status, setStatus] = useState('可直接粘贴文本，或从文件载入');
+  const [saveConflict, setSaveConflict] = useState<SaveConflict | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
   const displayLeft = useMemo(() => prepareTextForComparison(left.content, preferences), [left.content, preferences]);
   const displayRight = useMemo(() => prepareTextForComparison(right.content, preferences), [preferences, right.content]);
-  const hunks = useMemo(() => computeTextDiffHunks(displayLeft, displayRight), [displayLeft, displayRight]);
+  const { hunks, computing: diffComputing, error: diffError, worker: usingWorker } = useTextDiffHunks(displayLeft, displayRight);
   const filtered = preferences.ignoreCase || preferences.ignoreBlankLines;
   const language = languageIdFromName(right.label || left.label);
   const dark = theme === 'dark' || (theme === 'system' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -119,28 +134,52 @@ export const ComparePanel: React.FC = () => {
     }
   };
 
-  const saveDocument = async (side: 'left' | 'right', saveAs = false) => {
+  const saveDocument = async (side: 'left' | 'right', saveAs = false, force = false) => {
     const document = side === 'left' ? left : right;
     if (document.readOnly && !saveAs) {
       setStatus(`${document.label} 为只读文件，请使用另存为`);
       return;
     }
     const options = { encoding: document.encoding ?? 'utf8', lineEnding: document.lineEnding ?? 'LF' };
-    const result = document.path && !saveAs
-      ? await window.electronAPI.writeTextFile(document.path, document.content, { ...options, expectedModifiedAt: document.modifiedAt })
-      : await window.electronAPI.saveFile(document.content, document.label, options);
+    let result: Awaited<ReturnType<typeof window.electronAPI.writeTextFile>>;
+    if (document.path && !saveAs) {
+      result = await window.electronAPI.writeTextFile(document.path, document.content, { ...options, expectedModifiedAt: document.modifiedAt, force });
+    } else {
+      result = await window.electronAPI.saveFile(document.content, document.label, options);
+    }
     if (!result.success || !result.path) {
       const messages: Record<string, string> = {
         FILE_MODIFIED_EXTERNALLY: '文件已被外部修改，请重新载入或另存为',
         FILE_READ_ONLY: '文件为只读，请使用另存为',
         ACCESS_DENIED: '文件未由当前会话授权，请重新载入',
       };
+      if (result.error === 'FILE_MODIFIED_EXTERNALLY' && result.current) {
+        setSaveConflict({ side, current: result.current });
+      }
       setStatus(messages[result.error ?? ''] ?? result.error ?? '保存已取消');
       return;
     }
     const next = { ...document, path: result.path, label: result.path.split(/[\\/]/).pop() ?? document.label, modifiedAt: result.modifiedAt, savedContent: document.content, readOnly: false };
     if (side === 'left') setLeft(next); else setRight(next);
+    setSaveConflict(null);
     setStatus(`已保存 ${next.label}`);
+  };
+
+  const loadExternalVersion = () => {
+    if (!saveConflict) return;
+    const document = saveConflict.side === 'left' ? left : right;
+    const next: CompareDocument = {
+      ...document,
+      content: saveConflict.current.content,
+      savedContent: saveConflict.current.content,
+      encoding: saveConflict.current.encoding,
+      lineEnding: saveConflict.current.lineEnding,
+      modifiedAt: saveConflict.current.modifiedAt,
+    };
+    if (saveConflict.side === 'left') setLeft(next); else setRight(next);
+    setSaveConflict(null);
+    setActiveChange(-1);
+    setStatus(`已载入磁盘上的 ${document.label}`);
   };
 
   const navigate = (direction: 1 | -1) => {
@@ -159,7 +198,16 @@ export const ComparePanel: React.FC = () => {
   };
 
   const copyPatch = async () => {
-    const patch = createUnifiedDiff(left.content, right.content, left.label, right.label);
+    setStatus('正在生成 Unified Diff…');
+    let patch: string;
+    try {
+      patch = left.content.length + right.content.length >= DIFF_WORKER_THRESHOLD
+        ? await createUnifiedDiffAsync(left.content, right.content, left.label, right.label)
+        : createUnifiedDiff(left.content, right.content, left.label, right.label);
+    } catch (error) {
+      setStatus(error instanceof Error && error.message === 'DIFF_TIMEOUT' ? 'Unified Diff 生成超时' : 'Unified Diff 生成失败');
+      return;
+    }
     if (!patch) {
       setStatus('两侧内容没有差异');
       return;
@@ -198,9 +246,16 @@ export const ComparePanel: React.FC = () => {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (event.key !== 'F7') return;
-      event.preventDefault();
-      navigate(event.shiftKey ? -1 : 1);
+      if (activeActivity !== 'compare') return;
+      if (event.key === 'F7') {
+        event.preventDefault();
+        navigate(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void saveDocument('right', event.shiftKey);
+      }
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
@@ -236,6 +291,18 @@ export const ComparePanel: React.FC = () => {
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => updatePreference('inputsVisible', !preferences.inputsVisible)}>{preferences.inputsVisible ? '隐藏输入' : '显示输入'}</Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void copyPatch()}><Copy className="mr-1 h-3.5 w-3.5" />复制 Diff</Button>
       </header>
+
+      {saveConflict && (
+        <div role="alert" className="flex min-h-10 shrink-0 items-center gap-2 border-b border-warning/40 bg-warning/10 px-3 text-xs">
+          <span className="font-medium">{saveConflict.side === 'left' ? left.label : right.label} 已被外部修改。</span>
+          <span className="text-muted-foreground">请选择如何处理本地未保存内容。</span>
+          <div className="flex-1" />
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={loadExternalVersion}>载入外部版本</Button>
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void saveDocument(saveConflict.side, true)}>另存为</Button>
+          <Button size="sm" className="h-7 px-2 text-xs" onClick={() => void saveDocument(saveConflict.side, false, true)}>强制覆盖</Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setSaveConflict(null)}>取消</Button>
+        </div>
+      )}
 
       {preferences.inputsVisible && (
         <div className="grid h-44 shrink-0 grid-cols-2 gap-px border-b bg-border">
@@ -281,7 +348,7 @@ export const ComparePanel: React.FC = () => {
         />
       </div>
       <footer className="flex h-7 shrink-0 items-center gap-3 border-t px-3 text-[11px] text-muted-foreground">
-        <span>{hunks.length} 个差异块</span><span>{language}</span><span>F7/Shift+F7 导航</span>{filtered && <span className="text-warning">筛选模式仅影响显示</span>}<span className="truncate">{status}</span>
+        <span>{diffComputing ? '正在计算差异…' : `${hunks.length} 个差异块`}</span><span>{language}</span>{usingWorker && <span>后台计算</span>}<span>F7/Shift+F7 导航</span>{filtered && <span className="text-warning">筛选模式仅影响显示</span>}{diffError && <span className="text-warning">{diffError}</span>}<span className="truncate">{status}</span>
       </footer>
     </div>
   );
