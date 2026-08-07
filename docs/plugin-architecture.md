@@ -554,6 +554,8 @@ const unsubscribe = PluginSDK.on('event-name', (payload) => { console.log(payloa
 | `src/plugins/knowledge-graph/` | 知识图谱面板与画布 |
 | `src/plugins/database/` | 数据库浏览器 |
 | `src/plugins/terminal/` | 终端 UI 与主进程 backend |
+| `src/plugins/compare/` | 文本比较 |
+| `src/plugins/document-knowledge/` | 文档知识库 |
 | `src/plugins/dynamic/DynamicPlugin.tsx` | 静态 content 与 Sandbox 模式分发 |
 | `src/plugins/plugin-manager/` | 创建、导入、导出、管理 UI |
 | `src/plugins/sandbox/types.ts` | Manifest、权限与 Bridge 协议类型 |

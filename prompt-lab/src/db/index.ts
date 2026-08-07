@@ -429,9 +429,9 @@ export interface DbLlmCacheEntry {
 
 export function dbGetLlmCache(key: string, now = Date.now()): DbLlmCacheEntry | null {
   if (!_sqlDb) return null;
+  const safeKey = key.replace(/'/g, "''");
   const result = _sqlDb.exec(
-    'SELECT key, response, reasoning, model, provider, created_at, expires_at, last_accessed_at, hit_count FROM llm_response_cache WHERE key = ? AND expires_at > ?',
-    [key, now],
+    `SELECT key, response, reasoning, model, provider, created_at, expires_at, last_accessed_at, hit_count FROM llm_response_cache WHERE key = '${safeKey}' AND expires_at > ${Math.floor(now)}`,
   )[0];
   const row = result?.values[0];
   if (!row) return null;
@@ -462,7 +462,7 @@ export function dbClearLlmCache(): void {
 
 export function dbGetLlmCacheCount(now = Date.now()): number {
   if (!_sqlDb) return 0;
-  const row = _sqlDb.exec('SELECT COUNT(*) FROM llm_response_cache WHERE expires_at > ?', [now])[0]?.values[0];
+  const row = _sqlDb.exec(`SELECT COUNT(*) FROM llm_response_cache WHERE expires_at > ${Math.floor(now)}`)[0]?.values[0];
   return Number(row?.[0] ?? 0);
 }
 

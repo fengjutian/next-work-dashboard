@@ -44,9 +44,11 @@ const metrics: LlmCacheMetrics = {
   eligibleRequests: 0, memoryHits: 0, persistentHits: 0, coalescedHits: 0,
   misses: 0, bypasses: 0, writes: 0, errors: 0,
 };
+let cacheGeneration = 0;
 
 export function getLlmCacheMetrics(): LlmCacheMetrics { return { ...metrics }; }
 export function resetLlmCacheMetrics(): void { Object.keys(metrics).forEach((key) => { metrics[key as keyof LlmCacheMetrics] = 0; }); }
+export function clearLlmMemoryCaches(): void { cacheGeneration += 1; }
 
 function normalizeText(value: string): string {
   return value.replace(/\r\n?/g, '\n').split('\n').map((line) => line.replace(/\s+$/g, '')).join('\n');
@@ -95,6 +97,7 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
   const memoryTtlMs = options.memoryTtlMs ?? 30 * 60 * 1000;
   const maxMemoryEntries = options.maxMemoryEntries ?? 200;
   const chunkSize = options.replayChunkSize ?? 64;
+  let observedGeneration = cacheGeneration;
 
   const remember = (entry: LlmCacheEntry) => {
     memory.delete(entry.key);
@@ -107,6 +110,7 @@ export function createCachedProvider(provider: LLMProvider, options: CachedProvi
     listModels(): Promise<ModelInfo[]> { return provider.listModels(); },
     validate(): Promise<boolean> { return provider.validate(); },
     async *chat(messages, chatOptions) {
+      if (observedGeneration !== cacheGeneration) { memory.clear(); observedGeneration = cacheGeneration; }
       const bypass = options.enabled?.() === false || chatOptions.tools?.length || options.bypass?.(messages, chatOptions);
       if (bypass) { metrics.bypasses += 1; yield* provider.chat(messages, chatOptions); return; }
       metrics.eligibleRequests += 1;

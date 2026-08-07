@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store';
 import { dbClearLlmCache, dbGetLlmCacheCount, flushDbToDisk } from '@/db';
-import { getLlmCacheMetrics, resetLlmCacheMetrics } from '@/core';
+import { clearLlmMemoryCaches, getLlmCacheMetrics, resetLlmCacheMetrics } from '@/core';
 
 // ── AI API 设置 Tab ──
 
@@ -33,6 +33,7 @@ export const SettingsAiApi: React.FC = () => {
 
   const clearCache = async () => {
     dbClearLlmCache();
+    clearLlmMemoryCaches();
     resetLlmCacheMetrics();
     await flushDbToDisk();
     refreshCacheStats();

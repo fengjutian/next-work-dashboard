@@ -13,7 +13,17 @@ declare module 'sql.js' {
     exec(sql: string): QueryExecResult[];
     export(): Uint8Array;
     close(): void;
-    run(sql: string): Database;
+    run(sql: string, params?: unknown[] | Record<string, unknown>): Database;
+    prepare(sql: string, params?: unknown[] | Record<string, unknown>): Statement;
+  }
+
+  interface Statement {
+    bind(values?: unknown[] | Record<string, unknown>): boolean;
+    step(): boolean;
+    get(params?: unknown[] | Record<string, unknown>): unknown[];
+    getAsObject(params?: unknown[] | Record<string, unknown>): Record<string, unknown>;
+    run(values?: unknown[] | Record<string, unknown>): void;
+    free(): boolean;
   }
 
   interface SqlJsConfig {
