@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, MessageSquare, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -87,15 +87,15 @@ const builtInPlugins: Plugin[] = [
   },
   {
     id: 'prompts',
-    name: '提示词',
-    icon: MessageSquare,
+    name: '提示词与技能',
+    icon: Blocks,
     component: PromptSidebar,
     enabled: true,
     order: 2,
     contributions: {
       commands: [
-        { id: 'prompts.create', title: '新建提示词', category: '提示词' },
-        { id: 'prompts.search', title: '搜索提示词', category: '提示词' },
+        { id: 'prompts.create', title: '新建提示词', category: '提示词与技能' },
+        { id: 'prompts.search', title: '搜索提示词', category: '提示词与技能' },
       ],
     },
   },

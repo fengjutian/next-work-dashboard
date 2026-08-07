@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Star, Pin, Trash2, Edit3, Copy, Check } from '@/components/icons';
+import { Blocks, MessageSquare, Plus, Star, Pin, Trash2, Edit3, Copy, Check } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -17,6 +17,7 @@ import { PromptEditorDialog } from '@/features/prompts/PromptEditorDialog';
 import { PromptCardContent } from '@/features/prompts/PromptCardContent';
 import { usePromptCopy } from '@/features/prompts/usePromptCopy';
 import { VariableFillDialog } from '@/components/VariableFillDialog';
+import { SkillManagementPanel } from './SkillManagementPanel';
 
 // ── 提示词卡片 ──
 
@@ -132,6 +133,7 @@ const PromptCard: React.FC<{
 export const PromptSidebar: React.FC = () => {
   const {
     prompts: allPrompts,
+    skills,
     selectedPromptId,
     selectPrompt,
     batchDeletePrompts,
@@ -149,6 +151,7 @@ export const PromptSidebar: React.FC = () => {
   const [editingPrompt, setEditingPrompt] = useState<Prompt | undefined>();
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [managementTab, setManagementTab] = useState<'prompts' | 'skills'>('prompts');
   const { toast } = useToast();
   const copy = usePromptCopy({
     onCopied: () => toast('已复制填写后的提示词', 'success'),
@@ -158,6 +161,17 @@ export const PromptSidebar: React.FC = () => {
 
   return (
     <div className="h-full flex-1 flex flex-col bg-card relative">
+      <div className="flex h-11 shrink-0 items-end gap-1 border-b bg-background px-4">
+        <button className={`flex h-10 items-center gap-2 border-b-2 px-3 text-xs font-medium transition-colors ${managementTab === 'prompts' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`} onClick={() => setManagementTab('prompts')}>
+          <MessageSquare className="h-4 w-4" />提示词
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">{allPrompts.length}</span>
+        </button>
+        <button className={`flex h-10 items-center gap-2 border-b-2 px-3 text-xs font-medium transition-colors ${managementTab === 'skills' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`} onClick={() => setManagementTab('skills')}>
+          <Blocks className="h-4 w-4" />技能
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">{skills.length}</span>
+        </button>
+      </div>
+      {managementTab === 'skills' ? <SkillManagementPanel /> : <>
       <PromptFilters
         search={search}
         category={filterCategory}
@@ -283,15 +297,16 @@ export const PromptSidebar: React.FC = () => {
           </span>
         </div>
       )}
+      </>}
 
       {/* 编辑器浮层 */}
-      {editorOpen && (
+      {managementTab === 'prompts' && editorOpen && (
         <PromptEditorDialog
           prompt={editingPrompt}
           onClose={() => setEditorOpen(false)}
         />
       )}
-      {copy.promptToFill && (
+      {managementTab === 'prompts' && copy.promptToFill && (
         <VariableFillDialog
           content={copy.promptToFill.content}
           variables={copy.promptToFill.variables}
