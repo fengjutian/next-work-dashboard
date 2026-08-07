@@ -1,87 +1,152 @@
-# 安全模型
+# 🔒 安全模型
 
-## 1. 信任边界
+> next-work-dashboard 安全架构说明。最后更新：2026-08-04。
 
-系统包含四个主要边界：
+---
 
-| 区域 | 信任级别 | 说明 |
+## 1. 安全层级总览
+
+```
+┌─────────────────────────────────────────────┐
+│              应用边界安全                      │
+│  Fuse 保护 / asar 完整性 / Cookie 加密        │
+├─────────────────────────────────────────────┤
+│              进程隔离安全                      │
+│  contextBridge / IPC 校验 / 参数类型检查       │
+├─────────────────────────────────────────────┤
+│              插件沙箱安全                      │
+│  iframe sandbox / CSP / 权限控制 / 熔断       │
+├─────────────────────────────────────────────┤
+│              数据存储安全                      │
+│  safeStorage 加密 / SQLite 本地 / 无网络上传   │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## 2. 应用边界安全
+
+| 措施 | 说明 |
+|---|---|
+| `RunAsNode: false` | 禁止作为 Node.js 运行 |
+| `OnlyLoadAppFromAsar: true` | 仅从 asar 归档加载代码 |
+| `EnableEmbeddedAsarIntegrityValidation: true` | asar 完整性校验 |
+| `EnableCookieEncryption: true` | Cookie 加密 |
+
+---
+
+## 3. 进程隔离安全
+
+### 3.1 四层隔离
+
+```
+主进程 ←→ Preload ←→ 渲染进程 ←→ WebView Preload ←→ WebView 内容
+  ✅         ✅         ✅              ✅              ❌ 不受信任
+```
+
+- 渲染进程**零 Node.js 权限**：通过 `contextBridge.exposeInMainWorld` 暴露受控 API
+- WebView 通过独立的 `webview-preload.ts` 注入，不共享渲染进程的 contextBridge
+- 每个 WebView 使用独立 partition，AI 站点间无法跨站访问
+
+### 3.2 IPC 安全
+
+- 所有 IPC handler 在主进程侧校验参数类型和范围
+- 不信任渲染进程传来的任意路径（路径遍历防护）
+- 数据库操作通过主进程中转，渲染进程不直接写磁盘
+
+---
+
+## 4. 插件沙箱安全
+
+### 4.1 Sandbox 限制
+
+```html
+<iframe sandbox="allow-scripts" />
+```
+
+未授权的能力：
+- ❌ `allow-same-origin` — 无法读取宿主 Cookie/localStorage
+- ❌ `allow-popups` — 无法弹窗
+- ❌ `allow-top-navigation` — 无法导航宿主
+- ❌ `allow-forms` — 无法提交表单
+
+### 4.2 CSP 策略
+
+```
+default-src 'none'
+script-src 'unsafe-inline'
+style-src 'unsafe-inline'
+img-src data: https:
+font-src data:
+```
+
+- 禁止任意网络请求
+- 禁止 `eval()` / `new Function()`
+- 图片仅允许 `data:` 和 `https:`
+
+### 4.3 权限模型
+
+| 权限 | 风险等级 | 说明 |
 |---|---|---|
-| Electron Main | 高 | 文件系统、窗口、终端和系统能力 |
-| Preload | 高 | 通过 `contextBridge` 暴露受控 API |
-| Renderer 内置代码 | 受信任 | 应用 UI 和内置插件 |
-| 用户 Sandbox 插件 | 不受信任 | iframe、CSP、postMessage、权限校验 |
+| `store.read` | 低 | 只读快照数据 |
+| `clipboard` | 中 | 写入剪贴板 |
+| `inject` | 高 | 向 AI 站点注入内容 |
+| `external.open` | 中 | 打开外部链接 |
+| `data` | 低 | 插件私有存储 |
+| `preview` | 低 | 内容预览 |
+| `file.read` | 中 | 读取用户选择的文件 |
+| `file.write` | 高 | 写入用户选择的位置 |
 
-用户 Kernel 插件已经移除。任何外部插件代码都不应直接进入 Renderer React 树或获得 Node.js/Electron 全局对象。
+每次 Bridge 调用同时检查声明权限和当前授权状态。
 
-## 2. Electron 边界
+### 4.4 熔断与安全模式
 
-- Renderer 通过 Preload 调用主进程能力。
-- 新增 IPC 时应校验参数类型、长度、路径和操作范围。
-- 文件操作必须使用解析后的绝对路径验证工作区边界。
-- 不向 Renderer 暴露通用命令执行或任意 IPC 发送能力。
-- 打包配置应保持安全 Fuse 和 ASAR 约束。
+- 插件连续 **3 次运行错误** → 自动禁用
+- **安全模式**：禁用全部用户插件，用于排查启动问题
+- 导入时校验权限在已知集合内
 
-## 3. 用户插件隔离
+---
 
-Sandbox 使用 `sandbox="allow-scripts"` iframe，CSP 默认拒绝所有资源，仅按需允许内联脚本、样式及受限图片来源。
+## 5. 数据存储安全
 
-插件与宿主通过带 `requestId` 的 `postMessage` 协议通信。宿主应验证：
+### 5.1 Token 保护
 
-- 消息来源是当前插件 iframe。
-- channel、method 和参数数量合法。
-- 消息和数据大小在限制内。
-- manifest 声明了所需权限。
-- 用户当前仍授予该权限。
+```
+用户输入 API Key
+  → safeStorage.encryptString()
+  → OS 原生密钥链（Windows DPAPI / macOS Keychain / Linux libsecret）
+  → 使用时 safeStorage.decryptString()
+```
 
-Sandbox 不是插件真实性证明。用户仍应只安装来源可信、权限合理的插件。
+- Token 永不以明文写入磁盘
+- 不在 SQLite 或 localStorage 中存储
 
-## 4. 权限原则
+### 5.2 本地优先
 
-- 默认拒绝，最小授权。
-- UI 与配置读取无需敏感权限。
-- 宿主数据、剪贴板、注入、外链、文件和私有存储分别授权。
-- 撤销权限后，后续 Bridge 请求立即失败。
-- 插件更新不能静默扩大授权；完整权限差异确认仍在开发。
+| 数据类型 | 存储位置 | 网络暴露 |
+|---|---|---|
+| 提示词 / 站点 / 设置 | 本地 SQLite | ❌ 无 |
+| 对话历史 | 本地 Markdown | ❌ 无 |
+| 插件数据 | 本地 localStorage | ❌ 无 |
+| AI 对话内容 | AI 网站服务器 | ⚠️ 取决于使用的 AI 服务 |
 
-权限定义及 API 对照见[插件开发指南](./plugin-architecture.md#105-权限与-sdk-对照)。
+---
 
-## 5. 数据安全
+## 6. 外链安全
 
-- API 密钥和令牌应使用专用安全存储，不写入提示词或插件私有数据。
-- 插件配置和私有数据当前位于统一 LocalStorage 平台记录中，不适合保存秘密。
-- 日志和诊断信息可能包含文件名、错误文本或插件输出，分享前应脱敏。
-- 数据清除前先确认目标和备份；不要删除整个用户目录作为常规排障手段。
+`external.open` 权限的链接打开规则：
 
-## 6. WebView 与外部内容
+- ✅ 允许：`https:` / `http:` / `mailto:`
+- ❌ 拒绝：含用户名密码的 URL（如 `https://user:pass@host`）
+- ❌ 拒绝：`file:` / `javascript:` / `data:` 协议
+- 所有外链通过系统默认浏览器打开，不在应用内 webview 中加载
 
-- AI 站点属于外部不可信页面。
-- 注入脚本只应执行完成输入和提交所需的最小操作。
-- 外部页面内容不能作为可信命令或代码执行。
-- 外链能力应限制协议，并拒绝包含内嵌凭据的 URL。
-- 页面选择器变化应导致功能失败，而不是放宽安全边界。
+---
 
-## 7. 崩溃与恢复
+## 7. 安全检查清单
 
-- 用户插件错误会记录日志。
-- 连续 3 次运行错误触发熔断禁用。
-- 安全模式禁用全部用户插件，用于恢复可用界面。
-- 插件更新保留有限 revision，当前自动健康检查和事务回滚仍在开发。
-
-## 8. 已知限制
-
-- 插件包签名和发布者验证尚未实现。
-- 插件存储尚未迁移到带配额和加密的 SQLite 后端。
-- Bridge 的更细粒度限流、取消和网络域名控制仍待完善。
-- 安装和更新权限差异确认尚未闭环。
-- 安全模式尚未完整恢复进入前的逐插件启用状态。
-
-## 9. 报告安全问题
-
-安全问题不应在公开内容中附带真实密钥、个人数据或可直接利用的敏感环境信息。报告至少应说明：
-
-- 受影响版本和平台。
-- 信任边界与攻击前提。
-- 最小复现步骤。
-- 可能影响的数据或能力。
-- 建议缓解方式。
-
+- [ ] 第三方依赖定期审计（`npm audit`）
+- [ ] WebView 不加载不可信 URL
+- [ ] 用户插件仅从可信来源安装
+- [ ] 敏感权限（inject/file.write）按需授予
+- [ ] 定期检查插件日志中的异常模式

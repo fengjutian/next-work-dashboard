@@ -116,10 +116,8 @@ export interface Session {
 // ── Hook ──
 export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] = 'chat') {
   const aiApi = useStore((s) => s.aiApi);
-  const selectedPromptId = useStore((s) => s.selectedPromptId);
   const prompts = useStore((s) => s.prompts);
   const skills = useStore((s) => s.skills);
-  const promptDrawerOpen = useStore((s) => s.promptDrawerOpen);
 
   // ── 会话管理 ──
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -205,17 +203,6 @@ export function useChatSession(sceneSystemPrompt = '', scene: Session['scene'] =
     providerRef.current = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
     return providerRef.current;
   }, [aiApi.apiKey, aiApi.baseUrl]);
-
-  // 提示词注入（仅启用状态的提示词）
-  useEffect(() => {
-    if (selectedPromptId && promptDrawerOpen === false) {
-      const p = prompts.find((pp) => pp.id === selectedPromptId);
-      if (!p || streaming) return;
-      const execution = preparePromptExecution(p, 'chat');
-      if (execution.status === 'requires-input') setPendingInputPrompt(p);
-      if (execution.status === 'ready') setInput((prev) => (prev ? `${prev}\n${execution.content}` : execution.content));
-    }
-  }, [selectedPromptId, promptDrawerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const confirmInputPrompt = useCallback((values: Record<string, string>) => {
     if (!pendingInputPrompt) return;

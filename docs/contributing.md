@@ -1,94 +1,154 @@
-# 贡献指南
+# 🤝 贡献指南
 
-## 1. 开发环境
+> 参与 next-work-dashboard 开发前请先阅读本文。
 
-项目主体位于 `prompt-lab`：
+---
 
-```powershell
-cd prompt-lab
+## 1. 环境准备
+
+```bash
+git clone <repo-url>
+cd next-work-dashboard/prompt-lab
 npm install
-npm start
+npm start        # 启动开发模式
+npm test         # 运行测试
+npm run lint     # 代码检查
 ```
 
-主要技术栈为 Electron、React、TypeScript、Vite、Zustand、Vitest 和 Tailwind CSS。
-
-## 2. 修改原则
-
-- 保持主进程、Preload、Renderer 和用户 Sandbox 的边界。
-- Renderer 不应直接获得 Node.js 能力。
-- 新 IPC 必须经过 Preload 白名单，并校验参数和路径。
-- 用户插件能力必须通过 `PluginSDK` 和 Bridge 暴露。
-- 不重新引入 Renderer 用户 Kernel、`eval` 或 `new Function` 执行链。
-- 保留工作区中与当前任务无关的用户修改。
-
-## 3. 目录职责
-
-| 目录 | 职责 |
+| 工具 | 版本要求 |
 |---|---|
-| `src/main/` | Electron 主进程、IPC、终端和系统能力 |
-| `src/preload.ts` | 受控 Renderer API |
-| `src/components/` | 公共宿主 UI |
-| `src/plugins/` | 插件注册、运行时及各内置插件 |
-| `src/store/` | 应用状态 |
-| `src/db/` | 数据库和持久化 |
-| `tests/` | Vitest 测试 |
-| `docs/` | 架构、用户和开发文档 |
+| Node.js | ≥ 18 |
+| npm | ≥ 9 |
 
-插件相关代码应放在 `src/plugins/`。只被单个插件使用的组件、类型和工具应放入该插件自己的目录。
+---
 
-## 4. 增加内置插件
+## 2. 分支策略
 
-1. 在 `src/plugins/<plugin-id>/` 创建组件和入口。
-2. 在 `src/plugins/built-in/index.ts` 使用动态 `import()` 注册。
-3. 设置稳定 ID、名称、图标、默认启用状态和顺序。
-4. 按需要声明 `views`、`menus`、`settings`、`fileEditors` 和命令。
-5. 只有确实需要保存界面状态时才启用 `keepAlive`。
-6. 为 Registry 解析、生命周期和核心业务补测试。
+| 分支 | 用途 |
+|---|---|
+| `main` | 稳定版本，随时可发布 |
+| `feature/*` | 新功能开发 |
+| `fix/*` | Bug 修复 |
+| `docs/*` | 文档更新 |
 
-## 5. 修改 PluginSDK
+### PR 流程
 
-1. 在 `src/plugins/sandbox/plugin-sdk.ts` 修改类型和唯一运行时源码。
-2. 在 `sandbox/types.ts` 更新协议、权限及数据类型。
-3. 在 `usePluginBridge.ts` 实现宿主路由和参数校验。
-4. 为敏感能力增加明确权限；默认拒绝。
-5. 更新插件开发文档、权限矩阵和 `apiVersion` 兼容说明。
-6. 补充成功、拒绝、非法参数和超时测试。
+1. 从 `main` 创建功能分支
+2. 开发 + 测试 + lint
+3. 创建 PR，描述变更内容
+4. 代码审查
+5. 合并到 `main`
 
-破坏兼容性的变更不能静默发布，应升级 API 版本或保留兼容路径。
+---
 
-## 6. 验证
+## 3. 代码规范
 
-提交前至少运行：
+### 3.1 TypeScript
 
-```powershell
-npx tsc --noEmit
-npm test
-npm run lint
-git diff --check
+- 严格模式：`strict: true`
+- 禁止 `any`（特殊情况需注释说明）
+- 导出函数和接口必须有 JSDoc 注释
+
+### 3.2 React
+
+- 使用函数组件 + Hooks
+- Props 使用 `interface` 定义
+- 组件文件命名：PascalCase（如 `WebViewContainer.tsx`）
+- 避免超过 200 行的单文件组件
+
+### 3.3 命名约定
+
+| 类型 | 约定 | 示例 |
+|---|---|---|
+| 文件 | kebab-case 或 PascalCase | `injector.ts` / `WebViewContainer.tsx` |
+| 函数 | camelCase | `buildInjectionScript()` |
+| 接口 | PascalCase + I 前缀可选 | `Plugin` / `SiteConfig` |
+| 常量 | UPPER_SNAKE | `DEFAULT_SITES` |
+| IPC Channel | `domain:action` | `db:load` / `inject:prompt` |
+
+### 3.4 文件组织
+
+```
+src/
+├── main.ts              # 主进程入口（窗口/托盘/快捷键/IPC）
+├── preload.ts           # contextBridge API 暴露
+├── core/                # 纯函数，零运行时依赖，可独立测试
+├── components/          # 通用 UI 组件
+├── plugins/             # 插件系统（每个插件一个目录）
+├── store/               # Zustand Store
+├── db/                  # SQLite + Drizzle
+└── hooks/               # 自定义 Hooks
 ```
 
-根据变更风险补充手动验证：
+---
 
-- Electron 启动和窗口行为。
-- 文件选择、保存和路径边界。
-- 插件导入、权限拒绝、禁用与回滚。
-- 深浅主题和常见窗口尺寸。
-- 原生模块和终端功能。
+## 4. 提交信息
 
-## 7. 文档要求
+遵循 [Conventional Commits](https://www.conventionalcommits.org/)：
 
-- 用户可见行为变化应更新用户手册或故障排查。
-- 插件 API 变化必须更新插件架构与开发指南。
-- 未完成功能应明确标记，不把计划写成现状。
-- 架构决策变化应同步清理所有旧描述。
+```
+<type>(<scope>): <description>
 
-## 8. 提交检查表
+[optional body]
+```
 
-- [ ] 变更范围清晰，没有混入无关格式化。
-- [ ] 新增接口有类型、错误处理和边界校验。
-- [ ] 新增资源在禁用或卸载时会释放。
-- [ ] 测试覆盖关键成功和失败路径。
-- [ ] 类型检查、测试、Lint 和差异检查通过。
-- [ ] 文档与当前代码一致。
-- [ ] 没有提交密钥、令牌、个人数据或生成缓存。
+| Type | 用途 |
+|---|---|
+| `feat` | 新功能 |
+| `fix` | Bug 修复 |
+| `docs` | 文档更新 |
+| `refactor` | 重构（无功能变化） |
+| `test` | 测试 |
+| `chore` | 构建/工具链 |
 
+示例：
+```
+feat(injector): 支持追加模式注入
+fix(webview): 修复标签页关闭后 Session 未释放
+docs(plugin): 更新 Sandbox SDK 文档
+```
+
+---
+
+## 5. 测试
+
+### 5.1 测试框架
+
+| 工具 | 用途 |
+|---|---|
+| Vitest 2 | 测试运行器 |
+| Testing Library | React 组件测试 |
+
+### 5.2 测试要求
+
+- 核心逻辑（`src/core/`）必须覆盖
+- 新增功能同时提交测试
+- 运行 `npm test` 全部通过后再提交
+
+```bash
+npm test               # 运行全部测试
+npm run test:ui        # UI 模式
+npm run test:coverage  # 覆盖率报告
+```
+
+---
+
+## 6. 文档更新
+
+代码行为变化时，**同一变更中**更新对应文档：
+
+| 变更类型 | 更新文档 |
+|---|---|
+| 新增/修改插件 API | `docs/plugin-architecture.md` |
+| 新增/修改功能 | `docs/function-and-principles.md` + `FEATURE_CHECKLIST.md` |
+| 修改设置项 | `docs/user-guide.md` + `REQUIREMENTS.md` |
+| 修改构建流程 | `docs/project-intro-and-deploy.md` |
+
+---
+
+## 7. 架构原则
+
+1. **Core/UI 分离**：核心逻辑放在 `src/core/`，纯函数、零运行时依赖
+2. **类型安全**：IPC 通信、数据库 Schema、插件接口全部类型化
+3. **安全优先**：渲染进程零 Node.js 权限、插件沙箱隔离、Token 加密存储
+4. **渐进增强**：预览先行再编辑、内置优先再用户插件

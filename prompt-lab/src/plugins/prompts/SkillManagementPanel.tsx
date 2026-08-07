@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
+import { SkillDetailDialog } from './SkillDetailDialog';
 
 export const SkillManagementPanel: React.FC = () => {
   const skills = useStore((state) => state.skills);
@@ -13,7 +14,9 @@ export const SkillManagementPanel: React.FC = () => {
   const [search, setSearch] = useState('');
   const [importUrl, setImportUrl] = useState('');
   const [importing, setImporting] = useState(false);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const { toast } = useToast();
+  const selectedSkill = skills.find((skill) => skill.id === selectedSkillId);
 
   const visibleSkills = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -84,7 +87,7 @@ export const SkillManagementPanel: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {visibleSkills.map((skill) => (
-                <article key={skill.id} className="group flex min-h-40 flex-col rounded-lg border-2 border-border bg-card p-4 transition-all hover:border-primary hover:shadow-md">
+                <article key={skill.id} role="button" tabIndex={0} onClick={() => setSelectedSkillId(skill.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedSkillId(skill.id); }} className="group flex min-h-40 cursor-pointer flex-col rounded-lg border-2 border-border bg-card p-4 transition-all hover:border-primary hover:shadow-md">
                   <div className="flex items-start gap-3">
                     <div className="rounded-lg bg-primary/10 p-2 text-primary"><Blocks className="h-5 w-5" /></div>
                     <div className="min-w-0 flex-1">
@@ -93,7 +96,8 @@ export const SkillManagementPanel: React.FC = () => {
                     </div>
                     <button
                       className="rounded p-1 text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         if (window.confirm(`确定删除技能“${skill.name}”吗？`)) deleteSkill(skill.id);
                       }}
                       title="删除技能"
@@ -108,7 +112,7 @@ export const SkillManagementPanel: React.FC = () => {
                     <button
                       role="switch"
                       aria-checked={skill.enabled}
-                      onClick={() => toggleSkill(skill.id)}
+                      onClick={(event) => { event.stopPropagation(); toggleSkill(skill.id); }}
                       className={`relative h-5 w-9 rounded-full transition-colors ${skill.enabled ? 'bg-primary' : 'bg-input'}`}
                     >
                       <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow transition-transform ${skill.enabled ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -120,6 +124,13 @@ export const SkillManagementPanel: React.FC = () => {
           )}
         </div>
       </ScrollArea>
+      {selectedSkillId && selectedSkill && (
+        <SkillDetailDialog
+          skill={selectedSkill}
+          onClose={() => setSelectedSkillId(null)}
+          onToggleEnabled={() => toggleSkill(selectedSkillId)}
+        />
+      )}
     </div>
   );
 };
