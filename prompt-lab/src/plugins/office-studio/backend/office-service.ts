@@ -263,6 +263,22 @@ export async function renderOfficeHtml(filePath: string): Promise<OfficeRenderRe
   }
 }
 
+export async function renderOfficePage(filePath: string, page: number): Promise<OfficeRenderResult> {
+  let temporaryDirectory: string | undefined;
+  try {
+    const target = validateDocumentPath(filePath);
+    const safePage = Math.max(1, Math.min(10_000, Math.trunc(page)));
+    temporaryDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'next-work-office-page-'));
+    const outputPath = path.join(temporaryDirectory, 'page.png');
+    await runOfficeCli(['view', target, 'screenshot', '--page', String(safePage), '--render', 'html', '-o', outputPath], 60_000);
+    const candidates = (await fs.promises.readdir(temporaryDirectory)).filter((name) => name.toLowerCase().endsWith('.png'));
+    const imagePath = candidates.length ? path.join(temporaryDirectory, candidates[0]) : outputPath;
+    const data = await fs.promises.readFile(imagePath);
+    return { success: true, imageDataUrl: `data:image/png;base64,${data.toString('base64')}` };
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+  finally { if (temporaryDirectory) await fs.promises.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined); }
+}
+
 export async function closeOfficeDocument(filePath: string): Promise<OfficeOperationResult> {
   try {
     const target = validateDocumentPath(filePath);

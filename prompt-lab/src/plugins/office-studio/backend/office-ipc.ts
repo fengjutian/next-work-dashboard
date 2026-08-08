@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { addOfficeElement, closeOfficeDocument, createOfficeDocument, getOfficeCliStatus, getOfficeElement, getOfficeOutline, mergeOfficeTemplate, queryOfficeElements, redoOfficeDocument, removeOfficeElement, renderOfficeHtml, saveOfficeDocument, setOfficeProperties, undoOfficeDocument } from './office-service';
+import { addOfficeElement, closeOfficeDocument, createOfficeDocument, getOfficeCliStatus, getOfficeElement, getOfficeOutline, mergeOfficeTemplate, queryOfficeElements, redoOfficeDocument, removeOfficeElement, renderOfficeHtml, renderOfficePage, saveOfficeDocument, setOfficeProperties, undoOfficeDocument } from './office-service';
 import type { OfficeAddRequest, OfficeDocumentKind, OfficeSetRequest } from '../types';
 
 const definitions: Record<OfficeDocumentKind, { extension: string; label: string }> = {
@@ -52,6 +52,7 @@ export function registerOfficeIpc(): void {
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
   ipcMain.handle('office:render', (_event, filePath: string) => renderOfficeHtml(filePath));
+  ipcMain.handle('office:renderPage', (_event, filePath: string, page: number) => renderOfficePage(filePath, page));
   ipcMain.handle('office:close', (_event, filePath: string) => closeOfficeDocument(filePath));
   ipcMain.handle('office:create', async (event, kind: OfficeDocumentKind) => {
     const definition = definitions[kind];

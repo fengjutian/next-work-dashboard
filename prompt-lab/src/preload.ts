@@ -60,6 +60,7 @@ const electronAPI: ElectronAPI = {
     merge: (filePath, data) => ipcRenderer.invoke('office:merge', filePath, data),
     saveAs: (filePath) => ipcRenderer.invoke('office:saveAs', filePath),
     render: (filePath) => ipcRenderer.invoke('office:render', filePath),
+    renderPage: (filePath, page) => ipcRenderer.invoke('office:renderPage', filePath, page),
     close: (filePath) => ipcRenderer.invoke('office:close', filePath),
   },
 
