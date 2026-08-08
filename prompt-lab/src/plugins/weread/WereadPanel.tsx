@@ -616,11 +616,11 @@ export const WereadPanel: React.FC = () => {
         </div>}
       </div>}
 
-      {zenMode && <div className={`fixed right-4 top-4 z-[100] flex max-w-[min(34rem,calc(100vw-2rem))] items-center gap-1 rounded-full bg-background/75 p-1 shadow-lg backdrop-blur transition-all duration-300 ${zenControlsVisible ? 'translate-y-0 opacity-100' : '-translate-y-3 pointer-events-none opacity-0'}`}>
+      {zenMode && <Button size="icon" variant="secondary" className="fixed right-4 top-4 z-[101] h-9 w-9 rounded-full opacity-55 shadow-lg backdrop-blur transition-opacity hover:opacity-100" title="退出全屏（Esc）" aria-label="退出全屏" onClick={() => void toggleZenMode()}><X className="h-4 w-4" /></Button>}
+      {zenMode && <div className={`fixed right-16 top-4 z-[100] flex max-w-[min(34rem,calc(100vw-5rem))] items-center gap-1 rounded-full bg-background/75 p-1 shadow-lg backdrop-blur transition-all duration-300 ${zenControlsVisible ? 'translate-y-0 opacity-100' : '-translate-y-3 pointer-events-none opacity-0'}`}>
         <span className="min-w-0 truncate px-2 text-[10px] text-muted-foreground" title={currentReading?.chapter || currentReading?.title}>{currentReading?.chapter || currentReading?.title || '微信读书'}</span>
         <span className="shrink-0 px-2 text-[10px] tabular-nums text-muted-foreground">{readingProgress}% · {formatReadingDuration(sessionReadingSeconds)}</span>
         <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" title="切换阅读主题" aria-label="切换阅读主题" onClick={() => { const themes: ReaderTheme[] = ['system', 'light', 'eye', 'dark']; const index = themes.indexOf(readerPreferences.theme); saveReaderPreferences({ theme: themes[(index + 1) % themes.length] }); }}><Sun className="h-4 w-4" /></Button>
-        <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" title="退出禅模式（Esc）" aria-label="退出禅模式" onClick={() => void toggleZenMode()}><X className="h-4 w-4" /></Button>
       </div>}
 
       {visitedModes.current.has('reader') && (

@@ -1,6 +1,6 @@
 import initSqlJs, { type Database as SqlJsDatabase, type QueryExecResult } from 'sql.js';
 import { drizzle, type SQLJsDatabase } from 'drizzle-orm/sql-js';
-import { eq, inArray, desc, like, or } from 'drizzle-orm';
+import { eq, inArray, desc } from 'drizzle-orm';
 import * as schema from './schema';
 import type { Skill, SkillFile } from '@/core/skill';
 
@@ -238,6 +238,22 @@ function ensureSchema(): void {
       cached_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_weread_books_cached_at ON weread_books(cached_at DESC);
+    CREATE TABLE IF NOT EXISTS weread_notes (
+      note_id TEXT PRIMARY KEY,
+      book_id TEXT NOT NULL,
+      book_title TEXT NOT NULL,
+      author TEXT NOT NULL DEFAULT '',
+      note_type TEXT NOT NULL,
+      chapter TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_weread_notes_book ON weread_notes(book_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS weread_export_state (
+      book_id TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      exported_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS weread_review_state (
       book_id TEXT PRIMARY KEY,
       last_reviewed_at INTEGER NOT NULL,
@@ -276,6 +292,14 @@ function ensureSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(skill_id);
   `);
+  try {
+    _sqlDb.run(`CREATE VIRTUAL TABLE IF NOT EXISTS weread_notes_fts USING fts5(
+      note_id UNINDEXED, book_id UNINDEXED, book_title, author, chapter, content,
+      tokenize='unicode61'
+    )`);
+  } catch {
+    // Some custom sql.js builds omit FTS5. The structured notes table remains searchable.
+  }
   const sessionColumns = new Set((_sqlDb.exec('PRAGMA table_info(agent_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!sessionColumns.has('payload')) _sqlDb.run("ALTER TABLE agent_sessions ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'");
 
@@ -603,6 +627,57 @@ function wereadSearchText(book: Omit<WereadCachedBook, 'cachedAt'>): string {
   return `${book.title} ${book.author} ${noteText}`.toLocaleLowerCase();
 }
 
+export interface WereadIndexedNote {
+  noteId: string;
+  bookId: string;
+  bookTitle: string;
+  author: string;
+  noteType: 'highlight' | 'review';
+  chapter: string;
+  content: string;
+  createdAt: number;
+}
+
+function wereadIndexedNotes(book: Omit<WereadCachedBook, 'cachedAt'>): WereadIndexedNote[] {
+  const highlights = book.highlights.map((item, index) => {
+    const chapter = item.chapter && typeof item.chapter === 'object' ? item.chapter as Record<string, unknown> : {};
+    return {
+      noteId: String(item.bookmarkId || `h:${book.bookId}:${index}`), bookId: book.bookId,
+      bookTitle: book.title, author: book.author, noteType: 'highlight' as const,
+      chapter: String(chapter.title || item.chapterTitle || ''), content: String(item.markText || ''),
+      createdAt: Number(item.createTime) || 0,
+    };
+  });
+  const reviews = book.reviews.map((item, index) => {
+    const review = item.review && typeof item.review === 'object' ? item.review as Record<string, unknown> : item;
+    return {
+      noteId: String(review.reviewId || `r:${book.bookId}:${index}`), bookId: book.bookId,
+      bookTitle: book.title, author: book.author, noteType: 'review' as const,
+      chapter: String(review.chapterName || ''),
+      content: [review.abstract, review.content].filter(Boolean).join(' '), createdAt: Number(review.createTime) || 0,
+    };
+  });
+  return [...highlights, ...reviews];
+}
+
+function rebuildWereadNoteIndex(books: Array<Omit<WereadCachedBook, 'cachedAt'>>): void {
+  if (!_sqlDb) return;
+  _sqlDb.run('DELETE FROM weread_notes');
+  const insert = _sqlDb.prepare(`INSERT INTO weread_notes
+    (note_id, book_id, book_title, author, note_type, chapter, content, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  try {
+    for (const book of books) for (const note of wereadIndexedNotes(book)) {
+      insert.run([note.noteId, note.bookId, note.bookTitle, note.author, note.noteType, note.chapter, note.content, note.createdAt]);
+    }
+  } finally { insert.free(); }
+  try {
+    _sqlDb.run('DELETE FROM weread_notes_fts');
+    _sqlDb.run(`INSERT INTO weread_notes_fts (note_id, book_id, book_title, author, chapter, content)
+      SELECT note_id, book_id, book_title, author, chapter, content FROM weread_notes`);
+  } catch { /* FTS5 is optional; dbSearchWereadNotes falls back to LIKE. */ }
+}
+
 export interface WereadSyncSummary { id: string; syncedAt: number; addedBooks: number; updatedBooks: number; deletedBooks: number; addedNotes: number; deletedNotes: number; totalBooks: number; totalNotes: number }
 
 function wereadNoteIds(book: Pick<WereadCachedBook, 'bookId' | 'highlights' | 'reviews'>): Set<string> {
@@ -637,20 +712,73 @@ export function dbReplaceWereadCache(books: Array<Omit<WereadCachedBook, 'cached
     }
     tx.insert(schema.wereadSyncHistory).values(summary as never).run();
   });
+  rebuildWereadNoteIndex(books);
   return summary;
 }
 
 export function dbLoadWereadCache(query = ''): WereadCachedBook[] {
-  const normalized = query.trim().toLocaleLowerCase();
   const statement = getDb().select().from(schema.wereadBooks);
-  const rows = normalized
-    ? statement.where(or(
-      like(schema.wereadBooks.searchableText, `%${normalized}%`),
-      like(schema.wereadBooks.title, `%${query.trim()}%`),
-      like(schema.wereadBooks.author, `%${query.trim()}%`),
-    )).orderBy(desc(schema.wereadBooks.cachedAt)).all()
-    : statement.orderBy(desc(schema.wereadBooks.cachedAt)).all();
+  const bookIds = query.trim() ? new Set(dbSearchWereadNotes(query).map((match) => match.bookId)) : null;
+  const rows = statement.orderBy(desc(schema.wereadBooks.cachedAt)).all()
+    .filter((row) => !bookIds || bookIds.has(String((row as { bookId: string }).bookId)));
   return (rows as unknown as WereadBookRow[]).map(wereadRowToBook);
+}
+
+export interface WereadNoteSearchMatch extends WereadIndexedNote { snippet: string }
+
+function ftsQuery(query: string): string {
+  return query.trim().split(/\s+/).filter(Boolean).map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ');
+}
+
+export function dbSearchWereadNotes(query: string, limit = 200): WereadNoteSearchMatch[] {
+  if (!_sqlDb || !query.trim()) return [];
+  try {
+    const statement = _sqlDb.prepare(`SELECT n.note_id, n.book_id, n.book_title, n.author, n.note_type,
+      n.chapter, n.content, n.created_at,
+      snippet(weread_notes_fts, 5, '<mark>', '</mark>', '…', 18) AS search_snippet
+      FROM weread_notes_fts JOIN weread_notes n ON n.note_id = weread_notes_fts.note_id
+      WHERE weread_notes_fts MATCH ? ORDER BY rank LIMIT ?`);
+    try {
+      statement.bind([ftsQuery(query), limit]);
+      const matches: WereadNoteSearchMatch[] = [];
+      while (statement.step()) {
+        const row = statement.getAsObject();
+        matches.push({
+          noteId: String(row.note_id), bookId: String(row.book_id), bookTitle: String(row.book_title), author: String(row.author),
+          noteType: row.note_type === 'review' ? 'review' : 'highlight', chapter: String(row.chapter || ''),
+          content: String(row.content || ''), createdAt: Number(row.created_at) || 0, snippet: String(row.search_snippet || row.content || ''),
+        });
+      }
+      return matches;
+    } finally { statement.free(); }
+  } catch {
+    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    const statement = _sqlDb.prepare('SELECT * FROM weread_notes ORDER BY created_at DESC');
+    try {
+      const matches: WereadNoteSearchMatch[] = [];
+      while (statement.step() && matches.length < limit) {
+        const row = statement.getAsObject();
+        const haystack = [row.book_title, row.author, row.chapter, row.content].join(' ').toLocaleLowerCase();
+        if (!terms.every((term) => haystack.includes(term))) continue;
+        matches.push({ noteId: String(row.note_id), bookId: String(row.book_id), bookTitle: String(row.book_title), author: String(row.author), noteType: row.note_type === 'review' ? 'review' : 'highlight', chapter: String(row.chapter || ''), content: String(row.content || ''), createdAt: Number(row.created_at) || 0, snippet: String(row.content || '') });
+      }
+      return matches;
+    } finally { statement.free(); }
+  }
+}
+
+export interface WereadExportState { bookId: string; fingerprint: string; exportedAt: number }
+export function dbLoadWereadExportStates(): WereadExportState[] {
+  if (!_sqlDb) return [];
+  const result = _sqlDb.exec('SELECT book_id, fingerprint, exported_at FROM weread_export_state');
+  return (result[0]?.values || []).map((row) => ({ bookId: String(row[0]), fingerprint: String(row[1]), exportedAt: Number(row[2]) }));
+}
+export function dbMarkWereadExported(states: Array<{ bookId: string; fingerprint: string }>): void {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const statement = _sqlDb.prepare(`INSERT INTO weread_export_state (book_id, fingerprint, exported_at) VALUES (?, ?, ?)
+    ON CONFLICT(book_id) DO UPDATE SET fingerprint=excluded.fingerprint, exported_at=excluded.exported_at`);
+  try { const now = Date.now(); for (const state of states) statement.run([state.bookId, state.fingerprint, now]); }
+  finally { statement.free(); }
 }
 
 export interface WereadReviewState {
