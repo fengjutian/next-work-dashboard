@@ -8,6 +8,8 @@ Office Studio 是基于 OfficeCLI 的系统级内置插件，为 `.docx`、`.xls
 
 工作区支持多个 Office 文档标签、最近打开记录和文件拖拽打开。Agent 工具还包括 `office_create`、`office_add`、`office_remove`、`office_save`、`office_render` 和 `office_merge`；创建和合并使用系统保存对话框，新增与删除必须由用户确认。
 
+`.xlsx` 文档提供“表格编辑”模式，复用项目原有的虚拟化 Excel 网格。单元格提交直接转换为 OfficeCLI 的 `Sheet!A1` 路径并写入，因此不会像整本 SheetJS 导出那样丢失未展示的高级格式；公式以 `=` 开头时写入 `formula` 属性。网格修改可以使用 Office Studio 的文档级撤销和重做。
+
 ## 开发环境
 
 插件按以下顺序查找 OfficeCLI：
