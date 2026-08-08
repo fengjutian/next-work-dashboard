@@ -1,30 +1,37 @@
 package db
 
 import (
-	"database/sql"
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/fjutian/nwd-admin/internal/model"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-//go:embed schema.sql
-var schemaSQL string
-
-func Open(dataDir string) (*sql.DB, error) {
+func Open(dataDir string) (*gorm.DB, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	dsn := filepath.Join(dataDir, "nwd-admin.db") + "?_journal_mode=WAL&_foreign_keys=on"
-	db, err := sql.Open("sqlite3", dsn)
+
+	dsn := filepath.Join(dataDir, "nwd-admin.db")
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Warn),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite serialized mode
-	if _, err := db.Exec(schemaSQL); err != nil {
+
+	// Enable WAL via raw SQL (GORM sqlite driver supports this).
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA foreign_keys=ON")
+	db.Exec("PRAGMA busy_timeout=5000")
+
+	if err := db.AutoMigrate(&model.Plugin{}); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+
 	return db, nil
 }
