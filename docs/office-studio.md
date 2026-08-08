@@ -10,6 +10,10 @@ Office Studio 是基于 OfficeCLI 的系统级内置插件，为 `.docx`、`.xls
 
 `.xlsx` 文档提供“表格编辑”模式，复用项目原有的虚拟化 Excel 网格。单元格提交直接转换为 OfficeCLI 的 `Sheet!A1` 路径并写入，因此不会像整本 SheetJS 导出那样丢失未展示的高级格式；公式以 `=` 开头时写入 `formula` 属性。网格修改可以使用 Office Studio 的文档级撤销和重做。
 
+Excel 模式还提供名称框、公式栏、单元格复制粘贴、行列插删以及工作表新增/重命名/删除。Word 模式提供段落导航、文本、粗体、斜体、字号和颜色编辑。PowerPoint 模式提供幻灯片导航、增删、文本框新增，以及元素文本和位置尺寸编辑。
+
+文件工作流支持另存为、标签会话恢复和保存状态显示。AI 写操作使用 Office 专用审批弹窗，记录最近 200 条批准、拒绝、成功和失败审计；Office Studio 顶部可查看审计。Agent 可以通过 `office_undo` 和 `office_redo` 撤销或恢复修改。
+
 ## 开发环境
 
 插件按以下顺序查找 OfficeCLI：

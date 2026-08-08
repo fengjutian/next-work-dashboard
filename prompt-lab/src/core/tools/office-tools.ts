@@ -1,4 +1,5 @@
 import type { ToolDefinition } from './types';
+import { recordOfficeAuditResult, requestOfficeApproval } from '@/services/office-approval';
 
 function officeApi() {
   if (!window.electronAPI?.office) throw new Error('Office Studio 不可用');
@@ -15,6 +16,13 @@ function requiredString(args: Record<string, unknown>, key: string): string {
 function output(result: { success: boolean; output?: string; error?: string }): string {
   if (!result.success) throw new Error(result.error || 'Office 操作失败');
   return result.output || '操作成功';
+}
+
+async function approvedOperation(operation: string, summary: string, args: Record<string, unknown>, run: () => Promise<{ success: boolean; output?: string; error?: string }>, destructive = false): Promise<string> {
+  if (!await requestOfficeApproval(operation, summary, args, destructive)) throw new Error('用户取消了 Office 写操作');
+  const result = await run();
+  recordOfficeAuditResult(operation, summary, result.success, result.error);
+  return output(result);
 }
 
 export const officeTools: ToolDefinition[] = [
@@ -65,8 +73,7 @@ export const officeTools: ToolDefinition[] = [
       const properties = args.properties;
       if (!properties || typeof properties !== 'object' || Array.isArray(properties)) throw new Error('properties 必须是对象');
       const normalized = Object.fromEntries(Object.entries(properties).map(([key, value]) => [key, String(value)]));
-      if (!window.confirm(`AI 请求修改 Office 文档\n文件：${filePath}\n元素：${path}\n属性：${JSON.stringify(normalized, null, 2)}`)) throw new Error('用户取消了 Office 写操作');
-      return output(await officeApi().set({ filePath, path, properties: normalized }));
+      return approvedOperation('office_update', `修改 ${path} 的 ${Object.keys(normalized).join('、')} 属性`, { filePath, path, properties: normalized }, () => officeApi().set({ filePath, path, properties: normalized }));
     },
   },
   {
@@ -77,8 +84,8 @@ export const officeTools: ToolDefinition[] = [
       const filePath = requiredString(args, 'filePath'); const path = requiredString(args, 'path'); const type = requiredString(args, 'type');
       const properties = Object.fromEntries(Object.entries((args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties)) ? args.properties : {}).map(([key, value]) => [key, String(value)]));
       if (!Object.keys(properties).length) properties.text = '';
-      if (!window.confirm(`AI 请求新增 Office 元素\n文件：${filePath}\n父级：${path}\n类型：${type}`)) throw new Error('用户取消了 Office 写操作');
-      return output(await officeApi().add({ filePath, path, type, properties, index: typeof args.index === 'number' ? args.index : undefined }));
+      const request = { filePath, path, type, properties, index: typeof args.index === 'number' ? args.index : undefined };
+      return approvedOperation('office_add', `在 ${path} 新增 ${type}`, request, () => officeApi().add(request));
     },
   },
   {
@@ -87,8 +94,7 @@ export const officeTools: ToolDefinition[] = [
     parameters: { type: 'object', properties: { filePath: { type: 'string' }, path: { type: 'string' } }, required: ['filePath', 'path'], additionalProperties: false },
     execute: async (args) => {
       const filePath = requiredString(args, 'filePath'); const path = requiredString(args, 'path');
-      if (!window.confirm(`AI 请求删除 Office 元素\n文件：${filePath}\n元素：${path}`)) throw new Error('用户取消了 Office 写操作');
-      return output(await officeApi().remove(filePath, path));
+      return approvedOperation('office_remove', `删除 ${path}`, { filePath, path }, () => officeApi().remove(filePath, path), true);
     },
   },
   {
@@ -118,6 +124,24 @@ export const officeTools: ToolDefinition[] = [
       const result = await officeApi().merge(requiredString(args, 'filePath'), data as Record<string, unknown>);
       if (!result.success) throw new Error(result.error === 'CANCELLED' ? '用户取消了模板合并' : result.error || '模板合并失败');
       return `已生成：${result.filePath}`;
+    },
+  },
+  {
+    name: 'office_undo',
+    description: '撤销当前会话对指定 Office 文档的最近一次修改。',
+    parameters: { type: 'object', properties: { filePath: { type: 'string' } }, required: ['filePath'], additionalProperties: false },
+    execute: async (args) => {
+      const filePath = requiredString(args, 'filePath');
+      return approvedOperation('office_undo', '撤销最近一次 Office 修改', { filePath }, () => officeApi().undo(filePath));
+    },
+  },
+  {
+    name: 'office_redo',
+    description: '重做当前会话对指定 Office 文档最近撤销的修改。',
+    parameters: { type: 'object', properties: { filePath: { type: 'string' } }, required: ['filePath'], additionalProperties: false },
+    execute: async (args) => {
+      const filePath = requiredString(args, 'filePath');
+      return approvedOperation('office_redo', '重做最近撤销的 Office 修改', { filePath }, () => officeApi().redo(filePath));
     },
   },
 ];

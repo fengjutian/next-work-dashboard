@@ -16,6 +16,7 @@ import { ToolCallCard } from './MessageBubble';
 import { isToolEnabled, listTools, setToolEnabled } from '@/core/tools';
 import { ToolManagerDialog } from './ToolManagerDialog';
 import { McpApprovalDialog } from './McpApprovalDialog';
+import { OfficeApprovalDialog } from './OfficeApprovalDialog';
 import { ConversationResourcesDialog } from './ConversationResourcesDialog';
 import { RoleManagerDialog } from './RoleManagerDialog';
 import { MemoryManagerDialog } from './MemoryManagerDialog';
@@ -1630,6 +1631,7 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
 
           <ToolManagerDialog open={toolManagerOpen} onClose={() => setToolManagerOpen(false)} />
           <McpApprovalDialog />
+          <OfficeApprovalDialog />
           <ConversationResourcesDialog
             open={conversationResourcesOpen}
             onClose={() => setConversationResourcesOpen(false)}
