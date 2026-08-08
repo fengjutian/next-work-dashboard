@@ -12,6 +12,8 @@ export interface GraphNode {
   confidence?: number;
   /** 代码节点所在的工作区相对路径。 */
   sourcePath?: string;
+  aliases?: string[];
+  canonicalName?: string;
 }
 
 export interface GraphEdge {
@@ -23,7 +25,7 @@ export interface GraphEdge {
   /** AI 抽取出的关系名称，例如“依赖”“调用” */
   label?: string;
   /** Candidate facts are reviewed before they enter the persisted graph. */
-  status?: 'candidate' | 'accepted' | 'rejected';
+  status?: 'candidate' | 'accepted' | 'rejected' | 'stale';
   confidence?: number;
   evidence?: GraphEvidence[];
   extractionModel?: string;
@@ -36,11 +38,21 @@ export interface GraphEvidence {
   quote?: string;
   line?: number;
   page?: number;
+  documentHash?: string;
 }
 
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  documents?: GraphDocumentSnapshot[];
+}
+
+export interface GraphDocumentSnapshot {
+  path: string;
+  name: string;
+  hash: string;
+  indexedAt: number;
+  active: boolean;
 }
 
 // ── AI 抽取相关类型 ──

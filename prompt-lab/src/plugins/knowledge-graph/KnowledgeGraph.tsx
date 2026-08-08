@@ -13,6 +13,9 @@ import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type Knowl
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
 import { KnowledgeFolderTree } from './KnowledgeFolderTree';
+import { findDuplicateEntities, mergeEntities, stableEntityId } from '@/core/knowledge-graph/entity-normalization';
+import { attachDocumentHashes, reconcileDocuments } from '@/core/knowledge-graph/lifecycle';
+import { hybridGraphSearch, type HybridSearchResult } from '@/core/knowledge-graph/hybrid-search';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
@@ -98,6 +101,9 @@ export const KnowledgeGraph: React.FC = () => {
   const [knowledgeMatches, setKnowledgeMatches] = useState<KnowledgeSearchMatch[]>([]);
   const [knowledgeProposals, setKnowledgeProposals] = useState<KnowledgeChangeProposal[]>(activeKnowledgeWorkspace.changeProposals);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+  const [mergeUndo, setMergeUndo] = useState<GraphData | null>(null);
+  const [hybridQuery, setHybridQuery] = useState('');
+  const [hybridResult, setHybridResult] = useState<HybridSearchResult | null>(null);
 
   // 人工/AI 图谱自动保存；知识工作区扫描结果是临时视图，不覆盖持久数据。
   useEffect(() => {
@@ -183,14 +189,15 @@ export const KnowledgeGraph: React.FC = () => {
   }, [files, selectedPaths]);
 
   // ── 添加 AI 抽取的节点 ──
-  const addExtractedGraph = useCallback((newNodes: GraphNode[], relations: ExtractedRelation[]) => {
+  const addExtractedGraph = useCallback((newNodes: GraphNode[], relations: ExtractedRelation[], documents: ExtractionDocument[]) => {
     setNodes((prev) => {
       const existingLabels = new Set(prev.map((n) => n.label));
-      const toAdd = newNodes.filter((n) => !existingLabels.has(n.label));
+      const toAdd = newNodes.filter((n) => !existingLabels.has(n.label)).map((node) => ({ ...node, id: stableEntityId(node.category, node.label), canonicalName: node.label, aliases: node.aliases ?? [] }));
       const merged = [...prev, ...toAdd];
+      const labelIds = new Map(merged.map((node) => [node.label, node.id]));
       const relationEdges = relations.map((relation) => ({
-        source: relation.source,
-        target: relation.target,
+        source: labelIds.get(relation.source) ?? relation.source,
+        target: labelIds.get(relation.target) ?? relation.target,
         weight: 1,
         kind: 'inferred' as const,
         label: relation.label,
@@ -206,10 +213,37 @@ export const KnowledgeGraph: React.FC = () => {
         degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
       });
       const graphNodes = merged.map((node) => ({ ...node, degree: degree.get(node.id) ?? 0 }));
-      setGraphData({ nodes: graphNodes, edges: relationEdges });
+      setGraphData((current) => {
+        const reconciled = reconcileDocuments({ nodes: graphNodes, edges: current?.edges ?? [], documents: current?.documents }, documents).graph;
+        return attachDocumentHashes({ ...reconciled, edges: [...reconciled.edges, ...relationEdges] });
+      });
       return graphNodes;
     });
   }, []);
+
+  const duplicateSuggestions = findDuplicateEntities(graphData?.nodes ?? nodes);
+  const mergeFirstDuplicate = useCallback(() => {
+    const suggestion = duplicateSuggestions[0];
+    if (!suggestion || !graphData) return;
+    setMergeUndo(graphData);
+    const merged = mergeEntities(graphData, suggestion.canonicalId, suggestion.duplicateId);
+    setGraphData(merged); setNodes(merged.nodes);
+    toast('已合并重复实体，可撤销', 'success');
+  }, [duplicateSuggestions, graphData, toast]);
+
+  const checkDocumentChanges = useCallback(async () => {
+    if (!graphData) return;
+    const documents = await getSelectedContents();
+    const result = reconcileDocuments(graphData, documents);
+    setGraphData(attachDocumentHashes(result.graph));
+    toast(result.changedPaths.length ? `检测到 ${result.changedPaths.length} 个变化文件，相关事实已标记失效` : '所选文档没有变化', result.changedPaths.length ? 'success' : 'info');
+  }, [getSelectedContents, graphData, toast]);
+
+  const runHybridSearch = useCallback(async () => {
+    const query = hybridQuery.trim();
+    if (!query || !graphData) return;
+    setHybridResult(hybridGraphSearch(query, graphData, await getSelectedContents(), 2));
+  }, [getSelectedContents, graphData, hybridQuery]);
 
   const updateRelationStatus = useCallback((edgeIndex: number, status: 'accepted' | 'rejected') => {
     setGraphData((current) => current ? {
@@ -594,6 +628,18 @@ export const KnowledgeGraph: React.FC = () => {
           onToggleAll={toggleAllFiles}
           onRefresh={loadFiles}
         />
+
+        <section className="space-y-2 border-t p-3 text-xs">
+          <div className="flex items-center justify-between"><span className="font-medium">知识治理</span><span className="text-[10px] text-muted-foreground">重复 {duplicateSuggestions.length}</span></div>
+          <div className="grid grid-cols-2 gap-1">
+            <button className="h-7 rounded border disabled:opacity-50" disabled={!duplicateSuggestions.length || !graphData} onClick={mergeFirstDuplicate}>合并首个重复项</button>
+            <button className="h-7 rounded border disabled:opacity-50" disabled={!mergeUndo} onClick={() => { if (!mergeUndo) return; setGraphData(mergeUndo); setNodes(mergeUndo.nodes); setMergeUndo(null); }}>撤销合并</button>
+            <button className="col-span-2 h-7 rounded border disabled:opacity-50" disabled={!graphData || selectedPaths.size === 0} onClick={() => void checkDocumentChanges()}>检查所选文档更新</button>
+          </div>
+          {duplicateSuggestions[0] && <p className="truncate text-[10px] text-muted-foreground" title={`${duplicateSuggestions[0].canonicalId} ← ${duplicateSuggestions[0].duplicateId}`}>建议：{nodes.find((node) => node.id === duplicateSuggestions[0].canonicalId)?.label} ← {nodes.find((node) => node.id === duplicateSuggestions[0].duplicateId)?.label}</p>}
+          <div className="flex gap-1"><input className="h-7 min-w-0 flex-1 rounded border bg-background px-2" value={hybridQuery} onChange={(event) => setHybridQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runHybridSearch(); }} placeholder="全文 + 实体 + 图遍历" /><button className="h-7 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50" disabled={!hybridQuery.trim() || !graphData} onClick={() => void runHybridSearch()}>检索</button></div>
+          {hybridResult && <div className="space-y-1 rounded border p-2"><p>命中 {hybridResult.nodes.length} 个实体、{hybridResult.edges.length} 条关系、{hybridResult.documents.length} 篇文档</p><div className="max-h-24 overflow-auto text-[10px] text-muted-foreground">{hybridResult.nodes.map((node) => <span key={node.id} className="mr-2 inline-block">{node.label}</span>)}{hybridResult.documents.map((document) => <p key={document.sourcePath ?? document.name} className="truncate">{document.name} · {Math.round(document.score * 100)}%</p>)}</div><button className="h-6 w-full rounded border" onClick={() => void navigator.clipboard.writeText(hybridResult.context).then(() => toast('检索上下文已复制，可注入 AI 对话', 'success'))}>复制 GraphRAG 上下文</button></div>}
+        </section>
 
         <NodePanel
           nodes={nodes}

@@ -59,7 +59,7 @@ interface ExtractControlsProps {
   /** 对话文件内容获取器 */
   getSelectedContents: () => Promise<ExtractionDocument[]>;
   /** 添加抽取节点回调 */
-  onAddExtractedGraph: (nodes: GraphNode[], relations: ExtractedRelation[]) => void;
+  onAddExtractedGraph: (nodes: GraphNode[], relations: ExtractedRelation[], documents: ExtractionDocument[]) => void;
 }
 
 export const ExtractControls: React.FC<ExtractControlsProps> = ({
@@ -77,6 +77,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
   const [extractedRelations, setExtractedRelations] = useState<ExtractedRelation[]>([]);
   const [checkedSet, setCheckedSet] = useState<Set<string>>(new Set());
   const [checkedRelations, setCheckedRelations] = useState<Set<string>>(new Set());
+  const [sourceDocuments, setSourceDocuments] = useState<ExtractionDocument[]>([]);
   const relationKey = (relation: ExtractedRelation) => `${relation.source}\0${relation.label}\0${relation.target}`;
 
   // ── 执行抽取 ──
@@ -101,6 +102,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
       );
 
       setExtractedEntities(valid);
+      setSourceDocuments(docs);
       setExtractedRelations(result.relations ?? []);
       setCheckedRelations(new Set((result.relations ?? []).map(relationKey)));
       // 默认勾选全部不重复的
@@ -143,19 +145,21 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
       source: 'extracted',
       category: e.category,
       confidence: e.relevance,
+      aliases: e.aliases,
     }));
 
     const availableLabels = new Set([...existingLabels, ...selected.map((entity) => entity.name)]);
     const relations = extractedRelations.filter((relation) => checkedRelations.has(relationKey(relation)) &&
       availableLabels.has(relation.source) && availableLabels.has(relation.target) && relation.source !== relation.target,
     );
-    onAddExtractedGraph(newNodes, relations);
+    onAddExtractedGraph(newNodes, relations, sourceDocuments);
     setExtractedEntities([]);
     setExtractedRelations([]);
     setCheckedSet(new Set());
     setCheckedRelations(new Set());
+    setSourceDocuments([]);
     toast(`已添加 ${newNodes.length} 个节点、${relations.length} 条关系`, 'success');
-  }, [extractedEntities, extractedRelations, checkedSet, checkedRelations, existingLabels, onAddExtractedGraph, toast]);
+  }, [extractedEntities, extractedRelations, checkedSet, checkedRelations, existingLabels, onAddExtractedGraph, sourceDocuments, toast]);
 
   const existingLabelSet = new Set(existingLabels);
 
