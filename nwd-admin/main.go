@@ -17,6 +17,8 @@ import (
 	"github.com/fjutian/nwd-admin/internal/config"
 	"github.com/fjutian/nwd-admin/internal/db"
 	"github.com/fjutian/nwd-admin/internal/handler"
+	"github.com/fjutian/nwd-admin/internal/repository"
+	"github.com/fjutian/nwd-admin/internal/service"
 )
 
 func main() {
@@ -63,7 +65,7 @@ func main() {
 	}
 	defer sqlDB.Close()
 
-	hdlr := handler.New(gormDB)
+	hdlr := handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)))
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
