@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/fjutian/nwd-admin/internal/model"
+	"gorm.io/gorm"
 )
 
 //go:embed ../view/layout.html
@@ -27,8 +28,8 @@ var pageFS embed.FS
 var (
 	buildVersion  = "dev"
 	pluginIDRegex = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]{1,63}$`)
-	// Pre-parsed layout template (cloned per render with page injected).
-	baseLayout *template.Template
+	baseLayout    *template.Template
+	logger        = slog.Default()
 )
 
 func init() {
@@ -42,46 +43,49 @@ func init() {
 }
 
 type Handler struct {
-	DB *sql.DB
+	DB *gorm.DB
 }
 
-func New(db *sql.DB) *Handler {
+func New(db *gorm.DB) *Handler {
 	return &Handler{DB: db}
 }
 
 // ── Pages ──
 
 func (h *Handler) HomePage(w http.ResponseWriter, r *http.Request) {
-	pluginCount, _ := h.countPlugins()
-	totalDownloads, _ := h.sumDownloads()
-	recentCount, _ := h.countRecent(7)
-	recent, _ := h.listRecent(10)
+	var pluginCount, totalDownloads, recentCount int64
+	h.DB.Model(&model.Plugin{}).Count(&pluginCount)
+	h.DB.Model(&model.Plugin{}).Select("COALESCE(SUM(downloads), 0)").Scan(&totalDownloads)
+	h.DB.Model(&model.Plugin{}).Where("created_at >= ?", time.Now().AddDate(0, 0, -7)).Count(&recentCount)
 
-	data := map[string]any{
+	var recent []model.Plugin
+	h.DB.Order("created_at DESC").Limit(10).Find(&recent)
+
+	h.render(w, "home.html", map[string]any{
 		"Version":        buildVersion,
 		"PluginCount":    pluginCount,
 		"TotalDownloads": totalDownloads,
 		"RecentCount":    recentCount,
 		"RecentPlugins":  recent,
-	}
-	h.render(w, "home.html", data)
+	})
 }
 
 func (h *Handler) PluginsPage(w http.ResponseWriter, r *http.Request) {
-	plugins, _ := h.listAll()
-	data := map[string]any{
+	var plugins []model.Plugin
+	h.DB.Order("updated_at DESC").Find(&plugins)
+	h.render(w, "plugins.html", map[string]any{
 		"Version": buildVersion,
 		"Plugins": plugins,
-	}
-	h.render(w, "plugins.html", data)
+	})
 }
 
 // ── API ──
 
 func (h *Handler) ListPlugins(w http.ResponseWriter, r *http.Request) {
-	plugins, err := h.listAll()
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+	var plugins []model.Plugin
+	if err := h.DB.Order("updated_at DESC").Find(&plugins).Error; err != nil {
+		logger.Error("list plugins", "err", err)
+		http.Error(w, "internal error", 500)
 		return
 	}
 	if plugins == nil {
@@ -113,24 +117,26 @@ func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse .nwd manifest to extract real metadata (Bug 4 fix).
 	meta := parseNWDMeta(bundle, header.Filename)
 	if !pluginIDRegex.MatchString(meta.ID) {
 		http.Error(w, fmt.Sprintf("无效的插件 ID: %q（需 2-64 位字母/数字/._-）", meta.ID), 400)
 		return
 	}
 
-	err = h.upsertPlugin(model.Plugin{
+	plugin := model.Plugin{
 		ID:          meta.ID,
 		Name:        meta.Name,
 		Version:     meta.Version,
 		Author:      meta.Author,
 		Description: meta.Description,
 		IconEmoji:   meta.IconEmoji,
+		Bundle:      bundle,
 		SizeBytes:   int64(len(bundle)),
-	}, bundle)
-	if err != nil {
-		http.Error(w, "保存失败: "+err.Error(), 500)
+	}
+
+	if err := h.DB.Save(&plugin).Error; err != nil {
+		logger.Error("save plugin", "id", plugin.ID, "err", err)
+		http.Error(w, "保存失败", 500)
 		return
 	}
 
@@ -144,33 +150,34 @@ func (h *Handler) DownloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var bundle []byte
-	var name, version string
-	err := h.DB.QueryRow("SELECT bundle, name, version FROM plugins WHERE id = ?", id).Scan(&bundle, &name, &version)
-	if err != nil {
+	var p model.Plugin
+	if err := h.DB.First(&p, "id = ?", id).Error; err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	h.DB.Exec("UPDATE plugins SET downloads = downloads + 1 WHERE id = ?", id)
 
-	filename := sanitizeFilename(fmt.Sprintf("%s-%s.nwd", name, version))
+	if err := h.DB.Model(&p).UpdateColumn("downloads", gorm.Expr("downloads + 1")).Error; err != nil {
+		logger.Warn("bump download count", "id", id, "err", err)
+	}
+
+	filename := sanitizeFilename(fmt.Sprintf("%s-%s.nwd", p.Name, p.Version))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.Header().Set("Content-Length", strconv.Itoa(len(bundle)))
-	w.Write(bundle)
+	w.Header().Set("Content-Length", strconv.Itoa(len(p.Bundle)))
+	w.Write(p.Bundle)
 }
 
 func (h *Handler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if r.FormValue("_method") != "DELETE" {
-		http.Error(w, "method not allowed", 405)
+	if err := h.DB.Delete(&model.Plugin{}, "id = ?", id).Error; err != nil {
+		logger.Error("delete plugin", "id", id, "err", err)
+		writeJSON(w, 500, map[string]string{"error": "删除失败"})
 		return
 	}
-	h.DB.Exec("DELETE FROM plugins WHERE id = ?", id)
-	http.Redirect(w, r, "/plugins", 303)
+	writeJSON(w, 200, map[string]string{"ok": "deleted"})
 }
 
-// ── render (template parsed once at init, cloned per request — Bug 1 fix) ──
+// ── render ──
 
 func (h *Handler) render(w http.ResponseWriter, pageFile string, data map[string]any) {
 	if data == nil {
@@ -201,53 +208,7 @@ func (h *Handler) render(w http.ResponseWriter, pageFile string, data map[string
 	}
 }
 
-// ── DB helpers ──
-
-func (h *Handler) countPlugins() (int64, error) {
-	var n int64
-	err := h.DB.QueryRow("SELECT COUNT(*) FROM plugins").Scan(&n)
-	return n, err
-}
-
-func (h *Handler) sumDownloads() (int64, error) {
-	var n int64
-	err := h.DB.QueryRow("SELECT COALESCE(SUM(downloads), 0) FROM plugins").Scan(&n)
-	return n, err
-}
-
-func (h *Handler) countRecent(days int) (int64, error) {
-	var n int64
-	err := h.DB.QueryRow("SELECT COUNT(*) FROM plugins WHERE created_at >= datetime('now', ?)", fmt.Sprintf("-%d days", days)).Scan(&n)
-	return n, err
-}
-
-func (h *Handler) listRecent(limit int) ([]model.Plugin, error) {
-	return h.queryPlugins("SELECT id, name, version, author, description, icon_emoji, tags, size_bytes, downloads, created_at, updated_at FROM plugins ORDER BY created_at DESC LIMIT ?", limit)
-}
-
-func (h *Handler) listAll() ([]model.Plugin, error) {
-	return h.queryPlugins("SELECT id, name, version, author, description, icon_emoji, tags, size_bytes, downloads, created_at, updated_at FROM plugins ORDER BY updated_at DESC")
-}
-
-func (h *Handler) queryPlugins(query string, args ...any) ([]model.Plugin, error) {
-	rows, err := h.DB.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []model.Plugin
-	for rows.Next() {
-		var p model.Plugin
-		var ca, ua string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Version, &p.Author, &p.Description, &p.IconEmoji, &p.Tags, &p.SizeBytes, &p.Downloads, &ca, &ua); err != nil {
-			return out, err
-		}
-		p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", ca)
-		p.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", ua)
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
+// ── JSON helpers ──
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -257,26 +218,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = enc.Encode(v)
 }
 
-func (h *Handler) upsertPlugin(p model.Plugin, bundle []byte) error {
-	_, err := h.DB.Exec(`
-		INSERT INTO plugins (id, name, version, author, description, icon_emoji, size_bytes, bundle, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-		ON CONFLICT(id) DO UPDATE SET
-			version=excluded.version, bundle=excluded.bundle, size_bytes=excluded.size_bytes, updated_at=datetime('now')
-	`, p.ID, p.Name, p.Version, p.Author, p.Description, p.IconEmoji, p.SizeBytes, bundle)
-	return err
-}
-
-// ── .nwd manifest parser (Bug 4 fix) ──
+// ── .nwd manifest parser ──
 
 type nwdMeta struct {
 	ID, Name, Version, Author, Description, IconEmoji string
 }
 
-// parseNWDMeta extracts metadata from a .nwd v1 bundle.
-// Falls back to filename-based defaults if the bundle can't be parsed.
 func parseNWDMeta(bundle []byte, filename string) nwdMeta {
-	// Defaults from filename (Bug 3: safe fallback, validated by caller).
 	id := sanitizeID(strings.TrimSuffix(filename, ".nwd"))
 	name := id
 	version := "0.1.0"
@@ -284,7 +232,6 @@ func parseNWDMeta(bundle []byte, filename string) nwdMeta {
 	desc := fmt.Sprintf("Uploaded %s", time.Now().Format("2006-01-02"))
 	icon := "📊"
 
-	// Try to parse as JSON .nwd v1 bundle.
 	var raw struct {
 		Format   string `json:"format"`
 		Manifest struct {
@@ -320,16 +267,13 @@ func parseNWDMeta(bundle []byte, filename string) nwdMeta {
 	return nwdMeta{ID: id, Name: name, Version: version, Author: author, Description: desc, IconEmoji: icon}
 }
 
-// ── Input sanitizers (Bug 2 & 3 fixes) ──
+// ── Input sanitizers ──
 
-// sanitizeFilename strips characters unsafe for Content-Disposition header.
-// Replaces "/", "\", `"`, newlines, and control chars with "_".
 var unsafeFilenameRegex = regexp.MustCompile(`["/\x00-\x1f\x7f]`)
 
 func sanitizeFilename(name string) string {
 	name = strings.TrimSpace(name)
 	name = unsafeFilenameRegex.ReplaceAllString(name, "_")
-	// Also strip path traversal sequences.
 	name = filepath.Base(name)
 	if name == "" || name == "." {
 		name = "plugin.nwd"
@@ -337,7 +281,6 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
-// sanitizeID strips all characters not allowed in a plugin ID.
 var sanitizeIDRegex = regexp.MustCompile(`[^\p{L}\p{N}._-]`)
 
 func sanitizeID(raw string) string {

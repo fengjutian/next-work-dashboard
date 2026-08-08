@@ -56,10 +56,7 @@
                     <td class="px-4 py-3 text-mutedfg text-xs">{{.UpdatedAt.Format "01-02 15:04"}}</td>
                     <td class="px-4 py-3 text-right">
                         <a href="/api/plugins/{{.ID}}/download" class="text-primary hover:underline text-xs mr-2">下载</a>
-                        <form action="/api/plugins/{{.ID}}" method="POST" class="inline" onsubmit="return confirm('确定删除 {{.Name}}？')">
-                            <input type="hidden" name="_method" value="DELETE">
-                            <button class="text-red-500 hover:underline text-xs bg-transparent border-0 cursor-pointer">删除</button>
-                        </form>
+                        <button onclick="delPlugin('{{.ID}}','{{.Name}}')" class="text-red-500 hover:underline text-xs bg-transparent border-0 cursor-pointer">删除</button>
                     </td>
                 </tr>
                 {{end}}
@@ -73,4 +70,12 @@
     </div>
     {{end}}
 </div>
+<script>
+async function delPlugin(id, name) {
+    if (!confirm('确定删除 ' + name + '？')) return;
+    const resp = await fetch('/api/plugins/' + id, { method: 'DELETE' });
+    if (resp.ok) location.reload();
+    else alert('删除失败');
+}
+</script>
 {{end}}

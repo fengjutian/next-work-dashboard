@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -41,19 +42,33 @@ func main() {
 	r.Get("/api/plugins", h.ListPlugins)
 	r.Post("/api/plugins", h.UploadPlugin)
 	r.Get("/api/plugins/{id}/download", h.DownloadPlugin)
-	r.Post("/api/plugins/{id}", h.DeletePlugin)
+	r.Delete("/api/plugins/{id}", h.DeletePlugin)
 
-	// Graceful shutdown — let main's defer sqlDB.Close() handle cleanup.
+	srv := &http.Server{
+		Addr:         *addr,
+		Handler:      r,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// Graceful shutdown via context (P0 fix).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	go func() {
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-		<-sig
+		<-ctx.Done()
 		log.Println("shutting down...")
-		os.Exit(0)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown error: %v", err)
+		}
 	}()
 
 	fmt.Printf("🧩 NWD Admin listening on http://localhost%s\n", *addr)
-	if err := http.ListenAndServe(*addr, r); err != nil {
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("server: %v", err)
 	}
+	log.Println("server stopped")
 }
