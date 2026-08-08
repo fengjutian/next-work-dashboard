@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Database, FileText, Loader2, Send, Trash2, Upload } from '@/components/icons';
+import { Database, FileText, Loader2, PanelLeft, PanelRight, Send, Trash2, Upload } from '@/components/icons';
+import { dbDeleteDocumentKnowledge, dbLoadDocumentKnowledge, dbSaveDocumentKnowledge, dbTouchDocumentKnowledge, flushDbToDisk, isDbReady } from '@/db';
 import { createOpenAIProvider } from '@/core/llm';
 import { useStore } from '@/store';
 import { toast } from '@/components/Toast';
@@ -12,6 +13,7 @@ import { isSupportedDocument } from './parser';
 import type { DocumentChunk, ParsedDocument, RagMessage } from './types';
 
 type Stage = 'idle' | 'indexing' | 'ready' | 'asking' | 'error';
+const PANE_PREFS_KEY = 'document-knowledge.panes.v1';
 
 export const DocumentKnowledgePanel: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
@@ -25,12 +27,38 @@ export const DocumentKnowledgePanel: React.FC = () => {
   const [status, setStatus] = useState('上传 PDF 或 Office 文件开始');
   const [progress, setProgress] = useState(0);
   const [embeddingMode, setEmbeddingMode] = useState<EmbeddingMode>();
+  const [leftCollapsed, setLeftCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem(PANE_PREFS_KEY) || '{}').left === true; } catch { return false; } });
+  const [rightCollapsed, setRightCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem(PANE_PREFS_KEY) || '{}').right === true; } catch { return false; } });
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = useMemo(() => documents.find((item) => item.id === selectedId) ?? documents[0], [documents, selectedId]);
 
   const documentsRef = useRef<ParsedDocument[]>([]);
   useEffect(() => { documentsRef.current = documents; }, [documents]);
   useEffect(() => () => { documentsRef.current.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl)); }, []);
+  useEffect(() => { localStorage.setItem(PANE_PREFS_KEY, JSON.stringify({ left: leftCollapsed, right: rightCollapsed })); }, [leftCollapsed, rightCollapsed]);
+
+  useEffect(() => {
+    let attempts = 0;
+    const restore = () => {
+      attempts += 1;
+      if (!isDbReady()) return attempts >= 30;
+      try {
+        const records = dbLoadDocumentKnowledge();
+        setDocuments(records.map((record) => ({ id: record.id, name: record.name, kind: record.kind as ParsedDocument['kind'], size: record.size, sections: record.sections as unknown as ParsedDocument['sections'], plainText: record.plainText, createdAt: record.createdAt })));
+        setChunks(records.flatMap((record) => record.chunks as unknown as DocumentChunk[]));
+        if (records[0]) { setSelectedId(records[0].id); setEmbeddingMode(records[0].embeddingMode as EmbeddingMode); setStage('ready'); setStatus(`已恢复 ${records.length} 个文档`); }
+      } catch { /* A new database can legitimately have no persisted documents. */ }
+      return true;
+    };
+    if (restore()) return;
+    const timer = window.setInterval(() => { if (restore()) window.clearInterval(timer); }, 100);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId || !isDbReady()) return;
+    try { dbTouchDocumentKnowledge(selectedId); void flushDbToDisk(); } catch { /* Viewing still works if persistence is temporarily unavailable. */ }
+  }, [selectedId]);
 
   const addFiles = useCallback(async (files: File[]) => {
     const accepted = files.filter((file) => isSupportedDocument(file.name));
@@ -47,6 +75,10 @@ export const DocumentKnowledgePanel: React.FC = () => {
         setDocuments((current) => [...current.filter((item) => item.id !== result.document.id), result.document]);
         setChunks((current) => [...current.filter((item) => item.documentId !== result.document.id), ...result.chunks]);
         setSelectedId(result.document.id);
+        if (isDbReady()) {
+          dbSaveDocumentKnowledge({ id: result.document.id, name: result.document.name, kind: result.document.kind, size: result.document.size, sections: result.document.sections, plainText: result.document.plainText, chunks: result.chunks, embeddingMode: result.embeddingMode, createdAt: result.document.createdAt, lastViewedAt: Date.now() });
+          await flushDbToDisk();
+        }
       }
       setStage('ready'); setStatus(`已建立索引：${accepted.length} 个文件`); setProgress(100);
     } catch (error) {
@@ -94,11 +126,14 @@ export const DocumentKnowledgePanel: React.FC = () => {
     setChunks((current) => current.filter((item) => item.documentId !== id));
     if (documents.length === 1) setEmbeddingMode(undefined);
     setSelectedId(undefined);
+    if (isDbReady()) { try { dbDeleteDocumentKnowledge(id); void flushDbToDisk(); } catch { /* Keep UI removal responsive. */ } }
   }, [documents]);
 
   return <div className="flex h-full min-h-0 bg-background text-foreground">
-    <aside className="w-64 shrink-0 border-r flex flex-col">
+    <aside className={`${leftCollapsed ? 'w-10' : 'w-64'} shrink-0 border-r flex flex-col transition-[width] duration-200`}>
+      {leftCollapsed ? <div className="flex justify-center border-b p-1.5"><button title="展开文档列表" onClick={() => setLeftCollapsed(false)} className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"><PanelLeft className="h-4 w-4" /></button></div> : <>
       <div className="p-3 border-b">
+        <div className="mb-2 flex items-center justify-between"><span className="text-xs font-medium">文档列表</span><button title="折叠文档列表" onClick={() => setLeftCollapsed(true)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><PanelLeft className="h-4 w-4" /></button></div>
         <input ref={inputRef} type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.pptx" className="hidden"
           onChange={(event) => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
         <button className="w-full rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm flex items-center justify-center gap-2"
@@ -121,10 +156,11 @@ export const DocumentKnowledgePanel: React.FC = () => {
         {embeddingMode && <div className="mt-1">索引模式：{embeddingMode === 'remote-semantic' ? '远程语义' : embeddingMode === 'local-semantic' ? '本地语义' : '关键词降级'}</div>}
         {stage === 'indexing' && <div className="mt-2 h-1 bg-muted rounded"><div className="h-full bg-primary rounded" style={{ width: `${progress}%` }} /></div>}
       </div>
+      </>}
     </aside>
 
     <main className="flex-1 min-w-0 flex flex-col border-r">
-      <div className="px-4 py-3 border-b text-sm font-medium">文档预览{selected ? ` · ${selected.name}` : ''}</div>
+      <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-medium"><span className="min-w-0 flex-1 truncate">文档预览{selected ? ` · ${selected.name}` : ''}</span>{rightCollapsed && <button title="展开 RAG 问答" onClick={() => setRightCollapsed(false)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRight className="h-4 w-4" /></button>}</div>
       <div className="flex-1 min-h-0 overflow-auto bg-muted/30">
         {!selected ? <div className="h-full flex items-center justify-center text-sm text-muted-foreground">上传文件后在这里预览解析结果</div>
           : selected.kind === 'pdf' && selected.previewUrl ? <iframe className="w-full h-full border-0" src={selected.previewUrl} title={selected.name} />
@@ -132,8 +168,8 @@ export const DocumentKnowledgePanel: React.FC = () => {
       </div>
     </main>
 
-    <section className="w-[38%] min-w-[320px] flex flex-col">
-      <div className="px-4 py-3 border-b text-sm font-medium">RAG 文档问答</div>
+    {!rightCollapsed && <section className="w-[38%] min-w-[320px] flex flex-col">
+      <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-medium"><span className="flex-1">RAG 文档问答</span><button title="折叠 RAG 问答" onClick={() => setRightCollapsed(true)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"><PanelRight className="h-4 w-4" /></button></div>
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
         {!messages.length && <div className="text-xs text-muted-foreground leading-6">完成解析和向量化后，可针对全部已上传文档提问。回答会附带命中的文件、章节和页码。</div>}
         {messages.map((message) => <div key={message.id} className={message.role === 'user' ? 'ml-8 rounded-lg bg-primary text-primary-foreground p-3 text-sm' : 'mr-4 rounded-lg bg-muted p-3 text-sm'}>
@@ -144,6 +180,6 @@ export const DocumentKnowledgePanel: React.FC = () => {
       <div className="border-t p-3 flex gap-2"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={chunks.length ? '询问这些文档…' : '请先上传并索引文档'} disabled={!chunks.length}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void ask(); } }} className="flex-1 min-h-10 max-h-28 resize-y rounded-md border bg-background px-3 py-2 text-sm" />
         <button onClick={() => void ask()} disabled={!question.trim() || !chunks.length || stage === 'asking'} className="self-end rounded-md bg-primary text-primary-foreground p-2.5 disabled:opacity-40"><Send className="h-4 w-4" /></button></div>
-    </section>
+    </section>}
   </div>;
 };

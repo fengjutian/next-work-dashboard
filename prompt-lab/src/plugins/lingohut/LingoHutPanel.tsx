@@ -7,6 +7,7 @@ const HOME_URL = 'https://www.lingohut.com/zh';
 export const LingoHutPanel: React.FC = () => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState('');
   const [currentUrl, setCurrentUrl] = useState(HOME_URL);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -23,11 +24,11 @@ export const LingoHutPanel: React.FC = () => {
     const webview = webviewRef.current;
     if (!webview) return;
     const started = () => { setLoading(true); setError(''); };
-    const stopped = () => { setLoading(false); updateNavigation(); };
+    const stopped = () => { setLoading(false); setInitialLoading(false); updateNavigation(); };
     const navigated = () => updateNavigation();
     const failed = (event: Electron.DidFailLoadEvent) => {
       if (event.errorCode === -3) return;
-      setLoading(false); setError(`页面加载失败（${event.errorCode}）：${event.errorDescription}`);
+      setLoading(false); setInitialLoading(false); setError(`页面加载失败（${event.errorCode}）：${event.errorDescription}`);
     };
     webview.addEventListener('did-start-loading', started);
     webview.addEventListener('did-stop-loading', stopped);
@@ -53,6 +54,9 @@ export const LingoHutPanel: React.FC = () => {
     </div>
     <div className="relative min-h-0 flex-1">
       {error && <div role="alert" className="absolute inset-x-4 top-4 z-20 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive shadow-lg"><span>{error}</span><Button variant="outline" size="sm" onClick={() => webviewRef.current?.reload()}>重试</Button></div>}
+      {initialLoading && <div className="absolute inset-0 z-10 grid place-items-center bg-background">
+        <div className="flex flex-col items-center text-center"><div className="relative grid h-20 w-20 place-items-center rounded-3xl bg-primary/10 text-primary"><Languages className="h-10 w-10" /><Loader2 className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-background p-1 shadow-sm" /></div><h2 className="mt-5 text-sm font-semibold">正在打开 LingoHut</h2><p className="mt-1 text-xs text-muted-foreground">正在连接语言课程，请稍候…</p></div>
+      </div>}
       <webview ref={webviewRef} src={HOME_URL} partition="persist:lingohut" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
     </div>
   </div>;

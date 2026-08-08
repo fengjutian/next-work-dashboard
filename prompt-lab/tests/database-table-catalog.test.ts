@@ -6,6 +6,7 @@ describe('database table catalog', () => {
     expect(tableCategoryId('agent_tasks')).toBe('agents');
     expect(tableCategoryId('chat_messages')).toBe('conversations');
     expect(tableCategoryId('llm_response_cache')).toBe('ai');
+    expect(tableCategoryId('document_knowledge_records')).toBe('documents');
     expect(tableCategoryId('weread_notes')).toBe('weread');
     expect(tableCategoryId('hanyu_jinjie_executions')).toBe('hanyu');
     expect(tableCategoryId('skill_files')).toBe('prompts');

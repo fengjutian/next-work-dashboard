@@ -287,6 +287,12 @@ function ensureSchema(): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_hanyu_jinjie_executions_time ON hanyu_jinjie_executions(created_at DESC);
+    CREATE TABLE IF NOT EXISTS document_knowledge_records (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL,
+      sections TEXT NOT NULL DEFAULT '[]', plain_text TEXT NOT NULL DEFAULT '', chunks TEXT NOT NULL DEFAULT '[]',
+      embedding_mode TEXT NOT NULL DEFAULT 'hash-fallback', created_at INTEGER NOT NULL, last_viewed_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_document_knowledge_viewed ON document_knowledge_records(last_viewed_at DESC);
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -836,6 +842,26 @@ export function dbSaveHanyuJinjieExecution(execution: HanyuJinjieExecution): voi
 export function dbLoadHanyuJinjieExecutions(limit = 30): HanyuJinjieExecution[] {
   return getDb().select().from(schema.hanyuJinjieExecutions).orderBy(desc(schema.hanyuJinjieExecutions.createdAt)).limit(Math.max(1, Math.min(200, limit))).all() as HanyuJinjieExecution[];
 }
+
+export interface DocumentKnowledgeRecord {
+  id: string; name: string; kind: string; size: number; sections: Array<Record<string, unknown>>; plainText: string;
+  chunks: Array<Record<string, unknown>>; embeddingMode: string; createdAt: number; lastViewedAt: number;
+}
+interface DocumentKnowledgeRow extends Omit<DocumentKnowledgeRecord, 'sections' | 'chunks'> { sections: string; chunks: string }
+function documentKnowledgeRow(row: DocumentKnowledgeRow): DocumentKnowledgeRecord {
+  return { ...row, sections: safeJsonParse(row.sections, []), chunks: safeJsonParse(row.chunks, []) };
+}
+export function dbSaveDocumentKnowledge(record: DocumentKnowledgeRecord): void {
+  getDb().insert(schema.documentKnowledgeRecords).values({ ...record, sections: JSON.stringify(record.sections), chunks: JSON.stringify(record.chunks) } as never)
+    .onConflictDoUpdate({ target: schema.documentKnowledgeRecords.id, set: { name: record.name, kind: record.kind, size: record.size, sections: JSON.stringify(record.sections), plainText: record.plainText, chunks: JSON.stringify(record.chunks), embeddingMode: record.embeddingMode, lastViewedAt: record.lastViewedAt } }).run();
+}
+export function dbLoadDocumentKnowledge(): DocumentKnowledgeRecord[] {
+  return (getDb().select().from(schema.documentKnowledgeRecords).orderBy(desc(schema.documentKnowledgeRecords.lastViewedAt)).all() as unknown as DocumentKnowledgeRow[]).map(documentKnowledgeRow);
+}
+export function dbTouchDocumentKnowledge(id: string, lastViewedAt = Date.now()): void {
+  getDb().update(schema.documentKnowledgeRecords).set({ lastViewedAt }).where(eq(schema.documentKnowledgeRecords.id, id)).run();
+}
+export function dbDeleteDocumentKnowledge(id: string): void { getDb().delete(schema.documentKnowledgeRecords).where(eq(schema.documentKnowledgeRecords.id, id)).run(); }
 
 // ═══════════════════════════════════════════
 // 数据库浏览器（只读查询）
