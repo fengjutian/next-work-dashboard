@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildAgentProcessEnv, loadPackageScripts, validateAgentScriptName } from '../src/main/agent-script-runner';
+import { buildAgentProcessEnv, loadPackageScripts, validateAgentScriptName } from '../src/main/agent/script-runner';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });

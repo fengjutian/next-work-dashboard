@@ -17,14 +17,14 @@ import {
   type WorkspaceFileMutation,
   type WorkspaceTextEdit,
 } from './workspace-transaction';
-import { redactGitSecrets } from './git-security';
-import { parseGitLog } from './git-history';
-import { classifyGitError } from './git-diagnostics';
-import { parseGitBranches } from './git-overview';
+import { redactGitSecrets } from './git/security';
+import { parseGitLog } from './git/history';
+import { classifyGitError } from './git/diagnostics';
+import { parseGitBranches } from './git/overview';
 import { findSemanticMatches, type SemanticMatch } from './semantic-search';
 import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-tasks';
 import { WorkspaceTaskRunner } from './task-runner';
-import { detectRenameRename, parseUnmergedIndex } from './git-rename-conflict';
+import { detectRenameRename, parseUnmergedIndex } from './git/rename-conflict';
 import { createTypeScriptSemanticIndex } from './typescript-language-service';
 import {
   createKnowledgeDocumentFromTemplate,
@@ -41,11 +41,11 @@ import {
 } from './lancedb-memory';
 import { mcpManager } from './mcp/mcp-manager';
 import type { McpServerConfig } from '../types/mcp';
-import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getAgentWorktreeConflictVersions, mergeAgentWorktree, previewAgentWorktreeMerge } from './agent-worktree';
-import { agentTaskService } from './agent-task-service';
+import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getAgentWorktreeConflictVersions, mergeAgentWorktree, previewAgentWorktreeMerge } from './agent/worktree';
+import { agentTaskService } from './agent/task-service';
 import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, type PRDeliveryConfig } from './pr-delivery';
-import type { AgentTaskConfig } from './agent-task-types';
-import { loadPackageScripts, runAgentPackageScript } from './agent-script-runner';
+import type { AgentTaskConfig } from './agent/task-types';
+import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',

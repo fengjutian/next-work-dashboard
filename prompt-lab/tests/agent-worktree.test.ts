@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertCleanAgentWorktreeBase, buildAgentWorktreeSpec, parsePorcelainPaths, parseWorktreeList } from '../src/main/agent-worktree';
+import { assertCleanAgentWorktreeBase, buildAgentWorktreeSpec, parsePorcelainPaths, parseWorktreeList } from '../src/main/agent/worktree';
 
 describe('agent worktree safety', () => {
   it('builds a deterministic target below the storage root', () => {

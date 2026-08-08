@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { redactGitSecrets } from '../src/main/git-security';
+import { redactGitSecrets } from '../src/main/git/security';
 
 describe('Git 输出脱敏', () => {
   it('隐藏 HTTPS remote URL 中的用户名、密码和 token', () => {

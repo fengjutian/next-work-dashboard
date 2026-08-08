@@ -1,14 +1,14 @@
 // Agent Task Service - Main-process AI task execution
 import { EventEmitter } from 'node:events';
-import { createOpenAIProvider } from '../core/llm';
-import type { LLMProvider } from '../core/llm';
+import { createOpenAIProvider } from '../../core/llm';
+import type { LLMProvider } from '../../core/llm';
 import type {
   AgentTaskConfig,
   AgentTaskEvent,
   AgentTaskProgress,
   AgentTaskRecord,
   AgentTaskState,
-} from './agent-task-types';
+} from './task-types';
 
 export type { AgentTaskConfig, AgentTaskEvent, AgentTaskProgress, AgentTaskRecord, AgentTaskState };
 

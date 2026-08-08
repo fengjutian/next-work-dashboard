@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyConflictStatus } from '../src/main/git-conflicts';
+import { classifyConflictStatus } from '../src/main/git/conflicts';
 
 describe('classifyConflictStatus', () => {
   it.each([

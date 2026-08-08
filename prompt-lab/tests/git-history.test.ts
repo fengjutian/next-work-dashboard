@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseGitLog } from '../src/main/git-history';
+import { parseGitLog } from '../src/main/git/history';
 
 describe('parseGitLog', () => {
   it('parses topology, refs and verified signature metadata', () => {

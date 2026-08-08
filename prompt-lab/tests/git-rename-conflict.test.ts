@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectRenameRename, parseUnmergedIndex } from '../src/main/git-rename-conflict';
+import { detectRenameRename, parseUnmergedIndex } from '../src/main/git/rename-conflict';
 
 describe('rename/rename conflict grouping', () => {
   it('links the base, ours and theirs paths using index stages', () => {

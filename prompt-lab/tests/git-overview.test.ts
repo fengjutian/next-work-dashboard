@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseGitBranches } from '../src/main/git-overview';
+import { parseGitBranches } from '../src/main/git/overview';
 
 describe('Git 分支概览解析', () => {
   it('区分本地和远程分支并解析 tracking 状态', () => {

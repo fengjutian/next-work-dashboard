@@ -1,6 +1,6 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
 import type { WorkspaceGitStatus } from '@/types/electron';
-import { classifyConflictStatus } from '../../../main/git-conflicts';
+import { classifyConflictStatus } from '../../../main/git/conflicts';
 import { hasGitConflictMarkers, languageIdFromName } from '../editor-utils';
 import { displayError, type AiHunk, type OpenDocument } from '../editor-types';
 

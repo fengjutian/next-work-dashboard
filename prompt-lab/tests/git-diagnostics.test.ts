@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyGitError } from '../src/main/git-diagnostics';
+import { classifyGitError } from '../src/main/git/diagnostics';
 
 describe('classifyGitError', () => {
   it.each([

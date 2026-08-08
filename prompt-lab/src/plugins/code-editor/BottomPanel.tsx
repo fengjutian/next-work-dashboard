@@ -6,7 +6,7 @@ import { Code, X } from '@/components/icons';
 import type { BottomPanelTab, EditorPreferences, EditorProblem, EditorSymbol } from './editor-types';
 import type { WorkspaceGitCommit, WorkspaceGitOverview, WorkspaceGitStatus, WorkspaceTask } from '@/types/electron';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { classifyConflictStatus } from '../../main/git-conflicts';
+import { classifyConflictStatus } from '../../main/git/conflicts';
 import { GitHistoryGraph } from './GitHistoryGraph';
 import type { AiExecutionStage } from './hooks';
 

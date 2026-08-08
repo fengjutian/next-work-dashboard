@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentTaskService } from '../src/main/agent-task-service';
+import { AgentTaskService } from '../src/main/agent/task-service';
 import type { LLMProvider } from '../src/core/llm';
 
 function provider(response = 'updated'): LLMProvider {
