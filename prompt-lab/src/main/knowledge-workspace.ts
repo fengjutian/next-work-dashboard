@@ -151,12 +151,13 @@ export function scanKnowledgeWorkspace(rootPath: string): KnowledgeWorkspaceScan
 }
 
 /** Captures a reproducible freshness baseline for documents that declare frontmatter `sources`. */
-export function captureKnowledgeWorkspaceState(rootPath: string): KnowledgeWorkspaceState {
+export function captureKnowledgeWorkspaceState(rootPath: string, documentPaths?: string[]): KnowledgeWorkspaceState {
   const root = resolveWorkspacePath(rootPath, '');
   const workspace = scanKnowledgeWorkspace(rootPath);
   const capturedAt = new Date().toISOString();
-  const documents: KnowledgeWorkspaceState['documents'] = {};
-  for (const document of workspace.documents) {
+  const selected = documentPaths?.length ? new Set(documentPaths.map((item) => item.replace(/\\/g, '/'))) : null;
+  const documents: KnowledgeWorkspaceState['documents'] = selected ? { ...(workspace.state?.documents ?? {}) } : {};
+  for (const document of workspace.documents.filter((item) => !selected || selected.has(item.path))) {
     const sources: KnowledgeWorkspaceState['documents'][string]['sources'] = {};
     for (const source of stringList(document.frontmatter.sources)) {
       const absolutePath = resolveKnowledgeSourcePath(rootPath, source);
@@ -164,6 +165,7 @@ export function captureKnowledgeWorkspaceState(rootPath: string): KnowledgeWorks
       sources[source] = { hash: hashFile(absolutePath), capturedAt };
     }
     if (Object.keys(sources).length) documents[document.path] = { contentHash: document.contentHash, sources };
+    else delete documents[document.path];
   }
   const state: KnowledgeWorkspaceState = { schemaVersion: 1, updatedAt: capturedAt, documents };
   const knowledgeDirectory = path.join(root, '.knowledge');

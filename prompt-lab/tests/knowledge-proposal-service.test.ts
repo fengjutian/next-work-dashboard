@@ -8,16 +8,17 @@ afterEach(() => {
 
 function installApi(mutationResult: { success: boolean; error?: string }) {
   const mutateFiles = vi.fn().mockResolvedValue(mutationResult);
+  const captureState = vi.fn().mockResolvedValue({ success: true, data: { schemaVersion: 1, updatedAt: '', documents: {} } });
   vi.stubGlobal('window', { electronAPI: {
     workspace: { reauthorize: vi.fn().mockResolvedValue({ success: true }), mutateFiles, gitStatus: vi.fn().mockResolvedValue({ success: true, data: [] }) },
-    knowledge: { scanWorkspace: vi.fn().mockResolvedValue({ success: true, data: { documents: [], links: [], backlinks: {}, orphanUris: [], skipped: [], templates: [], rules: [], diagnostics: [] } }) },
+    knowledge: { captureState, scanWorkspace: vi.fn().mockResolvedValue({ success: true, data: { documents: [], links: [], backlinks: {}, orphanUris: [], skipped: [], templates: [], rules: [], diagnostics: [] } }) },
   } });
-  return mutateFiles;
+  return { mutateFiles, captureState };
 }
 
 describe('knowledge proposal review service', () => {
   it('only writes after acceptance and keeps optimistic-lock metadata', async () => {
-    const mutateFiles = installApi({ success: true });
+    const { mutateFiles, captureState } = installApi({ success: true });
     activeKnowledgeWorkspace.setActive('D:\\knowledge');
     const proposal = activeKnowledgeWorkspace.propose('Update', [{
       kind: 'write', path: 'note.md', before: 'before', content: 'after', expectedModifiedAt: 12,
@@ -28,6 +29,7 @@ describe('knowledge proposal review service', () => {
     expect(mutateFiles).toHaveBeenCalledWith('D:\\knowledge', [{
       kind: 'write', path: 'note.md', content: 'after', expectedModifiedAt: 12,
     }]);
+    expect(captureState).toHaveBeenCalledWith('D:\\knowledge', ['note.md']);
   });
 
   it('marks a failed atomic write as conflicted', async () => {

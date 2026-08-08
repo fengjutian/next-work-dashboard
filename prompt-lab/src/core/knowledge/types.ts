@@ -93,6 +93,20 @@ export interface KnowledgeUpdateImpact {
   changedSources: KnowledgeSourceChange[];
 }
 
+export interface KnowledgeHealthMetric {
+  key: 'errors' | 'staleSources' | 'missingSources' | 'untrackedSources' | 'warnings' | 'unresolvedLinks' | 'ambiguousLinks' | 'orphanDocuments';
+  label: string;
+  count: number;
+  penalty: number;
+}
+
+export interface KnowledgeHealthReport {
+  score: number;
+  grade: 'healthy' | 'warning' | 'critical';
+  metrics: KnowledgeHealthMetric[];
+  issueCount: number;
+}
+
 export type KnowledgeMutation =
   | { kind: 'create'; path: string; content: string }
   | { kind: 'write'; path: string; before: string; content: string; expectedModifiedAt?: number }

@@ -141,4 +141,14 @@ const getKnowledgeUpdateImpact: ToolDefinition = {
   },
 };
 
-export const knowledgeTools: ToolDefinition[] = [searchKnowledge, readKnowledgeDocument, getKnowledgeBacklinks, getKnowledgeUpdateImpact, proposeKnowledgeChange];
+const getKnowledgeHealth: ToolDefinition = {
+  name: 'get_knowledge_health',
+  description: '返回当前知识工作区的确定性健康评分，以及来源、链接、规则和孤立文档问题的分类扣分。',
+  parameters: { type: 'object', properties: {} },
+  execute: async () => {
+    try { return JSON.stringify(await activeKnowledgeWorkspace.health()); }
+    catch (error) { return JSON.stringify({ error: error instanceof Error ? error.message : String(error) }); }
+  },
+};
+
+export const knowledgeTools: ToolDefinition[] = [searchKnowledge, readKnowledgeDocument, getKnowledgeBacklinks, getKnowledgeHealth, getKnowledgeUpdateImpact, proposeKnowledgeChange];

@@ -1232,8 +1232,8 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  ipcMain.handle('knowledge:captureState', async (_event, rootPath: string) => {
-    try { return { success: true, data: captureKnowledgeWorkspaceState(rootPath) }; }
+  ipcMain.handle('knowledge:captureState', async (_event, rootPath: string, documentPaths?: string[]) => {
+    try { return { success: true, data: captureKnowledgeWorkspaceState(rootPath, documentPaths) }; }
     catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 

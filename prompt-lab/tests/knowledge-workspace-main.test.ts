@@ -105,4 +105,19 @@ describe('knowledge workspace filesystem boundary', () => {
     fs.writeFileSync(path.join(root, '.knowledge', 'instructions.md'), '# Knowledge brief\nKeep architecture current.', 'utf8');
     expect(scanKnowledgeWorkspace(root).instructions).toContain('Keep architecture current');
   });
+
+  it('refreshes only selected document baselines', () => {
+    const root = createWorkspace();
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'a1', 'utf8');
+    fs.writeFileSync(path.join(root, 'src', 'b.ts'), 'b1', 'utf8');
+    fs.writeFileSync(path.join(root, 'a.md'), '---\nsources: [src/a.ts]\n---\n# A', 'utf8');
+    fs.writeFileSync(path.join(root, 'b.md'), '---\nsources: [src/b.ts]\n---\n# B', 'utf8');
+    const first = captureKnowledgeWorkspaceState(root);
+    fs.writeFileSync(path.join(root, 'src', 'a.ts'), 'a2', 'utf8');
+    fs.writeFileSync(path.join(root, 'src', 'b.ts'), 'b2', 'utf8');
+    const partial = captureKnowledgeWorkspaceState(root, ['a.md']);
+    expect(partial.documents['a.md'].sources['src/a.ts'].hash).not.toBe(first.documents['a.md'].sources['src/a.ts'].hash);
+    expect(partial.documents['b.md']).toEqual(first.documents['b.md']);
+  });
 });

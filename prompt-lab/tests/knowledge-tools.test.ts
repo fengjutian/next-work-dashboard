@@ -56,4 +56,10 @@ describe('knowledge agent tools', () => {
     expect(output.count).toBe(1);
     expect(output.results[0].documentPath).toBe('architecture.md');
   });
+
+  it('exposes the knowledge health report to the agent', async () => {
+    vi.spyOn(activeKnowledgeWorkspace, 'health').mockResolvedValue({ score: 94, grade: 'healthy', issueCount: 1, metrics: [] });
+    const tool = knowledgeTools.find((item) => item.name === 'get_knowledge_health')!;
+    expect(JSON.parse(await tool.execute({}))).toMatchObject({ score: 94, grade: 'healthy', issueCount: 1 });
+  });
 });

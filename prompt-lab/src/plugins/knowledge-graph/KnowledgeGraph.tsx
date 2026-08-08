@@ -9,7 +9,7 @@ import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
 import { CodeExtractControls } from './CodeExtractControls';
-import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate, type KnowledgeUpdateImpact, type KnowledgeWorkspaceState } from '@/core/knowledge';
+import { evaluateKnowledgeHealth, getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate, type KnowledgeUpdateImpact, type KnowledgeWorkspaceState } from '@/core/knowledge';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
 import { KnowledgeFolderTree } from './KnowledgeFolderTree';
@@ -26,6 +26,14 @@ type KnowledgeWorkspaceView = KnowledgeIndex & {
   state?: KnowledgeWorkspaceState;
 };
 type KnowledgeSearchMatch = { uri: string; path: string; title: string; score: number; snippets: Array<{ line: number; text: string }> };
+type GeneratedKnowledgeUpdates = { updates?: Array<{ path?: unknown; content?: unknown; reason?: unknown }> };
+
+function parseGeneratedKnowledgeUpdates(raw: string): GeneratedKnowledgeUpdates {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const parsed = JSON.parse(cleaned) as GeneratedKnowledgeUpdates;
+  if (!parsed || !Array.isArray(parsed.updates)) throw new Error('INVALID_KNOWLEDGE_UPDATE_RESPONSE');
+  return parsed;
+}
 
 // ── 常量 ──
 
@@ -432,6 +440,76 @@ export const KnowledgeGraph: React.FC = () => {
     }
   }, [toast]);
 
+  const generateKnowledgeUpdateProposal = useCallback(async () => {
+    if (!knowledgeWorkspace || !knowledgeIndex || !knowledgeImpacts.length || !aiApi.apiKey) return;
+    setGenerating(true);
+    try {
+      const selectedImpacts = knowledgeImpacts.slice(0, 5);
+      const allowedPaths = new Set(selectedImpacts.map((impact) => impact.documentPath));
+      const originals = new Map<string, { content: string; modifiedAt: number }>();
+      const documents = [] as Array<{ path: string; content: string; changedSources: KnowledgeUpdateImpact['changedSources'] }>;
+      for (const impact of selectedImpacts) {
+        const original = await activeKnowledgeWorkspace.read(impact.documentPath);
+        originals.set(impact.documentPath, original);
+        documents.push({ path: impact.documentPath, content: original.content.slice(0, 30000), changedSources: impact.changedSources });
+      }
+      const sourcePaths = [...new Set(selectedImpacts.flatMap((impact) => impact.changedSources.map((source) => source.path)))];
+      const sourceChanges = [] as Array<{ path: string; status: string; diff: string; currentContent?: string }>;
+      for (const sourcePath of sourcePaths.slice(0, 20)) {
+        const status = selectedImpacts.flatMap((impact) => impact.changedSources).find((source) => source.path === sourcePath)?.status ?? '';
+        const [unstaged, staged, current] = await Promise.all([
+          window.electronAPI.workspace.gitOperation<string>(knowledgeWorkspace, 'fileDiff', { path: sourcePath }),
+          window.electronAPI.workspace.gitOperation<string>(knowledgeWorkspace, 'fileDiff', { path: sourcePath, staged: true }),
+          window.electronAPI.workspace.readTextFile(knowledgeWorkspace, sourcePath),
+        ]);
+        sourceChanges.push({
+          path: sourcePath,
+          status,
+          diff: `${staged.data ?? ''}\n${unstaged.data ?? ''}`.trim().slice(0, 16000),
+          currentContent: current.success ? current.data?.content.slice(0, 16000) : undefined,
+        });
+      }
+      const provider = createOpenAIProvider(aiApi);
+      let response = '';
+      for await (const part of provider.chat([
+        {
+          role: 'system',
+          content: '你是项目知识维护助手。根据代码变更更新已有 Markdown 文档。只输出 JSON 对象：{"updates":[{"path":"允许的文档路径","content":"完整的新文档内容","reason":"更新依据"}]}。不得创建新路径，不得修改未受影响文档；保留仍然有效的 frontmatter、sources、人工内容和 Wiki Links；证据不足时不要输出该文档。',
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            projectInstructions: knowledgeIndex.instructions?.slice(0, 8000) ?? '',
+            allowedDocumentPaths: [...allowedPaths],
+            documents,
+            sourceChanges,
+          }),
+        },
+      ], { model: aiApi.model, temperature: .1, maxTokens: 12000, stream: false, responseFormat: 'json_object' })) response += part.delta;
+      const generated = parseGeneratedKnowledgeUpdates(response);
+      const seen = new Set<string>();
+      const reasons: string[] = [];
+      const mutations = (generated.updates ?? []).flatMap((update) => {
+        const path = String(update.path ?? '').replace(/\\/g, '/');
+        const content = typeof update.content === 'string' ? update.content : '';
+        if (!allowedPaths.has(path) || seen.has(path) || !content.trim()) return [];
+        seen.add(path);
+        const original = originals.get(path);
+        if (!original || original.content === content) return [];
+        if (update.reason) reasons.push(`${path}: ${String(update.reason)}`);
+        return [{ kind: 'write' as const, path, before: original.content, content, expectedModifiedAt: original.modifiedAt }];
+      });
+      if (!mutations.length) throw new Error('NO_JUSTIFIED_KNOWLEDGE_UPDATES');
+      const proposal = activeKnowledgeWorkspace.propose(`根据代码变更更新知识文档。${reasons.join('；')}`.slice(0, 2000), mutations);
+      setSelectedProposalId(proposal.id);
+      toast(`已生成 ${mutations.length} 篇知识文档的更新提案，请审核 Diff`, 'success');
+    } catch (error) {
+      toast(`生成知识更新提案失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }, [aiApi, knowledgeImpacts, knowledgeIndex, knowledgeWorkspace, toast]);
+
   const createKnowledgeFolder = useCallback(async () => {
     if (!knowledgeWorkspace) return;
     const path = newFolderName.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -517,6 +595,7 @@ export const KnowledgeGraph: React.FC = () => {
   }, [knowledgeQuery, knowledgeTagFilter, knowledgeTypeFilter, knowledgeWorkspace, toast]);
 
   const selectedKnowledgeDocument = knowledgeIndex?.documents.find((item) => item.uri === selectedKnowledgeUri);
+  const knowledgeHealth = knowledgeIndex ? evaluateKnowledgeHealth(knowledgeIndex, knowledgeIndex.diagnostics) : null;
   const selectedBacklinks = selectedKnowledgeUri ? knowledgeIndex?.backlinks[selectedKnowledgeUri] ?? [] : [];
   const selectedOutgoing = selectedKnowledgeUri ? knowledgeIndex?.links.filter((link) => link.sourceUri === selectedKnowledgeUri) ?? [] : [];
   let templatePreviewPath = '';
@@ -658,6 +737,28 @@ export const KnowledgeGraph: React.FC = () => {
                 <p>歧义链接 {knowledgeIndex.links.filter((link) => link.status === 'ambiguous').length}</p>
                 <p>规则问题 {knowledgeIndex.diagnostics.length}</p>
               </div>
+              {knowledgeHealth && (
+                <div className="rounded border bg-muted p-2 text-xs text-muted-foreground">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="font-medium text-foreground">知识健康度</span>
+                    <span className={`text-lg font-semibold ${knowledgeHealth.grade === 'healthy' ? 'text-green-600' : knowledgeHealth.grade === 'warning' ? 'text-amber-600' : 'text-destructive'}`}>
+                      {knowledgeHealth.score}
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-background">
+                    <div
+                      className={`h-full ${knowledgeHealth.grade === 'healthy' ? 'bg-green-500' : knowledgeHealth.grade === 'warning' ? 'bg-amber-500' : 'bg-destructive'}`}
+                      style={{ width: `${knowledgeHealth.score}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1">
+                    {knowledgeHealth.metrics.filter((item) => item.count > 0).map((item) => (
+                      <p key={item.key} title={`扣 ${item.penalty} 分`}>{item.label} {item.count}</p>
+                    ))}
+                    {knowledgeHealth.issueCount === 0 && <p className="col-span-2 text-green-600">未发现知识质量问题</p>}
+                  </div>
+                </div>
+              )}
               <button
                 className="h-8 w-full rounded-md border text-xs hover:bg-accent disabled:opacity-50"
                 disabled={generating}
@@ -687,6 +788,14 @@ export const KnowledgeGraph: React.FC = () => {
                   ))}
                 </div>
               )}
+              <button
+                className="h-8 w-full rounded-md bg-primary text-xs text-primary-foreground disabled:opacity-50"
+                disabled={generating || !aiApi.apiKey || knowledgeImpacts.length === 0}
+                onClick={() => void generateKnowledgeUpdateProposal()}
+                title={!aiApi.apiKey ? '请先配置 AI API' : undefined}
+              >
+                生成知识更新提案
+              </button>
               {(knowledgeIndex.links.some((link) => link.status !== 'resolved') || knowledgeIndex.diagnostics.length > 0) && (
                 <div className="max-h-40 space-y-1 overflow-auto rounded border p-1">
                   {knowledgeIndex.links.filter((link) => link.status !== 'resolved').slice(0, 20).map((link, index) => (

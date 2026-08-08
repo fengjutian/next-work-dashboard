@@ -1,6 +1,7 @@
 import {
   createKnowledgeProposal,
   analyzeKnowledgeUpdateImpact,
+  evaluateKnowledgeHealth,
   rejectKnowledgeProposal,
   type KnowledgeChangeProposal,
   type KnowledgeIndex,
@@ -8,6 +9,8 @@ import {
   type KnowledgeSearchFilters,
   type KnowledgeSearchHit,
   type KnowledgeUpdateImpact,
+  type KnowledgeDiagnostic,
+  type KnowledgeHealthReport,
 } from '@/core/knowledge';
 import type { WorkspaceFileMutation } from '@/types/electron';
 
@@ -19,14 +22,14 @@ function storedRoot(): string | null {
 
 class ActiveKnowledgeWorkspaceService {
   private rootPath: string | null = storedRoot();
-  private index: KnowledgeIndex | null = null;
+  private index: (KnowledgeIndex & { diagnostics?: KnowledgeDiagnostic[] }) | null = null;
   private proposals: KnowledgeChangeProposal[] = [];
   private listeners = new Set<(proposals: KnowledgeChangeProposal[]) => void>();
 
   get activeRoot(): string | null { return this.rootPath; }
   get documents(): KnowledgeIndex['documents'] { return this.index?.documents ?? []; }
 
-  setActive(rootPath: string, index?: KnowledgeIndex): void {
+  setActive(rootPath: string, index?: KnowledgeIndex & { diagnostics?: KnowledgeDiagnostic[] }): void {
     this.rootPath = rootPath;
     this.index = index ?? null;
     try { localStorage.setItem(ACTIVE_ROOT_KEY, rootPath); } catch { /* storage is optional */ }
@@ -79,6 +82,14 @@ class ActiveKnowledgeWorkspaceService {
     this.proposals = this.proposals.map((item) => item.id === id ? { ...item, status } : item);
     this.emit();
     if (!result.success) throw new Error(result.error ?? 'KNOWLEDGE_CHANGE_APPLY_FAILED');
+    const changedKnowledgePaths = proposal.mutations.flatMap((mutation) => {
+      if (mutation.kind === 'delete') return [];
+      return [mutation.kind === 'rename' ? mutation.targetPath : mutation.path];
+    });
+    if (changedKnowledgePaths.length) {
+      const baseline = await window.electronAPI.knowledge.captureState(root, changedKnowledgePaths);
+      if (!baseline.success) console.warn('[KnowledgeWorkspace] baseline refresh failed after an accepted write', baseline.error);
+    }
     await this.refresh();
     return this.proposals.find((item) => item.id === id)!;
   }
@@ -90,7 +101,7 @@ class ActiveKnowledgeWorkspaceService {
     return this.rootPath;
   }
 
-  async refresh(): Promise<KnowledgeIndex> {
+  async refresh(): Promise<KnowledgeIndex & { diagnostics?: KnowledgeDiagnostic[] }> {
     const root = await this.authorize();
     const result = await window.electronAPI.knowledge.scanWorkspace(root);
     if (!result.success || !result.data) throw new Error(result.error ?? 'KNOWLEDGE_SCAN_FAILED');
@@ -120,6 +131,11 @@ class ActiveKnowledgeWorkspaceService {
     ]);
     if (!status.success) throw new Error(status.error ?? 'GIT_STATUS_FAILED');
     return analyzeKnowledgeUpdateImpact(index.documents, status.data ?? []);
+  }
+
+  async health(): Promise<KnowledgeHealthReport> {
+    const index = this.index ?? await this.refresh();
+    return evaluateKnowledgeHealth(index, index.diagnostics ?? []);
   }
 
   async backlinks(pathOrUri: string): Promise<Array<{ sourceUri: string; sourcePath?: string; sourceTitle?: string; line: number; target: string }>> {

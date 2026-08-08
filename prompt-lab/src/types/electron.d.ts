@@ -178,7 +178,7 @@ export interface ElectronAPI {
       instructions?: string;
       state?: import('../core/knowledge').KnowledgeWorkspaceState;
     }>>;
-    captureState: (rootPath: string) => Promise<WorkspaceResult<import('../core/knowledge').KnowledgeWorkspaceState>>;
+    captureState: (rootPath: string, documentPaths?: string[]) => Promise<WorkspaceResult<import('../core/knowledge').KnowledgeWorkspaceState>>;
     createFromTemplate: (rootPath: string, templateId: string, values: Record<string, string>) => Promise<WorkspaceResult<{
       path: string; modifiedAt: number; diagnostics: import('../core/knowledge').KnowledgeDiagnostic[];
     }>>;
