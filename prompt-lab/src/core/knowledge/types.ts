@@ -69,16 +69,19 @@ export interface KnowledgeDiagnostic {
 export interface KnowledgeSourceState {
   hash: string;
   capturedAt: string;
+  verifiedCommit?: string;
 }
 
 export interface KnowledgeDocumentState {
   contentHash: string;
   sources: Record<string, KnowledgeSourceState>;
+  lastVerifiedCommit?: string;
 }
 
 export interface KnowledgeWorkspaceState {
   schemaVersion: 1;
   updatedAt: string;
+  lastVerifiedCommit?: string;
   documents: Record<string, KnowledgeDocumentState>;
 }
 

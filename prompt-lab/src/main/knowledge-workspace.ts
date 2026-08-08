@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   buildKnowledgeIndex,
   instantiateKnowledgeTemplate,
@@ -75,6 +76,11 @@ function stringList(value: unknown): string[] {
 
 function hashFile(filePath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function currentGitCommit(root: string): string | undefined {
+  try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim() || undefined; }
+  catch { return undefined; }
 }
 
 function resolveKnowledgeSourcePath(rootPath: string, source: string): string {
@@ -169,6 +175,7 @@ export function captureKnowledgeWorkspaceState(rootPath: string, documentPaths?:
   const root = resolveWorkspacePath(rootPath, '');
   const workspace = scanKnowledgeWorkspace(rootPath);
   const capturedAt = new Date().toISOString();
+  const verifiedCommit = currentGitCommit(root);
   const selected = documentPaths?.length ? new Set(documentPaths.map((item) => item.replace(/\\/g, '/'))) : null;
   const documents: KnowledgeWorkspaceState['documents'] = selected ? { ...(workspace.state?.documents ?? {}) } : {};
   for (const document of workspace.documents.filter((item) => !selected || selected.has(item.path))) {
@@ -176,12 +183,12 @@ export function captureKnowledgeWorkspaceState(rootPath: string, documentPaths?:
     for (const source of stringList(document.frontmatter.sources)) {
       const absolutePath = resolveKnowledgeSourcePath(rootPath, source);
       if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) continue;
-      sources[source] = { hash: hashFile(absolutePath), capturedAt };
+      sources[source] = { hash: hashFile(absolutePath), capturedAt, verifiedCommit };
     }
-    if (Object.keys(sources).length) documents[document.path] = { contentHash: document.contentHash, sources };
+    if (Object.keys(sources).length) documents[document.path] = { contentHash: document.contentHash, sources, lastVerifiedCommit: verifiedCommit };
     else delete documents[document.path];
   }
-  const state: KnowledgeWorkspaceState = { schemaVersion: 1, updatedAt: capturedAt, documents };
+  const state: KnowledgeWorkspaceState = { schemaVersion: 1, updatedAt: capturedAt, lastVerifiedCommit: verifiedCommit, documents };
   const knowledgeDirectory = path.join(root, '.knowledge');
   fs.mkdirSync(knowledgeDirectory, { recursive: true });
   fs.writeFileSync(path.join(knowledgeDirectory, 'state.json'), `${JSON.stringify(state, null, 2)}\n`, 'utf8');

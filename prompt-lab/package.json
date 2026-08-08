@@ -16,6 +16,8 @@
     "check:ipc": "node scripts/check-ipc-contract.mjs",
     "check:docs": "node scripts/check-markdown-links.mjs",
     "check:encoding": "node scripts/check-utf8.mjs",
+    "knowledge:check": "vite-node scripts/run-knowledge-cli.ts check --root ..",
+    "knowledge:impact": "vite-node scripts/run-knowledge-cli.ts impact --root ..",
     "check": "npm run typecheck && npm run lint && npm run test && npm run check:ipc && npm run check:docs && npm run check:encoding",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -60,6 +62,7 @@
     "postcss": "^8.5.21",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.4.5",
+    "vite-node": "^2.1.9",
     "vite": "^5.4.0",
     "vitest": "^2.1.0"
   },
