@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, clipboard } from 'electron';
+import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron';
 import type { ElectronAPI, MemoryFile } from './types/electron';
 
 // ── 暴露给渲染进程的安全 API ──
@@ -140,6 +140,7 @@ const electronAPI: ElectronAPI = {
   pickFile: (options?: { accept?: string; multiple?: boolean }) =>
     ipcRenderer.invoke('dialog:pickFile', options),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   workspace: {
     openFolder: () => ipcRenderer.invoke('workspace:openFolder'),
     reauthorize: (rootPath: string) => ipcRenderer.invoke('workspace:reauthorize', rootPath),

@@ -4,6 +4,8 @@ import { officeClient } from './office-client';
 import type { OfficeCliStatus, OfficeDocumentKind } from './types';
 
 type ViewMode = 'preview' | 'outline';
+interface OfficeTab { path: string; name: string }
+const RECENT_KEY = 'office-studio:recent-v1';
 
 export const OfficeStudioPanel: React.FC = () => {
   const [status, setStatus] = useState<OfficeCliStatus>();
@@ -23,6 +25,11 @@ export const OfficeStudioPanel: React.FC = () => {
   const [queryResults, setQueryResults] = useState<string[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [tabs, setTabs] = useState<OfficeTab[]>([]);
+  const [recent, setRecent] = useState<OfficeTab[]>(() => {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') as OfficeTab[]; } catch { return []; }
+  });
+  const [dragOver, setDragOver] = useState(false);
 
   const refreshStatus = useCallback(async () => setStatus(await officeClient.status()), []);
 
@@ -30,7 +37,14 @@ export const OfficeStudioPanel: React.FC = () => {
     setBusy(true);
     setError('');
     setFilePath(nextPath);
-    setFileName(nextName || nextPath.split(/[\\/]/).pop() || nextPath);
+    const resolvedName = nextName || nextPath.split(/[\\/]/).pop() || nextPath;
+    setFileName(resolvedName);
+    setTabs((current) => current.some((tab) => tab.path === nextPath) ? current : [...current, { path: nextPath, name: resolvedName }]);
+    setRecent((current) => {
+      const updated = [{ path: nextPath, name: resolvedName }, ...current.filter((item) => item.path !== nextPath)].slice(0, 8);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+      return updated;
+    });
     const [rendered, structured] = await Promise.all([
       officeClient.render(nextPath),
       officeClient.outline(nextPath),
@@ -131,6 +145,30 @@ export const OfficeStudioPanel: React.FC = () => {
     if (result.success) setElementJson(result.output || '');
   };
 
+  const closeTab = async (tabPath: string) => {
+    await officeClient.close(tabPath);
+    const remaining = tabs.filter((tab) => tab.path !== tabPath);
+    setTabs(remaining);
+    if (tabPath !== filePath) return;
+    const next = remaining.at(-1);
+    if (next) await loadDocument(next.path, next.name);
+    else {
+      setFilePath(''); setFileName(''); setHtml(''); setOutline(''); setQueryResults([]); setElementJson('');
+      setCanUndo(false); setCanRedo(false);
+    }
+  };
+
+  const handleDrop = async (event: React.DragEvent) => {
+    event.preventDefault();
+    setDragOver(false);
+    const files = Array.from(event.dataTransfer.files);
+    for (const file of files) {
+      if (!/\.(docx|xlsx|pptx)$/i.test(file.name)) continue;
+      const droppedPath = window.electronAPI.getPathForFile(file);
+      if (droppedPath) await loadDocument(droppedPath, file.name);
+    }
+  };
+
   const mergeTemplate = async () => {
     const raw = window.prompt('输入模板数据 JSON。文档中的 {{key}} 会被对应值替换：', '{"name":"示例"}');
     if (raw === null) return;
@@ -142,7 +180,8 @@ export const OfficeStudioPanel: React.FC = () => {
     } catch (mergeError) { setError(mergeError instanceof Error ? mergeError.message : '模板数据格式错误'); }
   };
 
-  return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+  return <div onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={(event) => void handleDrop(event)} className={`relative flex h-full min-h-0 flex-col bg-background text-foreground ${dragOver ? 'ring-2 ring-inset ring-primary' : ''}`}>
+    {dragOver && <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/10 text-lg font-medium">拖放 Office 文档到这里打开</div>}
     <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
         <FileText className="h-5 w-5 text-blue-500" />
@@ -159,6 +198,13 @@ export const OfficeStudioPanel: React.FC = () => {
       </div>
     </header>
 
+    {tabs.length > 0 && <nav className="flex gap-1 overflow-x-auto border-b bg-muted/30 px-2 pt-1">
+      {tabs.map((tab) => <div key={tab.path} className={`flex shrink-0 items-center rounded-t border border-b-0 text-xs ${tab.path === filePath ? 'bg-background' : 'bg-muted text-muted-foreground'}`}>
+        <button onClick={() => void loadDocument(tab.path, tab.name)} className="max-w-48 truncate px-3 py-1.5" title={tab.path}>{tab.name}</button>
+        <button onClick={() => void closeTab(tab.path)} className="px-1.5 py-1.5 hover:text-destructive" title="关闭">×</button>
+      </div>)}
+    </nav>}
+
     {!status?.available ? <section className="m-auto max-w-lg p-8 text-center">
       <FileText className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
       <h3 className="mb-2 font-medium">需要 OfficeCLI</h3>
@@ -172,6 +218,7 @@ export const OfficeStudioPanel: React.FC = () => {
         <button onClick={() => void openDocument()} className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"><FolderOpen className="h-4 w-4" />打开文档</button>
         {(['docx', 'xlsx', 'pptx'] as const).map((kind) => <button key={kind} onClick={() => void createDocument(kind)} className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-sm hover:bg-muted"><Plus className="h-4 w-4" />{kind.toUpperCase()}</button>)}
       </div>
+      {recent.length > 0 && <div className="mt-6 border-t pt-4"><p className="mb-2 text-xs text-muted-foreground">最近文档</p>{recent.map((item) => <button key={item.path} onClick={() => void loadDocument(item.path, item.name)} className="mx-auto mb-1 block max-w-md truncate text-xs text-primary hover:underline" title={item.path}>{item.name}</button>)}</div>}
     </section> : <>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex gap-1 rounded bg-muted p-0.5">

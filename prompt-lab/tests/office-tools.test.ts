@@ -30,4 +30,18 @@ describe('Office Studio agent tools', () => {
     await expect(tool('office_update').execute({ filePath: 'C:\\report.docx', path: '/body/p[1]', properties: { bold: true } })).resolves.toBe('updated');
     expect(set).toHaveBeenCalledWith({ filePath: 'C:\\report.docx', path: '/body/p[1]', properties: { bold: 'true' } });
   });
+
+  it('creates a document through the save dialog bridge', async () => {
+    const create = vi.fn().mockResolvedValue({ success: true, filePath: 'C:\\new.docx' });
+    vi.stubGlobal('window', { electronAPI: { office: { create } } });
+    await expect(tool('office_create').execute({ kind: 'docx' })).resolves.toContain('C:\\new.docx');
+    expect(create).toHaveBeenCalledWith('docx');
+  });
+
+  it('does not remove an element without confirmation', async () => {
+    const remove = vi.fn();
+    vi.stubGlobal('window', { confirm: vi.fn(() => false), electronAPI: { office: { remove } } });
+    await expect(tool('office_remove').execute({ filePath: 'C:\\report.docx', path: '/body/p[1]' })).rejects.toThrow('用户取消');
+    expect(remove).not.toHaveBeenCalled();
+  });
 });

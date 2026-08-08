@@ -116,6 +116,7 @@ export interface ElectronAPI {
   /** 打开文件选择对话框，返回文件信息(base64 content) */
   pickFile: (options?: { accept?: string; multiple?: boolean }) => Promise<FilePickResult | FilePickResult[] | null>;
   pickFolder: () => Promise<FolderPickResult | null>;
+  getPathForFile: (file: File) => string;
   workspace: {
     openFolder: () => Promise<WorkspaceFolder | null>;
     reauthorize: (rootPath: string) => Promise<{ success: boolean }>;

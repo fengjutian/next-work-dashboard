@@ -6,6 +6,8 @@ Office Studio 是基于 OfficeCLI 的系统级内置插件，为 `.docx`、`.xls
 
 编辑操作保留最多 20 个临时历史快照，支持撤销和重做；快照在应用退出时清理。查询结果可以直接点击定位元素。工具栏的“模板合并”接受 JSON 对象，将当前文档中的 `{{key}}` 占位符替换后另存为同格式文件。
 
+工作区支持多个 Office 文档标签、最近打开记录和文件拖拽打开。Agent 工具还包括 `office_create`、`office_add`、`office_remove`、`office_save`、`office_render` 和 `office_merge`；创建和合并使用系统保存对话框，新增与删除必须由用户确认。
+
 ## 开发环境
 
 插件按以下顺序查找 OfficeCLI：
