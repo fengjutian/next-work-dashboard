@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { authorizeWorkspace } from '../src/main/workspace/path';
 import {
   createKnowledgeDocumentFromTemplate,
+  captureKnowledgeWorkspaceState,
   readKnowledgeDocument,
   scanKnowledgeWorkspace,
   searchKnowledgeWorkspace,
@@ -80,5 +81,28 @@ describe('knowledge workspace filesystem boundary', () => {
     expect(fs.existsSync(path.join(root, 'notes', 'target.md'))).toBe(false);
     expect(fs.readFileSync(path.join(root, 'notes', 'source.md'), 'utf8')).toContain('[[renamed|read this]]');
     expect(fs.readFileSync(path.join(root, 'notes', 'source.md'), 'utf8')).toContain('[[Missing]]');
+  });
+
+  it('captures source baselines and diagnoses stale or missing knowledge sources', () => {
+    const root = createWorkspace();
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'runtime.ts'), 'export const version = 1;', 'utf8');
+    fs.writeFileSync(path.join(root, 'architecture.md'), '---\ntitle: Runtime\ntype: spec\nsources: [src/runtime.ts, src/missing.ts]\n---\n# Runtime', 'utf8');
+
+    const initial = scanKnowledgeWorkspace(root);
+    expect(initial.diagnostics.map((item) => item.code)).toEqual(['SOURCE_NOT_TRACKED', 'SOURCE_MISSING']);
+    const state = captureKnowledgeWorkspaceState(root);
+    expect(state.documents['architecture.md'].sources['src/runtime.ts'].hash).toHaveLength(64);
+    expect(scanKnowledgeWorkspace(root).diagnostics.map((item) => item.code)).toEqual(['SOURCE_MISSING']);
+
+    fs.writeFileSync(path.join(root, 'src', 'runtime.ts'), 'export const version = 2;', 'utf8');
+    expect(scanKnowledgeWorkspace(root).diagnostics.map((item) => item.code)).toEqual(['SOURCE_STALE', 'SOURCE_MISSING']);
+  });
+
+  it('loads project knowledge instructions without requiring them', () => {
+    const root = createWorkspace();
+    fs.mkdirSync(path.join(root, '.knowledge'));
+    fs.writeFileSync(path.join(root, '.knowledge', 'instructions.md'), '# Knowledge brief\nKeep architecture current.', 'utf8');
+    expect(scanKnowledgeWorkspace(root).instructions).toContain('Keep architecture current');
   });
 });

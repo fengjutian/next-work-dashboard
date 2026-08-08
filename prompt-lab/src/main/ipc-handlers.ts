@@ -29,6 +29,7 @@ import { detectRenameRename, parseUnmergedIndex } from './git/rename-conflict';
 import { createTypeScriptSemanticIndex } from './typescript-language-service';
 import {
   createKnowledgeDocumentFromTemplate,
+  captureKnowledgeWorkspaceState,
   readKnowledgeDocument,
   renameKnowledgeDocumentWithBacklinks,
   scanKnowledgeWorkspace,
@@ -1229,6 +1230,11 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
+  });
+
+  ipcMain.handle('knowledge:captureState', async (_event, rootPath: string) => {
+    try { return { success: true, data: captureKnowledgeWorkspaceState(rootPath) }; }
+    catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
   ipcMain.handle('knowledge:createFromTemplate', async (

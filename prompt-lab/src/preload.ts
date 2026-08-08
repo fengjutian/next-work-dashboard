@@ -219,6 +219,7 @@ const electronAPI: ElectronAPI = {
   },
   knowledge: {
     scanWorkspace: (rootPath: string) => ipcRenderer.invoke('knowledge:scanWorkspace', rootPath),
+    captureState: (rootPath: string) => ipcRenderer.invoke('knowledge:captureState', rootPath),
     createFromTemplate: (rootPath: string, templateId: string, values: Record<string, string>) =>
       ipcRenderer.invoke('knowledge:createFromTemplate', rootPath, templateId, values),
     readDocument: (rootPath: string, relativePath: string) =>

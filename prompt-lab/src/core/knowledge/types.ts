@@ -65,6 +65,22 @@ export interface KnowledgeDiagnostic {
   path?: string;
 }
 
+export interface KnowledgeSourceState {
+  hash: string;
+  capturedAt: string;
+}
+
+export interface KnowledgeDocumentState {
+  contentHash: string;
+  sources: Record<string, KnowledgeSourceState>;
+}
+
+export interface KnowledgeWorkspaceState {
+  schemaVersion: 1;
+  updatedAt: string;
+  documents: Record<string, KnowledgeDocumentState>;
+}
+
 export type KnowledgeMutation =
   | { kind: 'create'; path: string; content: string }
   | { kind: 'write'; path: string; before: string; content: string; expectedModifiedAt?: number }

@@ -9,7 +9,7 @@ import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
 import { CodeExtractControls } from './CodeExtractControls';
-import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate } from '@/core/knowledge';
+import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate, type KnowledgeWorkspaceState } from '@/core/knowledge';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
 import { KnowledgeFolderTree } from './KnowledgeFolderTree';
@@ -22,6 +22,8 @@ type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
   diagnostics: KnowledgeDiagnostic[];
   skipped: Array<{ path: string; reason: 'too-large' | 'unreadable' }>;
+  instructions?: string;
+  state?: KnowledgeWorkspaceState;
 };
 type KnowledgeSearchMatch = { uri: string; path: string; title: string; score: number; snippets: Array<{ line: number; text: string }> };
 
@@ -401,6 +403,21 @@ export const KnowledgeGraph: React.FC = () => {
       toast(`已索引 ${index.documents.length} 篇知识文档、${edgeCount} 条显式链接；${unresolved} 条待解析`, 'success');
   }, [applyKnowledgeIndex, loadKnowledgeFolders, toast]);
 
+  const captureKnowledgeBaseline = useCallback(async () => {
+    if (!knowledgeWorkspace) return;
+    setGenerating(true);
+    try {
+      const result = await window.electronAPI.knowledge.captureState(knowledgeWorkspace);
+      if (!result.success || !result.data) throw new Error(result.error ?? 'CAPTURE_STATE_FAILED');
+      await scanKnowledgeWorkspace(knowledgeWorkspace);
+      toast(`已建立 ${Object.keys(result.data.documents).length} 篇文档的来源基线`, 'success');
+    } catch (error) {
+      toast(`建立知识来源基线失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }, [knowledgeWorkspace, scanKnowledgeWorkspace, toast]);
+
   const createKnowledgeFolder = useCallback(async () => {
     if (!knowledgeWorkspace) return;
     const path = newFolderName.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -627,6 +644,13 @@ export const KnowledgeGraph: React.FC = () => {
                 <p>歧义链接 {knowledgeIndex.links.filter((link) => link.status === 'ambiguous').length}</p>
                 <p>规则问题 {knowledgeIndex.diagnostics.length}</p>
               </div>
+              <button
+                className="h-8 w-full rounded-md border text-xs hover:bg-accent disabled:opacity-50"
+                disabled={generating}
+                onClick={() => void captureKnowledgeBaseline()}
+              >
+                建立知识来源基线
+              </button>
               {(knowledgeIndex.links.some((link) => link.status !== 'resolved') || knowledgeIndex.diagnostics.length > 0) && (
                 <div className="max-h-40 space-y-1 overflow-auto rounded border p-1">
                   {knowledgeIndex.links.filter((link) => link.status !== 'resolved').slice(0, 20).map((link, index) => (
