@@ -62,6 +62,9 @@ const config: ForgeConfig = {
     },
   },
   packagerConfig: {
+    extraResource: fs.existsSync(path.join(projectRoot, 'resources', 'officecli'))
+      ? [path.join(projectRoot, 'resources', 'officecli')]
+      : [],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb}/**',
     },

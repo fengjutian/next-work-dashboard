@@ -45,6 +45,13 @@ const electronAPI: ElectronAPI = {
     load: (documentId: string) => ipcRenderer.invoke('document-cache:load', documentId),
     delete: (documentId: string) => ipcRenderer.invoke('document-cache:delete', documentId),
   },
+  office: {
+    status: () => ipcRenderer.invoke('office:status'),
+    create: (kind) => ipcRenderer.invoke('office:create', kind),
+    outline: (filePath) => ipcRenderer.invoke('office:outline', filePath),
+    render: (filePath) => ipcRenderer.invoke('office:render', filePath),
+    close: (filePath) => ipcRenderer.invoke('office:close', filePath),
+  },
 
   // V2 功能
   toggleAlwaysOnTop: () => ipcRenderer.invoke('window-toggle-always-on-top'),

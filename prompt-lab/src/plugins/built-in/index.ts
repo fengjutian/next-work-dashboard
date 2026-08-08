@@ -30,6 +30,7 @@ const NotesPanel = notesPanel.component;
 const wordPreview = preloadable(() => import('../word-preview').then((m) => ({ default: m.WordPreviewPanel })));
 const excelPreview = preloadable(() => import('../excel-preview').then((m) => ({ default: m.ExcelPreviewPanel })));
 const pptPreview = preloadable(() => import('../ppt-preview').then((m) => ({ default: m.PptPreviewPanel })));
+const officeStudio = preloadable(() => import('../office-studio').then((m) => ({ default: m.OfficeStudioPanel })));
 const pdfPreview = preloadable(() => import('../pdf-preview').then((m) => ({ default: m.PdfPreviewPanel })));
 const excalidraw = preloadable(() => import('../excalidraw').then((m) => ({ default: m.ExcalidrawPanel })));
 const pluginManager = preloadable(() => import('../plugin-manager').then((m) => ({ default: m.PluginManagerPanel })));
@@ -46,6 +47,7 @@ const lingoHut = preloadable(() => import('../lingohut').then((m) => ({ default:
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
+const OfficeStudioPanel = officeStudio.component;
 const PdfPreviewPanel = pdfPreview.component;
 const ExcalidrawPanel = excalidraw.component;
 const PluginManagerPanel = pluginManager.component;
@@ -101,6 +103,24 @@ const builtInPlugins: Plugin[] = [
         { id: 'prompts.create', title: '新建提示词', category: '提示词与技能' },
         { id: 'prompts.search', title: '搜索提示词', category: '提示词与技能' },
       ],
+    },
+  },
+  {
+    id: 'office-studio',
+    name: 'Office Studio',
+    icon: FileText,
+    component: OfficeStudioPanel,
+    enabled: false,
+    order: 12,
+    keepAlive: true,
+    contributions: {
+      commands: [
+        { id: 'office-studio.open', title: '打开 Office 文档', category: 'Office Studio' },
+        { id: 'office-studio.create', title: '新建 Office 文档', category: 'Office Studio' },
+      ],
+      views: [{ id: 'office-studio.editor', title: 'Office Studio', component: OfficeStudioPanel, location: 'main' }],
+      fileEditors: [{ id: 'office-studio.editor', extensions: ['.docx', '.xlsx', '.pptx'], viewId: 'office-studio.editor', priority: 200 }],
+      settings: [{ key: 'office-studio.autoPreview', label: '打开后自动渲染', type: 'boolean', default: true }],
     },
   },
   {
@@ -352,6 +372,7 @@ export function registerBuiltInPlugins(): void {
     'word-preview': wordPreview.preload,
     'excel-preview': excelPreview.preload,
     'ppt-preview': pptPreview.preload,
+    'office-studio': officeStudio.preload,
     'pdf-preview': pdfPreview.preload,
     excalidraw: excalidraw.preload,
     'plugin-manager': pluginManager.preload,

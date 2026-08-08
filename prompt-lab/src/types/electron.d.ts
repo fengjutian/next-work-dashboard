@@ -30,6 +30,7 @@ export interface ElectronAPI {
     load: (documentId: string) => Promise<{ success: boolean; data?: ArrayBuffer; filePath?: string; error?: string }>;
     delete: (documentId: string) => Promise<{ success: boolean; error?: string }>;
   };
+  office: import('../plugins/office-studio/types').OfficeStudioAPI;
   toggleAlwaysOnTop: () => Promise<boolean>;
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;

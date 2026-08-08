@@ -48,6 +48,7 @@ import { agentTaskService } from './agent/task-service';
 import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, type PRDeliveryConfig } from './pr-delivery';
 import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
+import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -131,6 +132,7 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 }
 
 export function setupIPC(webviewPreloadPath: string) {
+  registerOfficeIpc();
   const workspaceWatchers = new Map<number, fs.FSWatcher>();
   const dialogAuthorizedFiles = new Set<string>();
 
