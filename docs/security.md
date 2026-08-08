@@ -1,6 +1,6 @@
 # 🔒 安全模型
 
-> next-work-dashboard 安全架构说明。最后更新：2026-08-04。
+> next-work-dashboard 安全架构说明。最后更新：2026-08-08。
 
 ---
 
@@ -26,12 +26,18 @@
 
 ## 2. 应用边界安全
 
+`forge.config.ts` 中 `FusesPlugin` 配置（`FuseVersion.V1`）：
+
 | 措施 | 说明 |
 |---|---|
 | `RunAsNode: false` | 禁止作为 Node.js 运行 |
+| `EnableCookieEncryption: true` | Cookie 加密 |
+| `EnableNodeOptionsEnvironmentVariable: false` | 禁止 `NODE_OPTIONS` 环境变量注入 |
+| `EnableNodeCliInspectArguments: false` | 禁止 `--inspect` 等 CLI 参数 |
 | `OnlyLoadAppFromAsar: true` | 仅从 asar 归档加载代码 |
 | `EnableEmbeddedAsarIntegrityValidation: true` | asar 完整性校验 |
-| `EnableCookieEncryption: true` | Cookie 加密 |
+
+asar 仅解包原生模块 `node-pty` 与 `@lancedb`（其余保持打包加密）。
 
 ---
 
@@ -46,13 +52,14 @@
 
 - 渲染进程**零 Node.js 权限**：通过 `contextBridge.exposeInMainWorld` 暴露受控 API
 - WebView 通过独立的 `webview-preload.ts` 注入，不共享渲染进程的 contextBridge
-- 每个 WebView 使用独立 partition，AI 站点间无法跨站访问
+- 每个 WebView 使用独立 partition（`persist:site-<siteId>`），AI 站点间无法跨站访问
+- 主窗口 `contextIsolation: true`、`nodeIntegration: false`、`webviewTag: true`
 
 ### 3.2 IPC 安全
 
 - 所有 IPC handler 在主进程侧校验参数类型和范围
-- 不信任渲染进程传来的任意路径（路径遍历防护）
-- 数据库操作通过主进程中转，渲染进程不直接写磁盘
+- 不信任渲染进程传来的任意路径（工作区路径经 `resolveWorkspacePath` 边界校验，防符号链接逃逸）
+- 数据库操作通过主进程中转，渲染进程不直接写磁盘（sql.js 导出字节流后由主进程落盘）
 
 ---
 
@@ -70,7 +77,7 @@
 - ❌ `allow-top-navigation` — 无法导航宿主
 - ❌ `allow-forms` — 无法提交表单
 
-### 4.2 CSP 策略
+### 4.2 CSP 策略（`plugin-frame.html`）
 
 ```
 default-src 'none'
@@ -81,7 +88,6 @@ font-src data:
 ```
 
 - 禁止任意网络请求
-- 禁止 `eval()` / `new Function()`
 - 图片仅允许 `data:` 和 `https:`
 
 ### 4.3 权限模型
@@ -114,7 +120,7 @@ font-src data:
 ```
 用户输入 API Key
   → safeStorage.encryptString()
-  → OS 原生密钥链（Windows DPAPI / macOS Keychain / Linux libsecret）
+  → 写盘到 <userData>/.auth-tokens.enc（OS 原生加密，Windows DPAPI / macOS Keychain / Linux libsecret）
   → 使用时 safeStorage.decryptString()
 ```
 
@@ -134,12 +140,15 @@ font-src data:
 
 ## 6. 外链安全
 
-`external.open` 权限的链接打开规则：
+`external.open` 权限的链接打开规则（`usePluginBridge.ts`）：
 
-- ✅ 允许：`https:` / `http:` / `mailto:`
+- ✅ 允许协议：`https:` / `http:` / `mailto:`
+- ✅ URL 长度上限 2048 字符
 - ❌ 拒绝：含用户名密码的 URL（如 `https://user:pass@host`）
-- ❌ 拒绝：`file:` / `javascript:` / `data:` 协议
-- 所有外链通过系统默认浏览器打开，不在应用内 webview 中加载
+- ❌ 拒绝：`file:` / `javascript:` / `data:` 等其余协议
+- 所有外链通过系统默认浏览器打开（`noopener,noreferrer`），不在应用内 webview 中加载
+
+> 该规则作用于插件 SDK 的 `openUrl` 调用。宿主自身 IPC `shell:open-external` 用于应用内部功能，不经过插件权限校验。
 
 ---
 
@@ -147,7 +156,7 @@ font-src data:
 
 AI 对话不开放任意 Shell。代码场景仅通过 `workspace_list_scripts` 查看当前工作区 `package.json` 中的脚本，并通过 `workspace_run_script` 按脚本名称执行。
 
-代码对话第一次写文件、局部编辑或运行项目脚本时，会自动创建以对话 ID 命名的独立 Git Worktree。后续工具操作转向该 Worktree，主工作区保持不变；界面显示隔离分支，并仅允许用户手动选择合并或放弃，AI 工具没有合并权限。
+代码对话第一次写文件、局部编辑或运行项目脚本时，会自动创建以对话 ID 命名的独立 Git Worktree（分支 `agent/<sessionId>`，存储于 `<userData>/agent-worktrees/`）。后续工具操作转向该 Worktree，主工作区保持不变；界面显示隔离分支，并仅允许用户手动选择合并或放弃，AI 工具没有合并权限。
 
 首次创建 Worktree 时主工作区必须干净。若存在未提交修改，系统停止 AI 写入并要求用户先提交或存入 Git Stash，避免 Worktree 基于旧 HEAD、遗漏用户当前修改，或在合并时混淆用户改动与 AI 改动。已经存在的会话 Worktree 可以在主工作区变脏后继续恢复，但合并仍要求主工作区干净。
 
