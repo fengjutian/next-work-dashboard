@@ -3,8 +3,10 @@ import { FileText, FolderOpen, Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2
 import { officeClient } from './office-client';
 import type { OfficeCliStatus, OfficeDocumentKind, OfficeOperationResult } from './types';
 import { OfficeExcelGrid } from './OfficeExcelGrid';
+import { OfficeWordEditor } from './OfficeWordEditor';
+import { OfficePptEditor } from './OfficePptEditor';
 
-type ViewMode = 'preview' | 'outline' | 'grid';
+type ViewMode = 'preview' | 'outline' | 'grid' | 'word' | 'ppt';
 interface OfficeTab { path: string; name: string }
 const RECENT_KEY = 'office-studio:recent-v1';
 
@@ -238,7 +240,7 @@ export const OfficeStudioPanel: React.FC = () => {
     </section> : <>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex gap-1 rounded bg-muted p-0.5">
-          {(['preview', 'outline', ...(filePath.toLowerCase().endsWith('.xlsx') ? ['grid' as const] : [])] as ViewMode[]).map((item) => <button key={item} onClick={() => void switchMode(item)} className={`rounded px-3 py-1 text-xs ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>{item === 'preview' ? '渲染预览' : item === 'outline' ? '文档结构' : '表格编辑'}</button>)}
+          {(['preview', 'outline', ...(filePath.toLowerCase().endsWith('.xlsx') ? ['grid' as const] : []), ...(filePath.toLowerCase().endsWith('.docx') ? ['word' as const] : []), ...(filePath.toLowerCase().endsWith('.pptx') ? ['ppt' as const] : [])] as ViewMode[]).map((item) => <button key={item} onClick={() => void switchMode(item)} className={`rounded px-3 py-1 text-xs ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>{item === 'preview' ? '渲染预览' : item === 'outline' ? '文档结构' : item === 'grid' ? '表格编辑' : item === 'word' ? 'Word 编辑' : 'PPT 编辑'}</button>)}
         </div>
         <div className="flex gap-2">
           <button disabled={!canUndo} onClick={() => void restore('undo')} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" />撤销</button>
@@ -253,9 +255,9 @@ export const OfficeStudioPanel: React.FC = () => {
       <main className="relative flex min-h-0 flex-1 bg-muted/30">
         {busy && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70"><Loader2 className="h-6 w-6 animate-spin" /></div>}
         <section className="min-w-0 flex-1">
-          {mode === 'grid' && filePath.toLowerCase().endsWith('.xlsx') ? <OfficeExcelGrid key={`${filePath}:${gridRevision}`} filePath={filePath} canUndo={canUndo} canRedo={canRedo} onUndo={() => void restore('undo')} onRedo={() => void restore('redo')} onMutation={handleGridMutation} onError={handleGridError} /> : mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : queryResults.length ? <div className="h-full overflow-auto p-3">{queryResults.map((line) => <button key={line} onClick={() => void chooseQueryResult(line)} className={`mb-1 block w-full rounded border px-3 py-2 text-left text-xs hover:bg-muted ${line.startsWith(`${selectedPath}\t`) ? 'border-primary bg-primary/5' : ''}`}><code className="break-all">{line}</code></button>)}</div> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
+          {mode === 'grid' && filePath.toLowerCase().endsWith('.xlsx') ? <OfficeExcelGrid key={`${filePath}:${gridRevision}`} filePath={filePath} canUndo={canUndo} canRedo={canRedo} onUndo={() => void restore('undo')} onRedo={() => void restore('redo')} onMutation={handleGridMutation} onError={handleGridError} /> : mode === 'word' && filePath.toLowerCase().endsWith('.docx') ? <OfficeWordEditor filePath={filePath} onMutation={handleGridMutation} onError={handleGridError} /> : mode === 'ppt' && filePath.toLowerCase().endsWith('.pptx') ? <OfficePptEditor filePath={filePath} onMutation={handleGridMutation} onError={handleGridError} /> : mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : queryResults.length ? <div className="h-full overflow-auto p-3">{queryResults.map((line) => <button key={line} onClick={() => void chooseQueryResult(line)} className={`mb-1 block w-full rounded border px-3 py-2 text-left text-xs hover:bg-muted ${line.startsWith(`${selectedPath}\t`) ? 'border-primary bg-primary/5' : ''}`}><code className="break-all">{line}</code></button>)}</div> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
         </section>
-        <aside className="w-80 shrink-0 overflow-auto border-l bg-background p-3 text-xs">
+        {(mode === 'preview' || mode === 'outline') && <aside className="w-80 shrink-0 overflow-auto border-l bg-background p-3 text-xs">
           <h3 className="mb-3 font-semibold">元素与属性</h3>
           <label className="mb-1 block text-muted-foreground">查询选择器</label>
           <div className="mb-3 flex gap-1"><input value={selector} onChange={(e) => setSelector(e.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1.5" /><button onClick={() => void queryElements()} className="rounded border px-2 hover:bg-muted">查询</button></div>
@@ -275,7 +277,7 @@ export const OfficeStudioPanel: React.FC = () => {
             <button disabled={selectedPath === '/'} onClick={() => void removeElement()} className="inline-flex items-center justify-center gap-1 rounded border border-destructive/40 px-2 py-1.5 text-destructive hover:bg-destructive/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />删除</button>
           </div>
           <p className="mt-3 text-[11px] leading-5 text-muted-foreground">写操作会先创建临时备份；命令失败时自动恢复原文件。</p>
-        </aside>
+        </aside>}
       </main>
     </>}
   </div>;

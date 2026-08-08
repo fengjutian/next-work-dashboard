@@ -40,6 +40,7 @@ export interface OfficeStudioAPI {
   undo(filePath: string): Promise<OfficeOperationResult>;
   redo(filePath: string): Promise<OfficeOperationResult>;
   merge(filePath: string, data: Record<string, unknown>): Promise<OfficeCreateResult>;
+  saveAs(filePath: string): Promise<OfficeCreateResult>;
   render(filePath: string): Promise<OfficeRenderResult>;
   close(filePath: string): Promise<OfficeOperationResult>;
 }

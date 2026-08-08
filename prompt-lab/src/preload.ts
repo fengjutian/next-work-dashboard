@@ -58,6 +58,7 @@ const electronAPI: ElectronAPI = {
     undo: (filePath) => ipcRenderer.invoke('office:undo', filePath),
     redo: (filePath) => ipcRenderer.invoke('office:redo', filePath),
     merge: (filePath, data) => ipcRenderer.invoke('office:merge', filePath, data),
+    saveAs: (filePath) => ipcRenderer.invoke('office:saveAs', filePath),
     render: (filePath) => ipcRenderer.invoke('office:render', filePath),
     close: (filePath) => ipcRenderer.invoke('office:close', filePath),
   },

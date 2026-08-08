@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { addOfficeElement, closeOfficeDocument, createOfficeDocument, getOfficeCliStatus, getOfficeElement, getOfficeOutline, mergeOfficeTemplate, queryOfficeElements, redoOfficeDocument, removeOfficeElement, renderOfficeHtml, saveOfficeDocument, setOfficeProperties, undoOfficeDocument } from './office-service';
 import type { OfficeAddRequest, OfficeDocumentKind, OfficeSetRequest } from '../types';
@@ -32,6 +33,23 @@ export function registerOfficeIpc(): void {
     const outputPath = path.extname(selection.filePath) ? selection.filePath : `${selection.filePath}${extension}`;
     const result = await mergeOfficeTemplate(filePath, outputPath, data);
     return { ...result, filePath: result.success ? outputPath : undefined };
+  });
+  ipcMain.handle('office:saveAs', async (event, filePath: string) => {
+    const extension = path.extname(filePath).toLowerCase();
+    const definition = Object.values(definitions).find((item) => `.${item.extension}` === extension);
+    if (!definition) return { success: false, error: 'UNSUPPORTED_OFFICE_FORMAT' };
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const parsed = path.parse(filePath);
+    const options = { title: 'Office 文档另存为', defaultPath: path.join(parsed.dir, `${parsed.name}-copy${parsed.ext}`), filters: [{ name: definition.label, extensions: [definition.extension] }] };
+    const selection = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+    if (selection.canceled || !selection.filePath) return { success: false, error: 'CANCELLED' };
+    const outputPath = path.extname(selection.filePath) ? selection.filePath : `${selection.filePath}${extension}`;
+    const saved = await saveOfficeDocument(filePath);
+    if (!saved.success) return saved;
+    try {
+      await fs.promises.copyFile(filePath, outputPath);
+      return { success: true, filePath: outputPath, output: `已另存为 ${outputPath}` };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
   ipcMain.handle('office:render', (_event, filePath: string) => renderOfficeHtml(filePath));
   ipcMain.handle('office:close', (_event, filePath: string) => closeOfficeDocument(filePath));
