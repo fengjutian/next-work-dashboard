@@ -107,6 +107,16 @@ export const wereadSyncHistory = sqliteTable('weread_sync_history', {
   addedNotes: integer('added_notes').notNull(), deletedNotes: integer('deleted_notes').notNull(), totalBooks: integer('total_books').notNull(), totalNotes: integer('total_notes').notNull(),
 });
 
+export const hanyuJinjieExecutions = sqliteTable('hanyu_jinjie_executions', {
+  id: text('id').primaryKey(),
+  word: text('word').notNull(),
+  status: text('status').notNull(),
+  svgContent: text('svg_content').notNull().default(''),
+  error: text('error').notNull().default(''),
+  model: text('model').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
 // ── Schema version tracking ──
 export const schemaVersion = sqliteTable("schema_version", {
   version: integer("version").primaryKey(),

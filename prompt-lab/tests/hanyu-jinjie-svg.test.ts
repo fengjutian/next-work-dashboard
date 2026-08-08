@@ -7,6 +7,10 @@ describe('汉语新解 SVG handling', () => {
     expect(extractSvgSource('```svg\n<svg viewBox="0 0 1 1"></svg>\n```')).toBe('<svg viewBox="0 0 1 1"></svg>');
   });
 
+  it('extracts a complete SVG when the model adds prose around it', () => {
+    expect(extractSvgSource('说吧。\n```svg\n<svg><text>内卷</text></svg>\n```\n生成完成')).toBe('<svg><text>内卷</text></svg>');
+  });
+
   it('removes executable content and external resources', () => {
     const result = sanitizeGeneratedSvg(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)">
       <script>alert(1)</script><foreignObject><div>bad</div></foreignObject>
@@ -19,7 +23,7 @@ describe('汉语新解 SVG handling', () => {
   });
 
   it('rejects malformed or non-SVG responses', () => {
-    expect(() => sanitizeGeneratedSvg('<div>not svg</div>')).toThrow('有效的 SVG');
+    expect(() => sanitizeGeneratedSvg('<div>not svg</div>')).toThrow('没有找到 SVG');
     expect(() => sanitizeGeneratedSvg('<svg><text></svg>')).toThrow('有效的 SVG');
   });
 

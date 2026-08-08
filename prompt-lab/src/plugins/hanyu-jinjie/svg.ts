@@ -2,15 +2,20 @@ const BLOCKED_ELEMENTS = new Set(['script', 'foreignobject', 'iframe', 'object',
 const URL_ATTRIBUTES = new Set(['href', 'xlink:href', 'src']);
 
 export function extractSvgSource(raw: string): string {
-  return raw.trim()
+  const cleaned = raw.trim()
     .replace(/^```(?:svg|xml|html)?\s*\n?/i, '')
     .replace(/\n?```\s*$/i, '')
     .replace(/^<\?xml[^>]*>\s*/i, '')
     .trim();
+  const start = cleaned.search(/<svg(?:\s|>)/i);
+  const closingMatches = [...cleaned.matchAll(/<\/svg\s*>/gi)];
+  const end = closingMatches.at(-1);
+  return start >= 0 && end ? cleaned.slice(start, (end.index || 0) + end[0].length) : cleaned;
 }
 
 export function sanitizeGeneratedSvg(raw: string): string {
   const source = extractSvgSource(raw);
+  if (!/<svg(?:\s|>)/i.test(source)) throw new Error('模型回复中没有找到 SVG 卡片，请重新生成');
   const document = new DOMParser().parseFromString(source, 'image/svg+xml');
   const root = document.documentElement;
   if (root.localName.toLocaleLowerCase() !== 'svg' || document.querySelector('parsererror')) {

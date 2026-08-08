@@ -277,6 +277,16 @@ function ensureSchema(): void {
       total_books INTEGER NOT NULL, total_notes INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_weread_sync_time ON weread_sync_history(synced_at DESC);
+    CREATE TABLE IF NOT EXISTS hanyu_jinjie_executions (
+      id TEXT PRIMARY KEY,
+      word TEXT NOT NULL,
+      status TEXT NOT NULL,
+      svg_content TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_hanyu_jinjie_executions_time ON hanyu_jinjie_executions(created_at DESC);
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -808,6 +818,24 @@ export interface WereadAction { id: string; bookId: string; sourceNoteId: string
 export function dbLoadWereadActions(): WereadAction[] { return getDb().select().from(schema.wereadActions).orderBy(desc(schema.wereadActions.updatedAt)).all() as unknown as WereadAction[]; }
 export function dbSaveWereadAction(action: WereadAction): void { getDb().insert(schema.wereadActions).values(action as never).onConflictDoUpdate({ target: schema.wereadActions.id, set: action as never }).run(); }
 export function dbLoadWereadSyncHistory(): WereadSyncSummary[] { return getDb().select().from(schema.wereadSyncHistory).orderBy(desc(schema.wereadSyncHistory.syncedAt)).all() as unknown as WereadSyncSummary[]; }
+
+export interface HanyuJinjieExecution {
+  id: string;
+  word: string;
+  status: 'success' | 'error';
+  svgContent: string;
+  error: string;
+  model: string;
+  createdAt: number;
+}
+
+export function dbSaveHanyuJinjieExecution(execution: HanyuJinjieExecution): void {
+  getDb().insert(schema.hanyuJinjieExecutions).values(execution).run();
+}
+
+export function dbLoadHanyuJinjieExecutions(limit = 30): HanyuJinjieExecution[] {
+  return getDb().select().from(schema.hanyuJinjieExecutions).orderBy(desc(schema.hanyuJinjieExecutions.createdAt)).limit(Math.max(1, Math.min(200, limit))).all() as HanyuJinjieExecution[];
+}
 
 // ═══════════════════════════════════════════
 // 数据库浏览器（只读查询）

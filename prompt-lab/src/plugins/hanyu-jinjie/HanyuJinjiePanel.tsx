@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Download, HanyuJinjie, Loader2, RefreshCw, Send, Sparkles } from '@/components/icons';
+import { Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
+import { dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
 import { useStore } from '@/store/store';
 import { safeCardFilename, sanitizeGeneratedSvg } from './svg';
 
@@ -47,14 +48,20 @@ const MAX_WORD_LENGTH = 24;
 async function llmChat(apiKey: string, baseUrl: string, model: string, messages: ChatMessage[]): Promise<string> {
   const provider = createOpenAIProvider({ apiKey, baseUrl });
   const chunks: string[] = [];
-  for await (const chunk of provider.chat(messages, { model, temperature: 0.82, stream: true })) {
+  for await (const chunk of provider.chat(messages, { model, temperature: 0.82, maxTokens: 4_096, stream: true })) {
     if (chunk.delta) chunks.push(chunk.delta);
   }
   return chunks.join('');
 }
 
 function errorMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : '生成失败，请稍后重试';
+  if (!(reason instanceof Error)) return '生成失败，请稍后重试';
+  if (/aborted|aborterror/i.test(reason.message)) return '生成请求被中止，请重试；如果持续出现，请更换响应更快的模型';
+  return reason.message;
+}
+
+function lispString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ');
 }
 
 export const HanyuJinjiePanel: React.FC = () => {
@@ -65,6 +72,7 @@ export const HanyuJinjiePanel: React.FC = () => {
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [executions, setExecutions] = useState<HanyuJinjieExecution[]>([]);
   const requestIdRef = useRef(0);
   const copyTimerRef = useRef<number>();
 
@@ -73,26 +81,50 @@ export const HanyuJinjiePanel: React.FC = () => {
     if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
   }, []);
 
+  const reloadExecutions = useCallback(() => {
+    if (!isDbReady()) return false;
+    try { setExecutions(dbLoadHanyuJinjieExecutions()); } catch { setExecutions([]); }
+    return true;
+  }, []);
+
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => { attempts += 1; if (reloadExecutions() || attempts >= 30) window.clearInterval(timer); }, 100);
+    return () => window.clearInterval(timer);
+  }, [reloadExecutions]);
+
+  const persistExecution = useCallback(async (execution: Omit<HanyuJinjieExecution, 'id' | 'createdAt'>) => {
+    if (!isDbReady()) return;
+    try {
+      dbSaveHanyuJinjieExecution({ ...execution, id: crypto.randomUUID(), createdAt: Date.now() });
+      await flushDbToDisk(); reloadExecutions();
+    } catch { /* Persistence must not hide a generated card or its original error. */ }
+  }, [reloadExecutions]);
+
   const handleGenerate = useCallback(async (nextWord?: string) => {
     const word = (nextWord ?? input).trim();
     if (!word || loading) return;
     if (word.length > MAX_WORD_LENGTH) { setError(`词汇请控制在 ${MAX_WORD_LENGTH} 个字符以内`); return; }
+    if (!isDbReady()) { setError('本地数据库正在初始化，请稍后再试'); return; }
     if (!aiApi.apiKey?.trim() || !aiApi.baseUrl?.trim() || !aiApi.model?.trim()) {
       setError('请先在设置中完整配置 AI 服务、API Key 和模型'); return;
     }
     const requestId = ++requestIdRef.current;
     setInput(word); setLoading(true); setError(null); setCopied(false);
     try {
-      const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: `词汇：${word}` }];
+      const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: `(汉语新解 "${lispString(word)}")` }];
       const sanitized = sanitizeGeneratedSvg(await llmChat(aiApi.apiKey, aiApi.baseUrl, aiApi.model, messages));
+      await persistExecution({ word, status: 'success', svgContent: sanitized, error: '', model: aiApi.model });
       if (requestId !== requestIdRef.current) return;
       setSvgContent(sanitized); setGeneratedWord(word);
     } catch (reason) {
-      if (requestId === requestIdRef.current) setError(errorMessage(reason));
+      const message = errorMessage(reason);
+      await persistExecution({ word, status: 'error', svgContent: '', error: message, model: aiApi.model });
+      if (requestId === requestIdRef.current) setError(message);
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [aiApi, input, loading]);
+  }, [aiApi, input, loading, persistExecution]);
 
   const handleCopy = useCallback(async () => {
     if (!svgContent) return;
@@ -145,6 +177,15 @@ export const HanyuJinjiePanel: React.FC = () => {
           <section className="rounded-2xl border border-dashed bg-background/50 p-4 text-xs leading-5 text-muted-foreground">
             <p className="font-medium text-foreground">生成说明</p><p className="mt-1">AI 会返回一张 400 × 600 的 SVG 卡片。</p>
           </section>
+
+          {executions.length > 0 && <section className="rounded-2xl border bg-card p-4">
+            <div className="flex items-center gap-2"><History className="h-4 w-4 text-primary" /><h2 className="text-xs font-medium">最近执行</h2><span className="ml-auto text-[10px] text-muted-foreground">SQLite</span></div>
+            <div className="mt-3 space-y-1">{executions.slice(0, 10).map((execution) => <button key={execution.id} type="button" onClick={() => { setInput(execution.word); setGeneratedWord(execution.word); setSvgContent(execution.svgContent || null); setError(execution.error || null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${execution.status === 'success' ? 'bg-success' : 'bg-destructive'}`} />
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">{execution.word}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(execution.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+            </button>)}</div>
+          </section>}
         </aside>
 
         <section className="relative flex min-h-[32rem] min-w-0 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm lg:min-h-0">

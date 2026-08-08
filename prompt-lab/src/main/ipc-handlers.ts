@@ -258,13 +258,19 @@ export function setupIPC(webviewPreloadPath: string) {
       if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
       const body = { ...payload.body, stream: false };
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120_000);
+      let timedOut = false;
+      const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 300_000);
       try {
         const response = await fetch(url, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
         const text = await response.text();
         let data: unknown;
         try { data = text ? JSON.parse(text) : {}; } catch { data = undefined; }
         return response.ok ? { ok: true, status: response.status, data } : { ok: false, status: response.status, error: text.slice(0, 1000) };
+      } catch (error) {
+        if (timedOut || (error instanceof Error && error.name === 'AbortError')) {
+          return { ok: false, status: 408, error: '模型生成超过 5 分钟，请缩短输入或更换响应更快的模型' };
+        }
+        throw error;
       } finally { clearTimeout(timeout); }
     } catch (error) {
       return { ok: false, status: 0, error: error instanceof Error ? error.message : String(error) };
