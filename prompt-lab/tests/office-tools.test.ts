@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { officeTools } from '../src/core/tools/office-tools';
+import { subscribeOfficeApproval } from '../src/services/office-approval';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -19,16 +20,20 @@ describe('Office Studio agent tools', () => {
 
   it('requires confirmation before an AI write', async () => {
     const set = vi.fn().mockResolvedValue({ success: true, output: 'updated' });
-    vi.stubGlobal('window', { confirm: vi.fn(() => false), electronAPI: { office: { set } } });
+    vi.stubGlobal('window', { electronAPI: { office: { set } } });
+    const unsubscribe = subscribeOfficeApproval((request) => request.respond(false));
     await expect(tool('office_update').execute({ filePath: 'C:\\report.docx', path: '/body/p[1]', properties: { text: 'New' } })).rejects.toThrow('用户取消');
     expect(set).not.toHaveBeenCalled();
+    unsubscribe();
   });
 
   it('normalizes property values after confirmation', async () => {
     const set = vi.fn().mockResolvedValue({ success: true, output: 'updated' });
-    vi.stubGlobal('window', { confirm: vi.fn(() => true), electronAPI: { office: { set } } });
+    vi.stubGlobal('window', { electronAPI: { office: { set } } });
+    const unsubscribe = subscribeOfficeApproval((request) => request.respond(true));
     await expect(tool('office_update').execute({ filePath: 'C:\\report.docx', path: '/body/p[1]', properties: { bold: true } })).resolves.toBe('updated');
     expect(set).toHaveBeenCalledWith({ filePath: 'C:\\report.docx', path: '/body/p[1]', properties: { bold: 'true' } });
+    unsubscribe();
   });
 
   it('creates a document through the save dialog bridge', async () => {
@@ -40,8 +45,10 @@ describe('Office Studio agent tools', () => {
 
   it('does not remove an element without confirmation', async () => {
     const remove = vi.fn();
-    vi.stubGlobal('window', { confirm: vi.fn(() => false), electronAPI: { office: { remove } } });
+    vi.stubGlobal('window', { electronAPI: { office: { remove } } });
+    const unsubscribe = subscribeOfficeApproval((request) => request.respond(false));
     await expect(tool('office_remove').execute({ filePath: 'C:\\report.docx', path: '/body/p[1]' })).rejects.toThrow('用户取消');
     expect(remove).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

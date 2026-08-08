@@ -1,14 +1,20 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, FolderOpen, Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2 } from '@/components/icons';
 import { officeClient } from './office-client';
 import type { OfficeCliStatus, OfficeDocumentKind, OfficeOperationResult } from './types';
 import { OfficeExcelGrid } from './OfficeExcelGrid';
 import { OfficeWordEditor } from './OfficeWordEditor';
 import { OfficePptEditor } from './OfficePptEditor';
+import { listOfficeAudit } from '@/services/office-approval';
 
 type ViewMode = 'preview' | 'outline' | 'grid' | 'word' | 'ppt';
 interface OfficeTab { path: string; name: string }
 const RECENT_KEY = 'office-studio:recent-v1';
+const SESSION_KEY = 'office-studio:session-v1';
+
+function storedTabs(key: string): OfficeTab[] {
+  try { const value = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; }
+}
 
 export const OfficeStudioPanel: React.FC = () => {
   const [status, setStatus] = useState<OfficeCliStatus>();
@@ -28,12 +34,13 @@ export const OfficeStudioPanel: React.FC = () => {
   const [queryResults, setQueryResults] = useState<string[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [tabs, setTabs] = useState<OfficeTab[]>([]);
-  const [recent, setRecent] = useState<OfficeTab[]>(() => {
-    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') as OfficeTab[]; } catch { return []; }
-  });
+  const [tabs, setTabs] = useState<OfficeTab[]>(() => storedTabs(SESSION_KEY));
+  const [recent, setRecent] = useState<OfficeTab[]>(() => storedTabs(RECENT_KEY));
   const [dragOver, setDragOver] = useState(false);
   const [gridRevision, setGridRevision] = useState(0);
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+  const restoredSession = useRef(false);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   const refreshStatus = useCallback(async () => setStatus(await officeClient.status()), []);
 
@@ -59,6 +66,14 @@ export const OfficeStudioPanel: React.FC = () => {
     else if (!structured.success) setError(structured.error || '文档结构读取失败');
     setBusy(false);
   }, []);
+
+  useEffect(() => { localStorage.setItem(SESSION_KEY, JSON.stringify(tabs)); }, [tabs]);
+  useEffect(() => {
+    if (restoredSession.current) return;
+    restoredSession.current = true;
+    const last = tabs.at(-1);
+    if (last) void loadDocument(last.path, last.name);
+  }, [loadDocument, tabs]);
 
   useEffect(() => { void refreshStatus(); }, [refreshStatus]);
   useEffect(() => {
@@ -99,10 +114,12 @@ export const OfficeStudioPanel: React.FC = () => {
   }, [createDocument, openDocument]);
 
   const runOperation = async <T extends { success: boolean; output?: string; error?: string; canUndo?: boolean; canRedo?: boolean }>(operation: () => Promise<T>, refresh = false): Promise<T> => {
+    setSaveState('saving');
     setBusy(true);
     setError('');
     const result = await operation();
     if (!result.success) setError(result.error || 'Office 操作失败');
+    setSaveState(result.success ? 'saved' : 'error');
     if (result.canUndo !== undefined) setCanUndo(result.canUndo);
     if (result.canRedo !== undefined) setCanRedo(result.canRedo);
     if (refresh && result.success) await loadDocument(filePath, fileName);
@@ -144,7 +161,8 @@ export const OfficeStudioPanel: React.FC = () => {
   };
 
   const handleGridMutation = useCallback((result: OfficeOperationResult) => {
-    if (!result.success) { setError(result.error || 'Excel 单元格更新失败'); return; }
+    setSaveState(result.success ? 'saved' : 'error');
+    if (!result.success) { setError(result.error || 'Office 更新失败'); return; }
     setCanUndo(result.canUndo ?? true);
     setCanRedo(result.canRedo ?? false);
   }, []);
@@ -198,6 +216,11 @@ export const OfficeStudioPanel: React.FC = () => {
     } catch (mergeError) { setError(mergeError instanceof Error ? mergeError.message : '模板数据格式错误'); }
   };
 
+  const saveAs = async () => {
+    const result = await runOperation(() => officeClient.saveAs(filePath));
+    if (result.success && result.filePath) await loadDocument(result.filePath);
+  };
+
   return <div onDragOver={(event) => { event.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={(event) => void handleDrop(event)} className={`relative flex h-full min-h-0 flex-col bg-background text-foreground ${dragOver ? 'ring-2 ring-inset ring-primary' : ''}`}>
     {dragOver && <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-primary/10 text-lg font-medium">拖放 Office 文档到这里打开</div>}
     <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
@@ -212,6 +235,8 @@ export const OfficeStudioPanel: React.FC = () => {
         <span className={`rounded-full px-2 py-1 text-[11px] ${status?.available ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>
           {status?.available ? status.version || 'OfficeCLI 可用' : 'OfficeCLI 未就绪'}
         </span>
+        {filePath && <span className={`text-[11px] ${saveState === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>{saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存失败' : '已保存'}</span>}
+        <button onClick={() => setAuditOpen(true)} className="rounded border px-2 py-1 text-[11px] hover:bg-muted">AI 审计</button>
         <button onClick={() => void refreshStatus()} className="rounded border p-1.5 hover:bg-muted" title="重新检测"><RefreshCw className="h-3.5 w-3.5" /></button>
       </div>
     </header>
@@ -246,6 +271,7 @@ export const OfficeStudioPanel: React.FC = () => {
           <button disabled={!canUndo} onClick={() => void restore('undo')} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" />撤销</button>
           <button disabled={!canRedo} onClick={() => void restore('redo')} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"><RefreshCw className="h-3.5 w-3.5" />重做</button>
           <button onClick={() => void runOperation(() => officeClient.save(filePath))} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted"><Save className="h-3.5 w-3.5" />保存</button>
+          <button onClick={() => void saveAs()} className="rounded border px-2 py-1 text-xs hover:bg-muted">另存为</button>
           <button onClick={() => void mergeTemplate()} className="rounded border px-2 py-1 text-xs hover:bg-muted">模板合并</button>
           <button onClick={() => void loadDocument(filePath, fileName)} className="rounded border px-2 py-1 text-xs hover:bg-muted">刷新</button>
           <button onClick={() => void openDocument()} className="rounded border px-2 py-1 text-xs hover:bg-muted">打开其他文档</button>
@@ -280,5 +306,6 @@ export const OfficeStudioPanel: React.FC = () => {
         </aside>}
       </main>
     </>}
+    {auditOpen && <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50"><section className="flex max-h-[80%] w-[720px] max-w-[92%] flex-col rounded-xl border bg-card shadow-2xl"><header className="flex items-center justify-between border-b p-3"><h3 className="text-sm font-semibold">Office AI 操作审计</h3><button onClick={() => setAuditOpen(false)}>×</button></header><div className="overflow-auto p-3">{listOfficeAudit().length ? listOfficeAudit().map((record) => <div key={record.id} className="mb-2 rounded border p-3 text-xs"><div className="flex justify-between"><code>{record.operation}</code><span className={record.approved ? record.success === false ? 'text-destructive' : 'text-emerald-600' : 'text-muted-foreground'}>{!record.approved ? '已拒绝' : record.success === false ? '失败' : record.success === true ? '成功' : '已批准'}</span></div><p className="mt-1">{record.summary}</p><time className="mt-1 block text-[10px] text-muted-foreground">{new Date(record.timestamp).toLocaleString()}</time></div>) : <p className="p-6 text-center text-sm text-muted-foreground">暂无 AI Office 操作</p>}</div></section></div>}
   </div>;
 };
