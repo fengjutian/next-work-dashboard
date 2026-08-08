@@ -8,17 +8,22 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/fjutian/nwd-admin/internal/model"
 	"github.com/fjutian/nwd-admin/internal/service"
 )
 
 //go:embed ../view/layout.html
 var layoutHTML string
+
+//go:embed ../view/components.html
+var componentsHTML string
 
 //go:embed ../view/home.html ../view/plugins.html
 var pageFS embed.FS
@@ -37,6 +42,7 @@ func init() {
 		buildVersion = "dev"
 	}
 	baseLayout = template.Must(template.New("layout").Parse(layoutHTML))
+	template.Must(baseLayout.Parse(componentsHTML))
 }
 
 type Handler struct {
@@ -259,11 +265,7 @@ var unsafeFilenameRegex = regexp.MustCompile(`["/\x00-\x1f\x7f]`)
 func sanitizeFilename(name string) string {
 	name = strings.TrimSpace(name)
 	name = unsafeFilenameRegex.ReplaceAllString(name, "_")
-	name = path.Join("/", name) // force filepath.Base semantics
-	name = name[1:] // strip leading /
-	for _, r := range name {
-		_ = r
-	}
+	name = filepath.Base(name)
 	if name == "" || name == "." {
 		name = "plugin.nwd"
 	}
@@ -282,6 +284,3 @@ func sanitizeID(raw string) string {
 	}
 	return s
 }
-
-// model import for UploadPlugin
-import "github.com/fjutian/nwd-admin/internal/model"
