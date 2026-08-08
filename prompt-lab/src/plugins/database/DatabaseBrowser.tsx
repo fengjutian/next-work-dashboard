@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { getDb, execSql, getTableInfo, exportDb, isDbReady } from '@/db';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { execSql, getTableInfo, exportDb, isDbReady } from '@/db';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Download, Copy, Check } from '@/components/icons';
+import { RefreshCw, Download, Copy, Check, Database, Search } from '@/components/icons';
+import { TABLE_CATEGORIES, tableCategoryId, tableDisplayName } from './tableCatalog';
 
 interface TableInfo {
   table: string;
@@ -21,6 +22,7 @@ export const DatabaseBrowser: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tableQuery, setTableQuery] = useState('');
 
   const loadTables = useCallback(() => {
     if (!isDbReady()) return;
@@ -123,6 +125,14 @@ export const DatabaseBrowser: React.FC = () => {
   };
 
   const rowCount = data ? data.values.length : 0;
+  const groupedTables = useMemo(() => {
+    const query = tableQuery.trim().toLocaleLowerCase();
+    return TABLE_CATEGORIES.map((category) => ({
+      ...category,
+      tables: tables.filter((table) => tableCategoryId(table.table) === category.id && (!query || `${table.table} ${tableDisplayName(table.table)}`.toLocaleLowerCase().includes(query))),
+    })).filter((category) => category.tables.length > 0);
+  }, [tableQuery, tables]);
+  const selectedInfo = tables.find((table) => table.table === selectedTable);
 
   return (
     <div className="flex flex-col h-full">
@@ -155,38 +165,47 @@ export const DatabaseBrowser: React.FC = () => {
         </div>
       )}
 
-      {/* 表列表 */}
-      <div className="flex gap-0.5 px-3 py-2 border-b bg-background overflow-x-auto">
-        {tables.length === 0 ? (
-          <span className="text-xs text-muted-foreground py-1">暂无表 — 数据库为空</span>
-        ) : (
-          tables.map((t) => (
-            <button
-              key={t.table}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap ${
-                selectedTable === t.table
-                  ? 'bg-primary text-white'
-                  : 'bg-card text-muted-foreground hover:bg-accent'
-              }`}
-              onClick={() => handleTableClick(t.table)}
-            >
-              {t.table}
-            </button>
-          ))
-        )}
-      </div>
+      <div className="flex min-h-0 flex-1">
+        {/* 分类表导航 */}
+        <aside className="flex w-64 shrink-0 flex-col border-r bg-muted/15">
+          <div className="border-b p-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <input value={tableQuery} onChange={(event) => setTableQuery(event.target.value)} placeholder="搜索数据表…" className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10" />
+            </div>
+          </div>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="space-y-4 p-2">
+              {tables.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">数据库为空</p>}
+              {tables.length > 0 && groupedTables.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">没有匹配的数据表</p>}
+              {groupedTables.map((category) => <section key={category.id}>
+                <div className="flex items-center gap-2 px-2 pb-1.5">
+                  <h3 className="text-[11px] font-semibold text-foreground">{category.label}</h3>
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">{category.tables.length}</span>
+                </div>
+                <div className="space-y-0.5">{category.tables.map((table) => <button key={table.table} type="button" onClick={() => handleTableClick(table.table)} title={`${category.description}\n${table.table}`} className={`group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${selectedTable === table.table ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+                  <Database className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                  <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{tableDisplayName(table.table)}</span><span className={`block truncate font-mono text-[9px] ${selectedTable === table.table ? 'text-primary-foreground/70' : 'text-muted-foreground/70'}`}>{table.table}</span></span>
+                  <span className={`shrink-0 text-[9px] tabular-nums ${selectedTable === table.table ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{table.columns.length} 列</span>
+                </button>)}</div>
+              </section>)}
+            </div>
+          </ScrollArea>
+          <div className="border-t px-3 py-2 text-[10px] text-muted-foreground">共 {tables.length} 张表 · {TABLE_CATEGORIES.filter((category) => tables.some((table) => tableCategoryId(table.table) === category.id)).length} 个分类</div>
+        </aside>
 
-      {/* 主内容 */}
-      <ScrollArea className="flex-1">
-        <div className="p-3">
+        {/* 主内容 */}
+        <ScrollArea className="min-w-0 flex-1">
+          <div className="p-4">
           {selectedTable && data ? (
             <>
-              {/* 统计 */}
-              <div className="flex items-center gap-3 mb-2 text-xs text-muted-foreground">
-                <span>{data.columns.length} 列</span>
-                <span>·</span>
-                <span>{rowCount} 行</span>
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <div><div className="flex items-center gap-2"><Database className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">{tableDisplayName(selectedTable)}</h3></div><p className="mt-1 font-mono text-[10px] text-muted-foreground">{selectedTable}</p></div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="rounded-full border bg-background px-2 py-1">{data.columns.length} 列</span>
+                <span className="rounded-full border bg-background px-2 py-1">{rowCount} 行</span>
                 {rowCount === 1000 && <span className="text-warning">（最多 1000 行）</span>}
+                </div>
               </div>
 
               {/* 数据表格 */}
@@ -241,28 +260,27 @@ export const DatabaseBrowser: React.FC = () => {
               </div>
             </>
           ) : selectedTable && loading ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
               <RefreshCw className="h-4 w-4 animate-spin mr-2" />
               加载中...
             </div>
           ) : selectedTable ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
               查询失败
             </div>
           ) : (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-              {tables.length > 0 ? '选择一张表查看数据' : '数据库为空，保存数据后将显示表结构'}
+            <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground">
+              <div className="grid h-14 w-14 place-items-center rounded-2xl border bg-muted/30"><Database className="h-7 w-7" /></div>
+              <p className="mt-4 text-sm font-medium text-foreground">{tables.length > 0 ? '选择一张数据表' : '数据库为空'}</p>
+              <p className="mt-1 max-w-xs text-xs leading-5">{tables.length > 0 ? '数据表已按业务功能分类，选择左侧项目查看字段和数据。' : '保存数据后，这里会显示表结构和记录。'}</p>
             </div>
           )}
         </div>
       </ScrollArea>
+      </div>
 
       {/* 底部统计栏 */}
-      {tables.length > 0 && (
-        <div className="h-7 flex items-center px-3 border-t bg-background text-xs text-muted-foreground gap-3">
-          <span>{tables.length} 张表</span>
-        </div>
-      )}
+      {selectedInfo && <div className="flex h-7 items-center gap-3 border-t bg-background px-3 text-[10px] text-muted-foreground"><span>{tableDisplayName(selectedInfo.table)}</span><span>·</span><span>{selectedInfo.columns.length} 个字段</span><span className="font-mono">{selectedInfo.table}</span></div>}
     </div>
   );
 };
