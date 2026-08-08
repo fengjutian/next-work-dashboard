@@ -8,6 +8,7 @@
  */
 
 import type { ToolDefinition } from './types';
+import { officeTools } from './office-tools';
 
 // ── 工具函数：按路径读取文件，返回 ArrayBuffer ──
 
@@ -383,4 +384,5 @@ export const pluginTools: ToolDefinition[] = [
   readPptTool,
   readImageTool,
   readFileContentTool,
+  ...officeTools,
 ];

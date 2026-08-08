@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { OfficeCliStatus, OfficeOperationResult, OfficeRenderResult } from '../types';
+import type { OfficeAddRequest, OfficeCliStatus, OfficeOperationResult, OfficeRenderResult, OfficeSetRequest } from '../types';
 
 const execFileAsync = promisify(execFile);
 const SUPPORTED_EXTENSIONS = new Set(['.docx', '.xlsx', '.pptx']);
@@ -35,6 +35,23 @@ function validateDocumentPath(filePath: string, mustExist = true): string {
   if (!SUPPORTED_EXTENSIONS.has(path.extname(absolute).toLowerCase())) throw new Error('UNSUPPORTED_OFFICE_FORMAT');
   if (mustExist && (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile())) throw new Error('OFFICE_FILE_NOT_FOUND');
   return absolute;
+}
+
+function validateDomExpression(value: string, label: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed.length > 1000 || /[\r\n\0]/.test(trimmed)) throw new Error(`INVALID_OFFICE_${label}`);
+  return trimmed;
+}
+
+function propertyArgs(properties: Record<string, string>): string[] {
+  const entries = Object.entries(properties ?? {});
+  if (!entries.length || entries.length > 50) throw new Error('INVALID_OFFICE_PROPERTIES');
+  return entries.flatMap(([key, value]) => {
+    if (!/^[A-Za-z][\w.-]{0,99}$/.test(key) || typeof value !== 'string' || value.length > 100_000 || /\0/.test(value)) {
+      throw new Error('INVALID_OFFICE_PROPERTY');
+    }
+    return ['--prop', `${key}=${value}`];
+  });
 }
 
 async function runOfficeCli(args: string[], timeout = 30_000): Promise<string> {
@@ -91,6 +108,69 @@ export async function getOfficeOutline(filePath: string): Promise<OfficeOperatio
   } catch (error) {
     return { success: false, error: errorMessage(error) };
   }
+}
+
+export async function getOfficeElement(filePath: string, domPath: string, depth = 2): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(filePath);
+    const safeDepth = Math.max(0, Math.min(10, Math.trunc(depth)));
+    const output = await runOfficeCli(['get', target, validateDomExpression(domPath, 'PATH'), '--depth', String(safeDepth), '--json']);
+    return { success: true, output };
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+export async function queryOfficeElements(filePath: string, selector: string): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(filePath);
+    const output = await runOfficeCli(['query', target, validateDomExpression(selector, 'SELECTOR'), '--compact']);
+    return { success: true, output };
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+async function mutateOfficeDocument(filePath: string, args: string[]): Promise<OfficeOperationResult> {
+  const target = validateDocumentPath(filePath);
+  const backup = `${target}.office-studio-${process.pid}.bak`;
+  await fs.promises.copyFile(target, backup);
+  try {
+    const output = await runOfficeCli(args);
+    return { success: true, output };
+  } catch (error) {
+    await fs.promises.copyFile(backup, target).catch(() => undefined);
+    return { success: false, error: errorMessage(error) };
+  } finally {
+    await fs.promises.rm(backup, { force: true }).catch(() => undefined);
+  }
+}
+
+export async function setOfficeProperties(request: OfficeSetRequest): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(request.filePath);
+    return await mutateOfficeDocument(target, ['set', target, validateDomExpression(request.path, 'PATH'), ...propertyArgs(request.properties), '--json']);
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+export async function addOfficeElement(request: OfficeAddRequest): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(request.filePath);
+    const type = request.type?.trim();
+    if (!/^[A-Za-z][\w-]{0,49}$/.test(type)) throw new Error('INVALID_OFFICE_ELEMENT_TYPE');
+    return await mutateOfficeDocument(target, ['add', target, validateDomExpression(request.path, 'PATH'), '--type', type, ...propertyArgs(request.properties), '--json']);
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+export async function removeOfficeElement(filePath: string, domPath: string): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(filePath);
+    if (domPath === '/') throw new Error('OFFICE_ROOT_REMOVE_FORBIDDEN');
+    return await mutateOfficeDocument(target, ['remove', target, validateDomExpression(domPath, 'PATH'), '--json']);
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+export async function saveOfficeDocument(filePath: string): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(filePath);
+    return { success: true, output: await runOfficeCli(['save', target, '--json']) };
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
 }
 
 export async function renderOfficeHtml(filePath: string): Promise<OfficeRenderResult> {

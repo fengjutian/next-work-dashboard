@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
-import { closeOfficeDocument, createOfficeDocument, getOfficeCliStatus, getOfficeOutline, renderOfficeHtml } from './office-service';
-import type { OfficeDocumentKind } from '../types';
+import { addOfficeElement, closeOfficeDocument, createOfficeDocument, getOfficeCliStatus, getOfficeElement, getOfficeOutline, queryOfficeElements, removeOfficeElement, renderOfficeHtml, saveOfficeDocument, setOfficeProperties } from './office-service';
+import type { OfficeAddRequest, OfficeDocumentKind, OfficeSetRequest } from '../types';
 
 const definitions: Record<OfficeDocumentKind, { extension: string; label: string }> = {
   docx: { extension: 'docx', label: 'Word 文档' },
@@ -12,6 +12,12 @@ const definitions: Record<OfficeDocumentKind, { extension: string; label: string
 export function registerOfficeIpc(): void {
   ipcMain.handle('office:status', () => getOfficeCliStatus());
   ipcMain.handle('office:outline', (_event, filePath: string) => getOfficeOutline(filePath));
+  ipcMain.handle('office:get', (_event, filePath: string, domPath: string, depth?: number) => getOfficeElement(filePath, domPath, depth));
+  ipcMain.handle('office:query', (_event, filePath: string, selector: string) => queryOfficeElements(filePath, selector));
+  ipcMain.handle('office:set', (_event, request: OfficeSetRequest) => setOfficeProperties(request));
+  ipcMain.handle('office:add', (_event, request: OfficeAddRequest) => addOfficeElement(request));
+  ipcMain.handle('office:remove', (_event, filePath: string, domPath: string) => removeOfficeElement(filePath, domPath));
+  ipcMain.handle('office:save', (_event, filePath: string) => saveOfficeDocument(filePath));
   ipcMain.handle('office:render', (_event, filePath: string) => renderOfficeHtml(filePath));
   ipcMain.handle('office:close', (_event, filePath: string) => closeOfficeDocument(filePath));
   ipcMain.handle('office:create', async (event, kind: OfficeDocumentKind) => {
