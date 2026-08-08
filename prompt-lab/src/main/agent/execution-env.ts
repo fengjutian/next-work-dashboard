@@ -3,8 +3,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { authorizeWorkspace, resolveWorkspacePath } from '../workspace-path';
-import { applyWorkspaceFileMutations } from '../workspace-transaction';
+import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
+import { applyWorkspaceFileMutations } from '../workspace/transaction';
 
 export type ExecutionEnvState = "preparing" | "ready" | "running" | "disconnected" | "cleanup_failed" | "destroyed";
 

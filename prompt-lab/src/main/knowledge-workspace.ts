@@ -14,8 +14,8 @@ import {
   type KnowledgeSearchHit,
   type KnowledgeTemplate,
 } from '../core/knowledge';
-import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
-import { applyWorkspaceFileMutations } from './workspace-transaction';
+import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace/path';
+import { applyWorkspaceFileMutations } from './workspace/transaction';
 
 const IGNORED = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache']);
 const MAX_DOCUMENTS = 5_000;
@@ -157,7 +157,7 @@ export function renameKnowledgeDocumentWithBacklinks(
   incoming.forEach((link) => bySource.set(link.sourceUri, [...(bySource.get(link.sourceUri) ?? []), link]));
   const targetFile = readKnowledgeDocument(rootPath, relativePath);
   let renamedContent: string | undefined;
-  const mutations: import('./workspace-transaction').WorkspaceFileMutation[] = [];
+  const mutations: import('./workspace/transaction').WorkspaceFileMutation[] = [];
   const updatedReferences: string[] = [];
   for (const [sourceUri, links] of bySource) {
     const source = workspace.documents.find((item) => item.uri === sourceUri);

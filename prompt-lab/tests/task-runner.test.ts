@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WorkspaceTaskRunner } from '../src/main/task-runner';
-import type { WorkspaceTaskDefinition } from '../src/main/workspace-tasks';
+import type { WorkspaceTaskDefinition } from '../src/main/workspace/tasks';
 
 const task = (name: string, command: string, dependsOn: string[] = [], dependsOrder: 'sequence' | 'parallel' = 'sequence'): WorkspaceTaskDefinition => ({ name, command, detail: 'test', dependsOn, dependsOrder, isBackground: false });
 const nodeCommand = (script: string) => `"${process.execPath}" -e ${JSON.stringify(script)}`;

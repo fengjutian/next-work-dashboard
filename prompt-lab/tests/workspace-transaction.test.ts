@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { authorizeWorkspace } from '../src/main/workspace-path';
-import { applyWorkspaceFileMutations, applyWorkspaceTextEdits } from '../src/main/workspace-transaction';
+import { authorizeWorkspace } from '../src/main/workspace/path';
+import { applyWorkspaceFileMutations, applyWorkspaceTextEdits } from '../src/main/workspace/transaction';
 
 const temporaryDirectories: string[] = [];
 

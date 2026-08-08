@@ -3,7 +3,7 @@ import {
   decodeWorkspaceText,
   encodeWorkspaceText,
   fileWasModified,
-} from '../src/main/workspace-text';
+} from '../src/main/workspace/text';
 
 describe('工作区文本编码', () => {
   it('识别并保留 UTF-8 BOM 和 CRLF', () => {

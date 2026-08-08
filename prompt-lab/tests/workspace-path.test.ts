@@ -6,7 +6,7 @@ import {
   authorizeWorkspace,
   resolveNewWorkspacePath,
   resolveWorkspacePath,
-} from '../src/main/workspace-path';
+} from '../src/main/workspace/path';
 
 const temporaryDirectories: string[] = [];
 

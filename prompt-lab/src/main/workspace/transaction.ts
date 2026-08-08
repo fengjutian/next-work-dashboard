@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace-path';
-import { encodeWorkspaceText, fileWasModified, type WorkspaceEncoding } from './workspace-text';
+import { resolveNewWorkspacePath, resolveWorkspacePath } from './path';
+import { encodeWorkspaceText, fileWasModified, type WorkspaceEncoding } from './text';
 
 export interface WorkspaceTextEdit {
   path: string;

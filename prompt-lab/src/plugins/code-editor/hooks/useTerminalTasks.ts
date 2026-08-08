@@ -4,7 +4,7 @@ import type { TerminalProfile, TerminalTab } from '@/plugins/terminal/Terminal';
 import type { WorkspaceTask, WorkspaceTaskEvent } from '@/types/electron';
 import type { BottomPanelTab, EditorProblem } from '../editor-types';
 import { displayError } from '../editor-types';
-import { parseProblemLine, resolveTaskOrder } from '../../../main/workspace-tasks';
+import { parseProblemLine, resolveTaskOrder } from '../../../main/workspace/tasks';
 
 interface EditorTerminalTab extends TerminalTab { profile?: TerminalProfile }
 type TaskState = 'running' | 'background' | 'completed' | 'failed' | 'cancelled';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseProblemLine, parseWorkspaceTasks, resolveTaskOrder } from '../src/main/workspace-tasks';
+import { parseProblemLine, parseWorkspaceTasks, resolveTaskOrder } from '../src/main/workspace/tasks';
 
 describe('workspace tasks', () => {
   it('parses lifecycle fields and quotes args', () => {

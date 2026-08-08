@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import type { WorkspaceTaskDefinition } from './workspace-tasks';
+import type { WorkspaceTaskDefinition } from './workspace/tasks';
 
 export interface TaskRunEvent {
   runId: string;

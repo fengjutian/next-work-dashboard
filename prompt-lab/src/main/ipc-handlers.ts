@@ -9,20 +9,20 @@ import { saveToken, getToken, deleteToken, listServices, clearAll, isEncryptionA
 import { createSession, write, resize, destroySession } from '../plugins/terminal/backend/terminal-manager';
 import { discoverShellProfiles } from '../plugins/terminal/backend/shell-profiles';
 import { resolveSecretReferences } from '../plugins/terminal/backend/environment';
-import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace-path';
-import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace-text';
+import { resolveNewWorkspacePath, resolveWorkspacePath, authorizeWorkspace } from './workspace/path';
+import { decodeWorkspaceText, encodeWorkspaceText, fileWasModified } from './workspace/text';
 import {
   applyWorkspaceFileMutations,
   applyWorkspaceTextEdits,
   type WorkspaceFileMutation,
   type WorkspaceTextEdit,
-} from './workspace-transaction';
+} from './workspace/transaction';
 import { redactGitSecrets } from './git/security';
 import { parseGitLog } from './git/history';
 import { classifyGitError } from './git/diagnostics';
 import { parseGitBranches } from './git/overview';
 import { findSemanticMatches, type SemanticMatch } from './semantic-search';
-import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace-tasks';
+import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace/tasks';
 import { WorkspaceTaskRunner } from './task-runner';
 import { detectRenameRename, parseUnmergedIndex } from './git/rename-conflict';
 import { createTypeScriptSemanticIndex } from './typescript-language-service';
