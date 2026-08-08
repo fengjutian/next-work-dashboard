@@ -18,6 +18,7 @@ import {
 } from '../core/knowledge';
 import { resolveNewWorkspacePath, resolveWorkspacePath } from './workspace/path';
 import { applyWorkspaceFileMutations } from './workspace/transaction';
+import { validateDeclaredSymbols, validateMermaid } from './knowledge-validation';
 
 const IGNORED = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache']);
 const MAX_DOCUMENTS = 5_000;
@@ -144,10 +145,23 @@ export function scanKnowledgeWorkspace(rootPath: string): KnowledgeWorkspaceScan
       return [
         ...validateKnowledgeDocument(document, content, configuration.rules),
         ...sourceDiagnostics(rootPath, document, configuration.state),
+        ...validateDeclaredSymbols(rootPath, document),
       ];
     } catch { return []; }
   });
   return { ...buildKnowledgeIndex(documents), skipped, ...configuration, diagnostics };
+}
+
+/** Full UI/IPC scan, including asynchronous Mermaid parser validation. */
+export async function scanKnowledgeWorkspaceValidated(rootPath: string): Promise<KnowledgeWorkspaceScanResult> {
+  const workspace = scanKnowledgeWorkspace(rootPath);
+  const mermaidDiagnostics = await Promise.all(workspace.documents.map(async (document) => {
+    try {
+      const content = readKnowledgeDocument(rootPath, document.path).content;
+      return await validateMermaid(content, document.path);
+    } catch { return [] as KnowledgeDiagnostic[]; }
+  }));
+  return { ...workspace, diagnostics: [...workspace.diagnostics, ...mermaidDiagnostics.flat()] };
 }
 
 /** Captures a reproducible freshness baseline for documents that declare frontmatter `sources`. */

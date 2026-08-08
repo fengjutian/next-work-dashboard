@@ -32,7 +32,7 @@ import {
   captureKnowledgeWorkspaceState,
   readKnowledgeDocument,
   renameKnowledgeDocumentWithBacklinks,
-  scanKnowledgeWorkspace,
+  scanKnowledgeWorkspaceValidated,
   searchKnowledgeWorkspace,
 } from './knowledge-workspace';
 import {
@@ -1226,7 +1226,7 @@ export function setupIPC(webviewPreloadPath: string) {
 
   ipcMain.handle('knowledge:scanWorkspace', async (_event, rootPath: string) => {
     try {
-      return { success: true, data: scanKnowledgeWorkspace(rootPath) };
+      return { success: true, data: await scanKnowledgeWorkspaceValidated(rootPath) };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

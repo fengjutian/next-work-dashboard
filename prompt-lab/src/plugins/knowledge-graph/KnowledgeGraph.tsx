@@ -806,7 +806,7 @@ export const KnowledgeGraph: React.FC = () => {
                   {knowledgeIndex.diagnostics.slice(0, 20).map((diagnostic, index) => {
                     const document = knowledgeIndex.documents.find((item) => item.path === diagnostic.path);
                     return (
-                      <button key={`${diagnostic.code}:${diagnostic.path}:${index}`} disabled={!document} className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent disabled:opacity-60" title={diagnostic.message} onClick={() => document && selectKnowledgeDocument(document.uri)}>
+                      <button key={`${diagnostic.code}:${diagnostic.path}:${index}`} disabled={!document} className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-accent disabled:opacity-60" title={diagnostic.message} onClick={() => document && (diagnostic.line ? openInEditor(document.path, diagnostic.line) : selectKnowledgeDocument(document.uri))}>
                         {diagnostic.severity === 'error' ? '错误' : '警告'}：{diagnostic.message}
                       </button>
                     );

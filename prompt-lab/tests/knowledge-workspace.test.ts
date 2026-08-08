@@ -18,6 +18,12 @@ describe('knowledge markdown', () => {
     expect(extractWikiLinks('[[Page#Section]]')[0].target).toBe('Page');
   });
 
+  it('parses frontmatter block lists used by sources and symbols', () => {
+    const document = parseKnowledgeDocument('architecture.md', `---\nsources:\n- src/main.ts\nsymbols:\n  - src/main.ts#bootstrap\n  - src/ipc.ts#knowledge:scanWorkspace\n---\n# Architecture`);
+    expect(document.frontmatter.sources).toEqual(['src/main.ts']);
+    expect(document.frontmatter.symbols).toEqual(['src/main.ts#bootstrap', 'src/ipc.ts#knowledge:scanWorkspace']);
+  });
+
   it('rewrites only resolved wiki links while preserving labels and embeds', () => {
     const content = '[[Old|Label]]\n![[folder/Old#Part]]\n[[Other]]';
     const links = [

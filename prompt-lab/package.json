@@ -96,6 +96,7 @@
     "js-yaml": "^4.3.0",
     "lucide-react": "^1.25.0",
     "mammoth": "^1.12.0",
+    "mermaid": "^11.16.0",
     "monaco-editor": "^0.52.2",
     "node-pty": "1.1.0",
     "pdfjs-dist": "^6.2.108",

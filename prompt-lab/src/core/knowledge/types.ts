@@ -63,6 +63,7 @@ export interface KnowledgeDiagnostic {
   code: string;
   message: string;
   path?: string;
+  line?: number;
 }
 
 export interface KnowledgeSourceState {

@@ -14,9 +14,18 @@ export function parseFrontmatter(content: string): { attributes: Record<string, 
   const match = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
   if (!match) return { attributes: {}, body: content };
   const attributes: Record<string, unknown> = {};
+  let listField: string | null = null;
   for (const line of match[1].split(/\r?\n/)) {
     const field = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (field) attributes[field[1]] = scalar(field[2]);
+    if (field) {
+      listField = field[2].trim() ? null : field[1];
+      attributes[field[1]] = listField ? [] : scalar(field[2]);
+      continue;
+    }
+    const listItem = line.match(/^\s*-\s+(.+)$/);
+    if (listField && listItem && Array.isArray(attributes[listField])) {
+      (attributes[listField] as unknown[]).push(scalar(listItem[1]));
+    } else if (line.trim()) listField = null;
   }
   return { attributes, body: content.slice(match[0].length) };
 }
