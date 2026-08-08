@@ -14,7 +14,7 @@ function preloadable<T extends ComponentType<any>>(
 ): { component: T; preload: () => Promise<{ default: T }> } {
   let pending: Promise<{ default: T }> | undefined;
   const preload = () => (pending ??= loader());
-  return { component: lazy(preload) as T, preload };
+  return { component: lazy(preload) as unknown as T, preload };
 }
 
 const aiPanel = preloadable(() => import('../ai').then((m) => ({ default: m.AIPanel })));
