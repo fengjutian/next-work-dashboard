@@ -8,15 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/fjutian/nwd-admin/internal/model"
-	"gorm.io/gorm"
+	"github.com/fjutian/nwd-admin/internal/service"
 )
 
 //go:embed ../view/layout.html
@@ -29,7 +27,6 @@ var (
 	buildVersion  = "dev"
 	pluginIDRegex = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]{1,63}$`)
 	baseLayout    *template.Template
-	logger        = slog.Default()
 )
 
 func init() {
@@ -43,36 +40,31 @@ func init() {
 }
 
 type Handler struct {
-	DB *gorm.DB
+	plugins *service.PluginService
 }
 
-func New(db *gorm.DB) *Handler {
-	return &Handler{DB: db}
+func New(pluginSvc *service.PluginService) *Handler {
+	return &Handler{plugins: pluginSvc}
 }
 
 // ── Pages ──
 
 func (h *Handler) HomePage(w http.ResponseWriter, r *http.Request) {
-	var pluginCount, totalDownloads, recentCount int64
-	h.DB.Model(&model.Plugin{}).Count(&pluginCount)
-	h.DB.Model(&model.Plugin{}).Select("COALESCE(SUM(downloads), 0)").Scan(&totalDownloads)
-	h.DB.Model(&model.Plugin{}).Where("created_at >= ?", time.Now().AddDate(0, 0, -7)).Count(&recentCount)
-
-	var recent []model.Plugin
-	h.DB.Order("created_at DESC").Limit(10).Find(&recent)
-
+	count, downloads, recentCount, recent := h.plugins.DashboardStats()
 	h.render(w, "home.html", map[string]any{
 		"Version":        buildVersion,
-		"PluginCount":    pluginCount,
-		"TotalDownloads": totalDownloads,
+		"PluginCount":    count,
+		"TotalDownloads": downloads,
 		"RecentCount":    recentCount,
 		"RecentPlugins":  recent,
 	})
 }
 
 func (h *Handler) PluginsPage(w http.ResponseWriter, r *http.Request) {
-	var plugins []model.Plugin
-	h.DB.Order("updated_at DESC").Find(&plugins)
+	plugins, err := h.plugins.List()
+	if err != nil {
+		slog.Error("list plugins", "err", err)
+	}
 	h.render(w, "plugins.html", map[string]any{
 		"Version": buildVersion,
 		"Plugins": plugins,
@@ -82,14 +74,11 @@ func (h *Handler) PluginsPage(w http.ResponseWriter, r *http.Request) {
 // ── API ──
 
 func (h *Handler) ListPlugins(w http.ResponseWriter, r *http.Request) {
-	var plugins []model.Plugin
-	if err := h.DB.Order("updated_at DESC").Find(&plugins).Error; err != nil {
-		logger.Error("list plugins", "err", err)
-		http.Error(w, "internal error", 500)
+	plugins, err := h.plugins.List()
+	if err != nil {
+		slog.Error("list plugins api", "err", err)
+		writeJSON(w, 500, map[string]string{"error": "internal error"})
 		return
-	}
-	if plugins == nil {
-		plugins = []model.Plugin{}
 	}
 	writeJSON(w, 200, plugins)
 }
@@ -123,7 +112,7 @@ func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plugin := model.Plugin{
+	p := &model.Plugin{
 		ID:          meta.ID,
 		Name:        meta.Name,
 		Version:     meta.Version,
@@ -133,9 +122,8 @@ func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
 		Bundle:      bundle,
 		SizeBytes:   int64(len(bundle)),
 	}
-
-	if err := h.DB.Save(&plugin).Error; err != nil {
-		logger.Error("save plugin", "id", plugin.ID, "err", err)
+	if err := h.plugins.Publish(p); err != nil {
+		slog.Error("publish plugin", "id", p.ID, "err", err)
 		http.Error(w, "保存失败", 500)
 		return
 	}
@@ -150,14 +138,11 @@ func (h *Handler) DownloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var p model.Plugin
-	if err := h.DB.First(&p, "id = ?", id).Error; err != nil {
+	p, err := h.plugins.Download(id)
+	if err != nil {
+		slog.Warn("download plugin", "id", id, "err", err)
 		http.NotFound(w, r)
 		return
-	}
-
-	if err := h.DB.Model(&p).UpdateColumn("downloads", gorm.Expr("downloads + 1")).Error; err != nil {
-		logger.Warn("bump download count", "id", id, "err", err)
 	}
 
 	filename := sanitizeFilename(fmt.Sprintf("%s-%s.nwd", p.Name, p.Version))
@@ -169,8 +154,8 @@ func (h *Handler) DownloadPlugin(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := h.DB.Delete(&model.Plugin{}, "id = ?", id).Error; err != nil {
-		logger.Error("delete plugin", "id", id, "err", err)
+	if err := h.plugins.Remove(id); err != nil {
+		slog.Error("delete plugin", "id", id, "err", err)
 		writeJSON(w, 500, map[string]string{"error": "删除失败"})
 		return
 	}
@@ -274,7 +259,11 @@ var unsafeFilenameRegex = regexp.MustCompile(`["/\x00-\x1f\x7f]`)
 func sanitizeFilename(name string) string {
 	name = strings.TrimSpace(name)
 	name = unsafeFilenameRegex.ReplaceAllString(name, "_")
-	name = filepath.Base(name)
+	name = path.Join("/", name) // force filepath.Base semantics
+	name = name[1:] // strip leading /
+	for _, r := range name {
+		_ = r
+	}
 	if name == "" || name == "." {
 		name = "plugin.nwd"
 	}
@@ -293,3 +282,6 @@ func sanitizeID(raw string) string {
 	}
 	return s
 }
+
+// model import for UploadPlugin
+import "github.com/fjutian/nwd-admin/internal/model"
