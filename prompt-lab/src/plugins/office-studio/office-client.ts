@@ -15,5 +15,6 @@ export const officeClient: OfficeStudioAPI = {
   merge: (filePath, data) => window.electronAPI.office.merge(filePath, data),
   saveAs: (filePath) => window.electronAPI.office.saveAs(filePath),
   render: (filePath) => window.electronAPI.office.render(filePath),
+  renderPage: (filePath, page) => window.electronAPI.office.renderPage(filePath, page),
   close: (filePath) => window.electronAPI.office.close(filePath),
 };

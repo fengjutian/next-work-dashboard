@@ -18,6 +18,7 @@ export interface OfficeOperationResult {
 
 export interface OfficeRenderResult extends OfficeOperationResult {
   html?: string;
+  imageDataUrl?: string;
 }
 
 export interface OfficeCreateResult extends OfficeOperationResult {
@@ -42,5 +43,6 @@ export interface OfficeStudioAPI {
   merge(filePath: string, data: Record<string, unknown>): Promise<OfficeCreateResult>;
   saveAs(filePath: string): Promise<OfficeCreateResult>;
   render(filePath: string): Promise<OfficeRenderResult>;
+  renderPage(filePath: string, page: number): Promise<OfficeRenderResult>;
   close(filePath: string): Promise<OfficeOperationResult>;
 }
