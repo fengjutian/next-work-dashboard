@@ -46,9 +46,9 @@ function validateDomExpression(value: string, label: string): string {
   return trimmed;
 }
 
-function propertyArgs(properties: Record<string, string>): string[] {
+function propertyArgs(properties: Record<string, string>, allowEmpty = false): string[] {
   const entries = Object.entries(properties ?? {});
-  if (!entries.length || entries.length > 50) throw new Error('INVALID_OFFICE_PROPERTIES');
+  if ((!allowEmpty && !entries.length) || entries.length > 50) throw new Error('INVALID_OFFICE_PROPERTIES');
   return entries.flatMap(([key, value]) => {
     if (!/^[A-Za-z][\w.-]{0,99}$/.test(key) || typeof value !== 'string' || value.length > 100_000 || /\0/.test(value)) {
       throw new Error('INVALID_OFFICE_PROPERTY');
@@ -216,7 +216,8 @@ export async function addOfficeElement(request: OfficeAddRequest): Promise<Offic
     const target = validateDocumentPath(request.filePath);
     const type = request.type?.trim();
     if (!/^[A-Za-z][\w-]{0,49}$/.test(type)) throw new Error('INVALID_OFFICE_ELEMENT_TYPE');
-    return await mutateOfficeDocument(target, ['add', target, validateDomExpression(request.path, 'PATH'), '--type', type, ...propertyArgs(request.properties), '--json']);
+    const indexArgs = request.index === undefined ? [] : ['--index', String(Math.max(0, Math.trunc(request.index)))];
+    return await mutateOfficeDocument(target, ['add', target, validateDomExpression(request.path, 'PATH'), '--type', type, ...indexArgs, ...propertyArgs(request.properties, true), '--json']);
   } catch (error) { return { success: false, error: errorMessage(error) }; }
 }
 
