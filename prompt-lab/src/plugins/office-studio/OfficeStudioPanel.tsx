@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FileText, FolderOpen, Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2 } from '@/components/icons';
 import { officeClient } from './office-client';
-import type { OfficeCliStatus, OfficeDocumentKind } from './types';
+import type { OfficeCliStatus, OfficeDocumentKind, OfficeOperationResult } from './types';
+import { OfficeExcelGrid } from './OfficeExcelGrid';
 
-type ViewMode = 'preview' | 'outline';
+type ViewMode = 'preview' | 'outline' | 'grid';
 interface OfficeTab { path: string; name: string }
 const RECENT_KEY = 'office-studio:recent-v1';
 
@@ -30,6 +31,7 @@ export const OfficeStudioPanel: React.FC = () => {
     try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') as OfficeTab[]; } catch { return []; }
   });
   const [dragOver, setDragOver] = useState(false);
+  const [gridRevision, setGridRevision] = useState(0);
 
   const refreshStatus = useCallback(async () => setStatus(await officeClient.status()), []);
 
@@ -136,6 +138,20 @@ export const OfficeStudioPanel: React.FC = () => {
 
   const restore = async (direction: 'undo' | 'redo') => {
     await runOperation(() => direction === 'undo' ? officeClient.undo(filePath) : officeClient.redo(filePath), true);
+    setGridRevision((value) => value + 1);
+  };
+
+  const handleGridMutation = useCallback((result: OfficeOperationResult) => {
+    if (!result.success) { setError(result.error || 'Excel 单元格更新失败'); return; }
+    setCanUndo(result.canUndo ?? true);
+    setCanRedo(result.canRedo ?? false);
+  }, []);
+
+  const handleGridError = useCallback((message: string) => setError(message), []);
+
+  const switchMode = async (nextMode: ViewMode) => {
+    setMode(nextMode);
+    if (nextMode === 'preview' && filePath) await loadDocument(filePath, fileName);
   };
 
   const chooseQueryResult = async (line: string) => {
@@ -222,7 +238,7 @@ export const OfficeStudioPanel: React.FC = () => {
     </section> : <>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex gap-1 rounded bg-muted p-0.5">
-          {(['preview', 'outline'] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`rounded px-3 py-1 text-xs ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>{item === 'preview' ? '渲染预览' : '文档结构'}</button>)}
+          {(['preview', 'outline', ...(filePath.toLowerCase().endsWith('.xlsx') ? ['grid' as const] : [])] as ViewMode[]).map((item) => <button key={item} onClick={() => void switchMode(item)} className={`rounded px-3 py-1 text-xs ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>{item === 'preview' ? '渲染预览' : item === 'outline' ? '文档结构' : '表格编辑'}</button>)}
         </div>
         <div className="flex gap-2">
           <button disabled={!canUndo} onClick={() => void restore('undo')} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" />撤销</button>
@@ -237,7 +253,7 @@ export const OfficeStudioPanel: React.FC = () => {
       <main className="relative flex min-h-0 flex-1 bg-muted/30">
         {busy && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70"><Loader2 className="h-6 w-6 animate-spin" /></div>}
         <section className="min-w-0 flex-1">
-          {mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : queryResults.length ? <div className="h-full overflow-auto p-3">{queryResults.map((line) => <button key={line} onClick={() => void chooseQueryResult(line)} className={`mb-1 block w-full rounded border px-3 py-2 text-left text-xs hover:bg-muted ${line.startsWith(`${selectedPath}\t`) ? 'border-primary bg-primary/5' : ''}`}><code className="break-all">{line}</code></button>)}</div> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
+          {mode === 'grid' && filePath.toLowerCase().endsWith('.xlsx') ? <OfficeExcelGrid key={`${filePath}:${gridRevision}`} filePath={filePath} canUndo={canUndo} canRedo={canRedo} onUndo={() => void restore('undo')} onRedo={() => void restore('redo')} onMutation={handleGridMutation} onError={handleGridError} /> : mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : queryResults.length ? <div className="h-full overflow-auto p-3">{queryResults.map((line) => <button key={line} onClick={() => void chooseQueryResult(line)} className={`mb-1 block w-full rounded border px-3 py-2 text-left text-xs hover:bg-muted ${line.startsWith(`${selectedPath}\t`) ? 'border-primary bg-primary/5' : ''}`}><code className="break-all">{line}</code></button>)}</div> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
         </section>
         <aside className="w-80 shrink-0 overflow-auto border-l bg-background p-3 text-xs">
           <h3 className="mb-3 font-semibold">元素与属性</h3>
