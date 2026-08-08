@@ -857,7 +857,8 @@ export function getTableInfo(): Array<{ table: string; columns: Array<{ name: st
   );
   const tables: Array<{ table: string; columns: Array<{ name: string; type: string }> }> = [];
   if (result.length === 0) return tables;
-  const tableNames = result[0].values.map((row: unknown[]) => String(row[0]));
+  const tableNames = result[0].values.map((row: unknown[]) => String(row[0]))
+    .filter((table) => !/_fts_(?:data|idx|content|docsize|config)$/i.test(table));
   for (const table of tableNames) {
     const cols = _sqlDb.exec(`PRAGMA table_info('${table}')`);
     if (cols.length > 0) {
