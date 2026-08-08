@@ -3,7 +3,7 @@
 
 import { createOpenAIProvider } from '@/core/llm';
 import type { LLMProvider, ChatMessage } from '@/core/llm';
-import type { ExtractedEntity, ExtractedRelation, ExtractResult, ExtractOptions, GraphSchema } from '@/plugins/knowledge-graph/graph-types';
+import type { ExtractResult, ExtractOptions, ExtractionDocument, GraphSchema } from '@/plugins/knowledge-graph/graph-types';
 
 export function constrainExtractResult(result: ExtractResult, schema?: GraphSchema): ExtractResult {
   if (!schema) return result;
@@ -39,12 +39,12 @@ relation labels 示例: 依赖, 使用, 实现, 调用, 配置, 包含`,
 // ── 文档拼接辅助 ──
 
 function buildUserMessage(
-  documents: { name: string; content: string }[],
+  documents: ExtractionDocument[],
   options: ExtractOptions,
 ): string {
   const maxEntities = options.maxEntities ?? 20;
   const docsText = documents
-    .map((d, i) => `--- 文档 ${i + 1}: ${d.name} ---\n${d.content.slice(0, 2500)}`)
+    .map((d, i) => `--- 文档 ${i + 1}: ${d.name}${d.sourcePath ? ` (${d.sourcePath})` : ''} ---\n${d.content.slice(0, 2500)}`)
     .join('\n\n');
 
   const basePrompt = options.customPrompt
@@ -243,7 +243,7 @@ export interface ExtractConfig {
 }
 
 export async function extractFromDocuments(
-  documents: { name: string; content: string }[],
+  documents: ExtractionDocument[],
   options: ExtractOptions,
   config: ExtractConfig,
   signal?: AbortSignal,
@@ -304,13 +304,23 @@ export async function extractFromDocuments(
     );
   }
 
-  return constrainExtractResult(result, options.schema);
+  const paths = new Map(documents.map((document) => [document.name, document.sourcePath]));
+  const enriched: ExtractResult = {
+    ...result,
+    relations: result.relations?.map((relation) => ({
+      ...relation,
+      extractionModel: config.model,
+      extractedAt: Date.now(),
+      evidence: relation.evidence?.map((item) => ({ ...item, sourcePath: item.sourcePath ?? paths.get(item.documentName) })),
+    })),
+  };
+  return constrainExtractResult(enriched, options.schema);
 }
 
 // ── 非流式快速抽取（不暴露中间 chunk） ──
 
 export async function quickExtract(
-  documents: { name: string; content: string }[],
+  documents: ExtractionDocument[],
   options: ExtractOptions,
   config: ExtractConfig,
   signal?: AbortSignal,

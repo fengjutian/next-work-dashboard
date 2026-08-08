@@ -3,7 +3,7 @@ import { Sparkles, Loader2 } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import { quickExtract } from '@/core';
-import type { ExtractStrategy, ExtractedEntity, ExtractedRelation, GraphNode } from './graph-types';
+import type { ExtractionDocument, ExtractStrategy, ExtractedEntity, ExtractedRelation, GraphNode } from './graph-types';
 import { GRAPH_SCHEMAS } from './graph-schemas';
 
 // ── 抽取策略标签 ──
@@ -57,7 +57,7 @@ interface ExtractControlsProps {
   /** 已存在的节点名（用于去重检查） */
   existingLabels: string[];
   /** 对话文件内容获取器 */
-  getSelectedContents: () => Promise<{ name: string; content: string }[]>;
+  getSelectedContents: () => Promise<ExtractionDocument[]>;
   /** 添加抽取节点回调 */
   onAddExtractedGraph: (nodes: GraphNode[], relations: ExtractedRelation[]) => void;
 }

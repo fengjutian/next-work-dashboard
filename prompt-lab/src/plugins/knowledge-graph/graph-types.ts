@@ -26,12 +26,16 @@ export interface GraphEdge {
   status?: 'candidate' | 'accepted' | 'rejected';
   confidence?: number;
   evidence?: GraphEvidence[];
+  extractionModel?: string;
+  extractedAt?: number;
 }
 
 export interface GraphEvidence {
   documentName: string;
   sourcePath?: string;
   quote?: string;
+  line?: number;
+  page?: number;
 }
 
 export interface GraphData {
@@ -57,7 +61,11 @@ export interface ExtractedRelation {
   label: string;
   confidence?: number;
   evidence?: GraphEvidence[];
+  extractionModel?: string;
+  extractedAt?: number;
 }
+
+export interface ExtractionDocument { name: string; content: string; sourcePath?: string }
 
 export interface GraphSchema {
   id: string;

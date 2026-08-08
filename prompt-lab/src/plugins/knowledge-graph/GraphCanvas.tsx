@@ -5,7 +5,7 @@ import { LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw, GitBranch } from '@/components/icons';
-import type { GraphData, GraphNode } from './graph-types';
+import type { GraphData, GraphEdge, GraphNode } from './graph-types';
 import { aggregateGraph, dependencyMatrix, graphModuleName, localGraph, sanitizeGraph } from './graph-views';
 import { SankeyView } from './SankeyView';
 
@@ -21,6 +21,7 @@ const NODE_COLORS = [
 interface GraphCanvasProps {
   graphData: GraphData | null;
   onNodeSelect?: (nodeId: string) => void;
+  onEdgeStatusChange?: (edgeIndex: number, status: 'accepted' | 'rejected') => void;
 }
 
 function escapeHtml(value: unknown): string {
@@ -96,12 +97,13 @@ function aggregatePositions(graph: GraphData, width: number, height: number): Ma
   return positions;
 }
 
-export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelect }) => {
+export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelect, onEdgeStatusChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
   const optionRef = useRef<EChartsCoreOption | null>(null);
   const [view, setView] = useState<GraphView>('aggregate');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<{ edge: GraphEdge; index: number } | null>(null);
   const validGraph = useMemo(() => graphData ? sanitizeGraph(graphData) : null, [graphData]);
   const fallbackNodeId = useMemo(() => validGraph?.nodes.reduce<GraphNode | undefined>(
     (best, node) => !best || node.degree > best.degree ? node : best,
@@ -196,10 +198,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
           target: edge.target,
           value: edge.weight,
           label: edge.label,
+          graphEdge: edge,
+          originalIndex: validGraph?.edges.indexOf(edge) ?? -1,
           lineStyle: {
             width: 0.7 + Math.sqrt(edge.weight / maxWeight) * 2.6,
             opacity: (isLargeGraph ? 0.05 : 0.12) + (edge.weight / maxWeight) * (isLargeGraph ? 0.14 : 0.34),
             curveness: view === 'aggregate' ? 0.12 : 0.04,
+            type: edge.status === 'rejected' ? 'dashed' : 'solid',
+            color: edge.status === 'rejected' ? '#ef4444' : undefined,
           },
         })),
         categories: categories.map((name) => ({ name })),
@@ -236,6 +242,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
     optionRef.current = option;
     chart.setOption(option);
     chart.on('click', (params: any) => {
+      if (params.dataType === 'edge') {
+        const edge = params.data?.graphEdge as GraphEdge | undefined;
+        const index = Number(params.data?.originalIndex ?? -1);
+        if (edge && index >= 0) setSelectedEdge({ edge, index });
+        return;
+      }
       if (params.dataType !== 'node') return;
       const id = String(params.data?.id ?? '');
       if (!validGraph?.nodes.some((node) => node.id === id)) return;
@@ -284,6 +296,20 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
         { icon: RotateCcw, label: '重置视图', onClick: resetView },
       ].map(({ icon: Icon, label, onClick }) => <button key={label} type="button" className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-muted/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground" onClick={onClick} title={label}><Icon className="h-3.5 w-3.5" /></button>)}
     </div>}
+
+    {selectedEdge && <aside className="absolute bottom-3 right-14 top-14 z-30 flex w-80 flex-col overflow-hidden rounded-lg border bg-background/95 shadow-xl backdrop-blur">
+      <header className="flex items-start justify-between border-b p-3">
+        <div className="min-w-0"><h3 className="truncate text-sm font-semibold">{selectedEdge.edge.source} —{selectedEdge.edge.label || '关联'}→ {selectedEdge.edge.target}</h3><p className="mt-1 text-xs text-muted-foreground">置信度 {Math.round((selectedEdge.edge.confidence ?? .5) * 100)}% · {selectedEdge.edge.status ?? '未审核'}</p></div>
+        <button className="ml-2 text-sm text-muted-foreground" onClick={() => setSelectedEdge(null)}>×</button>
+      </header>
+      <div className="flex-1 space-y-3 overflow-auto p-3 text-xs">
+        {(selectedEdge.edge.evidence ?? []).length === 0 ? <p className="text-muted-foreground">该关系没有保存证据。</p> : selectedEdge.edge.evidence?.map((item, index) => <section key={`${item.documentName}:${index}`} className="rounded border p-2">
+          <p className="font-medium">{item.documentName}</p>{item.sourcePath && <p className="mt-1 break-all text-[11px] text-muted-foreground">{item.sourcePath}{item.page ? ` · 第 ${item.page} 页` : ''}{item.line ? ` · L${item.line}` : ''}</p>}{item.quote && <blockquote className="mt-2 border-l-2 pl-2 text-muted-foreground">{item.quote}</blockquote>}
+        </section>)}
+        {selectedEdge.edge.extractionModel && <p className="text-[11px] text-muted-foreground">模型：{selectedEdge.edge.extractionModel}{selectedEdge.edge.extractedAt ? ` · ${new Date(selectedEdge.edge.extractedAt).toLocaleString()}` : ''}</p>}
+      </div>
+      {onEdgeStatusChange && <footer className="flex justify-end gap-2 border-t p-3"><button className="h-8 rounded border px-3 text-xs" onClick={() => { onEdgeStatusChange(selectedEdge.index, 'rejected'); setSelectedEdge((current) => current ? { ...current, edge: { ...current.edge, status: 'rejected' } } : null); }}>拒绝</button><button className="h-8 rounded bg-primary px-3 text-xs text-primary-foreground" onClick={() => { onEdgeStatusChange(selectedEdge.index, 'accepted'); setSelectedEdge((current) => current ? { ...current, edge: { ...current.edge, status: 'accepted' } } : null); }}>接受</button></footer>}
+    </aside>}
 
     {view !== 'matrix' && view !== 'sankey' && <div className="absolute bottom-3 left-3 z-10 space-y-1 rounded-md border border-border bg-muted/90 px-3 py-2 text-[10px] text-muted-foreground shadow-sm backdrop-blur">
       <div className="mb-1 flex max-w-72 flex-wrap gap-x-3 gap-y-1">{categories.slice(0, 10).map((category, index) => <span key={category} className="flex items-center gap-1.5" title={category}><span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: NODE_COLORS[index % NODE_COLORS.length] }} /><span className="max-w-28 truncate">{category}</span></span>)}</div>

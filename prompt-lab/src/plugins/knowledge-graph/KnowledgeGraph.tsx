@@ -3,7 +3,7 @@ import { FolderOpen, Plus, Search } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile } from '@/types/electron';
-import type { ExtractedRelation, GraphNode, GraphData } from './graph-types';
+import type { ExtractedRelation, ExtractionDocument, GraphNode, GraphData } from './graph-types';
 import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
@@ -168,15 +168,15 @@ export const KnowledgeGraph: React.FC = () => {
   }, []);
 
   // ── 获取选中文件内容（供 AI 抽取使用） ──
-  const getSelectedContents = useCallback(async (): Promise<{ name: string; content: string }[]> => {
+  const getSelectedContents = useCallback(async (): Promise<ExtractionDocument[]> => {
     const selected = files.filter((f) => selectedPaths.has(f.path));
     const api = (window as any).electronAPI;
     if (!api?.readConversation) return [];
-    const results: { name: string; content: string }[] = [];
+    const results: ExtractionDocument[] = [];
     for (const file of selected) {
       const result = await api.readConversation(file.path);
       if (result.success && result.content) {
-        results.push({ name: file.title || file.fileName, content: result.content });
+        results.push({ name: file.title || file.fileName, content: result.content, sourcePath: file.path });
       }
     }
     return results;
@@ -197,6 +197,8 @@ export const KnowledgeGraph: React.FC = () => {
         status: 'accepted' as const,
         confidence: relation.confidence,
         evidence: relation.evidence,
+        extractionModel: relation.extractionModel,
+        extractedAt: relation.extractedAt,
       }));
       const degree = new Map(merged.map((node) => [node.id, 0]));
       relationEdges.forEach((edge) => {
@@ -207,6 +209,13 @@ export const KnowledgeGraph: React.FC = () => {
       setGraphData({ nodes: graphNodes, edges: relationEdges });
       return graphNodes;
     });
+  }, []);
+
+  const updateRelationStatus = useCallback((edgeIndex: number, status: 'accepted' | 'rejected') => {
+    setGraphData((current) => current ? {
+      ...current,
+      edges: current.edges.map((edge, index) => index === edgeIndex ? { ...edge, status } : edge),
+    } : current);
   }, []);
 
   // ── 生成图谱 ──
@@ -616,7 +625,7 @@ export const KnowledgeGraph: React.FC = () => {
 
       {/* 右侧图谱区 */}
       <div className="flex-1 flex flex-col bg-card overflow-hidden relative">
-        <GraphCanvas graphData={graphData} onNodeSelect={knowledgeIndex ? selectKnowledgeDocument : undefined} />
+        <GraphCanvas graphData={graphData} onNodeSelect={knowledgeIndex ? selectKnowledgeDocument : undefined} onEdgeStatusChange={updateRelationStatus} />
         {selectedKnowledgeDocument && (
           <aside className="absolute bottom-3 right-14 top-3 z-20 flex w-80 flex-col overflow-hidden rounded-lg border bg-background/95 shadow-xl backdrop-blur">
             <div className="flex items-start justify-between border-b p-3">
