@@ -5,25 +5,18 @@ import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } 
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 import type { AnalyticsBook, ThemePalette } from './WereadAnalytics';
+import { extractWereadWords } from './wereadAnalysis';
 
 echarts.use([BarChart, HeatmapChart, LineChart, PieChart, SankeyChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 type JsonObject = Record<string, unknown>;
 type TextNote = { text: string; time: number; author: string };
-const STOP_WORDS = new Set(['一个', '一些', '这个', '那个', '这些', '我们', '自己', '什么', '为什么', '怎么', '可以', '不是', '没有', '就是', '因为', '所以', '但是', '如果', '已经', '还是', '以及', '对于', '通过', '进行', '这种', '一种', '可能', '需要', '应该', '非常', '作者', '书中']);
-
-function wordsOf(text: string): string[] {
-  const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: 'word' }) => { segment: (value: string) => Iterable<{ segment: string; isWordLike?: boolean }> } }).Segmenter;
-  const normalized = text.toLocaleLowerCase();
-  const words = Segmenter ? [...new Segmenter('zh-CN', { granularity: 'word' }).segment(normalized)].filter((part) => part.isWordLike).map((part) => part.segment) : normalized.match(/[a-z][a-z0-9]{2,}|[\u4e00-\u9fff]{2,6}/g) || [];
-  return words.map((word) => word.trim()).filter((word) => word.length >= 2 && word.length <= 16 && !STOP_WORDS.has(word) && !/^\d+$/.test(word));
-}
 function timestamp(value: unknown): number { const result = Number(value); return Number.isFinite(result) && result > 0 ? result : 0; }
 function reviewOf(item: JsonObject): JsonObject { return item.review && typeof item.review === 'object' ? item.review as JsonObject : item; }
 function notesOf(book: AnalyticsBook): TextNote[] {
   return [...book.highlights.map((item) => ({ text: String(item.markText || ''), time: timestamp(item.createTime), author: book.author || '未知作者' })), ...book.reviews.map((item) => { const review = reviewOf(item); return { text: `${String(review.abstract || '')} ${String(review.content || '')}`, time: timestamp(review.createTime), author: book.author || '未知作者' }; })];
 }
 function monthOf(time: number): string { const date = new Date(time * 1000); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; }
-function countWords(notes: TextNote[]): Map<string, number> { const counts = new Map<string, number>(); for (const note of notes) for (const word of wordsOf(note.text)) counts.set(word, (counts.get(word) || 0) + 1); return counts; }
+function countWords(notes: TextNote[]): Map<string, number> { const counts = new Map<string, number>(); for (const note of notes) for (const word of extractWereadWords(note.text)) counts.set(word, (counts.get(word) || 0) + 1); return counts; }
 function topEntries(counts: Map<string, number>, limit: number) { return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit); }
 
 function Chart({ option, height = 360 }: { option: EChartsCoreOption; height?: number }) {
@@ -50,7 +43,7 @@ export const WereadInterestProfile = memo(function WereadInterestProfile({ books
     for (const word of allTopics) { const now = recent.get(word) || 0; const before = previous.get(word) || 0; if (now >= 2 && before === 0) topicStatus.emerging.push([word, now]); else if (now > 0 && before > 0) topicStatus.persistent.push([word, now + before]); else if (before >= 2 && now < before * 0.5) topicStatus.declining.push([word, before]); }
     for (const list of Object.values(topicStatus)) list.sort((a, b) => b[1] - a[1]).splice(10);
     const authorCounts = new Map<string, number>(); const authorWords = new Map<string, Map<string, number>>();
-    for (const note of notes) { const words = wordsOf(note.text); authorCounts.set(note.author, (authorCounts.get(note.author) || 0) + 1); const counts = authorWords.get(note.author) || new Map<string, number>(); for (const word of words) counts.set(word, (counts.get(word) || 0) + 1); authorWords.set(note.author, counts); }
+    for (const note of notes) { const words = extractWereadWords(note.text); authorCounts.set(note.author, (authorCounts.get(note.author) || 0) + 1); const counts = authorWords.get(note.author) || new Map<string, number>(); for (const word of words) counts.set(word, (counts.get(word) || 0) + 1); authorWords.set(note.author, counts); }
     const authors = topEntries(authorCounts, 10).map(([author]) => author); const topics = topEntries(all, 10).map(([word]) => word);
     const authorTopicMatrix = authors.flatMap((author, y) => topics.map((topic, x) => [x, y, authorWords.get(author)?.get(topic) || 0]));
     const monthNotes = new Map<string, TextNote[]>(); for (const note of notes) if (note.time) { const month = monthOf(note.time); monthNotes.set(month, [...(monthNotes.get(month) || []), note]); }

@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, EyeOff, History, Loader2, Maximize2, Minus, Plus, RefreshCw, Rows3, Search, SlidersHorizontal, StickyNote, Sun, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { dbLoadWereadCache, dbReplaceWereadCache, flushDbToDisk, isDbReady } from '@/db';
+import { dbLoadWereadCache, dbLoadWereadExportStates, dbMarkWereadExported, dbReplaceWereadCache, flushDbToDisk, isDbReady } from '@/db';
 import { WereadAnalytics } from './WereadAnalytics';
 import { dateKey, formatReadingDuration, loadReadingActivities, saveReadingActivity, type WereadReadingActivity } from './readingActivity';
+import { makeWereadMarkdown, safeWereadFilename, wereadBookFingerprint } from './wereadExport';
 
 const TOKEN_SERVICE = 'weread-api-key';
 
@@ -77,7 +78,14 @@ function formatDate(value: unknown): string {
   return new Date(timestamp * 1000).toLocaleDateString('zh-CN');
 }
 
-const BookNotes: React.FC<{ book: ExportedBook }> = ({ book }) => {
+const HighlightedText: React.FC<{ text: string; query: string }> = ({ text, query }) => {
+  const terms = query.trim().split(/\s+/).filter(Boolean);
+  if (!terms.length) return <>{text}</>;
+  const pattern = new RegExp(`(${terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+  return <>{text.split(pattern).map((part, index) => terms.some((term) => part.toLocaleLowerCase() === term.toLocaleLowerCase()) ? <mark key={index} className="rounded-sm bg-warning/30 text-inherit">{part}</mark> : part)}</>;
+};
+
+const BookNotes: React.FC<{ book: ExportedBook; query?: string }> = ({ book, query = '' }) => {
   const grouped = new Map<string, JsonObject[]>();
   for (const highlight of book.highlights) {
     const chapter = asObject(highlight.chapter);
@@ -91,7 +99,7 @@ const BookNotes: React.FC<{ book: ExportedBook }> = ({ book }) => {
           <h4 className="text-sm font-medium text-muted-foreground">{chapter}</h4>
           {highlights.map((highlight, index) => (
             <blockquote key={String(highlight.bookmarkId || index)} className="border-l-2 border-primary/50 bg-muted/40 px-3 py-2 text-sm leading-6">
-              <p className="whitespace-pre-wrap">{String(highlight.markText || '')}</p>
+              <p className="whitespace-pre-wrap"><HighlightedText text={String(highlight.markText || '')} query={query} /></p>
               {formatDate(highlight.createTime) && <footer className="mt-1 text-xs text-muted-foreground">{formatDate(highlight.createTime)}</footer>}
             </blockquote>
           ))}
@@ -104,8 +112,8 @@ const BookNotes: React.FC<{ book: ExportedBook }> = ({ book }) => {
           const abstract = String(review.abstract || '').trim();
           const content = String(review.content || '').trim();
           return <div key={String(review.reviewId || index)} className="rounded-md bg-primary/5 p-3 text-sm">
-            {abstract && <blockquote className="mb-2 border-l-2 border-primary/40 pl-3 text-muted-foreground">{abstract}</blockquote>}
-            <p className="whitespace-pre-wrap leading-6">{content || '（无文字内容）'}</p>
+            {abstract && <blockquote className="mb-2 border-l-2 border-primary/40 pl-3 text-muted-foreground"><HighlightedText text={abstract} query={query} /></blockquote>}
+            <p className="whitespace-pre-wrap leading-6"><HighlightedText text={content || '（无文字内容）'} query={query} /></p>
             {formatDate(review.createTime) && <p className="mt-1 text-xs text-muted-foreground">{formatDate(review.createTime)}</p>}
           </div>;
         })}
@@ -114,34 +122,6 @@ const BookNotes: React.FC<{ book: ExportedBook }> = ({ book }) => {
     </div>
   );
 };
-
-function makeMarkdown(books: ExportedBook[]): string {
-  const lines = ['# 微信读书笔记', '', `导出时间：${new Date().toLocaleString('zh-CN')}`, ''];
-  for (const book of books) {
-    lines.push(`## ${book.title}`, '', book.author ? `作者：${book.author}` : '', '');
-    const chapterNames = new Map<string, string>();
-    for (const highlight of book.highlights) {
-      const chapter = asObject(highlight.chapter);
-      if (chapter.chapterUid != null) chapterNames.set(String(chapter.chapterUid), String(chapter.title || '未命名章节'));
-    }
-    for (const highlight of book.highlights) {
-      const text = String(highlight.markText || '').trim();
-      if (!text) continue;
-      const chapterName = chapterNames.get(String(highlight.chapterUid)) || String(highlight.chapterTitle || '');
-      if (chapterName) lines.push(`### ${chapterName}`, '');
-      lines.push(...text.split('\n').map((line) => `> ${line}`), '');
-    }
-    for (const item of book.reviews) {
-      const review = asObject(item.review || item);
-      const abstract = String(review.abstract || '').trim();
-      const content = String(review.content || '').trim();
-      if (abstract) lines.push(...abstract.split('\n').map((line) => `> ${line}`), '');
-      if (content) lines.push(`**想法/点评：** ${content}`, '');
-    }
-    if (!book.highlights.length && !book.reviews.length) lines.push('_没有可导出的笔记内容（书签仅支持数量统计）_', '');
-  }
-  return lines.filter((line, index) => line || lines[index - 1] !== '').join('\n');
-}
 
 export const WereadPanel: React.FC = () => {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -566,9 +546,20 @@ export const WereadPanel: React.FC = () => {
     } finally { setLoading(false); }
   }
 
-  async function exportMarkdown() {
-    const result = await window.electronAPI.saveFile(makeMarkdown(books), `微信读书笔记-${new Date().toISOString().slice(0, 10)}.md`);
-    if (!result.success) setError('导出已取消或保存失败');
+  async function exportMarkdown(exportBooks = books, incremental = false) {
+    if (!exportBooks.length) { setStatus(incremental ? '没有自上次导出后发生变化的书籍' : '没有可导出的笔记'); return; }
+    const label = exportBooks.length === 1 ? safeWereadFilename(exportBooks[0].title) : incremental ? '微信读书增量笔记' : '微信读书笔记';
+    const result = await window.electronAPI.saveFile(makeWereadMarkdown(exportBooks, incremental), `${label}-${new Date().toISOString().slice(0, 10)}.md`);
+    if (!result.success) { setError('导出已取消或保存失败'); return; }
+    dbMarkWereadExported(exportBooks.map((book) => ({ bookId: book.bookId, fingerprint: wereadBookFingerprint(book) })));
+    await flushDbToDisk();
+    setError(''); setStatus(`已导出 ${exportBooks.length} 本书的笔记`);
+  }
+
+  async function exportIncrementalMarkdown() {
+    const state = new Map(dbLoadWereadExportStates().map((item) => [item.bookId, item.fingerprint]));
+    const changed = books.filter((book) => state.get(book.bookId) !== wereadBookFingerprint(book));
+    await exportMarkdown(changed, true);
   }
 
   return (
@@ -676,7 +667,10 @@ export const WereadPanel: React.FC = () => {
             {books.length > 0 && <>
               <div className="flex items-center justify-between rounded-lg border bg-background p-4">
                 <div className="text-sm"><strong>{books.length}</strong> 本书 · <strong>{totals.highlights}</strong> 条划线 · <strong>{totals.reviews}</strong> 条想法/点评 · <strong>{totals.bookmarks}</strong> 个书签</div>
-                <Button variant="outline" size="sm" onClick={() => void exportMarkdown()}><Download />导出 Markdown</Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void exportIncrementalMarkdown()}><Download />增量导出</Button>
+                  <Button variant="outline" size="sm" onClick={() => void exportMarkdown()}><Download />全部导出</Button>
+                </div>
               </div>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -693,9 +687,10 @@ export const WereadPanel: React.FC = () => {
                         <div className="truncate font-medium">{book.title}</div>
                         <div className="mt-1 text-xs text-muted-foreground">{book.author || '未知作者'} · {book.highlights.length} 条划线 · {book.reviews.length} 条想法/点评 · {book.bookmarkCount} 个书签</div>
                       </button>
+                      <Button variant="ghost" size="sm" title="单独导出这本书" onClick={() => void exportMarkdown([book])}><Download className="h-3.5 w-3.5" />导出</Button>
                       <Button variant="ghost" size="sm" onClick={() => setOpenBookId(isOpen ? null : book.bookId)}>{isOpen ? '收起' : '查看笔记'}</Button>
                     </div>
-                    {isOpen && <BookNotes book={book} />}
+                    {isOpen && <BookNotes book={book} query={searchQuery} />}
                   </div>;
                 })}
                 {visibleBooks.length === 0 && <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">没有找到匹配的笔记</div>}

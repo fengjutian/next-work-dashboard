@@ -5,22 +5,16 @@ import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } 
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 import { dbLoadWereadReviewStates, dbMarkWereadReviewed, flushDbToDisk, type WereadReviewState } from '@/db';
+import { extractWereadWords } from './wereadAnalysis';
 
 echarts.use([BarChart, HeatmapChart, PieChart, SankeyChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 type JsonObject = Record<string, unknown>;
 type AnalyticsBook = { bookId: string; title: string; author: string; noteCount: number; reviewCount: number; bookmarkCount: number; highlights: JsonObject[]; reviews: JsonObject[] };
 type ThemePalette = { colors: string[]; text: string; muted: string; border: string; background: string; primaryLight: string; primaryStrong: string };
-const STOP_WORDS = new Set(['一个', '一些', '这个', '那个', '这些', '我们', '自己', '什么', '为什么', '怎么', '可以', '不是', '没有', '就是', '因为', '所以', '但是', '如果', '已经', '还是', '以及', '对于', '通过', '进行', '这种', '一种', '可能', '需要', '应该', '非常', '作者', '书中']);
 
 function objectOf(value: unknown): JsonObject { return value && typeof value === 'object' ? value as JsonObject : {}; }
 function timestamp(value: unknown): number { const result = Number(value); return Number.isFinite(result) ? result : 0; }
 function reviewOf(item: JsonObject): JsonObject { return objectOf(item.review || item); }
-function extractWords(text: string): string[] {
-  const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: 'word' }) => { segment: (value: string) => Iterable<{ segment: string; isWordLike?: boolean }> } }).Segmenter;
-  const normalized = text.toLocaleLowerCase();
-  const words = Segmenter ? [...new Segmenter('zh-CN', { granularity: 'word' }).segment(normalized)].filter((part) => part.isWordLike).map((part) => part.segment) : normalized.match(/[a-z][a-z0-9]{2,}|[\u4e00-\u9fff]{2,6}/g) || [];
-  return words.map((word) => word.trim()).filter((word) => word.length >= 2 && word.length <= 16 && !STOP_WORDS.has(word) && !/^\d+$/.test(word));
-}
 function bookNotes(book: AnalyticsBook) {
   return [
     ...book.highlights.map((item) => ({ text: String(item.markText || ''), time: timestamp(item.createTime) })),
@@ -73,7 +67,7 @@ export const WereadKnowledgeInsights = memo(function WereadKnowledgeInsights({ b
     for (const book of topBooks) {
       const author = `作者：${book.author || '未知作者'}`; const bookName = `书籍：${book.title}`;
       nodeNames.add(author); nodeNames.add(bookName); authorLinks.push({ source: author, target: bookName, value: Math.max(1, book.noteCount + book.reviewCount) });
-      const counts = new Map<string, number>(); for (const note of bookNotes(book)) for (const word of extractWords(note.text)) counts.set(word, (counts.get(word) || 0) + 1);
+      const counts = new Map<string, number>(); for (const note of bookNotes(book)) for (const word of extractWereadWords(note.text)) counts.set(word, (counts.get(word) || 0) + 1);
       for (const [word, count] of [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)) { const topic = `主题：${word}`; nodeNames.add(topic); authorLinks.push({ source: bookName, target: topic, value: count }); }
     }
     const paths = books.map((book) => { const times = bookNotes(book).map((note) => note.time).filter(Boolean); return { book, start: times.length ? Math.min(...times) * 1000 : 0, end: times.length ? Math.max(...times) * 1000 : 0 }; }).filter((item) => item.start).sort((a, b) => a.start - b.start);

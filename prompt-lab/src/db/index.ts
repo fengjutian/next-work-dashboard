@@ -40,6 +40,9 @@ export async function initDb(buffer?: ArrayBuffer): Promise<SQLJsDatabase<typeof
   }
   _db = drizzle(_sqlDb, { schema });
   ensureSchema();
+  const indexedCount = Number(_sqlDb.exec('SELECT COUNT(*) FROM weread_notes')[0]?.values[0]?.[0] || 0);
+  const cachedCount = Number(_sqlDb.exec('SELECT COUNT(*) FROM weread_books')[0]?.values[0]?.[0] || 0);
+  if (!indexedCount && cachedCount) rebuildWereadNoteIndex(dbLoadWereadCache());
   return _db;
 }
 
@@ -718,9 +721,10 @@ export function dbReplaceWereadCache(books: Array<Omit<WereadCachedBook, 'cached
 
 export function dbLoadWereadCache(query = ''): WereadCachedBook[] {
   const statement = getDb().select().from(schema.wereadBooks);
-  const bookIds = query.trim() ? new Set(dbSearchWereadNotes(query).map((match) => match.bookId)) : null;
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const bookIds = terms.length ? new Set(dbSearchWereadNotes(query).map((match) => match.bookId)) : null;
   const rows = statement.orderBy(desc(schema.wereadBooks.cachedAt)).all()
-    .filter((row) => !bookIds || bookIds.has(String((row as { bookId: string }).bookId)));
+    .filter((row) => !bookIds || bookIds.has(String((row as { bookId: string }).bookId)) || terms.every((term) => `${(row as { title: string }).title} ${(row as { author: string }).author}`.toLocaleLowerCase().includes(term)));
   return (rows as unknown as WereadBookRow[]).map(wereadRowToBook);
 }
 

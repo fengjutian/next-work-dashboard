@@ -5,17 +5,13 @@ import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } 
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 import type { AnalyticsBook, ThemePalette } from './WereadAnalytics';
+import { extractWereadWords } from './wereadAnalysis';
 
 echarts.use([BarChart, GraphChart, HeatmapChart, SankeyChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 type JsonObject = Record<string, unknown>;
 type NetworkNote = { id: string; bookId: string; book: string; author: string; chapter: string; text: string; words: string[] };
-const STOP_WORDS = new Set(['一个', '一些', '这个', '那个', '这些', '我们', '自己', '什么', '为什么', '怎么', '可以', '不是', '没有', '就是', '因为', '所以', '但是', '如果', '已经', '还是', '以及', '对于', '通过', '进行', '这种', '一种', '可能', '需要', '应该', '非常', '作者', '书中']);
-
 function wordsOf(text: string): string[] {
-  const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: 'word' }) => { segment: (value: string) => Iterable<{ segment: string; isWordLike?: boolean }> } }).Segmenter;
-  const normalized = text.toLocaleLowerCase();
-  const words = Segmenter ? [...new Segmenter('zh-CN', { granularity: 'word' }).segment(normalized)].filter((part) => part.isWordLike).map((part) => part.segment) : normalized.match(/[a-z][a-z0-9]{2,}|[\u4e00-\u9fff]{2,6}/g) || [];
-  return [...new Set(words.map((word) => word.trim()).filter((word) => word.length >= 2 && word.length <= 16 && !STOP_WORDS.has(word) && !/^\d+$/.test(word)))];
+  return [...new Set(extractWereadWords(text))];
 }
 function objectOf(value: unknown): JsonObject { return value && typeof value === 'object' ? value as JsonObject : {}; }
 function reviewOf(item: JsonObject): JsonObject { return objectOf(item.review || item); }

@@ -12,6 +12,7 @@ import { WereadInsightsActions } from './WereadInsightsActions';
 import { WereadAISummary } from './WereadAISummary';
 import { WereadAIRecommend } from './WereadAIRecommend';
 import { formatReadingDuration, type WereadReadingActivity } from './readingActivity';
+import { extractWereadWords, tfIdfWereadTerms } from './wereadAnalysis';
 
 echarts.use([
   BarChart, GraphChart, HeatmapChart, LineChart, PieChart, ScatterChart,
@@ -27,7 +28,6 @@ export type AnalyticsBook = {
 export type ThemePalette = { colors: string[]; text: string; muted: string; border: string; background: string; primaryLight: string; primaryStrong: string };
 type NoteText = { text: string; timestamp: number };
 
-const STOP_WORDS = new Set(['一个', '一些', '这个', '那个', '这些', '那些', '我们', '你们', '他们', '自己', '什么', '为什么', '怎么', '可以', '不是', '没有', '就是', '因为', '所以', '但是', '如果', '已经', '还是', '以及', '而且', '对于', '通过', '进行', '这种', '一种', '可能', '需要', '应该', '非常', '这样', '作者', '书中', 'the', 'and', 'that', 'this', 'with', 'from', 'have']);
 
 function timestampOf(value: unknown): number {
   const timestamp = Number(value);
@@ -49,12 +49,7 @@ function noteTexts(book: AnalyticsBook): NoteText[] {
 }
 
 export function extractWords(text: string): string[] {
-  const normalized = text.toLocaleLowerCase();
-  const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: 'word' }) => { segment: (value: string) => Iterable<{ segment: string; isWordLike?: boolean }> } }).Segmenter;
-  const raw = Segmenter
-    ? [...new Segmenter('zh-CN', { granularity: 'word' }).segment(normalized)].filter((part) => part.isWordLike).map((part) => part.segment)
-    : normalized.match(/[a-z][a-z0-9]{2,}|[\u4e00-\u9fff]{2,6}/g) || [];
-  return raw.map((word) => word.trim()).filter((word) => word.length >= 2 && word.length <= 16 && !STOP_WORDS.has(word) && !/^\d+$/.test(word));
+  return extractWereadWords(text);
 }
 
 function cssColor(style: CSSStyleDeclaration, name: string, alpha = 1): string {
@@ -156,7 +151,8 @@ export const WereadAnalytics: React.FC<{ books: AnalyticsBook[]; readingActiviti
     const months = new Map<string, { highlights: number; reviews: number }>();
     for (const [day, value] of days) { const key = day.slice(0, 7); const month = months.get(key) || { highlights: 0, reviews: 0 }; month.highlights += value.highlights; month.reviews += value.reviews; months.set(key, month); }
     const ranking = [...books].sort((a, b) => (b.noteCount + b.reviewCount + b.bookmarkCount) - (a.noteCount + a.reviewCount + a.bookmarkCount)).slice(0, 12);
-    const keywords = [...words.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+    const tfIdf = tfIdfWereadTerms(books.map((book) => ({ id: book.bookId, text: noteTexts(book).map((note) => note.text).join('\n') })));
+    const keywords = [...tfIdf.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
     const themeWords = keywords.slice(0, 5).map(([word]) => word);
     const reflection = books.filter((book) => book.noteCount + book.reviewCount > 0).map((book) => ({
       book, rate: book.noteCount ? Math.round((book.reviewCount / book.noteCount) * 100) : book.reviewCount ? 100 : 0,

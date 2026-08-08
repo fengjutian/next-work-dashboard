@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, Star } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -41,6 +41,7 @@ const database = preloadable(() => import('../database').then((m) => ({ default:
 const codeEditor = preloadable(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
 const compare = preloadable(() => import('../compare').then((m) => ({ default: m.ComparePanel })));
 const documentKnowledge = preloadable(() => import('../document-knowledge').then((m) => ({ default: m.DocumentKnowledgePanel })));
+const hanyuJinjie = preloadable(() => import('../hanyu-jinjie').then((m) => ({ default: m.HanyuJinjiePanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -55,6 +56,7 @@ const DatabaseBrowser = database.component;
 const CodeEditorPanel = codeEditor.component;
 const ComparePanel = compare.component;
 const DocumentKnowledgePanel = documentKnowledge.component;
+const HanyuJinjiePanel = hanyuJinjie.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -281,6 +283,14 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'hanyu-jinjie',
+    name: '汉语新解',
+    icon: Star,
+    component: HanyuJinjiePanel,
+    enabled: true,
+    order: 20,
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -339,6 +349,7 @@ export function registerBuiltInPlugins(): void {
     'code-editor': codeEditor.preload,
     compare: compare.preload,
     'document-knowledge': documentKnowledge.preload,
+    'hanyu-jinjie': hanyuJinjie.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
