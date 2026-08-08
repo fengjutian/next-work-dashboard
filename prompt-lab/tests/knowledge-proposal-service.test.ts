@@ -9,7 +9,7 @@ afterEach(() => {
 function installApi(mutationResult: { success: boolean; error?: string }) {
   const mutateFiles = vi.fn().mockResolvedValue(mutationResult);
   vi.stubGlobal('window', { electronAPI: {
-    workspace: { reauthorize: vi.fn().mockResolvedValue({ success: true }), mutateFiles },
+    workspace: { reauthorize: vi.fn().mockResolvedValue({ success: true }), mutateFiles, gitStatus: vi.fn().mockResolvedValue({ success: true, data: [] }) },
     knowledge: { scanWorkspace: vi.fn().mockResolvedValue({ success: true, data: { documents: [], links: [], backlinks: {}, orphanUris: [], skipped: [], templates: [], rules: [], diagnostics: [] } }) },
   } });
   return mutateFiles;
@@ -38,5 +38,21 @@ describe('knowledge proposal review service', () => {
     }]);
     await expect(activeKnowledgeWorkspace.acceptProposal(proposal.id)).rejects.toThrow('FILE_MODIFIED_EXTERNALLY');
     expect(activeKnowledgeWorkspace.changeProposals.find((item) => item.id === proposal.id)?.status).toBe('conflicted');
+  });
+
+  it('derives update impact from git status and explicit document sources', async () => {
+    installApi({ success: true });
+    const gitStatus = vi.mocked(window.electronAPI.workspace.gitStatus);
+    gitStatus.mockResolvedValue({ success: true, data: [{ path: 'src/main.ts', status: ' M' }] });
+    activeKnowledgeWorkspace.setActive('D:\\knowledge', {
+      documents: [{
+        uri: 'knowledge://architecture.md', path: 'architecture.md', title: 'Architecture', type: 'spec',
+        tags: [], aliases: [], links: [], modifiedAt: 0, contentHash: 'hash', frontmatter: { sources: ['src/main.ts'] },
+      }],
+      links: [], backlinks: { 'knowledge://architecture.md': [] }, orphanUris: [],
+    });
+    await expect(activeKnowledgeWorkspace.updateImpact()).resolves.toEqual([expect.objectContaining({
+      documentPath: 'architecture.md', changedSources: [{ path: 'src/main.ts', status: ' M' }],
+    })]);
   });
 });

@@ -9,7 +9,7 @@ import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
 import { ExtractControls } from './ExtractControls';
 import { CodeExtractControls } from './CodeExtractControls';
-import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate, type KnowledgeWorkspaceState } from '@/core/knowledge';
+import { getKnowledgeTemplateVariables, instantiateKnowledgeTemplate, type KnowledgeChangeProposal, type KnowledgeDiagnostic, type KnowledgeIndex, type KnowledgeTemplate, type KnowledgeUpdateImpact, type KnowledgeWorkspaceState } from '@/core/knowledge';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
 import { KnowledgeFolderTree } from './KnowledgeFolderTree';
@@ -105,6 +105,7 @@ export const KnowledgeGraph: React.FC = () => {
   const [knowledgeTagFilter, setKnowledgeTagFilter] = useState('');
   const [knowledgeMatches, setKnowledgeMatches] = useState<KnowledgeSearchMatch[]>([]);
   const [knowledgeProposals, setKnowledgeProposals] = useState<KnowledgeChangeProposal[]>(activeKnowledgeWorkspace.changeProposals);
+  const [knowledgeImpacts, setKnowledgeImpacts] = useState<KnowledgeUpdateImpact[]>([]);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [mergeUndo, setMergeUndo] = useState<GraphData | null>(null);
   const [hybridQuery, setHybridQuery] = useState('');
@@ -418,6 +419,19 @@ export const KnowledgeGraph: React.FC = () => {
     }
   }, [knowledgeWorkspace, scanKnowledgeWorkspace, toast]);
 
+  const inspectKnowledgeImpact = useCallback(async () => {
+    setGenerating(true);
+    try {
+      const impacts = await activeKnowledgeWorkspace.updateImpact();
+      setKnowledgeImpacts(impacts);
+      toast(impacts.length ? `发现 ${impacts.length} 篇可能受代码变更影响的知识文档` : '当前代码变更未影响已声明来源的知识文档', 'success');
+    } catch (error) {
+      toast(`分析知识更新影响失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  }, [toast]);
+
   const createKnowledgeFolder = useCallback(async () => {
     if (!knowledgeWorkspace) return;
     const path = newFolderName.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -651,6 +665,28 @@ export const KnowledgeGraph: React.FC = () => {
               >
                 建立知识来源基线
               </button>
+              <button
+                className="h-8 w-full rounded-md border text-xs hover:bg-accent disabled:opacity-50"
+                disabled={generating}
+                onClick={() => void inspectKnowledgeImpact()}
+              >
+                检查代码变更影响
+              </button>
+              {knowledgeImpacts.length > 0 && (
+                <div className="max-h-40 space-y-1 overflow-auto rounded border p-1">
+                  {knowledgeImpacts.map((impact) => (
+                    <button
+                      key={impact.documentUri}
+                      className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+                      title={impact.changedSources.map((source) => `${source.status} ${source.path}`).join('\n')}
+                      onClick={() => selectKnowledgeDocument(impact.documentUri)}
+                    >
+                      <span className="block truncate">{impact.documentTitle}</span>
+                      <span className="block truncate text-[10px] text-muted-foreground">{impact.changedSources.length} 个来源已变化</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {(knowledgeIndex.links.some((link) => link.status !== 'resolved') || knowledgeIndex.diagnostics.length > 0) && (
                 <div className="max-h-40 space-y-1 overflow-auto rounded border p-1">
                   {knowledgeIndex.links.filter((link) => link.status !== 'resolved').slice(0, 20).map((link, index) => (

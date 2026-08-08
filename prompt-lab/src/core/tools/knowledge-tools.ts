@@ -127,4 +127,18 @@ const proposeKnowledgeChange: ToolDefinition = {
   },
 };
 
-export const knowledgeTools: ToolDefinition[] = [searchKnowledge, readKnowledgeDocument, getKnowledgeBacklinks, proposeKnowledgeChange];
+const getKnowledgeUpdateImpact: ToolDefinition = {
+  name: 'get_knowledge_update_impact',
+  description: '根据当前 Git 工作区变更和知识文档声明的 sources，返回需要检查或更新的知识文档。生成知识修改提案前应先调用此工具。',
+  parameters: { type: 'object', properties: {} },
+  execute: async () => {
+    try {
+      const results = await activeKnowledgeWorkspace.updateImpact();
+      return JSON.stringify({ activeRoot: activeKnowledgeWorkspace.activeRoot, count: results.length, results });
+    } catch (error) {
+      return JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+};
+
+export const knowledgeTools: ToolDefinition[] = [searchKnowledge, readKnowledgeDocument, getKnowledgeBacklinks, getKnowledgeUpdateImpact, proposeKnowledgeChange];

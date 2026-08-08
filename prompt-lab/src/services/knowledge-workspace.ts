@@ -1,11 +1,13 @@
 import {
   createKnowledgeProposal,
+  analyzeKnowledgeUpdateImpact,
   rejectKnowledgeProposal,
   type KnowledgeChangeProposal,
   type KnowledgeIndex,
   type KnowledgeMutation,
   type KnowledgeSearchFilters,
   type KnowledgeSearchHit,
+  type KnowledgeUpdateImpact,
 } from '@/core/knowledge';
 import type { WorkspaceFileMutation } from '@/types/electron';
 
@@ -108,6 +110,16 @@ class ActiveKnowledgeWorkspaceService {
     const result = await window.electronAPI.knowledge.readDocument(root, path);
     if (!result.success || !result.data) throw new Error(result.error ?? 'KNOWLEDGE_READ_FAILED');
     return result.data;
+  }
+
+  async updateImpact(): Promise<KnowledgeUpdateImpact[]> {
+    const root = await this.authorize();
+    const [index, status] = await Promise.all([
+      this.index ? Promise.resolve(this.index) : this.refresh(),
+      window.electronAPI.workspace.gitStatus(root),
+    ]);
+    if (!status.success) throw new Error(status.error ?? 'GIT_STATUS_FAILED');
+    return analyzeKnowledgeUpdateImpact(index.documents, status.data ?? []);
   }
 
   async backlinks(pathOrUri: string): Promise<Array<{ sourceUri: string; sourcePath?: string; sourceTitle?: string; line: number; target: string }>> {

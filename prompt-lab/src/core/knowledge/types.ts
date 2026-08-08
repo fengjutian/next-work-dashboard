@@ -81,6 +81,18 @@ export interface KnowledgeWorkspaceState {
   documents: Record<string, KnowledgeDocumentState>;
 }
 
+export interface KnowledgeSourceChange {
+  path: string;
+  status: string;
+}
+
+export interface KnowledgeUpdateImpact {
+  documentUri: string;
+  documentPath: string;
+  documentTitle: string;
+  changedSources: KnowledgeSourceChange[];
+}
+
 export type KnowledgeMutation =
   | { kind: 'create'; path: string; content: string }
   | { kind: 'write'; path: string; before: string; content: string; expectedModifiedAt?: number }

@@ -45,4 +45,15 @@ describe('knowledge agent tools', () => {
     expect(read).toHaveBeenCalledWith('note.md');
     expect(propose).toHaveBeenCalledWith('Update note', [expect.objectContaining({ before: '# Before', expectedModifiedAt: 42 })]);
   });
+
+  it('exposes deterministic knowledge update impact to the agent', async () => {
+    vi.spyOn(activeKnowledgeWorkspace, 'updateImpact').mockResolvedValue([{
+      documentUri: 'knowledge://architecture.md', documentPath: 'architecture.md', documentTitle: 'Architecture',
+      changedSources: [{ path: 'src/main.ts', status: ' M' }],
+    }]);
+    const tool = knowledgeTools.find((item) => item.name === 'get_knowledge_update_impact')!;
+    const output = JSON.parse(await tool.execute({}));
+    expect(output.count).toBe(1);
+    expect(output.results[0].documentPath).toBe('architecture.md');
+  });
 });
