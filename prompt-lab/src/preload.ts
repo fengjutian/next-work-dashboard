@@ -40,6 +40,11 @@ const electronAPI: ElectronAPI = {
     load: () => ipcRenderer.invoke('db:load'),
     save: (buffer: ArrayBuffer) => ipcRenderer.invoke('db:save', buffer),
   },
+  documentCache: {
+    save: (documentId: string, buffer: ArrayBuffer) => ipcRenderer.invoke('document-cache:save', documentId, buffer),
+    load: (documentId: string) => ipcRenderer.invoke('document-cache:load', documentId),
+    delete: (documentId: string) => ipcRenderer.invoke('document-cache:delete', documentId),
+  },
 
   // V2 功能
   toggleAlwaysOnTop: () => ipcRenderer.invoke('window-toggle-always-on-top'),

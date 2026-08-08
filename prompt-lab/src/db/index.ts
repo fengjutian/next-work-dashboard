@@ -325,6 +325,8 @@ function ensureSchema(): void {
   // Migration: add bound_skill_ids to chat_sessions if missing
   const chatColumns = new Set((_sqlDb.exec('PRAGMA table_info(chat_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!chatColumns.has('bound_skill_ids')) _sqlDb.run("ALTER TABLE chat_sessions ADD COLUMN bound_skill_ids TEXT NOT NULL DEFAULT '[]'");
+  const documentColumns = new Set((_sqlDb.exec('PRAGMA table_info(document_knowledge_records)')[0]?.values ?? []).map((row) => String(row[1])));
+  if (!documentColumns.has('cached_file_path')) _sqlDb.run('ALTER TABLE document_knowledge_records ADD COLUMN cached_file_path TEXT');
 }
 
 // ═══════════════════════════════════════════
@@ -846,6 +848,7 @@ export function dbLoadHanyuJinjieExecutions(limit = 30): HanyuJinjieExecution[] 
 export interface DocumentKnowledgeRecord {
   id: string; name: string; kind: string; size: number; sections: unknown[]; plainText: string;
   chunks: unknown[]; embeddingMode: string; createdAt: number; lastViewedAt: number;
+  cachedFilePath?: string | null;
 }
 interface DocumentKnowledgeRow extends Omit<DocumentKnowledgeRecord, 'sections' | 'chunks'> { sections: string; chunks: string }
 function documentKnowledgeRow(row: DocumentKnowledgeRow): DocumentKnowledgeRecord {
@@ -853,7 +856,7 @@ function documentKnowledgeRow(row: DocumentKnowledgeRow): DocumentKnowledgeRecor
 }
 export function dbSaveDocumentKnowledge(record: DocumentKnowledgeRecord): void {
   getDb().insert(schema.documentKnowledgeRecords).values({ ...record, sections: JSON.stringify(record.sections), chunks: JSON.stringify(record.chunks) } as never)
-    .onConflictDoUpdate({ target: schema.documentKnowledgeRecords.id, set: { name: record.name, kind: record.kind, size: record.size, sections: JSON.stringify(record.sections), plainText: record.plainText, chunks: JSON.stringify(record.chunks), embeddingMode: record.embeddingMode, lastViewedAt: record.lastViewedAt } }).run();
+    .onConflictDoUpdate({ target: schema.documentKnowledgeRecords.id, set: { name: record.name, kind: record.kind, size: record.size, sections: JSON.stringify(record.sections), plainText: record.plainText, chunks: JSON.stringify(record.chunks), embeddingMode: record.embeddingMode, cachedFilePath: record.cachedFilePath, lastViewedAt: record.lastViewedAt } }).run();
 }
 export function dbLoadDocumentKnowledge(): DocumentKnowledgeRecord[] {
   return (getDb().select().from(schema.documentKnowledgeRecords).orderBy(desc(schema.documentKnowledgeRecords.lastViewedAt)).all() as unknown as DocumentKnowledgeRow[]).map(documentKnowledgeRow);

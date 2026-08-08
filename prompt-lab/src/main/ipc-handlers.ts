@@ -1,6 +1,7 @@
 import { BrowserWindow, app, ipcMain, Menu, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import AutoLaunch from 'electron-auto-launch';
@@ -242,6 +243,7 @@ export function setupIPC(webviewPreloadPath: string) {
   // ── 数据持久化路径 ──
   const dataPath = path.join(app.getPath('userData'), 'next-work-dashboard-data.json');
   const dbPath = path.join(app.getPath('userData'), 'next-work-dashboard.db');
+  const documentCacheDir = path.join(app.getPath('userData'), 'document-cache');
   const exportDir = path.join(app.getPath('documents'), 'next-work-dashboard', 'conversations');
 
   // ── favicon ──
@@ -647,6 +649,31 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  });
+
+  const cachedDocumentPath = (documentId: string) => path.join(documentCacheDir, `${crypto.createHash('sha256').update(documentId).digest('hex')}.pdf`);
+  ipcMain.handle('document-cache:save', async (_event, documentId: string, buffer: ArrayBuffer) => {
+    try {
+      fs.mkdirSync(documentCacheDir, { recursive: true });
+      const filePath = cachedDocumentPath(documentId);
+      fs.writeFileSync(filePath, Buffer.from(buffer));
+      return { success: true, filePath };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+  ipcMain.handle('document-cache:load', async (_event, documentId: string) => {
+    try {
+      const filePath = cachedDocumentPath(documentId);
+      if (!fs.existsSync(filePath)) return { success: false, error: '缓存文件不存在' };
+      const buffer = fs.readFileSync(filePath);
+      return { success: true, data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength), filePath };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+  ipcMain.handle('document-cache:delete', async (_event, documentId: string) => {
+    try {
+      const filePath = cachedDocumentPath(documentId);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return { success: true };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
   // ── 对话捕获存储 ──

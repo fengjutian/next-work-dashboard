@@ -15,6 +15,7 @@ export interface ParsedDocument {
   sections: DocumentSection[];
   plainText: string;
   previewUrl?: string;
+  cachedFilePath?: string;
   createdAt: number;
 }
 

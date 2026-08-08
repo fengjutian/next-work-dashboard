@@ -45,7 +45,14 @@ export const DocumentKnowledgePanel: React.FC = () => {
       if (!isDbReady()) return attempts >= 30;
       try {
         const records = dbLoadDocumentKnowledge();
-        setDocuments(records.map((record) => ({ id: record.id, name: record.name, kind: record.kind as ParsedDocument['kind'], size: record.size, sections: record.sections as unknown as ParsedDocument['sections'], plainText: record.plainText, createdAt: record.createdAt })));
+        const restored = records.map((record) => ({ id: record.id, name: record.name, kind: record.kind as ParsedDocument['kind'], size: record.size, sections: record.sections as unknown as ParsedDocument['sections'], plainText: record.plainText, cachedFilePath: record.cachedFilePath ?? undefined, createdAt: record.createdAt }));
+        setDocuments(restored);
+        void Promise.all(restored.filter((document) => document.kind === 'pdf' && document.cachedFilePath).map(async (document) => {
+          const cached = await window.electronAPI.documentCache.load(document.id);
+          if (!cached.success || !cached.data) return;
+          const previewUrl = URL.createObjectURL(new Blob([cached.data], { type: 'application/pdf' }));
+          setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, previewUrl } : item));
+        }));
         setChunks(records.flatMap((record) => record.chunks as unknown as DocumentChunk[]));
         if (records[0]) { setSelectedId(records[0].id); setEmbeddingMode(records[0].embeddingMode as EmbeddingMode); setStage('ready'); setStatus(`已恢复 ${records.length} 个文档`); }
       } catch { /* A new database can legitimately have no persisted documents. */ }
@@ -72,12 +79,17 @@ export const DocumentKnowledgePanel: React.FC = () => {
           setStatus(`${file.name} · ${label}`); setProgress(value);
         }, activeMode);
         activeMode = result.embeddingMode;
+        if (result.document.kind === 'pdf') {
+          const cached = await window.electronAPI.documentCache.save(result.document.id, await file.arrayBuffer());
+          if (!cached.success || !cached.filePath) throw new Error(cached.error ?? 'PDF 本地保存失败');
+          result.document.cachedFilePath = cached.filePath;
+        }
         setEmbeddingMode(result.embeddingMode);
         setDocuments((current) => [...current.filter((item) => item.id !== result.document.id), result.document]);
         setChunks((current) => [...current.filter((item) => item.documentId !== result.document.id), ...result.chunks]);
         setSelectedId(result.document.id);
         if (isDbReady()) {
-          dbSaveDocumentKnowledge({ id: result.document.id, name: result.document.name, kind: result.document.kind, size: result.document.size, sections: result.document.sections, plainText: result.document.plainText, chunks: result.chunks, embeddingMode: result.embeddingMode, createdAt: result.document.createdAt, lastViewedAt: Date.now() });
+          dbSaveDocumentKnowledge({ id: result.document.id, name: result.document.name, kind: result.document.kind, size: result.document.size, sections: result.document.sections, plainText: result.document.plainText, chunks: result.chunks, embeddingMode: result.embeddingMode, cachedFilePath: result.document.cachedFilePath, createdAt: result.document.createdAt, lastViewedAt: Date.now() });
           await flushDbToDisk();
         }
       }
@@ -128,6 +140,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
     if (documents.length === 1) setEmbeddingMode(undefined);
     setSelectedId(undefined);
     if (isDbReady()) { try { dbDeleteDocumentKnowledge(id); void flushDbToDisk(); } catch { /* Keep UI removal responsive. */ } }
+    void window.electronAPI.documentCache.delete(id);
   }, [documents]);
 
   return <div className="flex h-full min-h-0 bg-background text-foreground">

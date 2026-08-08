@@ -25,6 +25,11 @@ export interface ElectronAPI {
     load: () => Promise<ArrayBuffer | null>;
     save: (buffer: ArrayBuffer) => Promise<{ success: boolean; error?: string }>;
   };
+  documentCache: {
+    save: (documentId: string, buffer: ArrayBuffer) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+    load: (documentId: string) => Promise<{ success: boolean; data?: ArrayBuffer; filePath?: string; error?: string }>;
+    delete: (documentId: string) => Promise<{ success: boolean; error?: string }>;
+  };
   toggleAlwaysOnTop: () => Promise<boolean>;
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;

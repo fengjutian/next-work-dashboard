@@ -121,6 +121,7 @@ export const documentKnowledgeRecords = sqliteTable('document_knowledge_records'
   id: text('id').primaryKey(), name: text('name').notNull(), kind: text('kind').notNull(), size: integer('size').notNull(),
   sections: text('sections').notNull().default('[]'), plainText: text('plain_text').notNull().default(''), chunks: text('chunks').notNull().default('[]'),
   embeddingMode: text('embedding_mode').notNull().default('hash-fallback'), createdAt: integer('created_at').notNull(), lastViewedAt: integer('last_viewed_at').notNull(),
+  cachedFilePath: text('cached_file_path'),
 });
 
 // ── Schema version tracking ──
