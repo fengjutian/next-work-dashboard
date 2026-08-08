@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FileText, FolderOpen, Loader2, Plus, RefreshCw } from '@/components/icons';
+import { FileText, FolderOpen, Loader2, Plus, RefreshCw, Save, Trash2 } from '@/components/icons';
 import { officeClient } from './office-client';
 import type { OfficeCliStatus, OfficeDocumentKind } from './types';
 
@@ -14,6 +14,12 @@ export const OfficeStudioPanel: React.FC = () => {
   const [outline, setOutline] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [selector, setSelector] = useState('*');
+  const [selectedPath, setSelectedPath] = useState('/');
+  const [elementJson, setElementJson] = useState('');
+  const [propertyName, setPropertyName] = useState('text');
+  const [propertyValue, setPropertyValue] = useState('');
+  const [newType, setNewType] = useState('paragraph');
 
   const refreshStatus = useCallback(async () => setStatus(await officeClient.status()), []);
 
@@ -58,6 +64,41 @@ export const OfficeStudioPanel: React.FC = () => {
     else if (result.error !== 'CANCELLED') setError(result.error || '创建文档失败');
   };
 
+  const runOperation = async (operation: () => Promise<{ success: boolean; output?: string; error?: string }>, refresh = false) => {
+    setBusy(true);
+    setError('');
+    const result = await operation();
+    if (!result.success) setError(result.error || 'Office 操作失败');
+    if (refresh && result.success) await loadDocument(filePath, fileName);
+    setBusy(false);
+    return result;
+  };
+
+  const queryElements = async () => {
+    const result = await runOperation(() => officeClient.query(filePath, selector));
+    if (result.success) setOutline(result.output || '');
+    setMode('outline');
+  };
+
+  const inspectElement = async () => {
+    const result = await runOperation(() => officeClient.get(filePath, selectedPath, 3));
+    if (result.success) setElementJson(result.output || '');
+  };
+
+  const setProperty = async () => {
+    await runOperation(() => officeClient.set({ filePath, path: selectedPath, properties: { [propertyName]: propertyValue } }), true);
+    await inspectElement();
+  };
+
+  const addElement = async () => {
+    await runOperation(() => officeClient.add({ filePath, path: selectedPath, type: newType, properties: propertyValue ? { [propertyName]: propertyValue } : { text: '' } }), true);
+  };
+
+  const removeElement = async () => {
+    if (!window.confirm(`确定删除 ${selectedPath}？`)) return;
+    await runOperation(() => officeClient.remove(filePath, selectedPath), true);
+  };
+
   return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
     <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">
@@ -94,14 +135,38 @@ export const OfficeStudioPanel: React.FC = () => {
           {(['preview', 'outline'] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`rounded px-3 py-1 text-xs ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>{item === 'preview' ? '渲染预览' : '文档结构'}</button>)}
         </div>
         <div className="flex gap-2">
+          <button onClick={() => void runOperation(() => officeClient.save(filePath))} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted"><Save className="h-3.5 w-3.5" />保存</button>
           <button onClick={() => void loadDocument(filePath, fileName)} className="rounded border px-2 py-1 text-xs hover:bg-muted">刷新</button>
           <button onClick={() => void openDocument()} className="rounded border px-2 py-1 text-xs hover:bg-muted">打开其他文档</button>
         </div>
       </div>
       {error && <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">{error}</div>}
-      <main className="relative min-h-0 flex-1 bg-muted/30">
+      <main className="relative flex min-h-0 flex-1 bg-muted/30">
         {busy && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70"><Loader2 className="h-6 w-6 animate-spin" /></div>}
-        {mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
+        <section className="min-w-0 flex-1">
+          {mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
+        </section>
+        <aside className="w-80 shrink-0 overflow-auto border-l bg-background p-3 text-xs">
+          <h3 className="mb-3 font-semibold">元素与属性</h3>
+          <label className="mb-1 block text-muted-foreground">查询选择器</label>
+          <div className="mb-3 flex gap-1"><input value={selector} onChange={(e) => setSelector(e.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1.5" /><button onClick={() => void queryElements()} className="rounded border px-2 hover:bg-muted">查询</button></div>
+          <label className="mb-1 block text-muted-foreground">DOM 路径</label>
+          <div className="mb-3 flex gap-1"><input value={selectedPath} onChange={(e) => setSelectedPath(e.target.value)} className="min-w-0 flex-1 rounded border bg-background px-2 py-1.5" /><button onClick={() => void inspectElement()} className="rounded border px-2 hover:bg-muted">读取</button></div>
+          {elementJson && <pre className="mb-3 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">{elementJson}</pre>}
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className="mb-1 block text-muted-foreground">属性</label><input value={propertyName} onChange={(e) => setPropertyName(e.target.value)} className="w-full rounded border bg-background px-2 py-1.5" /></div>
+            <div><label className="mb-1 block text-muted-foreground">值</label><input value={propertyValue} onChange={(e) => setPropertyValue(e.target.value)} className="w-full rounded border bg-background px-2 py-1.5" /></div>
+          </div>
+          <button disabled={!propertyName} onClick={() => void setProperty()} className="mt-2 w-full rounded bg-primary px-2 py-1.5 text-primary-foreground disabled:opacity-50">更新属性</button>
+          <div className="my-3 border-t" />
+          <label className="mb-1 block text-muted-foreground">新增元素类型</label>
+          <input value={newType} onChange={(e) => setNewType(e.target.value)} className="w-full rounded border bg-background px-2 py-1.5" />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button onClick={() => void addElement()} className="inline-flex items-center justify-center gap-1 rounded border px-2 py-1.5 hover:bg-muted"><Plus className="h-3.5 w-3.5" />新增</button>
+            <button disabled={selectedPath === '/'} onClick={() => void removeElement()} className="inline-flex items-center justify-center gap-1 rounded border border-destructive/40 px-2 py-1.5 text-destructive hover:bg-destructive/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />删除</button>
+          </div>
+          <p className="mt-3 text-[11px] leading-5 text-muted-foreground">写操作会先创建临时备份；命令失败时自动恢复原文件。</p>
+        </aside>
       </main>
     </>}
   </div>;
