@@ -10,7 +10,7 @@ function terms(value: string): string[] {
   return [...new Set(latin)];
 }
 
-export function hybridGraphSearch(query: string, graph: GraphData, documents: ExtractionDocument[], depth = 2): HybridSearchResult {
+export function hybridGraphSearch(query: string, graph: GraphData, documents: ExtractionDocument[], depth = 2, semanticScores: Map<string, number> = new Map()): HybridSearchResult {
   const queryTerms = terms(query);
   const matched = graph.nodes.filter((node) => {
     const text = [node.label, node.canonicalName, ...(node.aliases ?? [])].filter(Boolean).join(' ').toLocaleLowerCase();
@@ -27,7 +27,9 @@ export function hybridGraphSearch(query: string, graph: GraphData, documents: Ex
   const nodes = graph.nodes.filter((node) => included.has(node.id));
   const documentHits = documents.map((document) => {
     const lower = document.content.toLocaleLowerCase();
-    const score = queryTerms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0) / Math.max(1, queryTerms.length);
+    const lexicalScore = queryTerms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0) / Math.max(1, queryTerms.length);
+    const semanticScore = semanticScores.get(document.sourcePath ?? document.name) ?? 0;
+    const score = semanticScores.size ? lexicalScore * .45 + semanticScore * .55 : lexicalScore;
     const first = queryTerms.map((term) => lower.indexOf(term)).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0;
     return { name: document.name, sourcePath: document.sourcePath, score, excerpt: document.content.slice(Math.max(0, first - 120), first + 380).trim() };
   }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);

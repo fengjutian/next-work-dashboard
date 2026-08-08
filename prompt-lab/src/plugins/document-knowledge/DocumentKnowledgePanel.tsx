@@ -11,6 +11,7 @@ import type { EmbeddingMode } from './pipeline';
 import { buildRagContext, retrieve } from './retrieval';
 import { isSupportedDocument } from './parser';
 import type { DocumentChunk, ParsedDocument, RagMessage } from './types';
+import { previewParagraphs } from './preview';
 
 type Stage = 'idle' | 'indexing' | 'ready' | 'asking' | 'error';
 const PANE_PREFS_KEY = 'document-knowledge.panes.v1';
@@ -164,7 +165,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
       <div className="flex-1 min-h-0 overflow-auto bg-muted/30">
         {!selected ? <div className="h-full flex items-center justify-center text-sm text-muted-foreground">上传文件后在这里预览解析结果</div>
           : selected.kind === 'pdf' && selected.previewUrl ? <iframe className="w-full h-full border-0" src={selected.previewUrl} title={selected.name} />
-            : <article className="max-w-4xl mx-auto p-8 prose prose-sm dark:prose-invert">{selected.sections.map((item) => <section key={item.id} className="mb-8"><h2>{item.title}</h2><pre className="whitespace-pre-wrap font-sans text-xs">{item.content}</pre></section>)}</article>}
+            : <article className="mx-auto max-w-4xl p-8">{selected.kind === 'pdf' && <div className="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">应用重启后无法继续使用临时 PDF 地址，当前显示已保存的分页文本。重新上传同一文件可恢复原始 PDF 预览，不会重复建立索引。</div>}{selected.sections.map((item) => <section key={item.id} className="mb-10 rounded-lg border bg-background px-8 py-7 shadow-sm"><h2 className="mb-5 border-b pb-3 text-lg font-semibold">{item.title}</h2><div className="space-y-3 text-sm leading-7 text-foreground">{previewParagraphs(item.content).map((paragraph, index) => <p key={index} className="whitespace-pre-wrap break-words">{paragraph}</p>)}</div></section>)}</article>}
       </div>
     </main>
 

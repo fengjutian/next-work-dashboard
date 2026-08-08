@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findDuplicateEntities, mergeEntities, stableEntityId } from '../src/core/knowledge-graph/entity-normalization';
-import { attachDocumentHashes, reconcileDocuments } from '../src/core/knowledge-graph/lifecycle';
+import { attachDocumentHashes, deactivateMissingDocuments, reconcileDocuments } from '../src/core/knowledge-graph/lifecycle';
 import { hybridGraphSearch } from '../src/core/knowledge-graph/hybrid-search';
 import type { GraphData } from '../src/plugins/knowledge-graph/graph-types';
 
@@ -30,12 +30,18 @@ describe('knowledge graph governance', () => {
     const changed = reconcileDocuments(withHashes, [{ name: '设计', sourcePath: 'design.md', content: 'v2' }], 2);
     expect(changed.changedPaths).toEqual(['design.md']);
     expect(changed.graph.edges[0].status).toBe('stale');
+    const removed = deactivateMissingDocuments(withHashes, []);
+    expect(removed.documents?.[0].active).toBe(false);
+    expect(removed.edges[0].status).toBe('stale');
   });
 
   it('combines entity matching, graph traversal and document retrieval', () => {
-    const result = hybridGraphSearch('LLM GraphRAG', graph, [{ name: '设计', sourcePath: 'design.md', content: 'GraphRAG 使用 LLM 构建知识图谱。' }]);
+    const result = hybridGraphSearch('LLM GraphRAG', graph, [
+      { name: '设计', sourcePath: 'design.md', content: 'GraphRAG 使用 LLM 构建知识图谱。' },
+      { name: '语义相关', sourcePath: 'semantic.md', content: '其他内容。' },
+    ], 2, new Map([['semantic.md', .99], ['design.md', 0]]));
     expect(result.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(['llm', 'rag']));
-    expect(result.documents).toHaveLength(1);
+    expect(result.documents[0].sourcePath).toBe('semantic.md');
     expect(result.context).toContain('[G1]');
     expect(result.context).toContain('[D1]');
   });

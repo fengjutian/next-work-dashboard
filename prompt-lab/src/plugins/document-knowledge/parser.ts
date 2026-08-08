@@ -27,7 +27,7 @@ async function parsePdf(file: File): Promise<DocumentSection[]> {
   const sections: DocumentSection[] = [];
   for (let page = 1; page <= document.numPages; page += 1) {
     const text = await (await document.getPage(page)).getTextContent();
-    sections.push(section(`page-${page}`, `第 ${page} 页`, text.items.map((item: any) => item.str ?? '').join(' '), page));
+    sections.push(section(`page-${page}`, `第 ${page} 页`, text.items.map((item: any) => `${item.str ?? ''}${item.hasEOL ? '\n' : ' '}`).join(''), page));
   }
   return sections;
 }

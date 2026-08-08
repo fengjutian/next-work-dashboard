@@ -29,3 +29,14 @@ export function attachDocumentHashes(graph: GraphData): GraphData {
   const hashes = new Map((graph.documents ?? []).map((item) => [item.path, item.hash]));
   return { ...graph, edges: graph.edges.map((edge) => ({ ...edge, evidence: edge.evidence?.map((item) => ({ ...item, documentHash: item.documentHash ?? (item.sourcePath ? hashes.get(item.sourcePath) : undefined) })) })) };
 }
+
+export function deactivateMissingDocuments(graph: GraphData, activePaths: string[]): GraphData {
+  const active = new Set(activePaths);
+  const missing = new Set((graph.documents ?? []).filter((item) => item.active && !active.has(item.path)).map((item) => item.path));
+  if (!missing.size) return graph;
+  return {
+    ...graph,
+    documents: graph.documents?.map((item) => missing.has(item.path) ? { ...item, active: false } : item),
+    edges: graph.edges.map((edge) => edge.evidence?.some((item) => item.sourcePath && missing.has(item.sourcePath)) ? { ...edge, status: 'stale' as const } : edge),
+  };
+}

@@ -14,8 +14,9 @@ import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { requestEditorNavigation } from '@/services/editor-navigation';
 import { KnowledgeFolderTree } from './KnowledgeFolderTree';
 import { findDuplicateEntities, mergeEntities, stableEntityId } from '@/core/knowledge-graph/entity-normalization';
-import { attachDocumentHashes, reconcileDocuments } from '@/core/knowledge-graph/lifecycle';
+import { attachDocumentHashes, deactivateMissingDocuments, reconcileDocuments } from '@/core/knowledge-graph/lifecycle';
 import { hybridGraphSearch, type HybridSearchResult } from '@/core/knowledge-graph/hybrid-search';
+import { createOpenAIProvider } from '@/core/llm';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
   templates: KnowledgeTemplate[];
@@ -79,6 +80,8 @@ export const KnowledgeGraph: React.FC = () => {
   const { toast } = useToast();
   const setActiveActivity = useStore((state) => state.setActiveActivity);
   const conversationSavedAt = useStore((s) => s.conversationSavedAt);
+  const memoryConfig = useStore((s) => s.memoryConfig);
+  const aiApi = useStore((s) => s.aiApi);
 
   const [files, setFiles] = useState<ConversationFile[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -104,6 +107,8 @@ export const KnowledgeGraph: React.FC = () => {
   const [mergeUndo, setMergeUndo] = useState<GraphData | null>(null);
   const [hybridQuery, setHybridQuery] = useState('');
   const [hybridResult, setHybridResult] = useState<HybridSearchResult | null>(null);
+  const [graphAnswer, setGraphAnswer] = useState('');
+  const [graphAsking, setGraphAsking] = useState(false);
 
   // 人工/AI 图谱自动保存；知识工作区扫描结果是临时视图，不覆盖持久数据。
   useEffect(() => {
@@ -122,6 +127,7 @@ export const KnowledgeGraph: React.FC = () => {
       if (!api?.listConversations) return;
       const list = await api.listConversations();
       setFiles(list);
+      setGraphData((current) => current ? deactivateMissingDocuments(current, list.map((file: ConversationFile) => file.path)) : current);
     } catch (err) {
       console.error('[KnowledgeGraph] loadFiles failed:', err);
     }
@@ -242,8 +248,38 @@ export const KnowledgeGraph: React.FC = () => {
   const runHybridSearch = useCallback(async () => {
     const query = hybridQuery.trim();
     if (!query || !graphData) return;
-    setHybridResult(hybridGraphSearch(query, graphData, await getSelectedContents(), 2));
-  }, [getSelectedContents, graphData, hybridQuery]);
+    const documents = await getSelectedContents();
+    const semanticScores = new Map<string, number>();
+    if (memoryConfig.embeddingBaseUrl && memoryConfig.embeddingApiKey && memoryConfig.embeddingModel && documents.length) {
+      try {
+        const response = await window.electronAPI.createEmbeddings({ baseUrl: memoryConfig.embeddingBaseUrl, apiKey: memoryConfig.embeddingApiKey, model: memoryConfig.embeddingModel, inputs: [query, ...documents.map((document) => document.content.slice(0, 6000))] });
+        const vectors = response.embeddings;
+        const queryVector = vectors?.[0];
+        if (response.success && queryVector) documents.forEach((document, index) => {
+          const vector = vectors?.[index + 1];
+          if (!vector || vector.length !== queryVector.length) return;
+          let dot = 0; let left = 0; let right = 0;
+          for (let cursor = 0; cursor < vector.length; cursor += 1) { dot += queryVector[cursor] * vector[cursor]; left += queryVector[cursor] ** 2; right += vector[cursor] ** 2; }
+          semanticScores.set(document.sourcePath ?? document.name, left && right ? dot / Math.sqrt(left * right) : 0);
+        });
+      } catch (error) { console.warn('[KnowledgeGraph] semantic retrieval unavailable; using lexical fallback.', error); }
+    }
+    setHybridResult(hybridGraphSearch(query, graphData, documents, 2, semanticScores));
+  }, [getSelectedContents, graphData, hybridQuery, memoryConfig]);
+
+  const askGraph = useCallback(async () => {
+    if (!hybridResult || !hybridQuery.trim() || !aiApi.apiKey || graphAsking) return;
+    setGraphAsking(true); setGraphAnswer('');
+    try {
+      const provider = createOpenAIProvider(aiApi);
+      let answer = '';
+      for await (const part of provider.chat([
+        { role: 'system', content: '你是严谨的知识图谱问答助手。只能依据给定实体、关系和证据回答；证据不足时明确说明。引用图证据用 [G数字]，引用文档片段用 [D数字]。' },
+        { role: 'user', content: hybridResult.context },
+      ], { model: aiApi.model, temperature: .2 })) { answer += part.delta; setGraphAnswer(answer); }
+    } catch (error) { setGraphAnswer(error instanceof Error ? `问答失败：${error.message}` : '问答失败'); }
+    finally { setGraphAsking(false); }
+  }, [aiApi, graphAsking, hybridQuery, hybridResult]);
 
   const updateRelationStatus = useCallback((edgeIndex: number, status: 'accepted' | 'rejected') => {
     setGraphData((current) => current ? {
@@ -638,7 +674,7 @@ export const KnowledgeGraph: React.FC = () => {
           </div>
           {duplicateSuggestions[0] && <p className="truncate text-[10px] text-muted-foreground" title={`${duplicateSuggestions[0].canonicalId} ← ${duplicateSuggestions[0].duplicateId}`}>建议：{nodes.find((node) => node.id === duplicateSuggestions[0].canonicalId)?.label} ← {nodes.find((node) => node.id === duplicateSuggestions[0].duplicateId)?.label}</p>}
           <div className="flex gap-1"><input className="h-7 min-w-0 flex-1 rounded border bg-background px-2" value={hybridQuery} onChange={(event) => setHybridQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runHybridSearch(); }} placeholder="全文 + 实体 + 图遍历" /><button className="h-7 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50" disabled={!hybridQuery.trim() || !graphData} onClick={() => void runHybridSearch()}>检索</button></div>
-          {hybridResult && <div className="space-y-1 rounded border p-2"><p>命中 {hybridResult.nodes.length} 个实体、{hybridResult.edges.length} 条关系、{hybridResult.documents.length} 篇文档</p><div className="max-h-24 overflow-auto text-[10px] text-muted-foreground">{hybridResult.nodes.map((node) => <span key={node.id} className="mr-2 inline-block">{node.label}</span>)}{hybridResult.documents.map((document) => <p key={document.sourcePath ?? document.name} className="truncate">{document.name} · {Math.round(document.score * 100)}%</p>)}</div><button className="h-6 w-full rounded border" onClick={() => void navigator.clipboard.writeText(hybridResult.context).then(() => toast('检索上下文已复制，可注入 AI 对话', 'success'))}>复制 GraphRAG 上下文</button></div>}
+          {hybridResult && <div className="space-y-1 rounded border p-2"><p>命中 {hybridResult.nodes.length} 个实体、{hybridResult.edges.length} 条关系、{hybridResult.documents.length} 篇文档</p><div className="max-h-24 overflow-auto text-[10px] text-muted-foreground">{hybridResult.nodes.map((node) => <span key={node.id} className="mr-2 inline-block">{node.label}</span>)}{hybridResult.documents.map((document) => <p key={document.sourcePath ?? document.name} className="truncate">{document.name} · {Math.round(document.score * 100)}%</p>)}</div><div className="grid grid-cols-2 gap-1"><button className="h-6 rounded border" onClick={() => void navigator.clipboard.writeText(hybridResult.context).then(() => toast('检索上下文已复制', 'success'))}>复制上下文</button><button className="h-6 rounded bg-primary text-primary-foreground disabled:opacity-50" disabled={!aiApi.apiKey || graphAsking} onClick={() => void askGraph()}>{graphAsking ? '回答中…' : '基于证据回答'}</button></div>{graphAnswer && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">{graphAnswer}</pre>}</div>}
         </section>
 
         <NodePanel
