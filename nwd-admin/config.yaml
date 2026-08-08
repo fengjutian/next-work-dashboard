@@ -1,0 +1,13 @@
+# nwd-admin config — override via env vars: NWD_SERVER_ADDR, NWD_LOG_LEVEL, etc.
+server:
+  addr: ":8090"
+  read_timeout: 5
+  write_timeout: 10
+  idle_timeout: 120
+
+database:
+  data_dir: "./data"
+
+log:
+  level: "info"   # debug | info | warn | error
+  format: "json"  # json | text

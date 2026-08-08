@@ -4,71 +4,105 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/fjutian/nwd-admin/internal/config"
 	"github.com/fjutian/nwd-admin/internal/db"
 	"github.com/fjutian/nwd-admin/internal/handler"
 )
 
 func main() {
-	addr := flag.String("addr", ":8090", "HTTP listen address")
-	dataDir := flag.String("data-dir", "./data", "SQLite data directory")
+	configPath := flag.String("config", "", "config file path (yaml)")
 	flag.Parse()
 
-	sqlDB, err := db.Open(*dataDir)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Structured logging with level from config.
+	var level slog.Level
+	switch strings.ToLower(cfg.Log.Level) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	var h slog.Handler
+	if cfg.Log.Format == "text" {
+		h = slog.NewTextHandler(os.Stderr, opts)
+	} else {
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(h))
+
+	gormDB, err := db.Open(cfg.Database.DataDir)
+	if err != nil {
+		slog.Error("open database", "err", err)
+		os.Exit(1)
+	}
+
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		slog.Error("get underlying sql.DB", "err", err)
+		os.Exit(1)
 	}
 	defer sqlDB.Close()
 
-	h := handler.New(sqlDB)
+	hdlr := handler.New(gormDB)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 
-	// Pages
-	r.Get("/", h.HomePage)
-	r.Get("/plugins", h.PluginsPage)
-
-	// API
-	r.Get("/api/plugins", h.ListPlugins)
-	r.Post("/api/plugins", h.UploadPlugin)
-	r.Get("/api/plugins/{id}/download", h.DownloadPlugin)
-	r.Delete("/api/plugins/{id}", h.DeletePlugin)
+	r.Get("/", hdlr.HomePage)
+	r.Get("/plugins", hdlr.PluginsPage)
+	r.Get("/api/plugins", hdlr.ListPlugins)
+	r.Post("/api/plugins", hdlr.UploadPlugin)
+	r.Get("/api/plugins/{id}/download", hdlr.DownloadPlugin)
+	r.Delete("/api/plugins/{id}", hdlr.DeletePlugin)
 
 	srv := &http.Server{
-		Addr:         *addr,
+		Addr:         cfg.Server.Addr,
 		Handler:      r,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(cfg.Server.IdleTimeout) * time.Second,
 	}
 
-	// Graceful shutdown via context (P0 fix).
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
 		<-ctx.Done()
-		log.Println("shutting down...")
+		slog.Info("shutting down...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown error: %v", err)
+			slog.Error("shutdown error", "err", err)
 		}
 	}()
 
-	fmt.Printf("🧩 NWD Admin listening on http://localhost%s\n", *addr)
+	slog.Info("server starting", "addr", cfg.Server.Addr, "log_level", cfg.Log.Level)
+	fmt.Printf("🧩 NWD Admin listening on http://localhost%s\n", cfg.Server.Addr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatalf("server: %v", err)
+		slog.Error("server error", "err", err)
+		os.Exit(1)
 	}
-	log.Println("server stopped")
+	slog.Info("server stopped")
 }

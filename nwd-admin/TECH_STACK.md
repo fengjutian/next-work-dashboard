@@ -16,10 +16,11 @@ next-work-dashboard 的插件管理后台。提供：
 | 模板引擎 | **Go html/template** | 标准库，零依赖，服务端渲染落地页 + 管理页 |
 | 前端增强 | **HTMX + Alpine.js**（CDN） | 无构建步，SSR 为主，渐进增强交互 |
 | CSS | **Tailwind CSS**（CDN） | 快速原型，与 Electron 端的 purple 主题对齐 |
-| 数据库 | **SQLite**（modernc.org/sqlite） | 纯 Go 实现，零 CGo 依赖，跨平台编译无痛 |
-| ORM | 无 — 裸 SQL | Go 生态 ORM 普遍薄弱；插件表结构简单，手写 SQL 清晰 |
-| 配置 | 环境变量 + 命令行 flag | 12-factor，单文件无外部配置依赖 |
-| 部署 | 单二进制 `nwd-admin` | `GOOS=linux GOARCH=amd64 go build` 即交付 |
+| 数据库 | **SQLite**（GORM sqlite driver） | 零运维，与 Electron 端一致 |
+| ORM | **GORM** | 企业级 ORM，AutoMigrate、链式查询、Hooks |
+| 日志 | **log/slog**（结构化 JSON） | 标准库，stderr JSON 输出 |
+| 配置 | 命令行 flag（近期切 Viper） | 简洁可扩展 |
+| 部署 | 单二进制 `nwd-admin` | `CGO_ENABLED=0 go build` 即交付 |
 
 ## 模块拆分（首期 MVP）
 
