@@ -100,6 +100,14 @@ function Weread({ className, ...props }: SVGProps<SVGSVGElement>) {
   </svg>;
 }
 
+/** A seal-and-character mark for the 汉语新解 plugin. */
+function HanyuJinjie({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...props}>
+    <rect x="3.25" y="3.25" width="17.5" height="17.5" rx="3.25" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    <path d="M7 8.15h10M12 6.2v11.6M7.5 12h9M8.2 16.8c1.7-.7 2.95-1.7 3.8-3.05.85 1.35 2.1 2.35 3.8 3.05" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>;
+}
+
 export {
   ArrowLeft,
   ArrowLeftRight,
@@ -135,6 +143,7 @@ export {
   Info,
   Loader2,
   Weread,
+  HanyuJinjie,
   Maximize2,
   Menu,
   Minus,

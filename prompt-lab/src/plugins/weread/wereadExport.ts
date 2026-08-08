@@ -25,7 +25,8 @@ export function wereadBookFingerprint(book: WereadExportBook): string {
 }
 
 export function safeWereadFilename(title: string): string {
-  return title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 80) || '未命名书籍';
+  const printable = [...title].map((character) => character.charCodeAt(0) < 32 ? '_' : character).join('');
+  return printable.replace(/[<>:"/\\|?*]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 80) || '未命名书籍';
 }
 
 function noteDate(value: unknown): string {
