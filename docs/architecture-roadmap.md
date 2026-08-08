@@ -1,6 +1,6 @@
 # 🗺️ 架构演进路线图
 
-> 源于 Continue.dev 架构分析，结合当前代码现状的改造优先级。最后更新：2026-08-04。
+> 源于 Continue.dev 架构分析，结合当前代码现状的改造优先级。最后更新：2026-08-08。
 
 ---
 
@@ -9,10 +9,10 @@
 | 优先级 | 方向 | 改动规模 | 用户感知 | 状态 |
 |---|---|---|---|---|
 | ⭐⭐⭐ | **1. Core/UI 分离** | 小 | 架构收益 | ✅ 已完成 |
+| ⭐⭐⭐ | **5. 工具系统** | 小 | 中 | ✅ 已实现 |
 | ⭐⭐⭐ | **4. Context Provider** | 中 | 🔥 高 | 📋 待实现 |
-| ⭐⭐ | **2. Protocol 驱动** | 大 | 类型安全 | 📋 待实现 |
-| ⭐⭐ | **3. LLM 抽象层** | 中 | 中 | ✅ 骨架已建 |
-| ⭐ | **5. 工具系统** | 小 | 低 | 📋 待实现 |
+| ⭐⭐ | **2. Protocol 驱动** | 大 | 类型安全 | 🚧 部分（契约检查） |
+| ⭐⭐ | **3. LLM 抽象层** | 中 | 中 | ✅ 骨架已建，接入待完成 |
 
 ---
 
@@ -26,15 +26,19 @@
 
 ```
 src/core/
-├── injector.ts                  # buildInjectionScript / extractVariables / fillVariables
+├── injector.ts                  # buildInjectionScript / extractVariables / fillVariables / parseInjectResult
 ├── conversation-extractor.ts    # buildConversationExtractScript
-├── llm.ts                       # LLMProvider 接口 + createOpenAIProvider
+├── llm.ts                       # LLMProvider 接口 + createOpenAIProvider + Provider Registry
+├── agent.ts                     # runAgent() ReAct 循环
+├── tools/                       # ToolRegistry + 内置/工作区/知识库/MCP/Office 工具
+├── conversation-memory.ts       # 会话记忆检索索引
+├── knowledge/                   # 知识库索引/检索/提案/健康
 └── index.ts                     # barrel export
 ```
 
 ### 效果
 
-- `WebViewContainer.tsx` 减少 ~160 行内联脚本
+- `WebViewContainer.tsx` 减少大量内联脚本
 - 注入逻辑可独立单测
 - 为 LLM API 直连模式铺路
 
@@ -73,15 +77,22 @@ interface ContextProvider {
 - 用户写 `今天是 {{date}}，帮我 {{clipboard}}` 自动获取日期和剪贴板
 - 模板变量从"占位符"升级为"动态上下文"
 
+> **状态**：目前 `src/core/context-providers/` 尚不存在，仍为规划项。`{{变量}}` 目前通过手动 `VariableFillDialog` 填充。
+
 ---
 
-## 2. Protocol 驱动（IPC 类型化）
+## 2. Protocol 驱动（IPC 类型化）🚧 部分
 
 ### 目标
 
 将散落的 `ipcMain.handle` / `ipcRenderer.invoke` 集中为类型安全的协议层。
 
-### 方案
+### 已完成
+
+- `scripts/check-ipc-contract.mjs`：运行时校验 preload 暴露的通道与主进程 handler 一致
+- Preload 暴露的类型化 `window.electronAPI`（`src/preload.ts`）
+
+### 方案（规划）
 
 ```
 src/protocol/
@@ -95,10 +106,6 @@ const IPC = {
   'db:save':       { req: { data: ArrayBuffer },   res: { success: boolean } },
   'inject-prompt': { req: { siteId, promptId },    res: { success: boolean; error?: string } },
 } as const;
-
-// 编译期检查
-const result = await electronAPI.invoke('db:save', { data: buffer });
-//      ^ typed as { success: boolean }
 ```
 
 ### 收益
@@ -124,42 +131,46 @@ src/core/llm.ts
 └── Provider Registry        # registerProvider / getProvider / listProviders
 ```
 
+接入现状（`src/plugins/chat/useChatSession.ts` 等）：
+- AI 对话面板已通过 LLMProvider 直连（OpenAI 兼容，支持 DeepSeek 风格 DSML 工具调用）
+- LLM 响应缓存 `llm-cache.ts` 已接入 SQLite
+
 ### 待完成
 
-- [ ] DeepSeek 专用 Provider（特殊参数、FIM 补全）
+- [ ] DeepSeek 专用 Provider 特化参数（FIM 补全等）
 - [ ] Ollama Provider（本地模型）
 - [ ] Anthropic Provider（Claude Messages API）
-- [ ] Store 中 `aiApi` 替换为 `LLMProvider` 实例
-- [ ] AI Panel 插件接入 LLMProvider
+- [ ] 更多业务场景全面切换到 `LLMProvider`
 
 ---
 
-## 5. 工具系统（注入插件化）
+## 5. 工具系统 ✅（已实现）
 
 ### 目标
 
-利用已有 `PluginRegistry` 体系，让特殊站点的注入逻辑可插件化。
+让 AI Agent 具备可扩展、可授权的工具调用能力。
 
-```typescript
-interface PluginContributions {
-  injectors?: Record<string, Injector>;  // siteId → 自定义注入器
-}
+### 已完成
 
-interface Injector {
-  buildScript(opts: InjectOptions): string;  // 替代通用 buildInjectionScript
-}
+```
+src/core/tools/
+├── registry.ts          # registerTool / getTool / listTools / executeToolCall
+├── types.ts             # ToolDefinition / ToolCall / ToolResult
+├── builtin.ts           # 内置通用工具
+├── code-workspace-tools.ts  # 工作区文件、Git、workspace_run_script（隔离 Worktree）
+├── knowledge-tools.ts   # 知识库检索
+├── conversation-memory-tools.ts # 会话记忆
+├── mcp-tools.ts         # MCP 外部工具
+├── office-tools.ts      # Office 文档工具
+└── plugin-tools.ts      # 插件相关工具
 ```
 
-### 使用场景
+工具由 `runAgent()`（`src/core/agent.ts`）通过 function calling / DSML 标签调用，支持 `allowedToolNames` 白名单控制。
 
-- Gemini 的 `contenteditable` div 需要特殊处理
-- 微信、钉钉等非标准输入框
-- 需要预先点击、滚动等交互的站点
+### 待办
 
-### 改动
-
-- `PluginRegistry` 增加 `resolveInjector(siteId) → Injector | undefined`
-- `WebViewContainer.doInject()` 先查 registry，fallback 到通用 CSS selector
+- 注入逻辑插件化（`PluginContributions.injectors?: Record<string, Injector>`）：让 Gemini 的 `contenteditable`、微信/钉钉等非标准输入框可注入自定义注入器
+- 特殊站点交互（预先点击、滚动等）的工具化
 
 ---
 
@@ -168,6 +179,6 @@ interface Injector {
 | 时序 | 方向 | 理由 |
 |---|---|---|
 | **立即** | Context Provider | 用户体验质变，改动可控 |
-| **短期** | LLM Provider 接入 | 利用已建骨架连接 DeepSeek API |
-| **中期** | Protocol 驱动 | 重构性质，配合新功能逐步迁移 |
-| **观望** | 工具系统 | 等特殊站点需求驱动 |
+| **短期** | LLM Provider 全场景接入 | 利用已建骨架，接入更多 Provider |
+| **中期** | Protocol 驱动 | 重构性质，配合新功能逐步迁移（已有关键检查脚本） |
+| **观望** | 注入器插件化 | 等特殊站点需求驱动 |

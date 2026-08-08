@@ -1,6 +1,6 @@
 # 🔌 next-work-dashboard 插件系统
 
-> 统一注册、两类插件、安全隔离。最后更新：2026-08-04。
+> 统一注册、两类插件、安全隔离。最后更新：2026-08-08。
 
 ---
 
@@ -38,7 +38,7 @@ registerBuiltInPlugins()
 - 用户插件无需先打开插件管理器即可出现在导航和主面板
 - `App`、`ActivityBar`、`TitleBar`、`CommandPalette`、`PluginStatusBar` 通过 `usePluginRegistryVersion()` 订阅 Registry（基于 `useSyncExternalStore`）
 - 内置插件使用 `React.lazy()` 动态 import；App 只挂载当前面板
-- 声明 `keepAlive: true` 的插件首次访问后保持挂载（Terminal / Code Editor / Excel / Excalidraw）
+- 声明 `keepAlive: true` 的插件首次访问后保持挂载（Chat / Office Studio / Excel / Excalidraw / Code Editor / Compare / Document Knowledge / LingoHut / Terminal）
 
 ---
 
@@ -74,7 +74,8 @@ interface PluginContributions {
 ```
 
 - `fileEditors` 通过 `resolveFileEditor(fileName)` 按扩展名和优先级选择编辑器
-- `文件 → 打开文件…` 调用 `resolveFileEditor`，切换到目标插件并发送 `plugin:file-open` 事件
+- `文件 → 打开文件…` 调用 `resolveFileEditor`，切换到目标插件并发送 `plugin:file-open` 事件（已实现，见 §4.4）
+- `TitleBar` 的菜单还聚合各插件 `contributions.menus` 贡献的 `file` / `view` 菜单项
 
 ### 3.2 生命周期
 
@@ -126,6 +127,7 @@ const plugin: Plugin = {
 | `setEnabledMap(map)` | 批量更新，只通知真正变化 |
 | `getEnabledSnapshot()` | 生成持久化用启用状态快照 |
 | `getLifecycleState(id)` | 查询生命周期状态 |
+| `resolveFileEditor(fileName)` | 按扩展名解析文件编辑器 |
 
 ### 4.2 React 订阅
 
@@ -150,36 +152,50 @@ Registry 内部维护稳定版本号，每次有效变化递增并通知订阅�
 
 > ⚠️ 未注册 handler 的命令保留旧版 fallback 行为，后续应由导航服务替代。
 
+### 4.4 文件打开协议（已实现）
+
+`TitleBar` 的"打开文件…"流程：
+
+1. `window.electronAPI.pickFile()` 选择文件
+2. `pluginRegistry.resolveFileEditor(file.name)` 解析编辑器
+3. `setActiveActivity(editor.pluginId)` 切换到目标插件
+4. `window.dispatchEvent(new CustomEvent('plugin:file-open', { detail: { pluginId, editorId, file } }))`
+
+`Office Studio` 等插件监听 `plugin:file-open` 事件消费文件（见 `src/plugins/office-studio/OfficeStudioPanel.tsx`）。文件编辑器注册与消费已打通；Word/Excel/PPT/PDF/Code Editor 的完整统一消费仍是待办（见 §12 P0）。
+
 ---
 
 ## 5. 内置插件
 
-`registerBuiltInPlugins()` 注册 **20 个内置插件**：
+`registerBuiltInPlugins()` 注册 **23 个内置插件**（`src/plugins/built-in/index.ts`）：
 
-| # | ID | 面板 | 默认启用 | 常驻 | order |
-|---:|------|------|:---:|:---:|---:|
-| 0 | `ai` | 🤖 AI 工作台 | ✅ | ❌ | 0 |
-| 1 | `chat` | 💬 AI 对话 | ✅ | ✅ | 1 |
-| 2 | `prompts` | 📝 提示词与技能 | ✅ | ❌ | 2 |
-| 3 | `history` | 📜 知识库 | ✅ | ❌ | 3 |
-| 4 | `graph` | 🕸️ 知识图谱 | ✅ | ❌ | 4 |
-| 5 | `notes` | 📋 便签 | ❌ | ❌ | 5 |
-| 6 | `weread` | 📚 微信读书 | ❌ | ❌ | 6 |
-| 7 | `windy` | 🌤️ Windy | ❌ | ❌ | 7 |
-| 8 | `plugin-manager` | 🔧 插件管理 | ✅ | ❌ | 8 |
-| 9 | `terminal` | 🖥️ 终端 | ❌ | ✅ | 9 |
-| 10 | `database` | 🗄️ 数据库 | ✅ | ❌ | 10 |
-| 11 | `translator` | 🌐 百度翻译 | ❌ | ❌ | 11 |
-| 12 | `word-preview` | 📄 Word 预览 | ❌ | ❌ | 12 |
-| 13 | `excel-preview` | 📊 Excel 编辑 | 视配置 | ✅ | 13 |
-| 14 | `ppt-preview` | 📽️ PPT 演示 | ❌ | ❌ | 14 |
-| 15 | `excalidraw` | 🎨 Excalidraw 白板 | ✅ | ✅ | 15 |
-| 16 | `pdf-preview` | 📑 PDF 预览 | ✅ | ❌ | 16 |
-| 17 | `code-editor` | 💻 代码编辑 | ✅ | ✅ | 17 |
-| 18 | `compare` | 🔍 文本比较 | ✅ | ✅ | 18 |
-| 19 | `document-knowledge` | 📖 文档知识库 | ✅ | ✅ | 19 |
+| order | ID | 面板 | 默认启用 | 常驻 |
+|---:|------|------|:---:|:---:|
+| 0 | `ai` | ✨ AI 工作台 | ✅ | ❌ |
+| 1 | `chat` | 💬 AI 对话 | ✅ | ✅ |
+| 2 | `prompts` | 📝 提示词与技能 | ✅ | ❌ |
+| 3 | `history` | 📚 知识库 | ✅ | ❌ |
+| 4 | `graph` | 🕸️ 知识图谱 | ✅ | ❌ |
+| 5 | `notes` | 📋 便签 | ❌ | ❌ |
+| 6 | `weread` | 📖 微信读书 | ❌ | ❌ |
+| 7 | `windy` | 🌤️ Windy | ❌ | ❌ |
+| 8 | `plugin-manager` | 🔧 插件管理 | ✅ | ❌ |
+| 9 | `terminal` | 🖥️ 终端 | ❌ | ✅ |
+| 10 | `database` | 🗄️ 数据库 | ✅ | ❌ |
+| 11 | `translator` | 🌐 百度翻译 | ❌ | ❌ |
+| 12 | `office-studio` | 🗂️ Office Studio | ❌ | ✅ |
+| 12 | `word-preview` | 📄 Word 预览 | ❌ | ❌ |
+| 13 | `excel-preview` | 📊 Excel 编辑 | ❌ | ✅ |
+| 14 | `ppt-preview` | 📽️ PPT 演示 | ❌ | ❌ |
+| 15 | `excalidraw` | 🎨 Excalidraw 白板 | ✅ | ✅ |
+| 16 | `pdf-preview` | 📑 PDF 预览 | ✅ | ❌ |
+| 17 | `code-editor` | 💻 代码编辑 | ✅ | ✅ |
+| 18 | `compare` | 🔍 文本比较 | ✅ | ✅ |
+| 19 | `document-knowledge` | 📖 文档知识库 | ✅ | ✅ |
+| 20 | `hanyu-jinjie` | 汉 汉语新解 | ✅ | ❌ |
+| 21 | `lingohut` | 🌏 LingoHut 语言学习 | ✅ | ✅ |
 
-默认状态以 `built-in/index.ts` 和 `plugins/defaults.ts` 为准。数据库中的用户启用差量可覆盖默认值。
+> **默认状态以 `built-in/index.ts` 和 `plugins/defaults.ts` 为准**。`excel-preview` 的默认启用由 `EXCEL_PREVIEW_DEFAULT_ENABLED`（当前 `false`）控制。数据库中的用户启用差量（`plugin.enabled.delta`）可覆盖默认值。`office-studio` 与 `word-preview` 同为 order 12，按注册顺序排列。
 
 ---
 
@@ -191,7 +207,7 @@ Registry 内部维护稳定版本号，每次有效变化递增并通知订阅�
 <iframe sandbox="allow-scripts" />
 ```
 
-CSP 核心规则：
+CSP 核心规则（`src/plugins/sandbox/plugin-frame.html`）：
 
 ```
 default-src 'none'
@@ -230,7 +246,7 @@ Host 校验规则：
 | `store.read` | 读取提示词、站点、标签页、主题和会话元数据 |
 | `clipboard` | 写入系统剪贴板 |
 | `inject` | 向 AI 站点注入提示词 |
-| `external.open` | 打开外部链接（`https:` / `http:` / `mailto:`；拒绝 URL 含用户名密码） |
+| `external.open` | 打开外部链接（`https:` / `http:` / `mailto:`；URL ≤ 2048 字符；拒绝 URL 含用户名密码） |
 | `data` | 使用插件私有键值存储（命名空间 `pksdk:data:<pluginId>`，上限 512 KB） |
 | `preview` | Markdown、图片、PDF、代码预览 |
 | `file.read` | 通过选择器读取文件 |
@@ -347,7 +363,7 @@ SDK 类型和运行时源码统一来自 `sandbox/plugin-sdk.ts`。
 | 内置插件启用差量 | 数据库 setting：`plugin.enabled.delta` |
 | Registry 状态和生命周期 | 当前 Renderer 内存 |
 
-首次读取自动迁移旧数据且不破坏旧 key。插件连续 3 次运行错误被熔断禁用。
+首次读取自动迁移旧数据且不破坏旧 key（旧 `plugin-manager-user-plugins` 与 `pksdk:data:*` 一并迁移）。插件连续 3 次运行错误被熔断禁用。
 
 ---
 
@@ -457,6 +473,8 @@ node build.mjs   # 生成的 .nwd 不得超过 2 MB
 }
 ```
 
+Sandbox 内置样式类：`.pk-btn` / `.pk-btn-primary` / `.pk-danger` / `.pk-input` / `.pk-card` / `.pk-badge` / `.pk-separator`（见 `plugin-frame.html`）。
+
 ### 10.6 SDK 使用要点
 
 #### Store（数据读取）
@@ -544,22 +562,26 @@ const unsubscribe = PluginSDK.on('event-name', (payload) => { console.log(payloa
 |---|---|
 | `src/App.tsx` | 初始化插件系统并渲染面板 |
 | `src/plugins/types.ts` | Plugin、Contributions、生命周期类型 |
-| `src/plugins/registry.ts` | 注册、启用、命令、生命周期与资源回收 |
+| `src/plugins/registry.ts` | 注册、启用、命令、文件编辑器、生命周期与资源回收 |
 | `src/plugins/usePluginRegistry.ts` | React `useSyncExternalStore` 适配 |
-| `src/plugins/built-in/index.ts` | 内置插件清单 |
-| `src/plugins/ai/` | AI 导航、WebView、欢迎页与会话保存 |
-| `src/plugins/chat/` | AI 对话面板 |
+| `src/plugins/built-in/index.ts` | 23 个内置插件清单 |
+| `src/plugins/ai/` | AI 工作台、WebView、欢迎页与会话保存 |
+| `src/plugins/ai-chat-module/` | AI 对话模块（承载 chat 插件） |
+| `src/plugins/chat/` | AI 对话面板组件 |
 | `src/plugins/prompts/` | 提示词侧栏与全局抽屉 |
-| `src/plugins/history/` | 会话历史 |
+| `src/plugins/history/` | 会话历史 / 知识库 |
 | `src/plugins/knowledge-graph/` | 知识图谱面板与画布 |
 | `src/plugins/database/` | 数据库浏览器 |
 | `src/plugins/terminal/` | 终端 UI 与主进程 backend |
+| `src/plugins/office-studio/` | Office Studio 插件（含主进程 office-service） |
 | `src/plugins/compare/` | 文本比较 |
 | `src/plugins/document-knowledge/` | 文档知识库 |
 | `src/plugins/dynamic/DynamicPlugin.tsx` | 静态 content 与 Sandbox 模式分发 |
 | `src/plugins/plugin-manager/` | 创建、导入、导出、管理 UI |
+| `src/plugins/plugin-storage.ts` | 插件平台级持久化（localStorage） |
 | `src/plugins/sandbox/types.ts` | Manifest、权限与 Bridge 协议类型 |
 | `src/plugins/sandbox/PluginSandbox.tsx` | iframe 与 CSP 容器 |
+| `src/plugins/sandbox/plugin-frame.html` | Sandbox 页面骨架、内置样式、错误边界 |
 | `src/plugins/sandbox/plugin-sdk.ts` | SDK 类型及唯一运行时源码 |
 | `src/plugins/sandbox/usePluginBridge.ts` | Host API 路由、权限和参数校验 |
 | `tests/plugin-lifecycle.test.ts` | 生命周期及异步竞态测试 |
@@ -572,7 +594,7 @@ const unsubscribe = PluginSDK.on('event-name', (payload) => { console.log(payloa
 
 | 功能 | 说明 |
 |---|---|
-| **文件编辑器打开协议** | Word/Excel/PPT/PDF/Code Editor 统一消费 `plugin:file-open` 事件 |
+| **文件编辑器打开协议全覆盖** | Word/Excel/PPT/PDF/Code Editor 统一消费 `plugin:file-open` 事件（协议与 Office Studio 已打通，其余编辑器待接入） |
 | **安装与更新授权确认** | 安装前展示权限，更新时对比新旧权限，新敏感权限二次确认 |
 | **原子更新与自动回滚** | 事务式更新、健康检查、失败自动回滚、版本历史列表 |
 

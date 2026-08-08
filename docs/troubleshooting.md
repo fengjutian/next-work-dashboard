@@ -13,6 +13,7 @@
 | `node-gyp` 编译错误 | 安装 [windows-build-tools](https://www.npmjs.com/package/windows-build-tools) (Windows) 或 Xcode Command Line Tools (macOS) |
 | `python` 未找到 | 安装 Python ≥ 3.10，或设置 `npm config set python python3` |
 | 网络超时 | 切换 npm 镜像：`npm config set registry https://registry.npmmirror.com` |
+| 原生依赖（node-pty / lancedb）构建失败 | 运行 `npm run prepare:native` 重建原生模块 |
 
 ### 应用无法启动
 
@@ -21,6 +22,7 @@
 | 白屏 / 黑屏 | 查看开发者工具 Console（`Ctrl+Shift+I`），检查是否有 JS 错误 |
 | `Error: Cannot find module` | 删除 `node_modules` + `package-lock.json` 重新 `npm install` |
 | Electron 启动失败 | 确认 Node.js ≥ 18，尝试 `npx electron --version` 验证 |
+| 怀疑用户插件导致启动问题 | 在 `设置 → 插件` 开启**安全模式**禁用全部用户插件 |
 
 ---
 
@@ -50,6 +52,7 @@
 | 页面空白 / 加载失败 | 检查网络连接，右键标签页刷新 |
 | 登录态丢失 | 确认对应站点的 Cookie 设置正确，尝试重新登录 |
 | 字体/布局错乱 | 可能是 WebView 版本兼容问题，尝试更新 Electron |
+| 提示"使用环境异常"类反爬提示 | 确认 `webview-preload.ts` 反指纹伪装未被新版检测（可尝试更新应用） |
 
 ---
 
@@ -94,9 +97,9 @@
 
 ### 数据丢失怎么恢复
 
-- 应用数据存储在 `%APPDATA%/next-work-dashboard/`
-- 提示词/站点/设置：`data.db`（SQLite）
-- 对话历史：`conversations/` 目录
+- 应用数据库：`<userData>/next-work-dashboard.db`（Windows 下 `%APPDATA%\next-work-dashboard\next-work-dashboard.db`）
+- 对话历史 / 记忆：`<documents>/next-work-dashboard/` 目录
+- Token：`<userData>/.auth-tokens.enc`（safeStorage 加密，无需手动备份）
 - 定期使用 `设置 → 数据管理 → 导出` 备份
 
 ### 应用卡顿 / 内存高
@@ -105,7 +108,7 @@
 |---|---|
 | 打开过多 WebView 标签 | 关闭不用的标签页 |
 | 大量对话历史 | 清理旧对话或导出后删除 |
-| 知识库索引过大 | `设置 → 知识库 → 清空缓存` |
+| 知识库索引过大 | `设置 → 知识库 → 索引管理 → 清空/重建` |
 | 用户插件资源泄漏 | 禁用可疑插件，查看插件日志 |
 
 ---
@@ -114,7 +117,7 @@
 
 ### 终端无法启动
 
-- Windows：确认 PowerShell 已安装（`pwsh --version`）
+- Windows：确认 PowerShell 已安装（`pwsh --version`），终端插件默认**未启用**，需先在活动栏启用
 - macOS/Linux：确认 `bash` 或 `zsh` 可用
 - 尝试在应用外打开对应终端，确认系统 shell 正常工作
 
@@ -123,6 +126,7 @@
 - 检查工作目录是否正确
 - 确认 `PATH` 环境变量包含所需命令
 - 避免需要交互式输入的命令（如 `ssh` 密码认证）
+- 通过 `设置 → 快捷键` 检查全局快捷键是否被占用
 
 ---
 

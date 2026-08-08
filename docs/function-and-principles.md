@@ -1,6 +1,6 @@
 # ⚙️ next-work-dashboard — 功能与原理
 
-> 涵盖架构原理、核心引擎、插件系统、数据层、Agent 系统。最后更新：2026-08-04。
+> 涵盖架构原理、核心引擎、插件系统、数据层、Agent 系统。最后更新：2026-08-08。
 
 ---
 
@@ -14,7 +14,7 @@
 6. [插件系统](#6-插件系统)
 7. [数据持久化层](#7-数据持久化层)
 8. [状态管理](#8-状态管理)
-9. [ReAct Agent 系统](#9-react-agent-系统)
+9. [AI Agent 系统](#9-ai-agent-系统)
 10. [工作区与代码编辑器](#10-工作区与代码编辑器)
 11. [终端系统](#11-终端系统)
 12. [IPC 通信桥](#12-ipc-通信桥)
@@ -24,7 +24,7 @@
 
 ## 1. 项目概述
 
-**next-work-dashboard** 是一个基于 Electron 的 AI 提示词注入桌面应用。
+**next-work-dashboard** 是一个基于 Electron 的 AI 下一代工作平台。
 
 > **定位**：不是又一个 ChatGPT 客户端——是你所有 AI 网站的提示词遥控器。
 
@@ -34,12 +34,15 @@
 |---|---|
 | 框架 | Electron 35 |
 | 渲染进程 | React 18 + TypeScript 5.4 |
-| UI | shadcn/ui + Tailwind CSS 3 |
+| UI | Ant Design 6 + @ant-design/x + shadcn/ui + Tailwind CSS 3 |
 | 状态管理 | Zustand 5 |
 | 持久化 | sql.js (SQLite WASM) + Drizzle ORM |
-| 图可视化 | ECharts 6 |
+| 图可视化 | ECharts 6 / mermaid / cytoscape |
+| 代码编辑 | Monaco Editor |
+| 终端 | xterm.js + node-pty |
+| 向量/Embedding | LanceDB + Transformers.js（本地） |
+| MCP | @modelcontextprotocol/sdk |
 | 构建 | electron-forge 7 + Vite 5 |
-| 终端 | xterm.js |
 | 测试 | Vitest 2 + Testing Library |
 
 ---
@@ -49,9 +52,10 @@
 ```
 ┌─────────────────────────────────────────┐
 │            主进程 (Main Process)          │
-│  src/main.ts                            │
+│  src/main.ts + src/main/                │
 │  · 窗口管理 · 系统托盘 · 全局快捷键       │
 │  · IPC 处理器 · 终端管理 · 安全存储       │
+│  · Agent 任务 · Git 工作区 · MCP · Office │
 └──────────────┬──────────────────────────┘
                │ IPC (contextBridge)
 ┌──────────────▼──────────────────────────┐
@@ -80,6 +84,7 @@
 1. **渲染进程零 Node.js 权限**：通过 `contextBridge` 暴露 `window.electronAPI`，永不直接 `require('electron')`
 2. **单例窗口模式**（`main/globals.ts`）：模块级 `let mainWindow`，`getMainWindow()` / `setMainWindow()` 访问
 3. **启动顺序**：`app.whenReady() → createWindow → createTray → setupIPC → registerShortcuts`
+4. **数据本地化**：sql.js 内存数据库在渲染进程运行，通过 IPC `db:save` 定时（30s / beforeunload / 退出前）落盘
 
 ---
 
@@ -112,7 +117,7 @@ if (nativeSetter) { nativeSetter.call(input, text); }
 else { input.value = text; }
 ```
 
-**原理**：React/Vue 拦截 `input.value` 赋值。通过获取原生 `HTMLTextAreaElement.prototype.value` 的 setter 直接调用，绕过框架拦截。
+**原理**：React/Vue 拦截 `input.value` 赋值。通过获取原生 `HTMLTextAreaElement.prototype.value`（fallback 到 `HTMLInputElement.prototype.value`）的 setter 直接调用，绕过框架拦截。
 
 #### 第二步：事件模拟
 
@@ -143,13 +148,13 @@ setTimeout(() => {
 | `injectStrategy` | `replace` | 替换全部内容 |
 | | `append` | 追加到末尾 |
 
-两者正交组合产生 4 种行为。
+两者正交组合产生 4 种行为。`buildInjectionScript` 找不到输入框选择器时返回 `{ success: false, error: 'INPUT_NOT_FOUND' }`，由 `parseInjectResult` 解析。
 
 ---
 
 ## 4. WebView 多标签浏览器
 
-> 核心组件：`WebViewContainer.tsx`
+> 核心组件：`src/plugins/ai/WebViewContainer.tsx`
 
 ### 4.1 架构
 
@@ -167,8 +172,6 @@ WebViewContainer
 
 ### 4.2 为什么用 webview 而不是 iframe
 
-> 🔗 项目记忆：[webview not iframe for external sites]
-
 | 特性 | webview | iframe |
 |---|---|---|
 | 进程隔离 | ✅ 独立渲染进程 | ❌ 同进程 |
@@ -178,8 +181,8 @@ WebViewContainer
 
 ### 4.3 Session 分区
 
-```
-partition = `persist:site_${site.id}`
+```tsx
+<webview partition={`persist:site-${tab.siteId}`} />
 ```
 
 - 不同 AI 站点登录态互不干扰
@@ -196,15 +199,20 @@ partition = `persist:site_${site.id}`
 
 | 属性 | 伪装值 | 目的 |
 |---|---|---|
+| `navigator.userAgent` | 伪造 Chrome 134 UA | 隐藏 Electron UA |
+| `navigator.userAgentData` | 伪造 brands / platform，`getHighEntropyValues()` 返回高熵假值（platformVersion / architecture / uaFullVersion） | 规避新版浏览器指纹 API |
 | `navigator.webdriver` | `false` | 隐藏自动化标志 |
-| `navigator.plugins` | 非空 PluginArray | 模拟正常浏览器 |
-| `navigator.languages` | `['zh-CN', 'en']` | 区域伪装 |
-| `window.chrome` | `{ runtime: {} }` | 模拟 Chrome 特征 |
-| `screen` 属性 | 合理值 | 规避 headless 检测 |
+| `navigator.plugins` | 非空 PluginArray（PDF Plugin 等） | 模拟正常浏览器（Electron 默认 plugins 为空） |
+| `navigator.languages` | `['zh-CN', 'zh', 'en-US', 'en']` | 区域伪装 |
+| `navigator.platform` | `'Win32'` | 平台伪装 |
+| `navigator.hardwareConcurrency` | `8` | CPU 核数伪装 |
+| `navigator.deviceMemory` | `8` | 内存伪装 |
+| `window.chrome` | `{ runtime: {}, loadTimes, csi, app }` | 模拟 Chrome 特征 |
+| `screen.colorDepth` / `pixelDepth` | `24` | 规避 headless 检测 |
 
 ### 5.2 注入时机
 
-使用 `contextIsolation: true` + `preload` 脚本，在页面 JavaScript 执行前运行，确保页面脚本读到的是伪装后的值。
+使用 `contextIsolation: true` + 独立 `webview-preload` 脚本，在页面 JavaScript 执行前运行，确保页面脚本读到的是伪装后的值。所有伪装项用 `Object.defineProperty` + `try/catch` 包裹，失败静默忽略。
 
 ---
 
@@ -212,10 +220,11 @@ partition = `persist:site_${site.id}`
 
 详见 [插件架构文档](./plugin-architecture.md)。核心要点：
 
-- **20 个内置插件**，`React.lazy()` 动态 import
+- **23 个内置插件**，`React.lazy()` 动态 import
 - **Sandbox 用户插件**，`sandbox="allow-scripts"` iframe 隔离
-- **PluginRegistry** 统一管理生命周期、命令、React 订阅
+- **PluginRegistry** 统一管理生命周期、命令、文件编辑器、React 订阅
 - Kernel 执行链已完全移除
+- `plugin:file-open` 文件打开协议已实现（Office Studio 已接入，其余编辑器待办）
 
 ---
 
@@ -227,35 +236,43 @@ partition = `persist:site_${site.id}`
 
 | 方案 | 决策 |
 |---|---|
-| sql.js (SQLite WASM) | ✅ 纯 JS，无需原生编译 |
+| sql.js (SQLite WASM) | ✅ 纯 JS，无需原生编译；运行在渲染进程内存中 |
 | Drizzle ORM | ✅ 类型安全，与 TypeScript 完美集成 |
-| 数据库路径 | `%APPDATA%/next-work-dashboard/data.db` |
+| 数据库路径 | `<userData>/next-work-dashboard.db` |
 
-### 7.2 核心表结构
+### 7.2 核心表结构（Drizzle schema + ensureSchema）
 
-| 表 | 用途 |
+Drizzle schema（`src/db/schema.ts`）20 张表，运行时 `ensureSchema()` 补充 `chat_sessions` / `chat_messages` / `weread_notes` / `weread_export_state` 等。主要分组：
+
+| 分组 | 表 |
 |---|---|
-| `prompts` | 提示词（标题/正文/分类/标签/变量/收藏/使用次数） |
-| `sites` | AI 站点配置（名称/URL/CSS 选择器/启用状态） |
-| `settings` | 应用设置（键值对存储） |
-| `conversations` | 对话历史元数据 |
+| 提示词 | `prompts`（标题/正文/分类/标签/变量/收藏/置顶/使用次数） |
+| 站点 | `sites`（名称/URL/CSS 选择器/启用/代理/排序） |
+| 注入 | `inject_history` |
+| 设置 | `settings`（键值对）、`schema_version` |
+| LLM 缓存 | `llm_response_cache`、`embedding_cache`、`semantic_shadow_cache`、`llm_cache_events` |
+| 会话/记忆 | `chat_sessions`、`chat_messages`、`conversations` |
+| 微信读书 | `weread_books`、`weread_review_state`、`weread_actions`、`weread_sync_history`、`weread_notes`、`weread_export_state` |
+| 汉语新解 | `hanyu_jinjie_executions` |
+| 文档知识库 | `document_knowledge_records` |
+| Agent | `agent_sessions`、`agent_messages`、`agent_logs`、`agent_proposals`、`agent_tasks` |
+| 技能 | `skills`、`skill_files` |
 
 ### 7.3 数据库操作流程
 
 ```
 App 启动
-  → dbLoad() 从 IndexedDB 读取 SQLite 文件
-  → 通过 IPC 传递给主进程
-  → 主进程写入磁盘
-  → drizzle-orm 连接
-  ↓
-运行时
+  → useDbPersistence() 通过 IPC db:load 读取磁盘 SQLite 字节
+  → initDb() 在渲染进程用 sql.js 加载 + ensureSchema()
   → 所有 DB 操作通过 Zustand Store 的 action
   → 同步更新内存状态 + 数据库
   ↓
 保存
-  → dbSave() 序列化 SQLite → 通过 IPC 写入磁盘
+  → flushDbToDisk(): sql.js export() → IPC db:save → 主进程 fs.writeFileSync
+  → 触发：每 30s 定时 / beforeunload / 托盘退出 save-before-quit / 变更后主动 flush
 ```
+
+> IndexedDB 仅用于会话历史的语义检索索引（`conversation-memory.ts`，store `next-work-dashboard-memory`），不属于主数据路径。
 
 ---
 
@@ -293,38 +310,54 @@ interface AppStore {
 
 ### 8.2 持久化 Hook
 
-`useDbPersistence()` 在启动时从数据库恢复状态，并监听状态变化自动保存（debounce 500ms）。
+`useDbPersistence()` 在启动时从数据库恢复状态，并监听状态变化自动保存（定时 30s flush + 变更主动落盘）。
 
 ---
 
-## 9. ReAct Agent 系统
+## 9. AI Agent 系统
 
-> 文件：`src/core/agent/` + `main/agent-task-service.ts`
+> 聊天侧 ReAct 循环：`src/core/agent.ts` + `src/core/tools/`
+> 文件编辑任务：`src/main/agent/`（task-service / worktree / script-runner / execution-env）
 
-### 9.1 ReAct 循环
+### 9.1 ReAct 循环（聊天）
 
 ```
 Thought → Action → Observation → Thought → Action → ... → Final Answer
 ```
 
-### 9.2 组件
+`src/core/agent.ts` 导出 `runAgent()`（异步生成器）：支持 OpenAI 流式 `tool_call` 增量解析与 DeepSeek 风格 DSML 工具调用标签；默认最多 5 步；支持工具 allowlist（`allowedToolNames`）。由 `src/plugins/chat/useChatSession.ts` 与 `ChatPanel.tsx` 消费。
+
+### 9.2 工具系统（已实现）
+
+`src/core/tools/` 是独立的工具注册与执行系统：
+
+| 文件 | 职责 |
+|---|---|
+| `registry.ts` | `registerTool` / `getTool` / `listTools` / `executeToolCall` / `getEnabledToolSchemas` |
+| `types.ts` | `ToolDefinition` / `ToolCall` / `ToolResult` 类型 |
+| `builtin.ts` | 内置通用工具 |
+| `code-workspace-tools.ts` | 工作区文件、Git、`workspace_run_script`（脚本在隔离 Worktree 内运行） |
+| `knowledge-tools.ts` | 知识库检索 |
+| `conversation-memory-tools.ts` | 会话记忆读写 |
+| `mcp-tools.ts` | MCP 外部工具 |
+| `office-tools.ts` | Office 文档工具 |
+| `plugin-tools.ts` | 插件相关工具 |
+
+### 9.3 LLM Provider
+
+`src/core/llm.ts`：
 
 | 组件 | 职责 |
 |---|---|
-| `AgentLoop` | 管理 ReAct 循环的 Thought-Action-Observation 迭代 |
-| `ToolRegistry` | 注册和查找可用工具 |
-| `LLMProvider` | 统一的模型调用接口（OpenAI 兼容 / DeepSeek / Ollama） |
-| `agent-task-service` | 任务队列、取消/重试、执行指标 |
+| `LLMProvider` 接口 | `chat` / `listModels` / `validate` |
+| `createOpenAIProvider()` | OpenAI 兼容（流式 SSE 解析） |
+| Provider Registry | `registerProvider` / `getProvider` / `listProviders` |
 
-### 9.3 工具系统
+### 9.4 文件编辑任务（主进程）
 
-工具通过 `PluginContributions.commands` 注册，Agent 通过 function calling 调用。支持的工具包括：
+`src/main/agent/task-service.ts` 的 `AgentTaskService`：任务队列、取消/重试、执行指标（`agent-task:create/get/list/cancel/retry` + `agent-task:event` 订阅）。
 
-- 文件读写、搜索
-- Git 操作
-- 终端命令
-- 知识库检索
-- MCP 外部工具
+`src/main/agent/execution-env.ts`：`ExecutionEnv` 抽象（`AgentProvider` / `createLocalWorktreeEnv`），`readFile`/`writeFiles`/`runCommand` 全部经过 `resolveWorkspacePath` 边界校验。
 
 ---
 
@@ -333,7 +366,7 @@ Thought → Action → Observation → Thought → Action → ... → Final Answ
 ### 10.1 工作区授权
 
 ```
-用户选择文件夹 → authorizeWorkspace(root)
+用户选择文件夹 → authorizeWorkspace(root)   # src/main/workspace/path.ts
   → 每次文件访问验证：
     1. 路径在根内（path.resolve + 前缀检查）
     2. 真实路径授权（fs.realpathSync 防符号链接逃逸）
@@ -342,26 +375,27 @@ Thought → Action → Observation → Thought → Action → ... → Final Answ
 
 ### 10.2 文件编辑事务
 
-`applyWorkspaceTextEdits(edits[])` 两阶段提交：
+`applyWorkspaceTextEdits(root, edits)`（`src/main/workspace/transaction.ts`）两阶段提交：
 
 ```
-Phase 1 — 预检：读取所有文件原始内容 + mtime
+Phase 1 — 预检：读取所有文件原始内容 + mtime（fileWasModified 冲突检测）
 Phase 2 — 写入：逐个写文件
           ↓ 任何写入失败 →
           回滚：用 Phase 1 原始内容恢复所有已修改文件
 ```
 
-同时支持 `WorkspaceFileMutation`：create / delete / rename。
+同时支持 `WorkspaceFileMutation`：create / delete / rename（`applyWorkspaceFileMutations`）。文本编解码（UTF-8/GBK 检测）见 `workspace/text.ts`。
 
 ### 10.3 Git 集成
 
 | 模块 | 职责 |
 |---|---|
-| `git-security.ts` | 脱敏凭证（token/password） |
-| `git-history.ts` | `git log` 结构化解析 |
-| `git-diagnostics.ts` | 错误分类（network/auth/conflict） |
-| `git-overview.ts` | 分支列表解析 |
-| `git-conflicts.ts` | 合并冲突检测与展示 |
+| `git/security.ts` | 脱敏凭证（token/password） |
+| `git/history.ts` | `git log` 结构化解析 |
+| `git/diagnostics.ts` | 错误分类（network/auth/conflict） |
+| `git/overview.ts` | 分支列表解析 |
+| `git/conflicts.ts` | 合并冲突检测与展示 |
+| `git/rename-conflict.ts` | 重命名冲突处理 |
 
 **Git 操作队列**：每个工作区维护 Promise 串行队列。网络操作超时 120s，本地操作 30s。支持 `AbortController` 取消。
 
@@ -369,10 +403,19 @@ Phase 2 — 写入：逐个写文件
 
 | 组件 | 功能 |
 |---|---|
-| `CodeEditorPanel` | Monaco 编辑器 + 标签页管理 |
-| `FileTreeRow` | 文件树渲染（展开/折叠/右键菜单） |
-| `DiffView` | 差异对比视图 |
-| `Search` | 工作区全局搜索 |
+| `CodeEditorWorkspaceController` | Monaco 编辑器 + 标签页管理 + 工作区控制 |
+| `WorkspaceExplorer` / `FileTreeRow` | 文件树渲染（展开/折叠/右键菜单） |
+| `DiffViewPanel` / `GitHistoryGraph` | 差异对比与提交历史 |
+| `SearchPanel` / `QuickOpenPanel` | 工作区全局搜索与快速打开 |
+| `agents/AgentsWindow` | Agent 会话视图（基于 `agent-sessions` / `agent-edit-scope` / `ai-token-budget`） |
+| `useAiEditGeneration` / `useAiProposalReview` | AI 编辑生成与提案审查 |
+
+### 10.5 Agent 隔离工作区（Git Worktree）
+
+- 代码对话第一次写文件、局部编辑或运行项目脚本时，通过 `workspace:createAgentWorktree` 创建以会话 ID 命名的独立 Git Worktree（分支 `agent/<sessionId>`），存储在 `<userData>/agent-worktrees/`
+- 首次创建要求主工作区干净（`assertCleanAgentWorktreeBase`）；存在未提交修改时停止 AI 写入，要求先提交或 Stash
+- 后续工具操作在隔离分支上进行；`mergeAgentWorktree` 以 squash-merge 方式合并回主工作区（仅用户手动触发，AI 工具没有合并权限）
+- 冲突处理：`getAgentWorktreeConflictVersions` + `previewAgentWorktreeMerge`
 
 ---
 
@@ -398,8 +441,8 @@ Renderer (xterm.js)
 ### 11.3 多标签终端
 
 - 终端插件支持多标签，每个标签一个 pty 会话
-- Shell 类型根据 OS 自动选择（Windows: pwsh, macOS/Linux: bash/zsh）
-- 支持自定义 shell profiles 配置
+- `discoverShellProfiles()` 自动发现 shell（Windows: PowerShell/pwsh/cmd/Git Bash/WSL；POSIX: `$SHELL` + zsh/bash/fish/sh）
+- 支持自定义 shell profiles 与环境变量层（`mergeEnvironmentLayers` + `resolveSecretReferences`，`${secret:name}` 引用安全 token）
 
 ---
 
@@ -407,18 +450,20 @@ Renderer (xterm.js)
 
 ### 12.1 通道分类
 
-| 通道前缀 | 用途 |
+| 通道 | 用途 |
 |---|---|
-| `db:*` | 数据库操作 |
-| `site:*` | AI 站点管理 |
-| `inject:*` | 提示词注入 |
-| `shortcut:*` | 快捷键注册 |
-| `token:*` | Token 安全存储 |
-| `file:*` | 文件操作 |
-| `workspace:*` | 工作区管理 |
+| `db:load` / `db:save` | SQLite 数据库读写 |
+| `store-load` / `store-save` | 旧版 JSON 存储（迁移用） |
+| `inject-prompt` | 提示词注入 |
+| `terminal:profiles/create/write/resize/destroy` + `terminal:data:<id>` / `terminal:exit:<id>` | 终端通信 |
+| `workspace:*` | 工作区授权、文件编辑、Git、Agent Worktree、脚本执行 |
 | `git:*` | Git 操作 |
-| `terminal:*` | 终端通信 |
-| `agent:*` | Agent 任务 |
+| `agent-task:*` | Agent 任务队列 |
+| `document-cache:save/load/delete` | 文档缓存 |
+| `office:*` | Office 文档操作 |
+| `window-*` / `auto-launch-*` | 窗口与开机自启 |
+| `toggle-search-panel` / `inject-from-context-menu` / `save-before-quit` | 事件推送（Main→Renderer） |
+| `token:*` / `auth` | Token 安全存储（safeStorage） |
 
 ### 12.2 安全原则
 
@@ -426,6 +471,7 @@ Renderer (xterm.js)
 - 不使用 `nodeIntegration: true`
 - 参数校验在主进程 handler 中执行
 - 敏感操作（token 读写）使用 `safeStorage` 加密
+- `scripts/check-ipc-contract.mjs` 校验通道契约一致性
 
 ---
 
@@ -435,27 +481,35 @@ Renderer (xterm.js)
 
 | 快捷键 | 功能 | 范围 |
 |---|---|---|
-| `Ctrl+Shift+Space` | 唤起主窗口 | 全局 |
-| `Ctrl+K` | 浮动搜索面板 | 应用内 |
-| `Ctrl+1` | AI 工作台 | 应用内 |
-| `Ctrl+,` | 设置 | 应用内 |
-| `Ctrl+O` | 打开文件 | 应用内 |
+| `Ctrl/Cmd+Shift+Space` | 唤起主窗口 + 切换搜索面板 | **全局**（可自定义） |
+| `Ctrl/Cmd+K` | 浮动搜索面板（CommandPalette） | 应用内 |
+| `Ctrl/Cmd+1` | AI 工作台 | 应用内 |
+| `Ctrl/Cmd+,` | 设置 | 应用内 |
+| `Ctrl/Cmd+O` | 打开文件（经 resolveFileEditor） | 应用内 |
+| `Ctrl+R` | 重新加载界面 | 应用内 |
+| `Escape` | 关闭弹层 / 菜单 | 应用内 |
+| `Alt+F4` | 关闭窗口 | 应用内 |
 
 ### 13.2 全局快捷键注册
 
 ```typescript
 // main/shortcuts.ts
-globalShortcut.register('Ctrl+Shift+Space', () => {
+globalShortcut.register('CommandOrControl+Shift+Space', () => {
   const win = getMainWindow();
   win?.show();
   win?.focus();
+  win?.webContents.send('toggle-search-panel');
 });
 ```
+
+- 默认 `Ctrl/Cmd+Shift+Space`；若 `userData/next-work-dashboard-data.json` 中存在 `shortcuts['toggle-search']`，则注销默认并注册自定义快捷键
+- 注册失败静默回退默认
+- `will-quit` 时 `globalShortcut.unregisterAll()`
 
 ### 13.3 系统托盘
 
 - 关闭窗口 → 最小化到托盘（不退出）
-- 托盘菜单：显示窗口 / 退出
+- 托盘菜单：显示窗口 / 退出（退出时发送 `save-before-quit` 触发数据库落盘）
 - 托盘图标：应用状态指示
 
 ---
