@@ -8,6 +8,7 @@ import { setupIPC } from './main/ipc-handlers';
 import { registerShortcuts } from './main/shortcuts';
 import { destroyAll } from './plugins/terminal/backend/terminal-manager';
 import { mcpManager } from './main/mcp/mcp-manager';
+import { disposeOfficeService } from './plugins/office-studio/backend/office-service';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -97,5 +98,6 @@ if (started) {
     globalShortcut.unregisterAll();
     destroyAll();
     void mcpManager.closeAll();
+    void disposeOfficeService();
   });
 }

@@ -10,6 +10,9 @@ export const officeClient: OfficeStudioAPI = {
   add: (request) => window.electronAPI.office.add(request),
   remove: (filePath, path) => window.electronAPI.office.remove(filePath, path),
   save: (filePath) => window.electronAPI.office.save(filePath),
+  undo: (filePath) => window.electronAPI.office.undo(filePath),
+  redo: (filePath) => window.electronAPI.office.redo(filePath),
+  merge: (filePath, data) => window.electronAPI.office.merge(filePath, data),
   render: (filePath) => window.electronAPI.office.render(filePath),
   close: (filePath) => window.electronAPI.office.close(filePath),
 };

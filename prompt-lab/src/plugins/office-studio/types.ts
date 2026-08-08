@@ -12,6 +12,8 @@ export interface OfficeOperationResult {
   success: boolean;
   output?: string;
   error?: string;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 export interface OfficeRenderResult extends OfficeOperationResult {
@@ -35,6 +37,9 @@ export interface OfficeStudioAPI {
   add(request: OfficeAddRequest): Promise<OfficeOperationResult>;
   remove(filePath: string, path: string): Promise<OfficeOperationResult>;
   save(filePath: string): Promise<OfficeOperationResult>;
+  undo(filePath: string): Promise<OfficeOperationResult>;
+  redo(filePath: string): Promise<OfficeOperationResult>;
+  merge(filePath: string, data: Record<string, unknown>): Promise<OfficeCreateResult>;
   render(filePath: string): Promise<OfficeRenderResult>;
   close(filePath: string): Promise<OfficeOperationResult>;
 }

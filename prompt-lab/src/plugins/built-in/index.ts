@@ -113,6 +113,10 @@ const builtInPlugins: Plugin[] = [
     enabled: false,
     order: 12,
     keepAlive: true,
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('office-studio.open', () => { window.dispatchEvent(new CustomEvent('office-studio:command', { detail: { command: 'open' } })); }));
+      context.subscriptions.add(context.commands.register('office-studio.create', () => { window.dispatchEvent(new CustomEvent('office-studio:command', { detail: { command: 'create' } })); }));
+    },
     contributions: {
       commands: [
         { id: 'office-studio.open', title: '打开 Office 文档', category: 'Office Studio' },

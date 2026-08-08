@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FileText, FolderOpen, Loader2, Plus, RefreshCw, Save, Trash2 } from '@/components/icons';
+import { FileText, FolderOpen, Loader2, Plus, RefreshCw, RotateCcw, Save, Trash2 } from '@/components/icons';
 import { officeClient } from './office-client';
 import type { OfficeCliStatus, OfficeDocumentKind } from './types';
 
@@ -20,6 +20,9 @@ export const OfficeStudioPanel: React.FC = () => {
   const [propertyName, setPropertyName] = useState('text');
   const [propertyValue, setPropertyValue] = useState('');
   const [newType, setNewType] = useState('paragraph');
+  const [queryResults, setQueryResults] = useState<string[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const refreshStatus = useCallback(async () => setStatus(await officeClient.status()), []);
 
@@ -49,26 +52,41 @@ export const OfficeStudioPanel: React.FC = () => {
     return () => window.removeEventListener('plugin:file-open', handler);
   }, [loadDocument]);
 
-  const openDocument = async () => {
+  const openDocument = useCallback(async () => {
     const selected = await window.electronAPI.pickFile({ accept: '.docx,.xlsx,.pptx' });
     const file = Array.isArray(selected) ? selected[0] : selected;
     if (file) await loadDocument(file.path, file.name);
-  };
+  }, [loadDocument]);
 
-  const createDocument = async (kind: OfficeDocumentKind) => {
+  const createDocument = useCallback(async (kind: OfficeDocumentKind) => {
     setBusy(true);
     setError('');
     const result = await officeClient.create(kind);
     setBusy(false);
     if (result.success && result.filePath) await loadDocument(result.filePath);
     else if (result.error !== 'CANCELLED') setError(result.error || '创建文档失败');
-  };
+  }, [loadDocument]);
 
-  const runOperation = async (operation: () => Promise<{ success: boolean; output?: string; error?: string }>, refresh = false) => {
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const command = (event as CustomEvent<{ command: 'open' | 'create' }>).detail?.command;
+      if (command === 'open') void openDocument();
+      if (command === 'create') {
+        const kind = window.prompt('文档类型：docx、xlsx 或 pptx', 'docx')?.toLowerCase();
+        if (kind === 'docx' || kind === 'xlsx' || kind === 'pptx') void createDocument(kind);
+      }
+    };
+    window.addEventListener('office-studio:command', handler);
+    return () => window.removeEventListener('office-studio:command', handler);
+  }, [createDocument, openDocument]);
+
+  const runOperation = async <T extends { success: boolean; output?: string; error?: string; canUndo?: boolean; canRedo?: boolean }>(operation: () => Promise<T>, refresh = false): Promise<T> => {
     setBusy(true);
     setError('');
     const result = await operation();
     if (!result.success) setError(result.error || 'Office 操作失败');
+    if (result.canUndo !== undefined) setCanUndo(result.canUndo);
+    if (result.canRedo !== undefined) setCanRedo(result.canRedo);
     if (refresh && result.success) await loadDocument(filePath, fileName);
     setBusy(false);
     return result;
@@ -76,7 +94,10 @@ export const OfficeStudioPanel: React.FC = () => {
 
   const queryElements = async () => {
     const result = await runOperation(() => officeClient.query(filePath, selector));
-    if (result.success) setOutline(result.output || '');
+    if (result.success) {
+      setOutline(result.output || '');
+      setQueryResults((result.output || '').split('\n').filter((line) => line.startsWith('/')));
+    }
     setMode('outline');
   };
 
@@ -97,6 +118,28 @@ export const OfficeStudioPanel: React.FC = () => {
   const removeElement = async () => {
     if (!window.confirm(`确定删除 ${selectedPath}？`)) return;
     await runOperation(() => officeClient.remove(filePath, selectedPath), true);
+  };
+
+  const restore = async (direction: 'undo' | 'redo') => {
+    await runOperation(() => direction === 'undo' ? officeClient.undo(filePath) : officeClient.redo(filePath), true);
+  };
+
+  const chooseQueryResult = async (line: string) => {
+    const path = line.split('\t')[0];
+    setSelectedPath(path);
+    const result = await runOperation(() => officeClient.get(filePath, path, 3));
+    if (result.success) setElementJson(result.output || '');
+  };
+
+  const mergeTemplate = async () => {
+    const raw = window.prompt('输入模板数据 JSON。文档中的 {{key}} 会被对应值替换：', '{"name":"示例"}');
+    if (raw === null) return;
+    try {
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('请输入 JSON 对象');
+      const result = await runOperation(() => officeClient.merge(filePath, data));
+      if (result.success && 'filePath' in result && typeof result.filePath === 'string') await loadDocument(result.filePath);
+    } catch (mergeError) { setError(mergeError instanceof Error ? mergeError.message : '模板数据格式错误'); }
   };
 
   return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -135,7 +178,10 @@ export const OfficeStudioPanel: React.FC = () => {
           {(['preview', 'outline'] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`rounded px-3 py-1 text-xs ${mode === item ? 'bg-background shadow-sm' : 'text-muted-foreground'}`}>{item === 'preview' ? '渲染预览' : '文档结构'}</button>)}
         </div>
         <div className="flex gap-2">
+          <button disabled={!canUndo} onClick={() => void restore('undo')} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" />撤销</button>
+          <button disabled={!canRedo} onClick={() => void restore('redo')} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"><RefreshCw className="h-3.5 w-3.5" />重做</button>
           <button onClick={() => void runOperation(() => officeClient.save(filePath))} className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted"><Save className="h-3.5 w-3.5" />保存</button>
+          <button onClick={() => void mergeTemplate()} className="rounded border px-2 py-1 text-xs hover:bg-muted">模板合并</button>
           <button onClick={() => void loadDocument(filePath, fileName)} className="rounded border px-2 py-1 text-xs hover:bg-muted">刷新</button>
           <button onClick={() => void openDocument()} className="rounded border px-2 py-1 text-xs hover:bg-muted">打开其他文档</button>
         </div>
@@ -144,7 +190,7 @@ export const OfficeStudioPanel: React.FC = () => {
       <main className="relative flex min-h-0 flex-1 bg-muted/30">
         {busy && <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/70"><Loader2 className="h-6 w-6 animate-spin" /></div>}
         <section className="min-w-0 flex-1">
-          {mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
+          {mode === 'preview' ? <iframe title="Office 文档预览" sandbox="allow-scripts" srcDoc={html} className="h-full w-full border-0 bg-white" /> : queryResults.length ? <div className="h-full overflow-auto p-3">{queryResults.map((line) => <button key={line} onClick={() => void chooseQueryResult(line)} className={`mb-1 block w-full rounded border px-3 py-2 text-left text-xs hover:bg-muted ${line.startsWith(`${selectedPath}\t`) ? 'border-primary bg-primary/5' : ''}`}><code className="break-all">{line}</code></button>)}</div> : <pre className="h-full overflow-auto whitespace-pre-wrap p-4 text-xs leading-6">{outline}</pre>}
         </section>
         <aside className="w-80 shrink-0 overflow-auto border-l bg-background p-3 text-xs">
           <h3 className="mb-3 font-semibold">元素与属性</h3>
