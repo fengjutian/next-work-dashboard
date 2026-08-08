@@ -79,7 +79,7 @@ function hashFile(filePath: string): string {
 }
 
 function currentGitCommit(root: string): string | undefined {
-  try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim() || undefined; }
+  try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined; }
   catch { return undefined; }
 }
 

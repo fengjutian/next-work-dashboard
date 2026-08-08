@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { authorizeWorkspace } from '../src/main/workspace/path';
 import {
@@ -119,5 +120,22 @@ describe('knowledge workspace filesystem boundary', () => {
     const partial = captureKnowledgeWorkspaceState(root, ['a.md']);
     expect(partial.documents['a.md'].sources['src/a.ts'].hash).not.toBe(first.documents['a.md'].sources['src/a.ts'].hash);
     expect(partial.documents['b.md']).toEqual(first.documents['b.md']);
+  });
+
+  it('records the verified Git commit globally, per document and per source', () => {
+    const root = createWorkspace();
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'main.ts'), 'export const version = 1;', 'utf8');
+    fs.writeFileSync(path.join(root, 'architecture.md'), '---\nsources: [src/main.ts]\n---\n# Architecture', 'utf8');
+    execFileSync('git', ['init'], { cwd: root, windowsHide: true });
+    execFileSync('git', ['config', 'user.email', 'knowledge@example.test'], { cwd: root, windowsHide: true });
+    execFileSync('git', ['config', 'user.name', 'Knowledge Test'], { cwd: root, windowsHide: true });
+    execFileSync('git', ['add', '.'], { cwd: root, windowsHide: true });
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: root, windowsHide: true });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
+    const state = captureKnowledgeWorkspaceState(root);
+    expect(state.lastVerifiedCommit).toBe(head);
+    expect(state.documents['architecture.md'].lastVerifiedCommit).toBe(head);
+    expect(state.documents['architecture.md'].sources['src/main.ts'].verifiedCommit).toBe(head);
   });
 });

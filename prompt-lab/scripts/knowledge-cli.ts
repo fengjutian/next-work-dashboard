@@ -82,7 +82,11 @@ function changedFiles(root: string, opts: CliOptions, baseline?: string): { chan
   const from = opts.from ?? baseline;
   if (from) {
     const range = `${validateRef(from)}..${validateRef(opts.to)}`;
-    return { changes: parseNameStatus(git(root, ['diff', '--name-status', '-z', range, '--'])), range };
+    const committed = parseNameStatus(git(root, ['diff', '--name-status', '-z', range, '--']));
+    const working = parsePorcelain(git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']));
+    const byPath = new Map(committed.map((change) => [change.path.replace(/\\/g, '/').toLocaleLowerCase(), change]));
+    working.forEach((change) => byPath.set(change.path.replace(/\\/g, '/').toLocaleLowerCase(), change));
+    return { changes: [...byPath.values()], range: working.length ? `${range}+working-tree` : range };
   }
   return { changes: parsePorcelain(git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])), range: 'working-tree' };
 }
