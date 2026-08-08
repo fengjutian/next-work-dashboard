@@ -4,6 +4,7 @@ import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import { quickExtract } from '@/core';
 import type { ExtractStrategy, ExtractedEntity, ExtractedRelation, GraphNode } from './graph-types';
+import { GRAPH_SCHEMAS } from './graph-schemas';
 
 // ── 抽取策略标签 ──
 
@@ -70,10 +71,13 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
   const aiApi = useStore((s) => s.aiApi);
 
   const [strategy, setStrategy] = useState<ExtractStrategy>('keyword');
+  const [schemaId, setSchemaId] = useState('software');
   const [extracting, setExtracting] = useState(false);
   const [extractedEntities, setExtractedEntities] = useState<ExtractedEntity[]>([]);
   const [extractedRelations, setExtractedRelations] = useState<ExtractedRelation[]>([]);
   const [checkedSet, setCheckedSet] = useState<Set<string>>(new Set());
+  const [checkedRelations, setCheckedRelations] = useState<Set<string>>(new Set());
+  const relationKey = (relation: ExtractedRelation) => `${relation.source}\0${relation.label}\0${relation.target}`;
 
   // ── 执行抽取 ──
   const handleExtract = useCallback(async () => {
@@ -84,7 +88,8 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
       const docs = await getSelectedContents();
       if (docs.length === 0) { toast('请先选择对话文件', 'error'); return; }
 
-      const result = await quickExtract(docs, { strategy }, {
+      const schema = strategy === 'concept-relation' ? GRAPH_SCHEMAS.find((item) => item.id === schemaId) : undefined;
+      const result = await quickExtract(docs, { strategy, schema }, {
         apiKey: aiApi.apiKey,
         baseUrl: aiApi.baseUrl,
         model: aiApi.model,
@@ -97,6 +102,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
 
       setExtractedEntities(valid);
       setExtractedRelations(result.relations ?? []);
+      setCheckedRelations(new Set((result.relations ?? []).map(relationKey)));
       // 默认勾选全部不重复的
       const defaultChecked = new Set(
         valid.filter((e) => !existingLabels.includes(e.name)).map((e) => e.name),
@@ -114,7 +120,7 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
     } finally {
       setExtracting(false);
     }
-  }, [aiApi, strategy, getSelectedContents, existingLabels, toast]);
+  }, [aiApi, strategy, schemaId, getSelectedContents, existingLabels, toast]);
 
   // ── 切换勾选 ──
   const toggleEntity = useCallback((name: string) => {
@@ -140,15 +146,16 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
     }));
 
     const availableLabels = new Set([...existingLabels, ...selected.map((entity) => entity.name)]);
-    const relations = extractedRelations.filter((relation) =>
+    const relations = extractedRelations.filter((relation) => checkedRelations.has(relationKey(relation)) &&
       availableLabels.has(relation.source) && availableLabels.has(relation.target) && relation.source !== relation.target,
     );
     onAddExtractedGraph(newNodes, relations);
     setExtractedEntities([]);
     setExtractedRelations([]);
     setCheckedSet(new Set());
+    setCheckedRelations(new Set());
     toast(`已添加 ${newNodes.length} 个节点、${relations.length} 条关系`, 'success');
-  }, [extractedEntities, extractedRelations, checkedSet, existingLabels, onAddExtractedGraph, toast]);
+  }, [extractedEntities, extractedRelations, checkedSet, checkedRelations, existingLabels, onAddExtractedGraph, toast]);
 
   const existingLabelSet = new Set(existingLabels);
 
@@ -179,6 +186,9 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
           {extracting ? '抽取中' : 'AI 抽取'}
         </button>
       </div>
+      {strategy === 'concept-relation' && <select value={schemaId} onChange={(event) => setSchemaId(event.target.value)} className="h-7 w-full rounded border border-input bg-card px-1 text-[11px]" title="约束实体类型与关系类型">
+        {GRAPH_SCHEMAS.map((schema) => <option key={schema.id} value={schema.id}>{schema.name} · {schema.description}</option>)}
+      </select>}
 
       {/* 抽取结果 */}
       {extractedEntities.length > 0 && (
@@ -212,9 +222,10 @@ export const ExtractControls: React.FC<ExtractControlsProps> = ({
           </div>
           {extractedRelations.length > 0 && <div className="max-h-24 overflow-y-auto border-t bg-muted/20 px-2 py-1">
             <p className="mb-1 text-[10px] font-medium text-muted-foreground">关系预览（{extractedRelations.length}）</p>
-            {extractedRelations.map((relation, index) => <div key={`${relation.source}:${relation.target}:${index}`} className="truncate text-[10px] text-muted-foreground" title={`${relation.source} —${relation.label}→ ${relation.target}`}>
-              {relation.source} <span className="text-primary">—{relation.label || '关联'}→</span> {relation.target}
-            </div>)}
+            {extractedRelations.map((relation, index) => <label key={`${relation.source}:${relation.target}:${index}`} className="flex gap-1 text-[10px] text-muted-foreground" title={relation.evidence?.map((item) => `${item.documentName}: ${item.quote ?? ''}`).join('\n')}>
+              <input type="checkbox" checked={checkedRelations.has(relationKey(relation))} onChange={() => setCheckedRelations((previous) => { const next = new Set(previous); const key = relationKey(relation); next.has(key) ? next.delete(key) : next.add(key); return next; })} />
+              <span className="min-w-0 truncate">{relation.source} <span className="text-primary">—{relation.label || '关联'}→</span> {relation.target} · {Math.round((relation.confidence ?? .5) * 100)}%</span>
+            </label>)}
           </div>}
           <div className="px-2 py-1 border-t border-border">
             <button

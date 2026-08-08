@@ -3,7 +3,20 @@
 
 import { createOpenAIProvider } from '@/core/llm';
 import type { LLMProvider, ChatMessage } from '@/core/llm';
-import type { ExtractedEntity, ExtractedRelation, ExtractResult, ExtractOptions } from '@/plugins/knowledge-graph/graph-types';
+import type { ExtractedEntity, ExtractedRelation, ExtractResult, ExtractOptions, GraphSchema } from '@/plugins/knowledge-graph/graph-types';
+
+export function constrainExtractResult(result: ExtractResult, schema?: GraphSchema): ExtractResult {
+  if (!schema) return result;
+  const entities = result.entities.filter((entity) => schema.nodeTypes.includes(entity.category));
+  const entityTypes = new Map(entities.map((entity) => [entity.name, entity.category]));
+  const relations = (result.relations ?? []).filter((relation) => {
+    const from = entityTypes.get(relation.source);
+    const to = entityTypes.get(relation.target);
+    if (!from || !to || !relation.evidence?.some((item) => item.quote?.trim())) return false;
+    return schema.relationTypes.some((rule) => rule.name === relation.label && rule.from.includes(from) && rule.to.includes(to));
+  });
+  return { entities, relations };
+}
 
 // ── 策略对应的 System Prompt ──
 
@@ -38,7 +51,9 @@ function buildUserMessage(
     ? options.customPrompt
     : `请从以下文档中提取最多 ${maxEntities} 个关键实体${options.strategy === 'concept-relation' ? '及其关系' : ''}。`;
 
-  return `${basePrompt}\n\n${docsText}`;
+  const schemaPrompt = options.schema ? `\n请严格遵守以下知识图谱 Schema：\n节点类型：${options.schema.nodeTypes.join('、')}\n关系规则：\n${options.schema.relationTypes.map((relation) => `- ${relation.name}: ${relation.from.join('/')} -> ${relation.to.join('/')}`).join('\n')}\n不得创造 Schema 之外的节点类型和关系类型。每条关系必须返回 confidence（0-1）和 evidence，evidence 格式为 [{"documentName":"文档名","quote":"支持该关系的原文短句"}]。没有直接证据的关系不要输出。` : '';
+
+  return `${basePrompt}${schemaPrompt}\n\n${docsText}`;
 }
 
 // ── JSON 解析容错 ──
@@ -206,6 +221,11 @@ function parseResult(jsonStr: string): ExtractResult | null {
               source: String(r.source ?? ''),
               target: String(r.target ?? ''),
               label: String(r.label ?? ''),
+              confidence: typeof r.confidence === 'number' ? Math.min(1, Math.max(0, r.confidence)) : 0.5,
+              evidence: Array.isArray(r.evidence) ? r.evidence
+                .filter((item: any) => item && item.documentName)
+                .map((item: any) => ({ documentName: String(item.documentName), quote: item.quote ? String(item.quote) : undefined }))
+                : undefined,
             }))
         : undefined,
     };
@@ -284,7 +304,7 @@ export async function extractFromDocuments(
     );
   }
 
-  return result;
+  return constrainExtractResult(result, options.schema);
 }
 
 // ── 非流式快速抽取（不暴露中间 chunk） ──

@@ -22,6 +22,16 @@ export interface GraphEdge {
   sourcePath?: string;
   /** AI 抽取出的关系名称，例如“依赖”“调用” */
   label?: string;
+  /** Candidate facts are reviewed before they enter the persisted graph. */
+  status?: 'candidate' | 'accepted' | 'rejected';
+  confidence?: number;
+  evidence?: GraphEvidence[];
+}
+
+export interface GraphEvidence {
+  documentName: string;
+  sourcePath?: string;
+  quote?: string;
 }
 
 export interface GraphData {
@@ -45,6 +55,16 @@ export interface ExtractedRelation {
   source: string;
   target: string;
   label: string;
+  confidence?: number;
+  evidence?: GraphEvidence[];
+}
+
+export interface GraphSchema {
+  id: string;
+  name: string;
+  description: string;
+  nodeTypes: string[];
+  relationTypes: Array<{ name: string; from: string[]; to: string[] }>;
 }
 
 export interface ExtractResult {
@@ -56,4 +76,5 @@ export interface ExtractOptions {
   strategy: ExtractStrategy;
   maxEntities?: number;
   customPrompt?: string;
+  schema?: GraphSchema;
 }

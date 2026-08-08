@@ -194,6 +194,9 @@ export const KnowledgeGraph: React.FC = () => {
         weight: 1,
         kind: 'inferred' as const,
         label: relation.label,
+        status: 'accepted' as const,
+        confidence: relation.confidence,
+        evidence: relation.evidence,
       }));
       const degree = new Map(merged.map((node) => [node.id, 0]));
       relationEdges.forEach((edge) => {
