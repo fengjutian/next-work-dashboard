@@ -4,6 +4,8 @@ Office Studio 是基于 OfficeCLI 的系统级内置插件，为 `.docx`、`.xls
 
 当前编辑器还提供 CSS-like 元素查询、DOM 元素 JSON 检查、属性修改、元素新增/删除和显式保存。AI 对话注册了 `office_read`、`office_query`、`office_get_element` 与 `office_update`；其中写操作必须经过用户确认。
 
+编辑操作保留最多 20 个临时历史快照，支持撤销和重做；快照在应用退出时清理。查询结果可以直接点击定位元素。工具栏的“模板合并”接受 JSON 对象，将当前文档中的 `{{key}}` 占位符替换后另存为同格式文件。
+
 ## 开发环境
 
 插件按以下顺序查找 OfficeCLI：

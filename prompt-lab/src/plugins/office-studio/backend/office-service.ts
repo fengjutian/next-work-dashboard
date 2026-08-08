@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -9,6 +10,8 @@ import type { OfficeAddRequest, OfficeCliStatus, OfficeOperationResult, OfficeRe
 const execFileAsync = promisify(execFile);
 const SUPPORTED_EXTENSIONS = new Set(['.docx', '.xlsx', '.pptx']);
 const MAX_OUTPUT = 20 * 1024 * 1024;
+const MAX_HISTORY = 20;
+const histories = new Map<string, { undo: string[]; redo: string[] }>();
 
 function bundledExecutableCandidates(): string[] {
   const platform = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'darwin' : 'linux';
@@ -64,6 +67,37 @@ async function runOfficeCli(args: string[], timeout = 30_000): Promise<string> {
     env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' },
   });
   return result.stdout.trim();
+}
+
+function historyFor(target: string) {
+  let history = histories.get(target);
+  if (!history) {
+    history = { undo: [], redo: [] };
+    histories.set(target, history);
+  }
+  return history;
+}
+
+async function createHistorySnapshot(target: string): Promise<string> {
+  const directory = path.join(app.getPath('temp'), 'next-work-office-history');
+  await fs.promises.mkdir(directory, { recursive: true });
+  const snapshot = path.join(directory, `${path.basename(target)}-${crypto.randomUUID()}.bak`);
+  await fs.promises.copyFile(target, snapshot);
+  return snapshot;
+}
+
+async function clearSnapshots(snapshots: string[]): Promise<void> {
+  await Promise.all(snapshots.splice(0).map((snapshot) => fs.promises.rm(snapshot, { force: true }).catch(() => undefined)));
+}
+
+async function pushUndo(target: string, snapshot: string): Promise<void> {
+  const history = historyFor(target);
+  history.undo.push(snapshot);
+  await clearSnapshots(history.redo);
+  while (history.undo.length > MAX_HISTORY) {
+    const expired = history.undo.shift();
+    if (expired) await fs.promises.rm(expired, { force: true }).catch(() => undefined);
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -129,17 +163,45 @@ export async function queryOfficeElements(filePath: string, selector: string): P
 
 async function mutateOfficeDocument(filePath: string, args: string[]): Promise<OfficeOperationResult> {
   const target = validateDocumentPath(filePath);
-  const backup = `${target}.office-studio-${process.pid}.bak`;
-  await fs.promises.copyFile(target, backup);
+  const backup = await createHistorySnapshot(target);
   try {
     const output = await runOfficeCli(args);
-    return { success: true, output };
+    await runOfficeCli(['save', target, '--json']);
+    await pushUndo(target, backup);
+    const history = historyFor(target);
+    return { success: true, output, canUndo: true, canRedo: history.redo.length > 0 };
   } catch (error) {
+    await runOfficeCli(['close', target]).catch(() => undefined);
     await fs.promises.copyFile(backup, target).catch(() => undefined);
-    return { success: false, error: errorMessage(error) };
-  } finally {
     await fs.promises.rm(backup, { force: true }).catch(() => undefined);
+    return { success: false, error: errorMessage(error) };
   }
+}
+
+async function restoreHistory(filePath: string, direction: 'undo' | 'redo'): Promise<OfficeOperationResult> {
+  try {
+    const target = validateDocumentPath(filePath);
+    const history = historyFor(target);
+    const sourceStack = history[direction];
+    const destinationStack = history[direction === 'undo' ? 'redo' : 'undo'];
+    const snapshot = sourceStack.pop();
+    if (!snapshot) return { success: false, error: direction === 'undo' ? '没有可撤销的操作' : '没有可重做的操作', canUndo: history.undo.length > 0, canRedo: history.redo.length > 0 };
+    await runOfficeCli(['close', target]).catch(() => undefined);
+    const current = await createHistorySnapshot(target);
+    await fs.promises.copyFile(snapshot, target);
+    await fs.promises.rm(snapshot, { force: true }).catch(() => undefined);
+    destinationStack.push(current);
+    return { success: true, output: direction === 'undo' ? '已撤销' : '已重做', canUndo: history.undo.length > 0, canRedo: history.redo.length > 0 };
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+export const undoOfficeDocument = (filePath: string) => restoreHistory(filePath, 'undo');
+export const redoOfficeDocument = (filePath: string) => restoreHistory(filePath, 'redo');
+
+export async function disposeOfficeService(): Promise<void> {
+  const snapshots = [...histories.values()].flatMap((history) => [...history.undo, ...history.redo]);
+  histories.clear();
+  await clearSnapshots(snapshots);
 }
 
 export async function setOfficeProperties(request: OfficeSetRequest): Promise<OfficeOperationResult> {
@@ -170,6 +232,17 @@ export async function saveOfficeDocument(filePath: string): Promise<OfficeOperat
   try {
     const target = validateDocumentPath(filePath);
     return { success: true, output: await runOfficeCli(['save', target, '--json']) };
+  } catch (error) { return { success: false, error: errorMessage(error) }; }
+}
+
+export async function mergeOfficeTemplate(templatePath: string, outputPath: string, data: Record<string, unknown>): Promise<OfficeOperationResult> {
+  try {
+    const template = validateDocumentPath(templatePath);
+    const output = validateDocumentPath(outputPath, false);
+    if (path.extname(template).toLowerCase() !== path.extname(output).toLowerCase()) throw new Error('OFFICE_MERGE_FORMAT_MISMATCH');
+    const serialized = JSON.stringify(data);
+    if (!serialized || serialized.length > 2 * 1024 * 1024) throw new Error('INVALID_OFFICE_MERGE_DATA');
+    return { success: true, output: await runOfficeCli(['merge', template, output, '--data', serialized], 60_000) };
   } catch (error) { return { success: false, error: errorMessage(error) }; }
 }
 
