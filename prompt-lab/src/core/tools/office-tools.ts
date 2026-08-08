@@ -72,13 +72,13 @@ export const officeTools: ToolDefinition[] = [
   {
     name: 'office_add',
     description: '向 Office 文档的父级 DOM 路径新增元素。执行前必须由用户确认。',
-    parameters: { type: 'object', properties: { filePath: { type: 'string' }, path: { type: 'string' }, type: { type: 'string' }, properties: { type: 'object', additionalProperties: { type: 'string' } } }, required: ['filePath', 'path', 'type'], additionalProperties: false },
+    parameters: { type: 'object', properties: { filePath: { type: 'string' }, path: { type: 'string' }, type: { type: 'string' }, index: { type: 'number', description: '可选的零基插入位置' }, properties: { type: 'object', additionalProperties: { type: 'string' } } }, required: ['filePath', 'path', 'type'], additionalProperties: false },
     execute: async (args) => {
       const filePath = requiredString(args, 'filePath'); const path = requiredString(args, 'path'); const type = requiredString(args, 'type');
       const properties = Object.fromEntries(Object.entries((args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties)) ? args.properties : {}).map(([key, value]) => [key, String(value)]));
       if (!Object.keys(properties).length) properties.text = '';
       if (!window.confirm(`AI 请求新增 Office 元素\n文件：${filePath}\n父级：${path}\n类型：${type}`)) throw new Error('用户取消了 Office 写操作');
-      return output(await officeApi().add({ filePath, path, type, properties }));
+      return output(await officeApi().add({ filePath, path, type, properties, index: typeof args.index === 'number' ? args.index : undefined }));
     },
   },
   {

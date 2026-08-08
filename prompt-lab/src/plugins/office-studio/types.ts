@@ -25,7 +25,7 @@ export interface OfficeCreateResult extends OfficeOperationResult {
 }
 
 export interface OfficeSetRequest { filePath: string; path: string; properties: Record<string, string> }
-export interface OfficeAddRequest extends OfficeSetRequest { type: string }
+export interface OfficeAddRequest extends OfficeSetRequest { type: string; index?: number }
 
 export interface OfficeStudioAPI {
   status(): Promise<OfficeCliStatus>;

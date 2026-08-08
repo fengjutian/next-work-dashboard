@@ -17,6 +17,7 @@ interface ExcelGridProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  onSelectionChange?: (selection: CellSelection) => void;
 }
 
 const ROW_HEIGHT = 28;
@@ -43,6 +44,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
   canRedo,
   onUndo,
   onRedo,
+  onSelectionChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -54,6 +56,8 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
   const [scrollLeft, setScrollLeft] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
   const [containerWidth, setContainerWidth] = useState(800);
+
+  useEffect(() => { onSelectionChange?.(selection); }, [onSelectionChange, selection]);
 
   const { rows, rowCount, colCount } = sheet;
 
@@ -142,6 +146,17 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
         if (canRedo) onRedo();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !editing) {
+        e.preventDefault();
+        const value = rows[selection.row]?.[selection.col]?.v;
+        void navigator.clipboard.writeText(value == null ? '' : String(value));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !editing) {
+        e.preventDefault();
+        void navigator.clipboard.readText().then((text) => onCellChange(selection.row, selection.col, { v: text, t: 's' }));
+        return;
+      }
 
       if (editing) {
         if (e.key === 'Enter') {
@@ -174,7 +189,7 @@ export const ExcelGrid: React.FC<ExcelGridProps> = ({
         return { row, col };
       });
     },
-    [editing, commitEdit, startEdit, rowCount, colCount, onCellChange, canUndo, canRedo, onUndo, onRedo],
+    [editing, commitEdit, startEdit, rowCount, colCount, onCellChange, canUndo, canRedo, onUndo, onRedo, rows, selection],
   );
 
   // 生成可见行
