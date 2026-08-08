@@ -844,8 +844,8 @@ export function dbLoadHanyuJinjieExecutions(limit = 30): HanyuJinjieExecution[] 
 }
 
 export interface DocumentKnowledgeRecord {
-  id: string; name: string; kind: string; size: number; sections: Array<Record<string, unknown>>; plainText: string;
-  chunks: Array<Record<string, unknown>>; embeddingMode: string; createdAt: number; lastViewedAt: number;
+  id: string; name: string; kind: string; size: number; sections: unknown[]; plainText: string;
+  chunks: unknown[]; embeddingMode: string; createdAt: number; lastViewedAt: number;
 }
 interface DocumentKnowledgeRow extends Omit<DocumentKnowledgeRecord, 'sections' | 'chunks'> { sections: string; chunks: string }
 function documentKnowledgeRow(row: DocumentKnowledgeRow): DocumentKnowledgeRecord {
