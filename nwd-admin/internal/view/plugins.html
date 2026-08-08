@@ -1,0 +1,76 @@
+{{define "content"}}
+<div class="max-w-4xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-fg">插件管理</h1>
+        <button onclick="document.getElementById('upload-form').classList.toggle('hidden')"
+                class="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-primary text-primary-fg text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer border-0">
+            + 上传插件
+        </button>
+    </div>
+
+    <!-- Upload Form -->
+    <div id="upload-form" class="hidden bg-card border border-border rounded-xl p-6 mb-6">
+        <form action="/api/plugins" method="POST" enctype="multipart/form-data" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-fg mb-1">插件包 (.nwd)</label>
+                <input type="file" name="bundle" accept=".nwd" required
+                       class="block w-full text-sm text-mutedfg file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border file:border-border file:bg-muted file:text-fg file:text-sm file:font-medium file:cursor-pointer hover:file:bg-primary-light">
+            </div>
+            <div class="flex gap-2">
+                <button type="submit" class="px-4 py-2 rounded-lg bg-primary text-primary-fg text-sm font-medium hover:bg-primary-hover transition-colors border-0 cursor-pointer">上传</button>
+                <button type="button" onclick="document.getElementById('upload-form').classList.add('hidden')"
+                        class="px-4 py-2 rounded-lg border border-border text-fg text-sm hover:bg-muted transition-colors cursor-pointer bg-transparent">取消</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Plugin Table -->
+    {{if .Plugins}}
+    <div class="bg-card border border-border rounded-xl overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-muted text-mutedfg text-left">
+                <tr>
+                    <th class="px-4 py-3 font-medium">插件</th>
+                    <th class="px-4 py-3 font-medium">版本</th>
+                    <th class="px-4 py-3 font-medium">作者</th>
+                    <th class="px-4 py-3 font-medium">下载</th>
+                    <th class="px-4 py-3 font-medium">更新</th>
+                    <th class="px-4 py-3 font-medium text-right">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+                {{range .Plugins}}
+                <tr class="hover:bg-muted/50 transition-colors">
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-lg">{{.IconEmoji}}</span>
+                            <div>
+                                <div class="font-medium text-fg">{{.Name}}</div>
+                                <div class="text-xs text-mutedfg">{{.ID}}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-4 py-3 text-mutedfg">v{{.Version}}</td>
+                    <td class="px-4 py-3 text-mutedfg">{{.Author}}</td>
+                    <td class="px-4 py-3 text-mutedfg">{{.Downloads}}</td>
+                    <td class="px-4 py-3 text-mutedfg text-xs">{{.UpdatedAt.Format "01-02 15:04"}}</td>
+                    <td class="px-4 py-3 text-right">
+                        <a href="/api/plugins/{{.ID}}/download" class="text-primary hover:underline text-xs mr-2">下载</a>
+                        <form action="/api/plugins/{{.ID}}" method="POST" class="inline" onsubmit="return confirm('确定删除 {{.Name}}？')">
+                            <input type="hidden" name="_method" value="DELETE">
+                            <button class="text-red-500 hover:underline text-xs bg-transparent border-0 cursor-pointer">删除</button>
+                        </form>
+                    </td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{else}}
+    <div class="bg-card border border-border rounded-xl p-12 text-center text-mutedfg">
+        <p class="text-lg mb-2">📭 暂无插件</p>
+        <p class="text-sm">上传第一个 .nwd 插件包开始使用。</p>
+    </div>
+    {{end}}
+</div>
+{{end}}
