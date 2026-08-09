@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from 'electron';
+import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import { setMainWindow, removeMainWindow, getTray } from './globals';
 
@@ -18,6 +18,7 @@ export function createWindow(preloadPath: string) {
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
+      backgroundThrottling: false,
     },
   });
 
