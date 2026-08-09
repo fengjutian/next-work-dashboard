@@ -21,7 +21,7 @@ const recordingCountdown = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 240));
 };
 const displayStream = (target: 'app' | 'screen', audio: boolean) => {
-  window.electronAPI.screenCapture.setTarget(target);
+  window.electronAPI.screenCapture.setTarget(target, audio);
   return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
 };
 
@@ -84,6 +84,8 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> 
     try {
       await hideCapturePanel();
       await recordingCountdown();
+      await window.electronAPI.hide();
+      await new Promise((resolve) => window.setTimeout(resolve, 320));
       const display = await displayStream(target, systemAudio);
       let mic: MediaStream | undefined;
       try { if (microphone) mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
@@ -115,11 +117,13 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> 
         capture.getTracks().forEach((track) => track.stop()); display.getTracks().forEach((track) => track.stop()); mic?.getTracks().forEach((track) => track.stop());
         void audioContext.current?.close(); audioContext.current = undefined; stream.current = undefined; recorder.current = undefined;
         setRecording(false); setPaused(false); notice.success({ message: '录屏完成', description: '录像可以预览或下载。', placement: 'bottomRight' });
+        void window.electronAPI.show();
       };
       display.getVideoTracks()[0]?.addEventListener('ended', stop, { once: true });
       mediaRecorder.start(1000); setRecording(true);
       notice.info({ message: '录屏已开始', description: mixedAudioTracks.length ? `声音已连接：${[systemAudio ? '系统声音' : '', microphone ? '麦克风' : ''].filter(Boolean).join(' + ')}` : '本次录制不包含声音', placement: 'bottomRight', duration: 4 });
     } catch (error) {
+      void window.electronAPI.show();
       if (!(error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name))) notice.error({ message: '无法开始录屏', description: error instanceof Error ? error.message : String(error) });
     } finally { setBusy(false); }
   }, [microphone, notice, stop, systemAudio, target]);

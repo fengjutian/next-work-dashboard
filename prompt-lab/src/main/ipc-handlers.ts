@@ -222,6 +222,8 @@ export function setupIPC(webviewPreloadPath: string) {
   });
   ipcMain.handle('window-is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false);
   ipcMain.handle('window-close', (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  ipcMain.handle('window-hide', (event) => BrowserWindow.fromWebContents(event.sender)?.hide());
+  ipcMain.handle('window-show', (event) => { const win = BrowserWindow.fromWebContents(event.sender); win?.show(); win?.focus(); });
 
   // ── 窗口置顶 ──
   ipcMain.handle('window-toggle-always-on-top', (event) => {

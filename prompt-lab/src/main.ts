@@ -75,17 +75,18 @@ if (started) {
     const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
 
     let captureTarget: 'app' | 'screen' = 'screen';
-    ipcMain.on('screen-capture:set-target', (_event, target: 'app' | 'screen') => { captureTarget = target === 'app' ? 'app' : 'screen'; });
+    let captureSystemAudio = false;
+    ipcMain.on('screen-capture:set-target', (_event, options: { target: 'app' | 'screen'; systemAudio: boolean }) => { captureTarget = options.target === 'app' ? 'app' : 'screen'; captureSystemAudio = Boolean(options.systemAudio); });
     ipcMain.on('screen-capture:recording-state', (_event, state: { recording: boolean; paused: boolean; seconds: number }) => setTrayRecordingState(state));
 
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
       if (captureTarget === 'app' && request.frame) {
-        callback({ video: request.frame, audio: request.audioRequested ? request.frame : undefined, enableLocalEcho: true });
+        callback({ video: request.frame, audio: captureSystemAudio ? request.frame : undefined, enableLocalEcho: true });
         return;
       }
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
       const primaryScreen = sources.find((source) => source.id.startsWith('screen:')) ?? sources[0];
-      callback({ video: primaryScreen, audio: request.audioRequested ? 'loopback' : undefined });
+      callback({ video: primaryScreen, audio: captureSystemAudio ? 'loopback' : undefined });
     }, { useSystemPicker: false });
 
     openMainWindow();
