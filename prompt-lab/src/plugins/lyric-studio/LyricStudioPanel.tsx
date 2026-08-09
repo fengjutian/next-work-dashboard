@@ -17,12 +17,16 @@ const starterSections: LyricSection[] = [
 ];
 const initialProject: LyricProject = { id: 'summer-love', title: '未完成的夏天', theme: '失恋后的夏天', style: '华语流行', emotion: '遗憾、温柔', language: '中文', bpm: 72, location: '雨后的旧车站', time: '夏末黄昏', story: '一次没能好好说完的告别', coreImages: ['旧车票', '街灯', '没寄出的信'], sections: starterSections, updatedAt: Date.now() };
 
+function normalizeProject(saved: Partial<LyricProject>): LyricProject {
+  return { ...initialProject, ...saved, coreImages: Array.isArray(saved.coreImages) ? saved.coreImages : initialProject.coreImages, sections: Array.isArray(saved.sections) ? saved.sections : initialProject.sections };
+}
+
 function loadProject(): LyricProject {
-  try { const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '') as Partial<LyricProject>; return { ...initialProject, ...saved, coreImages: saved.coreImages ?? initialProject.coreImages, sections: saved.sections ?? initialProject.sections }; } catch { return initialProject; }
+  try { return normalizeProject(JSON.parse(localStorage.getItem(STORAGE_KEY) || '') as Partial<LyricProject>); } catch { return initialProject; }
 }
 
 function loadHistory(): LyricRevision[] {
-  try { const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); return Array.isArray(value) ? value.slice(0, 20) : []; } catch { return []; }
+  try { const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') as LyricRevision[]; return Array.isArray(value) ? value.filter((item) => item?.project).slice(0, 20).map((item) => ({ ...item, project: normalizeProject(item.project) })) : []; } catch { return []; }
 }
 
 function snapshot(project: LyricProject, label: string): LyricRevision {
@@ -40,7 +44,7 @@ async function generateLyrics(apiKey: string, baseUrl: string, model: string, pr
   const provider = createOpenAIProvider({ apiKey, baseUrl });
   const messages: ChatMessage[] = [
     { role: 'system', content: LYRIC_SYSTEM_PROMPT },
-    { role: 'user', content: `创作一首完整歌词。主题：${project.theme}；风格：${project.style}；情绪：${project.emotion}；语言：${project.language}；BPM：${project.bpm}；结构：${project.sections.map((s) => s.kind).join(' + ')}。` },
+    { role: 'user', content: `创作一首完整歌词。主题：${project.theme}；风格：${project.style}；情绪：${project.emotion}；地点：${project.location}；时间：${project.time}；故事背景：${project.story}；核心意象：${project.coreImages.join('、')}；语言：${project.language}；BPM：${project.bpm}；结构：${project.sections.map((s) => s.kind).join(' + ')}。` },
   ];
   let raw = '';
   for await (const chunk of provider.chat(messages, { model, temperature: 0.86, maxTokens: 3_000, stream: true })) raw += chunk.delta ?? '';
@@ -103,7 +107,7 @@ export const LyricStudioPanel: React.FC = () => {
     finally { setLoading(false); }
   }, [active, aiApi, loading, project, rewriteMode, saveRevision]);
 
-  const restoreRevision = (revision: LyricRevision) => { saveRevision('恢复版本前'); setProject(structuredClone(revision.project)); setActiveId(revision.project.sections[0]?.id ?? ''); setShowHistory(false); setMessage(`已恢复：${revision.label}`); };
+  const restoreRevision = (revision: LyricRevision) => { saveRevision('恢复版本前'); const restored = normalizeProject(structuredClone(revision.project)); setProject(restored); setActiveId(restored.sections[0]?.id ?? ''); setShowHistory(false); setMessage(`已恢复：${revision.label}`); };
 
   const exportText = () => { const url = URL.createObjectURL(new Blob([projectToText(project)], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = `${project.title.replace(/[\\/:*?"<>|]/g, '-') || 'lyrics'}.txt`; a.click(); URL.revokeObjectURL(url); setMessage('歌词已导出为 TXT'); };
 

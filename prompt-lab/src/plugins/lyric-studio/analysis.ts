@@ -44,5 +44,5 @@ export function scoreProject(project: LyricProject): LyricScore {
 }
 
 export function projectToText(project: LyricProject): string {
-  return [`# ${project.title}`, `主题：${project.theme}`, `风格：${project.style} · ${project.bpm} BPM`, '', ...project.sections.flatMap((section) => [`[${section.title}]`, section.lyrics, ''])].join('\n');
+  return [`# ${project.title}`, `主题：${project.theme}`, `风格：${project.style} · ${project.bpm} BPM`, `场景：${project.time} · ${project.location}`, `核心意象：${project.coreImages.join('、')}`, `故事：${project.story}`, '', ...project.sections.flatMap((section) => [`[${section.title}]`, section.lyrics, ''])].join('\n');
 }
