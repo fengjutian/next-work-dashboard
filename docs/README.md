@@ -1,79 +1,70 @@
-# 📚 next-work-dashboard 文档中心
+# Next Work Dashboard 文档中心
 
-> 按角色选择阅读路径，5 分钟了解全貌，30 分钟深入核心。
+这套文档覆盖产品使用、桌面端部署、插件开发、系统架构、安全边界以及专项功能设计。
 
----
+可直接打开 [`index.html`](./index.html) 使用可视化文档入口。
 
-## 🧭 快速导航
+## 推荐阅读路径
 
-| 我想… | 看这个 |
-|---|---|
-| 了解这个项目是什么 | → [项目介绍与部署](./project-intro-and-deploy.md) |
-| 安装并使用应用 | → [用户手册](./user-guide.md) |
-| 开发一个插件 | → [插件架构指南](./plugin-architecture.md) |
-| 参与项目开发 | → [贡献指南](./contributing.md) → [功能与原理](./function-and-principles.md) |
-| 排查运行问题 | → [故障排查](./troubleshooting.md) |
-| 了解功能完成度 | → [功能检查表](../FEATURE_CHECKLIST.md) |
+### 应用使用者
 
----
+1. [用户手册](./user-guide.md)：首次设置、界面、AI 站点、提示词、编辑器与插件。
+2. [故障排查](./troubleshooting.md)：安装、启动、数据、终端及插件问题。
+3. [安全模型](./security.md)：本地数据、WebView、令牌和文件访问边界。
 
-## 👤 用户
+### 插件开发者
 
-1. **[项目介绍与部署](./project-intro-and-deploy.md)** — 项目定位、技术架构、安装与构建
-2. **[用户手册](./user-guide.md)** — 界面结构、AI 站点配置、提示词使用、插件管理
-3. **[故障排查](./troubleshooting.md)** — 常见问题与解决办法
+1. [插件系统可视化概览](./plugin-architecture.html)
+2. [插件架构完整指南](./plugin-architecture.md)
+3. [安全模型](./security.md)
+4. [磁盘空间插件](./disk-space-plugin.md)或 [Office Studio](./office-studio.md)：真实插件案例。
 
----
+### 项目维护者
 
-## 🔌 插件开发者
+1. [项目介绍与部署](./project-intro-and-deploy.md)
+2. [功能与实现原理](./function-and-principles.md)
+3. [贡献指南](./contributing.md)
+4. [架构演进路线图](./architecture-roadmap.md)
 
-1. **[插件架构指南](./plugin-architecture.md)** — 内置插件 vs Sandbox 插件、API 接口、开发流程
-2. **[安全模型](./security.md)** — 沙箱限制、权限模型、CSP 策略
-3. 插件文档中标注了当前限制和待开发功能
+## 核心文档
 
----
-
-## 🛠️ 项目开发者
-
-| 文档 | 内容 |
-|---|---|
-| **[贡献指南](./contributing.md)** | 代码规范、PR 流程、提交约定 |
-| **[功能与原理](./function-and-principles.md)** | 架构原理、注入引擎、Agent 系统、数据层 |
-| **[架构演进路线图](./architecture-roadmap.md)** | Core/UI 分离、Protocol 驱动、Context Provider 等 |
-| **[安全模型](./security.md)** | 进程隔离、权限控制、加密存储 |
-
----
-
-## 📋 专题文档
-
-| 文档 | 内容 | 状态 |
+| 文档 | 面向对象 | 内容 |
 |---|---|---|
-| [代码编辑器需求](./code-editor-requirements.md) | 编辑器目标、接口和验收标准 | 🔄 持续更新 |
-| [代码编辑器未完成功能](./code-editor-remaining-features.md) | Git、AI 编辑、终端和搜索待办 | 📋 规划中 |
-| [代码编辑器 Agents Window](./code-editor-agents-window.md) | Agent 会话视图、数据模型、分阶段计划 | ✅ 阶段 A 已实现 |
-| [代码编辑器 Agents Window 剩余工作](./code-editor-agents-window-remaining-work.md) | 阶段 B/C 待实现项 | 📋 规划中 |
-| [终端功能](./terminal-features.md) | 终端架构、功能和已知问题 | 🔄 持续更新 |
-| [Excel 插件方案](./excel-plugin-plan.md) | 技术选型与阶段计划 | 📋 方案 |
-| [磁盘空间插件](./disk-space-plugin.md) | Rust 扫描器、安全边界与打包 | ✅ 已实现 |
-| [Office Studio 插件](./office-studio.md) | OfficeCLI 内置集成、运行与打包说明 | ✅ 已实现 MVP |
-| [知识工作区需求](./knowledge-workspace-requirements.md) | 知识库工作区功能规划 | 📋 规划中 |
-| [MCP 未完成功能](./mcp-remaining-features.md) | MCP 协议待实现项 | 📋 规划中 |
+| [项目与部署概览](./project-intro-and-deploy.html) | 所有人 | 产品定位、架构、开发与构建入口 |
+| [项目介绍与部署](./project-intro-and-deploy.md) | 开发者 | 完整环境、项目结构、发布与数据说明 |
+| [用户手册](./user-guide.md) | 用户 | 日常功能与快捷键 |
+| [插件系统概览](./plugin-architecture.html) | 插件开发者 | Sandbox、权限和 `.nwd` 快速入门 |
+| [插件架构指南](./plugin-architecture.md) | 插件开发者 | 完整接口、Manifest、SDK 示例和检查清单 |
+| [功能与实现原理](./function-and-principles.md) | 维护者 | Electron、注入、状态、数据、Agent 和 IPC |
+| [安全模型](./security.md) | 所有人 | 信任边界、隔离、权限与敏感数据 |
+| [贡献指南](./contributing.md) | 贡献者 | 分支、代码、测试和文档规范 |
 
----
+## 专项设计与计划
 
-## 📄 根目录文档
+| 领域 | 设计文档 | 补充计划 |
+|---|---|---|
+| 代码编辑器 | [需求与实现](./code-editor-requirements.md) | [剩余功能](./code-editor-remaining-features.md) |
+| Agents Window | [功能设计](./code-editor-agents-window.md) | [剩余工作](./code-editor-agents-window-remaining-work.md) |
+| 知识工作区 | [需求与实现](./knowledge-workspace-requirements.md) | — |
+| MCP | — | [后续开发计划](./mcp-remaining-features.md) |
+| AI 缓存 | [缓存设计](./ai-chat-cache-design.md) | — |
+| 终端 | [终端功能](./terminal-features.md) | — |
+| Excel | [Excel 插件方案](./excel-plugin-plan.md) | — |
+| 磁盘空间 | [Rust 插件说明](./disk-space-plugin.md) | — |
+| Office | [Office Studio](./office-studio.md) | — |
+| 千问 | [API 接入](./qwen-api-integration.md) | — |
 
-| 文档 | 内容 |
-|---|---|
-| [需求文档](../REQUIREMENTS.md) | 完整产品需求与范围定义 |
-| [功能检查表](../FEATURE_CHECKLIST.md) | 90 项功能的实时完成状态 |
+## 项目级资料
 
----
+- [产品需求](../REQUIREMENTS.md)
+- [功能检查表](../FEATURE_CHECKLIST.md)
+- [架构路线图](./architecture-roadmap.md)
 
-## 🔧 维护约定
+## 文档维护规则
 
-- 代码行为变化时，**同一变更中更新对应文档**
-- 已实现 / 部分实现 / 待开发 **必须明确区分**，使用 ✅ ⚠️ ❌ 标记
-- 历史方案不应继续写成当前能力；需要保留时标注 **"历史"**
-- 命令示例默认从 `prompt-lab` 目录运行
-- 插件 API 以 `plugin-architecture.md` 和源码类型为准
+- 功能行为变化时，在同一变更中更新对应文档。
+- 明确区分已实现、部分实现和规划能力。
+- 历史方案若仍需保留，必须标注日期和“历史方案”。
+- npm 命令默认从 `prompt-lab` 目录执行。
+- 插件接口以 `plugin-architecture.md` 和源码类型定义为准。
+- HTML 页面用于浏览与快速理解，Markdown 主文档承载完整技术细节。
