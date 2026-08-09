@@ -22,8 +22,31 @@ export interface LyricProject {
   time: string;
   story: string;
   coreImages: string[];
+  tags: string[];
+  favorite: boolean;
+  collection: string;
+  status: 'idea' | 'draft' | 'revising' | 'done';
+  coverColor: string;
   sections: LyricSection[];
   updatedAt: number;
+}
+
+export interface LineRewriteCandidate {
+  id: string;
+  original: string;
+  replacement: string;
+  lineIndex: number;
+  mode: string;
+}
+
+export interface LyricLineAnalysis {
+  line: string;
+  hanCount: number;
+  rhyme: string;
+  durationSeconds: number;
+  breathing: string;
+  lengthKind: 'short' | 'medium' | 'long';
+  deviation: number;
 }
 
 export interface LyricRevision {

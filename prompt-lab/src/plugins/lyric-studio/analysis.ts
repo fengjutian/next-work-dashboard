@@ -1,4 +1,4 @@
-import type { LyricProject, LyricScore } from './types';
+import type { LyricLineAnalysis, LyricProject, LyricScore } from './types';
 
 const RHYMES: Array<[string, RegExp]> = [
   ['ang', /(昂|帮|旁|忙|方|房|香|想|响|乡|光|望|忘|伤|长|浪|上)$/],
@@ -16,6 +16,40 @@ export function detectRhyme(line: string): string {
 
 export function countHan(line: string): number {
   return (line.match(/[\u3400-\u9fff]/g) ?? []).length;
+}
+
+const RHYME_WORDS: Record<string, string[]> = {
+  an: ['晚', '岸', '伞', '站', '看', '暖', '散', '慢', '远', '边'],
+  ang: ['光', '巷', '窗', '霜', '望', '忘', '伤', '长', '浪', '场'],
+  en: ['门', '尘', '痕', '人', '认真', '体温', '清晨', '转身'],
+  eng: ['灯', '风声', '旅程', '永恒', '等', '冷', '一生', '发生'],
+  ou: ['走', '手', '以后', '停留', '路口', '回头', '等候', '宇宙'],
+  ao: ['岛', '桥', '拥抱', '迟到', '年少', '街角', '浪潮', '知道'],
+  i: ['你', '雨', '回忆', '距离', '玻璃', '消息', '四季', '日期'],
+  ing: ['星', '醒', '听', '安静', '风景', '曾经', '电影', '姓名'],
+  ong: ['空', '风', '梦', '失控', '心动', '霓虹', '时钟', '相拥'],
+};
+
+export function rhymeSuggestions(rhyme: string): string[] {
+  return RHYME_WORDS[rhyme.toLowerCase()] ?? [];
+}
+
+export function analyzeLines(lyrics: string, bpm: number): LyricLineAnalysis[] {
+  const lines = lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const counts = lines.map(countHan);
+  const average = counts.reduce((sum, value) => sum + value, 0) / Math.max(1, counts.length);
+  const secondsPerBeat = 60 / Math.max(40, bpm);
+  return lines.map((line, index) => {
+    const hanCount = counts[index];
+    const durationSeconds = Number((Math.max(1, hanCount / 2) * secondsPerBeat).toFixed(1));
+    return { line, hanCount, rhyme: detectRhyme(line), durationSeconds, breathing: hanCount >= 12 ? '建议在中点加入呼吸' : hanCount >= 8 ? '自然换气' : '可连唱', lengthKind: hanCount <= 5 ? 'short' : hanCount <= 10 ? 'medium' : 'long', deviation: Number((hanCount - average).toFixed(1)) };
+  });
+}
+
+export function rhymePattern(lyrics: string): string {
+  const rhymes = lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map(detectRhyme);
+  const labels = new Map<string, string>();
+  return rhymes.map((rhyme) => { if (!labels.has(rhyme)) labels.set(rhyme, String.fromCharCode(65 + labels.size)); return labels.get(rhyme); }).join('');
 }
 
 export function scoreProject(project: LyricProject): LyricScore {
