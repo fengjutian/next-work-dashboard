@@ -13,7 +13,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"time"
+	"unicode/utf8"
 
 	"github.com/fjutian/nwd-admin/internal/model"
 	"github.com/fjutian/nwd-admin/internal/service"
@@ -25,8 +25,16 @@ var viewFS embed.FS
 var (
 	buildVersion  = "dev"
 	pluginIDRegex = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]{1,63}$`)
+	versionRegex  = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
 	baseLayout    *template.Template
 )
+
+const maxPluginFileSize int64 = 2 << 20
+
+var allowedPermissions = map[string]struct{}{
+	"store.read": {}, "clipboard": {}, "inject": {}, "external.open": {},
+	"data": {}, "preview": {}, "file.read": {}, "file.write": {},
+}
 
 func init() {
 	if info, ok := debug.ReadBuildInfo(); ok {
@@ -92,8 +100,10 @@ func (h *Handler) ListPlugins(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, "文件过大（最大 10MB）", 400)
+	// Multipart adds a small amount of framing data around the file itself.
+	r.Body = http.MaxBytesReader(w, r.Body, maxPluginFileSize+(64<<10))
+	if err := r.ParseMultipartForm(maxPluginFileSize); err != nil {
+		http.Error(w, "请求无效或文件过大（插件最大 2 MB）", http.StatusBadRequest)
 		return
 	}
 	file, header, err := r.FormFile("bundle")
@@ -108,15 +118,19 @@ func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundle, err := io.ReadAll(file)
+	bundle, err := io.ReadAll(io.LimitReader(file, maxPluginFileSize+1))
 	if err != nil {
 		http.Error(w, "读取文件失败", 500)
 		return
 	}
+	if len(bundle) > int(maxPluginFileSize) {
+		http.Error(w, "插件文件不能超过 2 MB", http.StatusRequestEntityTooLarge)
+		return
+	}
 
-	meta := parseNWDMeta(bundle, header.Filename)
-	if !pluginIDRegex.MatchString(meta.ID) {
-		http.Error(w, fmt.Sprintf("无效的插件 ID: %q（需 2-64 位字母/数字/._-）", meta.ID), 400)
+	meta, err := parseNWDMeta(bundle)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -162,6 +176,10 @@ func (h *Handler) DownloadPlugin(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if !pluginIDRegex.MatchString(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的插件 ID"})
+		return
+	}
 	if err := h.plugins.Remove(id); err != nil {
 		slog.Error("delete plugin", "id", id, "err", err)
 		writeJSON(w, 500, map[string]string{"error": "删除失败"})
@@ -217,47 +235,76 @@ type nwdMeta struct {
 	ID, Name, Version, Author, Description, IconEmoji string
 }
 
-func parseNWDMeta(bundle []byte, filename string) nwdMeta {
-	id := sanitizeID(strings.TrimSuffix(filename, ".nwd"))
-	name := id
-	version := "0.1.0"
-	author := ""
-	desc := fmt.Sprintf("Uploaded %s", time.Now().Format("2006-01-02"))
-	icon := "📊"
-
+func parseNWDMeta(bundle []byte) (nwdMeta, error) {
 	var raw struct {
 		Format   string `json:"format"`
 		Manifest struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Version     string `json:"version"`
-			Author      string `json:"author"`
-			Description string `json:"description"`
-			IconEmoji   string `json:"iconEmoji"`
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Version     string   `json:"version"`
+			Author      string   `json:"author"`
+			Description string   `json:"description"`
+			IconEmoji   string   `json:"iconEmoji"`
+			APIVersion  string   `json:"apiVersion"`
+			Runtime     string   `json:"runtime"`
+			Permissions []string `json:"permissions"`
 		} `json:"manifest"`
+		Script string          `json:"script"`
+		Style  json.RawMessage `json:"style"`
 	}
-	if err := json.Unmarshal(bundle, &raw); err == nil && raw.Format == "nwd-v1" {
-		if raw.Manifest.Name != "" {
-			name = raw.Manifest.Name
+	if err := json.Unmarshal(bundle, &raw); err != nil {
+		return nwdMeta{}, fmt.Errorf("插件包不是有效的 JSON: %v", err)
+	}
+	if raw.Format != "nwd-v1" {
+		return nwdMeta{}, fmt.Errorf("不支持的插件格式，需要 nwd-v1")
+	}
+	raw.Manifest.Name = strings.TrimSpace(raw.Manifest.Name)
+	if raw.Manifest.Name == "" || utf8.RuneCountInString(raw.Manifest.Name) > 100 {
+		return nwdMeta{}, fmt.Errorf("manifest.name 必须是 1–100 个字符")
+	}
+	if !versionRegex.MatchString(raw.Manifest.Version) {
+		return nwdMeta{}, fmt.Errorf("manifest.version 必须是有效的语义版本，例如 1.0.0")
+	}
+	if raw.Manifest.APIVersion != "" && raw.Manifest.APIVersion != "1" {
+		return nwdMeta{}, fmt.Errorf("不支持的插件 API 版本: %s", raw.Manifest.APIVersion)
+	}
+	if raw.Manifest.Runtime != "" && raw.Manifest.Runtime != "sandbox" {
+		return nwdMeta{}, fmt.Errorf("仅支持 sandbox runtime")
+	}
+	if raw.Manifest.Permissions == nil {
+		return nwdMeta{}, fmt.Errorf("manifest.permissions 必须是数组")
+	}
+	for _, permission := range raw.Manifest.Permissions {
+		if _, ok := allowedPermissions[permission]; !ok {
+			return nwdMeta{}, fmt.Errorf("manifest.permissions 包含未知权限: %s", permission)
 		}
-		if raw.Manifest.Version != "" {
-			version = raw.Manifest.Version
-		}
-		if raw.Manifest.Author != "" {
-			author = raw.Manifest.Author
-		}
-		if raw.Manifest.Description != "" {
-			desc = raw.Manifest.Description
-		}
-		if raw.Manifest.IconEmoji != "" {
-			icon = raw.Manifest.IconEmoji
-		}
-		if raw.Manifest.ID != "" {
-			id = raw.Manifest.ID
+	}
+	if strings.TrimSpace(raw.Script) == "" {
+		return nwdMeta{}, fmt.Errorf("插件脚本为空")
+	}
+	if len(raw.Style) > 0 && string(raw.Style) != "null" {
+		var style string
+		if err := json.Unmarshal(raw.Style, &style); err != nil {
+			return nwdMeta{}, fmt.Errorf("插件 style 必须是字符串")
 		}
 	}
 
-	return nwdMeta{ID: id, Name: name, Version: version, Author: author, Description: desc, IconEmoji: icon}
+	id := strings.TrimSpace(raw.Manifest.ID)
+	if id == "" {
+		id = strings.ToLower(strings.Join(strings.Fields(raw.Manifest.Name), "-"))
+	}
+	if !pluginIDRegex.MatchString(id) {
+		return nwdMeta{}, fmt.Errorf("插件 ID 必须为 2–64 位字母、数字、点、下划线或连字符")
+	}
+
+	icon := strings.TrimSpace(raw.Manifest.IconEmoji)
+	if icon == "" {
+		icon = "📦"
+	}
+	return nwdMeta{
+		ID: id, Name: raw.Manifest.Name, Version: raw.Manifest.Version,
+		Author: strings.TrimSpace(raw.Manifest.Author), Description: strings.TrimSpace(raw.Manifest.Description), IconEmoji: icon,
+	}, nil
 }
 
 // ── Input sanitizers ──
@@ -272,17 +319,4 @@ func sanitizeFilename(name string) string {
 		name = "plugin.nwd"
 	}
 	return name
-}
-
-var sanitizeIDRegex = regexp.MustCompile(`[^\p{L}\p{N}._-]`)
-
-func sanitizeID(raw string) string {
-	s := sanitizeIDRegex.ReplaceAllString(raw, "")
-	if s == "" {
-		return "unknown"
-	}
-	if len(s) > 64 {
-		s = s[:64]
-	}
-	return s
 }
