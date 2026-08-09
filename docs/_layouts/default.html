@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Next Work Dashboard 文档">
+  <title>{% if page.title %}{{ page.title }} · {% endif %}Next Work Dashboard Docs</title>
+  <link rel="stylesheet" href="{{ '/assets/docs.css' | relative_url }}">
+</head>
+<body>
+  <header class="topbar">
+    <nav class="shell nav" aria-label="主导航">
+      <a class="brand" href="{{ '/' | relative_url }}"><span class="mark">N</span><span>Next Work Dashboard Docs</span></a>
+      <div class="navlinks">
+        <a href="{{ '/user-guide.html' | relative_url }}">用户手册</a>
+        <a href="{{ '/project-intro-and-deploy.html' | relative_url }}">部署</a>
+        <a href="{{ '/plugin-architecture.html' | relative_url }}">插件</a>
+        <a class="repo" href="https://github.com/fengjutian/next-work-dashboard">GitHub →</a>
+      </div>
+    </nav>
+  </header>
+  <main class="shell article-layout">
+    <article class="article">{{ content }}</article>
+  </main>
+  <footer class="footer">
+    <div class="shell footer-inner"><span>Next Work Dashboard · 本地优先的 AI 工作台</span><a href="{{ '/' | relative_url }}">文档首页</a></div>
+  </footer>
+</body>
+</html>

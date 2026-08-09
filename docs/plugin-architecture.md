@@ -1,3 +1,9 @@
+---
+layout: default
+title: "🔌 next-work-dashboard 插件系统"
+permalink: /plugin-architecture-full.html
+---
+
 # 🔌 next-work-dashboard 插件系统
 
 > 统一注册、两类插件、安全隔离。最后更新：2026-08-08。

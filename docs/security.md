@@ -1,3 +1,8 @@
+---
+layout: default
+title: "🔒 安全模型"
+---
+
 # 🔒 安全模型
 
 > next-work-dashboard 安全架构说明。最后更新：2026-08-08。

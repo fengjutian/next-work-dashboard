@@ -1,3 +1,8 @@
+---
+layout: default
+title: "千问 API 接入说明"
+---
+
 # 千问 API 接入说明
 
 应用的 AI API 设置现支持 DeepSeek、千问（DashScope）和自定义 OpenAI 兼容服务。

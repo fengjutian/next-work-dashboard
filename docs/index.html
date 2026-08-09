@@ -12,7 +12,7 @@
   </nav></header>
   <main>
     <section class="hero"><div class="shell hero-grid">
-      <div><span class="eyebrow">Documentation · Local-first AI Workspace</span><h1>从使用到架构，<span class="accent">清晰理解</span>整个工作台</h1><p class="lead">这里汇集 Next Work Dashboard 的产品手册、部署指南、插件 SDK、安全边界和工程设计。按目标阅读，快速找到真正需要的答案。</p><div class="actions"><a class="button primary" href="user-guide.md">开始使用 →</a><a class="button" href="project-intro-and-deploy.html">安装与部署</a></div></div>
+      <div><span class="eyebrow">Documentation · Local-first AI Workspace</span><h1>从使用到架构，<span class="accent">清晰理解</span>整个工作台</h1><p class="lead">这里汇集 Next Work Dashboard 的产品手册、部署指南、插件 SDK、安全边界和工程设计。按目标阅读，快速找到真正需要的答案。</p><div class="actions"><a class="button primary" href="user-guide.html">开始使用 →</a><a class="button" href="project-intro-and-deploy.html">安装与部署</a></div></div>
       <div class="visual terminal" aria-label="快速启动命令"><div class="visual-head"><i></i><i></i><i></i></div><pre><span class="token-muted"># Clone and enter the desktop app</span>
 <span class="prompt">$</span> git clone https://github.com/fengjutian/next-work-dashboard.git
 <span class="prompt">$</span> cd next-work-dashboard/prompt-lab
@@ -24,35 +24,35 @@
 
     <section id="paths" class="shell section"><div class="section-head"><div><span class="pill">Choose your path</span><h2>按你的目标开始</h2></div><p>文档不要求顺序阅读。选择当前角色，沿着最短路径进入对应内容。</p></div>
       <div class="grid-3">
-        <a class="card" href="user-guide.md"><div class="card-icon">01</div><h3>我是使用者</h3><p>从首次设置、AI 站点、提示词，到文件编辑、插件与数据备份。</p></a>
+        <a class="card" href="user-guide.html"><div class="card-icon">01</div><h3>我是使用者</h3><p>从首次设置、AI 站点、提示词，到文件编辑、插件与数据备份。</p></a>
         <a class="card" href="plugin-architecture.html"><div class="card-icon">02</div><h3>我要开发插件</h3><p>理解 Sandbox、Manifest、权限、Bridge API，并构建第一个 .nwd。</p></a>
-        <a class="card" href="contributing.md"><div class="card-icon">03</div><h3>我要参与开发</h3><p>准备环境，理解进程架构、质量门禁和贡献协作约定。</p></a>
+        <a class="card" href="contributing.html"><div class="card-icon">03</div><h3>我要参与开发</h3><p>准备环境，理解进程架构、质量门禁和贡献协作约定。</p></a>
       </div>
     </section>
 
     <section id="library" class="shell section"><div class="section-head"><div><span class="pill">Core library</span><h2>核心文档</h2></div><p>围绕日常使用、扩展开发、系统设计与故障恢复整理的主文档。</p></div>
       <div class="grid-2">
         <a class="card" href="project-intro-and-deploy.html"><span class="label">Getting started</span><h3>项目介绍与部署</h3><p>产品定位、技术架构、开发环境、构建发布与数据位置。</p></a>
-        <a class="card" href="user-guide.md"><span class="label">Product guide</span><h3>用户手册</h3><p>界面结构、AI 网站、提示词、编辑器、插件和快捷键。</p></a>
+        <a class="card" href="user-guide.html"><span class="label">Product guide</span><h3>用户手册</h3><p>界面结构、AI 网站、提示词、编辑器、插件和快捷键。</p></a>
         <a class="card" href="plugin-architecture.html"><span class="label">Plugin SDK</span><h3>插件系统</h3><p>注册表、生命周期、Sandbox Bridge、权限与 .nwd 包规范。</p></a>
-        <a class="card" href="function-and-principles.md"><span class="label">Engineering</span><h3>功能与实现原理</h3><p>Electron 进程、注入引擎、数据层、Agent 和工作区实现。</p></a>
-        <a class="card" href="security.md"><span class="label">Security</span><h3>安全模型</h3><p>WebView 隔离、IPC 边界、插件权限、令牌与文件访问控制。</p></a>
-        <a class="card" href="troubleshooting.md"><span class="label">Support</span><h3>故障排查</h3><p>安装、启动、AI 页面、插件、数据与终端问题的诊断入口。</p></a>
+        <a class="card" href="function-and-principles.html"><span class="label">Engineering</span><h3>功能与实现原理</h3><p>Electron 进程、注入引擎、数据层、Agent 和工作区实现。</p></a>
+        <a class="card" href="security.html"><span class="label">Security</span><h3>安全模型</h3><p>WebView 隔离、IPC 边界、插件权限、令牌与文件访问控制。</p></a>
+        <a class="card" href="troubleshooting.html"><span class="label">Support</span><h3>故障排查</h3><p>安装、启动、AI 页面、插件、数据与终端问题的诊断入口。</p></a>
       </div>
     </section>
 
     <section id="topics" class="shell section"><div class="section-head"><div><span class="pill">Deep dives</span><h2>工程专题</h2></div><p>面向正在实现具体模块的维护者，记录设计决策、完成状态和后续计划。</p></div>
       <div class="grid-4">
-        <a class="card" href="code-editor-requirements.md"><span class="label">Editor</span><h3>代码编辑器</h3><p>能力范围、数据模型与验收标准。</p></a>
-        <a class="card" href="code-editor-agents-window.md"><span class="label">Agents</span><h3>Agents Window</h3><p>任务视图、隔离模型与交付流程。</p></a>
-        <a class="card" href="knowledge-workspace-requirements.md"><span class="label">Knowledge</span><h3>知识工作区</h3><p>知识源、图谱、模板与可审查变更。</p></a>
-        <a class="card" href="mcp-remaining-features.md"><span class="label">Protocol</span><h3>MCP 路线</h3><p>Resources、多模态、认证与治理计划。</p></a>
-        <a class="card" href="terminal-features.md"><span class="label">Terminal</span><h3>终端系统</h3><p>PTY 架构、会话能力与已知问题。</p></a>
-        <a class="card" href="disk-space-plugin.md"><span class="label">Rust plugin</span><h3>磁盘空间</h3><p>Rust 扫描器、安全边界与打包方式。</p></a>
-        <a class="card" href="office-studio.md"><span class="label">Office</span><h3>Office Studio</h3><p>OfficeCLI 集成、运行方式与发布说明。</p></a>
-        <a class="card" href="architecture-roadmap.md"><span class="label">Roadmap</span><h3>架构路线图</h3><p>当前完成度、技术债和演进优先级。</p></a>
+        <a class="card" href="code-editor-requirements.html"><span class="label">Editor</span><h3>代码编辑器</h3><p>能力范围、数据模型与验收标准。</p></a>
+        <a class="card" href="code-editor-agents-window.html"><span class="label">Agents</span><h3>Agents Window</h3><p>任务视图、隔离模型与交付流程。</p></a>
+        <a class="card" href="knowledge-workspace-requirements.html"><span class="label">Knowledge</span><h3>知识工作区</h3><p>知识源、图谱、模板与可审查变更。</p></a>
+        <a class="card" href="mcp-remaining-features.html"><span class="label">Protocol</span><h3>MCP 路线</h3><p>Resources、多模态、认证与治理计划。</p></a>
+        <a class="card" href="terminal-features.html"><span class="label">Terminal</span><h3>终端系统</h3><p>PTY 架构、会话能力与已知问题。</p></a>
+        <a class="card" href="disk-space-plugin.html"><span class="label">Rust plugin</span><h3>磁盘空间</h3><p>Rust 扫描器、安全边界与打包方式。</p></a>
+        <a class="card" href="office-studio.html"><span class="label">Office</span><h3>Office Studio</h3><p>OfficeCLI 集成、运行方式与发布说明。</p></a>
+        <a class="card" href="architecture-roadmap.html"><span class="label">Roadmap</span><h3>架构路线图</h3><p>当前完成度、技术债和演进优先级。</p></a>
       </div>
     </section>
   </main>
-  <footer class="footer"><div class="shell footer-inner"><span>Next Work Dashboard · 本地优先的 AI 工作台</span><span><a href="README.md">全部文档</a>　·　<a href="contributing.md">参与贡献</a></span></div></footer>
+  <footer class="footer"><div class="shell footer-inner"><span>Next Work Dashboard · 本地优先的 AI 工作台</span><span><a href="README.html">全部文档</a>　·　<a href="contributing.html">参与贡献</a></span></div></footer>
 </body></html>

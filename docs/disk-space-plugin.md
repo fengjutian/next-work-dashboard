@@ -1,3 +1,8 @@
+---
+layout: default
+title: "磁盘空间插件"
+---
+
 # 磁盘空间插件
 
 磁盘空间插件是内置可信插件，由 Electron 主进程启动 Rust sidecar 完成只读扫描和重复文件复核。

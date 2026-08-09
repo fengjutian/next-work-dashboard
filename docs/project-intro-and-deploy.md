@@ -1,3 +1,9 @@
+---
+layout: default
+title: "🚀 next-work-dashboard — 项目介绍与部署"
+permalink: /project-intro-and-deploy-full.html
+---
+
 # 🚀 next-work-dashboard — 项目介绍与部署
 
 > 基于 Electron 的 AI 下一代工作平台 · v0.1.0
@@ -108,7 +114,7 @@
 - Token 使用 `safeStorage` + OS 原生加密
 - Fuse 保护：`RunAsNode: false`、`OnlyLoadAppFromAsar: true`、asar 完整性校验
 
-详见 [安全模型](./security.md)。
+详见 [安全模型](./security.html)。
 
 ---
 
@@ -270,7 +276,7 @@ npm run make                # 3. 构建
 | Excel 编辑 | **100%** |
 | **总体** | **79%** (71/90) |
 
-详见 [功能检查表](../FEATURE_CHECKLIST.md)。
+详见 [功能检查表](../FEATURE_CHECKLIST.html)。
 
 ---
 
@@ -278,12 +284,12 @@ npm run make                # 3. 构建
 
 | 文档 | 路径 |
 |---|---|
-| 需求文档 | [REQUIREMENTS.md](../REQUIREMENTS.md) |
-| 功能对照表 | [FEATURE_CHECKLIST.md](../FEATURE_CHECKLIST.md) |
-| 用户手册 | [user-guide.md](./user-guide.md) |
-| 插件架构 | [plugin-architecture.md](./plugin-architecture.md) |
-| 架构路线图 | [architecture-roadmap.md](./architecture-roadmap.md) |
-| 功能与原理 | [function-and-principles.md](./function-and-principles.md) |
-| 故障排查 | [troubleshooting.md](./troubleshooting.md) |
-| 贡献指南 | [contributing.md](./contributing.md) |
-| 安全模型 | [security.md](./security.md) |
+| 需求文档 | [REQUIREMENTS.md](../REQUIREMENTS.html) |
+| 功能对照表 | [FEATURE_CHECKLIST.md](../FEATURE_CHECKLIST.html) |
+| 用户手册 | [user-guide.md](./user-guide.html) |
+| 插件架构 | [plugin-architecture.md](./plugin-architecture.html) |
+| 架构路线图 | [architecture-roadmap.md](./architecture-roadmap.html) |
+| 功能与原理 | [function-and-principles.md](./function-and-principles.html) |
+| 故障排查 | [troubleshooting.md](./troubleshooting.html) |
+| 贡献指南 | [contributing.md](./contributing.html) |
+| 安全模型 | [security.md](./security.html) |

@@ -1,3 +1,8 @@
+---
+layout: default
+title: "🔧 故障排查"
+---
+
 # 🔧 故障排查
 
 > 常见问题与解决办法。遇到新问题欢迎补充。
@@ -132,6 +137,6 @@
 
 ## 获取更多帮助
 
-- 查看 [用户手册](./user-guide.md)
-- 查看 [项目介绍](./project-intro-and-deploy.md)
+- 查看 [用户手册](./user-guide.html)
+- 查看 [项目介绍](./project-intro-and-deploy.html)
 - 提交 Issue 到项目仓库

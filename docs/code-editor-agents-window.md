@@ -1,3 +1,8 @@
+---
+layout: default
+title: "代码编辑器 Agents Window 功能设计"
+---
+
 # 代码编辑器 Agents Window 功能设计
 
 ## 1. 文档状态

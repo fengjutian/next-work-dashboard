@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Office Studio 插件"
+---
+
 # Office Studio 插件
 
 Office Studio 是基于 OfficeCLI 的系统级内置插件，为 `.docx`、`.xlsx` 和 `.pptx` 提供统一的创建、结构读取与高保真 HTML 预览能力。

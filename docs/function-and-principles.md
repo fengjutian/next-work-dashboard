@@ -1,3 +1,8 @@
+---
+layout: default
+title: "⚙️ next-work-dashboard — 功能与原理"
+---
+
 # ⚙️ next-work-dashboard — 功能与原理
 
 > 涵盖架构原理、核心引擎、插件系统、数据层、Agent 系统。最后更新：2026-08-08。
@@ -218,7 +223,7 @@ WebViewContainer
 
 ## 6. 插件系统
 
-详见 [插件架构文档](./plugin-architecture.md)。核心要点：
+详见 [插件架构文档](./plugin-architecture.html)。核心要点：
 
 - **23 个内置插件**，`React.lazy()` 动态 import
 - **Sandbox 用户插件**，`sandbox="allow-scripts"` iframe 隔离
@@ -518,8 +523,8 @@ globalShortcut.register('CommandOrControl+Shift+Space', () => {
 
 | 文档 | 路径 |
 |---|---|
-| 插件架构 | [plugin-architecture.md](./plugin-architecture.md) |
-| 架构路线图 | [architecture-roadmap.md](./architecture-roadmap.md) |
-| 安全模型 | [security.md](./security.md) |
-| 代码编辑器需求 | [code-editor-requirements.md](./code-editor-requirements.md) |
-| 终端功能 | [terminal-features.md](./terminal-features.md) |
+| 插件架构 | [plugin-architecture.md](./plugin-architecture.html) |
+| 架构路线图 | [architecture-roadmap.md](./architecture-roadmap.html) |
+| 安全模型 | [security.md](./security.html) |
+| 代码编辑器需求 | [code-editor-requirements.md](./code-editor-requirements.html) |
+| 终端功能 | [terminal-features.md](./terminal-features.html) |

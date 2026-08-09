@@ -1,3 +1,8 @@
+---
+layout: default
+title: "🤝 贡献指南"
+---
+
 # 🤝 贡献指南
 
 > 参与 next-work-dashboard 开发前请先阅读本文。

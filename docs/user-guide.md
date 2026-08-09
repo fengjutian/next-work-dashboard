@@ -1,3 +1,8 @@
+---
+layout: default
+title: "📖 next-work-dashboard 用户手册"
+---
+
 # 📖 next-work-dashboard 用户手册
 
 > 从零开始，掌握 AI 工作台的日常使用。
@@ -207,6 +212,6 @@ npm start
 
 ## 8. 获取帮助
 
-- 遇到问题先查看 [故障排查](./troubleshooting.md)
-- 开发插件查看 [插件开发指南](./plugin-architecture.md#10-sandbox-插件开发指南)
-- 了解项目全貌查看 [项目介绍与部署](./project-intro-and-deploy.md)
+- 遇到问题先查看 [故障排查](./troubleshooting.html)
+- 开发插件查看 [插件开发指南](./plugin-architecture.html#10-sandbox-插件开发指南)
+- 了解项目全貌查看 [项目介绍与部署](./project-intro-and-deploy.html)

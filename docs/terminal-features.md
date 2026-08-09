@@ -1,3 +1,8 @@
+---
+layout: default
+title: "终端功能文档"
+---
+
 # 终端功能文档
 
 > 对标 VS Code 集成终端，基于 xterm.js + node-pty 实现。

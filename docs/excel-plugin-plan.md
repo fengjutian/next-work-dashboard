@@ -1,3 +1,8 @@
+---
+layout: default
+title: "Excel 预览编辑插件 — 技术方案"
+---
+
 # Excel 预览编辑插件 — 技术方案
 
 ## 1. 目标
