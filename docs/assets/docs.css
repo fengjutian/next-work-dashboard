@@ -106,8 +106,7 @@ a.card::after { content: "→"; position: absolute; top: 20px; right: 22px; colo
 .callout.danger { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); border-left-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
 .callout p { margin: 0; }
 .article-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 52px; padding: 44px 0 86px; }
-.article-layout--single { display: block; }
-.article-layout--single .article { width: min(100%, 920px); margin-inline: auto; }
+.article-page { display: block; width: min(920px, calc(100% - 40px)); margin-inline: auto; padding: 44px 0 86px; }
 .toc { position: sticky; top: 92px; align-self: start; }
 .toc strong { display: block; margin-bottom: 10px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .toc a { display: block; padding: 7px 10px; border-left: 1px solid var(--line); color: var(--muted); text-decoration: none; font-size: 13px; }
