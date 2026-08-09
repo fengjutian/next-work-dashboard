@@ -32,7 +32,7 @@ export const OfficePptEditor: React.FC<Props> = ({ filePath, onMutation, onError
     setSlide((current) => pages.includes(current) ? current : pages[0]);
     setRendering(true);
     const rendered = await Promise.all(pages.map(async (page) => [page, await officeClient.renderPage(filePath, page)] as const));
-    setImages(Object.fromEntries(rendered.filter(([, value]) => value.success && value.imageDataUrl).map(([page, value]) => [page, value.imageDataUrl!] as const)));
+    setImages(Object.fromEntries(rendered.flatMap(([page, value]) => value.success && value.imageDataUrl ? [[page, value.imageDataUrl] as const] : [])));
     setRendering(false);
   }, [filePath, onError]);
   useEffect(() => { void reload(); }, [reload]);

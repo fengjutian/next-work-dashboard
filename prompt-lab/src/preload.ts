@@ -119,6 +119,7 @@ const electronAPI: ElectronAPI = {
   // favicon 获取（主进程 HTTP，绕过浏览器限制）
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
+  generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>
     ipcRenderer.invoke('embedding:create', payload),
   memoryIndex: {

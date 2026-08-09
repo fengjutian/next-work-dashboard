@@ -282,6 +282,49 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('image:generate', async (_event, payload: import('../plugins/style-image/types').StyleImageRequest) => {
+    try {
+      const baseUrl = String(payload.baseUrl || '').replace(/\/+$/, '');
+      const apiKey = String(payload.apiKey || '').trim();
+      const model = String(payload.model || '').trim();
+      const prompt = String(payload.prompt || '').trim().slice(0, 8000);
+      if (!/^https:\/\//i.test(baseUrl) || !apiKey || !model || !prompt) return { success: false, error: '图片服务配置或提示词不完整' };
+      const endpoint = `${baseUrl}/images/${payload.image ? 'edits' : 'generations'}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 600_000);
+      let response: Response;
+      try {
+        if (payload.image) {
+          const bytes = Buffer.from(payload.image.dataBase64, 'base64');
+          if (bytes.byteLength > 20 * 1024 * 1024) return { success: false, error: '参考图片不能超过 20 MB' };
+          const form = new FormData();
+          form.append('model', model); form.append('prompt', prompt); form.append('size', String(payload.size || '1024x1024')); form.append('quality', String(payload.quality || 'medium'));
+          form.append('image', new Blob([bytes], { type: payload.image.mimeType || 'image/png' }), payload.image.name || 'reference.png');
+          response = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: { Authorization: `Bearer ${apiKey}` }, body: form });
+        } else {
+          response = await fetch(endpoint, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, prompt, size: payload.size || '1024x1024', quality: payload.quality || 'medium', n: 1 }) });
+        }
+      } finally { clearTimeout(timeout); }
+      const text = await response.text();
+      let data: { error?: { message?: string }; data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }> } | null;
+      try { data = JSON.parse(text) as typeof data; } catch { data = null; }
+      if (!response.ok) return { success: false, error: data?.error?.message || text.slice(0, 1000) || `图片服务返回 ${response.status}` };
+      const item = data?.data?.[0];
+      if (item?.b64_json) return { success: true, imageDataUrl: `data:image/png;base64,${item.b64_json}`, revisedPrompt: item.revised_prompt };
+      if (item?.url) {
+        const imageResponse = await fetch(item.url, { signal: AbortSignal.timeout(120_000) });
+        if (!imageResponse.ok) return { success: false, error: '图片已生成，但下载结果失败' };
+        const mime = imageResponse.headers.get('content-type') || 'image/png';
+        const encoded = Buffer.from(await imageResponse.arrayBuffer()).toString('base64');
+        return { success: true, imageDataUrl: `data:${mime};base64,${encoded}`, revisedPrompt: item.revised_prompt };
+      }
+      return { success: false, error: '图片服务未返回可识别的结果' };
+    } catch (error) {
+      const message = error instanceof Error && error.name === 'AbortError' ? '图片生成超时（10 分钟）' : (error instanceof Error ? error.message : String(error));
+      return { success: false, error: message };
+    }
+  });
+
   ipcMain.handle('embedding:create', async (_event, payload: {
     baseUrl: string; apiKey: string; model: string; inputs: string[];
   }) => {

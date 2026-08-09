@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -44,6 +44,7 @@ const compare = preloadable(() => import('../compare').then((m) => ({ default: m
 const documentKnowledge = preloadable(() => import('../document-knowledge').then((m) => ({ default: m.DocumentKnowledgePanel })));
 const hanyuJinjie = preloadable(() => import('../hanyu-jinjie').then((m) => ({ default: m.HanyuJinjiePanel })));
 const lingoHut = preloadable(() => import('../lingohut').then((m) => ({ default: m.LingoHutPanel })));
+const styleImage = preloadable(() => import('../style-image').then((m) => ({ default: m.StyleImagePanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -61,6 +62,7 @@ const ComparePanel = compare.component;
 const DocumentKnowledgePanel = documentKnowledge.component;
 const HanyuJinjiePanel = hanyuJinjie.component;
 const LingoHutPanel = lingoHut.component;
+const StyleImagePanel = styleImage.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -326,6 +328,16 @@ const builtInPlugins: Plugin[] = [
     order: 21,
   },
   {
+    id: 'style-image',
+    name: '风格图片',
+    icon: Image,
+    component: StyleImagePanel,
+    enabled: true,
+    keepAlive: true,
+    order: 22,
+    contributions: { commands: [{ id: 'style-image.generate', title: '生成风格图片', category: '风格图片' }] },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -387,6 +399,7 @@ export function registerBuiltInPlugins(): void {
     'document-knowledge': documentKnowledge.preload,
     'hanyu-jinjie': hanyuJinjie.preload,
     lingohut: lingoHut.preload,
+    'style-image': styleImage.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
