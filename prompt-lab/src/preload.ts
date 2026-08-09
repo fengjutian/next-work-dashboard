@@ -13,6 +13,8 @@ const electronAPI: ElectronAPI = {
     return () => ipcRenderer.removeListener('window-maximized-changed', handler);
   },
   close: () => ipcRenderer.invoke('window-close'),
+  hide: () => ipcRenderer.invoke('window-hide'),
+  show: () => ipcRenderer.invoke('window-show'),
 
   // 提示词注入（传递到主进程执行）
   injectPrompt: (payload: {
@@ -121,7 +123,7 @@ const electronAPI: ElectronAPI = {
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
   generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
   screenCapture: {
-    setTarget: (target) => ipcRenderer.send('screen-capture:set-target', target),
+    setTarget: (target, systemAudio) => ipcRenderer.send('screen-capture:set-target', { target, systemAudio }),
     setRecordingState: (state) => ipcRenderer.send('screen-capture:recording-state', state),
   },
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>

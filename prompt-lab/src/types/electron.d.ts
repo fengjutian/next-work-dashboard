@@ -17,6 +17,8 @@ export interface ElectronAPI {
   isMaximized: () => Promise<boolean>;
   onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
   close: () => Promise<void>;
+  hide: () => Promise<void>;
+  show: () => Promise<void>;
   injectPrompt: (payload: InjectPayload) => Promise<InjectResult>;
   onToggleSearchPanel: (callback: () => void) => () => void;
   saveData: (data: string) => Promise<{ success: boolean }>;
@@ -41,7 +43,7 @@ export interface ElectronAPI {
   llmChat: (payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => Promise<{ ok: boolean; status: number; data?: any; error?: string }>;
   generateImage: (payload: import('../plugins/style-image/types').StyleImageRequest) => Promise<import('../plugins/style-image/types').StyleImageResult>;
   screenCapture: {
-    setTarget: (target: 'app' | 'screen') => void;
+    setTarget: (target: 'app' | 'screen', systemAudio: boolean) => void;
     setRecordingState: (state: { recording: boolean; paused: boolean; seconds: number }) => void;
   };
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) => Promise<{
