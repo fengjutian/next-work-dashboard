@@ -55,6 +55,11 @@ export function setupDiskSpaceIPC(): void {
     if (!child.stdout || !child.stderr) throw new Error('无法连接 Rust 扫描器输出');
     scans.set(scanId, child);
     scanResults.set(scanId, { root: canonicalRoot, files: new Map(), groups: new Map() });
+    while (scanResults.size > 5) {
+      const oldest = scanResults.keys().next().value as string | undefined;
+      if (!oldest || oldest === scanId) break;
+      scanResults.delete(oldest);
+    }
     const sender = event.sender;
     const lines = readline.createInterface({ input: child.stdout });
     lines.on('line', (line) => {
@@ -65,21 +70,21 @@ export function setupDiskSpaceIPC(): void {
           payload.files.forEach((file) => result?.files.set(file.path, file));
           if (result && payload.groupId) result.groups.set(payload.groupId, payload.files.map((file) => file.path));
         }
-        sender.send('disk-space:event', scanId, payload);
+        if (!sender.isDestroyed()) sender.send('disk-space:event', scanId, payload);
       } catch { /* ignore malformed sidecar output */ }
     });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-4096); });
     child.on('close', (code) => {
       scans.delete(scanId);
-      sender.send('disk-space:exit', scanId, { code, error: code === 0 ? undefined : stderr.trim() || '扫描器异常退出' });
+      if (!sender.isDestroyed()) sender.send('disk-space:exit', scanId, { code, error: code === 0 ? undefined : stderr.trim() || '扫描器异常退出' });
     });
     return { success: true };
   });
   ipcMain.handle('disk-space:cancel', (_event, scanId: string) => {
     const child = scans.get(scanId);
     if (!child) return false;
-    child.kill(); scans.delete(scanId); return true;
+    child.kill(); scans.delete(scanId); scanResults.delete(scanId); return true;
   });
   ipcMain.handle('disk-space:trash', async (_event, scanId: string, requestedPaths: string[]) => {
     const result = scanResults.get(scanId);
