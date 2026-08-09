@@ -2,7 +2,7 @@ import React from 'react';
 import { FolderOpen, Loader2, Square, HardDrive } from '@/components/icons';
 
 type FileEntry = { type: 'file'; path: string; size: number; modifiedAt: number; extension: string };
-type ScanEvent = FileEntry | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
+type ScanEvent = FileEntry | { type: 'extension'; extension: string; size: number } | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 const formatBytes = (bytes: number) => bytes === 0 ? '0 B' : `${(bytes / 1024 ** Math.floor(Math.log(bytes) / Math.log(1024))).toFixed(1)} ${['B', 'KB', 'MB', 'GB', 'TB'][Math.floor(Math.log(bytes) / Math.log(1024))]}`;
 
 export function DiskSpacePanel() {
@@ -17,9 +17,9 @@ export function DiskSpacePanel() {
   React.useEffect(() => window.electronAPI.diskSpace.onEvent((id, event: ScanEvent) => {
     if (id !== scanId.current) return;
     if (event.type === 'file') {
-      setStats((value) => ({ ...value, files: value.files + 1, bytes: value.bytes + event.size }));
-      setExtensions((value) => ({ ...value, [event.extension.toLowerCase() || '(无扩展名)']: (value[event.extension.toLowerCase() || '(无扩展名)'] ?? 0) + event.size }));
       setLargest((value) => [...value, event].sort((a, b) => b.size - a.size).slice(0, 50));
+    } else if (event.type === 'extension') {
+      setExtensions((value) => ({ ...value, [event.extension || '(无扩展名)']: event.size }));
     } else setStats({ files: event.files, bytes: event.bytes, errors: event.errors });
   }), []);
   React.useEffect(() => window.electronAPI.diskSpace.onExit((id, result) => {
@@ -43,4 +43,3 @@ export function DiskSpacePanel() {
     <div className="grid min-h-0 gap-4 lg:grid-cols-3"><section className="rounded-lg border p-4"><h2 className="mb-3 font-medium">扩展名占用</h2>{topExtensions.map(([name, size]) => <div key={name} className="flex justify-between gap-3 py-1 text-sm"><span className="truncate">{name}</span><span>{formatBytes(size)}</span></div>)}</section><section className="lg:col-span-2 rounded-lg border p-4"><h2 className="mb-3 font-medium">最大文件（前 50）</h2><div className="space-y-1">{largest.map((file) => <div key={file.path} className="flex gap-3 border-b py-2 text-sm"><span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span><span>{formatBytes(file.size)}</span></div>)}</div></section></div>
   </div>;
 }
-

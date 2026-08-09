@@ -13,6 +13,7 @@ export interface InjectResult {
 
 export type DiskScanEvent =
   | { type: 'file'; path: string; size: number; modifiedAt: number; extension: string }
+  | { type: 'extension'; extension: string; size: number }
   | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 
 export interface ElectronAPI {
