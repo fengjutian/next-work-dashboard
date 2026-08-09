@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { detectRhyme, projectToText, scoreProject } from './analysis';
+import { LYRIC_SYSTEM_PROMPT } from './prompt';
 import type { LyricProject, LyricSection, SectionKind } from './types';
 
 const STORAGE_KEY = 'nwd:lyric-studio:project';
@@ -29,7 +30,7 @@ function extractJson(raw: string): unknown {
 async function generateLyrics(apiKey: string, baseUrl: string, model: string, project: LyricProject): Promise<LyricSection[]> {
   const provider = createOpenAIProvider({ apiKey, baseUrl });
   const messages: ChatMessage[] = [
-    { role: 'system', content: '你是专业中文歌词编辑。只输出 JSON：{"sections":[{"kind":"Verse","title":"Verse 1","lyrics":"每行用\\n分隔","emotion":"","rhyme":"ong","syllables":"8-10"}]}。避免模仿或复现任何在世艺术家的独特风格；把风格要求转译成通用音乐特征。歌词必须原创、可唱、有具体意象，副歌包含简洁 Hook。' },
+    { role: 'system', content: LYRIC_SYSTEM_PROMPT },
     { role: 'user', content: `创作一首完整歌词。主题：${project.theme}；风格：${project.style}；情绪：${project.emotion}；语言：${project.language}；BPM：${project.bpm}；结构：${project.sections.map((s) => s.kind).join(' + ')}。` },
   ];
   let raw = '';
