@@ -18,8 +18,19 @@ export interface LyricProject {
   emotion: string;
   language: string;
   bpm: number;
+  location: string;
+  time: string;
+  story: string;
+  coreImages: string[];
   sections: LyricSection[];
   updatedAt: number;
+}
+
+export interface LyricRevision {
+  id: string;
+  label: string;
+  createdAt: number;
+  project: LyricProject;
 }
 
 export interface LyricScore {
