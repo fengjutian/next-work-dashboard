@@ -8,6 +8,8 @@ export interface LyricSection {
   emotion: string;
   rhyme: string;
   syllables: string;
+  locked?: boolean;
+  collapsed?: boolean;
 }
 
 export interface LyricProject {
@@ -47,6 +49,45 @@ export interface LyricLineAnalysis {
   breathing: string;
   lengthKind: 'short' | 'medium' | 'long';
   deviation: number;
+}
+
+export interface HookCandidate {
+  id: string;
+  text: string;
+  memorability: number;
+  singability: number;
+  imagery: number;
+}
+
+export interface ReviewIssue {
+  id: string;
+  sectionTitle: string;
+  line: string;
+  category: string;
+  severity: 'info' | 'warning' | 'critical';
+  suggestion: string;
+}
+
+export interface AudioAnalysis {
+  name: string;
+  duration: number;
+  bpm: number;
+  sampleRate: number;
+  channels: number;
+  key: string;
+  waveform: number[];
+}
+
+export interface LrcLine {
+  id: string;
+  time: number;
+  text: string;
+}
+
+export interface MelodyNote {
+  pitch: number;
+  beats: number;
+  lyric: string;
 }
 
 export interface LyricRevision {

@@ -352,6 +352,11 @@ const builtInPlugins: Plugin[] = [
   },
   {
     id: 'lyric-studio', name: '歌词工坊', icon: Draw, component: LyricStudioPanel, enabled: true, order: 25, keepAlive: true,
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('lyric-studio.generate', () => {
+        window.dispatchEvent(new CustomEvent('lyric-studio:command', { detail: { command: 'generate' } }));
+      }));
+    },
     contributions: {
       commands: [{ id: 'lyric-studio.generate', title: 'AI 生成整首歌词', category: '歌词工坊' }],
       views: [{ id: 'lyric-studio.main', title: '歌词工坊', component: LyricStudioPanel, location: 'main' }],
