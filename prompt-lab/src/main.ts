@@ -76,7 +76,10 @@ if (started) {
 
     let captureTarget: 'app' | 'screen' = 'screen';
     let captureSystemAudio = false;
-    ipcMain.on('screen-capture:set-target', (_event, options: { target: 'app' | 'screen'; systemAudio: boolean }) => { captureTarget = options.target === 'app' ? 'app' : 'screen'; captureSystemAudio = Boolean(options.systemAudio); });
+    ipcMain.handle('screen-capture:set-target', (_event, options: { target: 'app' | 'screen'; systemAudio: boolean }) => {
+      captureTarget = options.target === 'app' ? 'app' : 'screen'; captureSystemAudio = Boolean(options.systemAudio);
+      return { target: captureTarget, systemAudio: captureSystemAudio };
+    });
     ipcMain.on('screen-capture:recording-state', (_event, state: { recording: boolean; paused: boolean; seconds: number }) => setTrayRecordingState(state));
 
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {

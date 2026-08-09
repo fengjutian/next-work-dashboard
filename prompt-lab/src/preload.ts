@@ -123,7 +123,7 @@ const electronAPI: ElectronAPI = {
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
   generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
   screenCapture: {
-    setTarget: (target, systemAudio) => ipcRenderer.send('screen-capture:set-target', { target, systemAudio }),
+    setTarget: (target, systemAudio) => ipcRenderer.invoke('screen-capture:set-target', { target, systemAudio }),
     setRecordingState: (state) => ipcRenderer.send('screen-capture:recording-state', state),
   },
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>

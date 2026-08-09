@@ -20,8 +20,9 @@ const recordingCountdown = async () => {
   window.dispatchEvent(new CustomEvent('screen-capture:countdown', { detail: 0 }));
   await new Promise((resolve) => window.setTimeout(resolve, 240));
 };
-const displayStream = (target: 'app' | 'screen', audio: boolean) => {
-  window.electronAPI.screenCapture.setTarget(target, audio);
+const displayStream = async (target: 'app' | 'screen', audio: boolean) => {
+  const confirmed = await window.electronAPI.screenCapture.setTarget(target, audio);
+  if (confirmed.target !== target || confirmed.systemAudio !== audio) throw new Error('主进程未确认录屏声音配置');
   return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
 };
 
@@ -87,6 +88,16 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> 
       await window.electronAPI.hide();
       await new Promise((resolve) => window.setTimeout(resolve, 320));
       const display = await displayStream(target, systemAudio);
+      const displayAudioTracks = display.getAudioTracks();
+      if (systemAudio && displayAudioTracks.length === 0) {
+        display.getTracks().forEach((track) => track.stop());
+        throw new Error('Windows/Electron 没有返回系统声音轨道。请检查扬声器输出设备，并确认使用“整个屏幕”模式。');
+      }
+      const inactiveSystemTrack = systemAudio && displayAudioTracks.find((track) => track.readyState !== 'live');
+      if (inactiveSystemTrack) {
+        display.getTracks().forEach((track) => track.stop());
+        throw new Error(`系统声音轨道不可用：${inactiveSystemTrack.readyState}`);
+      }
       let mic: MediaStream | undefined;
       try { if (microphone) mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
       catch (error) { display.getTracks().forEach((track) => track.stop()); throw new Error(`无法使用麦克风：${error instanceof Error ? error.message : String(error)}`); }
@@ -121,7 +132,8 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> 
       };
       display.getVideoTracks()[0]?.addEventListener('ended', stop, { once: true });
       mediaRecorder.start(1000); setRecording(true);
-      notice.info({ message: '录屏已开始', description: mixedAudioTracks.length ? `声音已连接：${[systemAudio ? '系统声音' : '', microphone ? '麦克风' : ''].filter(Boolean).join(' + ')}` : '本次录制不包含声音', placement: 'bottomRight', duration: 4 });
+      const trackDetails = mixedAudioTracks.map((track) => `${track.label || '音轨'} (${track.readyState}${track.muted ? '，静音' : ''})`).join('；');
+      notice.info({ message: '录屏已开始', description: mixedAudioTracks.length ? `声音已连接：${trackDetails}` : '本次录制不包含声音', placement: 'bottomRight', duration: 6 });
     } catch (error) {
       void window.electronAPI.show();
       if (!(error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name))) notice.error({ message: '无法开始录屏', description: error instanceof Error ? error.message : String(error) });

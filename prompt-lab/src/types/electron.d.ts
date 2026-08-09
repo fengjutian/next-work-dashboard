@@ -43,7 +43,7 @@ export interface ElectronAPI {
   llmChat: (payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => Promise<{ ok: boolean; status: number; data?: any; error?: string }>;
   generateImage: (payload: import('../plugins/style-image/types').StyleImageRequest) => Promise<import('../plugins/style-image/types').StyleImageResult>;
   screenCapture: {
-    setTarget: (target: 'app' | 'screen', systemAudio: boolean) => void;
+    setTarget: (target: 'app' | 'screen', systemAudio: boolean) => Promise<{ target: 'app' | 'screen'; systemAudio: boolean }>;
     setRecordingState: (state: { recording: boolean; paused: boolean; seconds: number }) => void;
   };
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) => Promise<{
