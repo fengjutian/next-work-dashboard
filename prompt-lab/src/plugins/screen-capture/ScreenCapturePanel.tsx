@@ -7,6 +7,10 @@ export type CaptureMode = 'screenshot' | 'recording';
 
 const timeLabel = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 const save = (url: string, name: string) => { const link = document.createElement('a'); link.href = url; link.download = name; link.click(); };
+const hideCapturePanel = async () => {
+  window.dispatchEvent(new CustomEvent('screen-capture:hide'));
+  await new Promise((resolve) => window.setTimeout(resolve, 180));
+};
 const displayStream = (target: 'app' | 'screen', audio: boolean) => {
   window.electronAPI.screenCapture.setTarget(target);
   return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
@@ -48,6 +52,7 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
   const screenshot = useCallback(async () => {
     setBusy(true); let capture: MediaStream | undefined;
     try {
+      await hideCapturePanel();
       capture = await displayStream(target, false);
       const preview = document.createElement('video'); preview.srcObject = capture; preview.muted = true; await preview.play();
       const canvas = document.createElement('canvas'); canvas.width = preview.videoWidth; canvas.height = preview.videoHeight;
@@ -65,6 +70,7 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
   const start = useCallback(async () => {
     setBusy(true);
     try {
+      await hideCapturePanel();
       const display = await displayStream(target, systemAudio);
       let mic: MediaStream | undefined;
       try { if (microphone) mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
@@ -94,7 +100,7 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
   };
   const url = mode === 'screenshot' ? imageUrl : videoUrl;
   return <div className="flex h-full flex-col bg-background">{holder}
-    <header className="flex h-14 items-center gap-3 border-b px-5"><Monitor className="h-5 w-5 text-primary" /><div><h2 className="text-sm font-semibold">屏幕捕获</h2><p className="text-[11px] text-muted-foreground">选择屏幕或窗口后进行截屏与录屏</p></div><div className="flex-1" /><div className="flex rounded-lg bg-muted p-1"><button disabled={recording} onClick={() => setMode('screenshot')} className={`flex gap-1.5 rounded-md px-3 py-1.5 text-xs ${mode === 'screenshot' ? 'bg-background text-primary shadow-sm' : ''}`}><Camera className="h-4 w-4" />截屏</button><button onClick={() => setMode('recording')} className={`flex gap-1.5 rounded-md px-3 py-1.5 text-xs ${mode === 'recording' ? 'bg-background text-primary shadow-sm' : ''}`}><Video className="h-4 w-4" />录屏</button></div></header>
+    <header className="flex h-14 items-center gap-3 border-b px-5"><Monitor className="h-5 w-5 text-primary" /><div><h2 className="text-sm font-semibold">{mode === 'screenshot' ? '截取屏幕' : recording ? '正在录屏' : '录制屏幕'}</h2><p className="text-[11px] text-muted-foreground">{mode === 'screenshot' ? '设置捕获范围，截屏时窗口会自动隐藏' : '设置捕获范围和声音，开始后窗口会自动隐藏'}</p></div></header>
     <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-auto p-6">
       <div className="flex flex-wrap items-center justify-center gap-4 rounded-lg border bg-card px-4 py-2 text-xs"><span className="font-medium">捕获范围</span><label className="flex items-center gap-1.5"><input type="radio" checked={target === 'screen'} disabled={recording} onChange={() => setTarget('screen')} />整个屏幕</label><label className="flex items-center gap-1.5"><input type="radio" checked={target === 'app'} disabled={recording} onChange={() => setTarget('app')} />当前应用</label>{mode === 'recording' && <><span className="mx-1 h-4 w-px bg-border" /><label className="flex items-center gap-1.5"><input type="checkbox" checked={systemAudio} disabled={recording} onChange={(event) => setSystemAudio(event.target.checked)} />系统声音</label><label className="flex items-center gap-1.5"><input type="checkbox" checked={microphone} disabled={recording} onChange={(event) => setMicrophone(event.target.checked)} />麦克风</label></>}</div>
       {url ? mode === 'screenshot' ? <img src={url} className="max-h-[calc(100vh-300px)] max-w-full rounded-lg border bg-black object-contain shadow-lg" alt="屏幕截图" /> : <video src={url} controls className="max-h-[calc(100vh-300px)] max-w-full rounded-lg border bg-black shadow-lg" /> : <div className="flex min-h-64 w-full max-w-3xl flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 text-muted-foreground"><Monitor className="mb-4 h-16 w-16 opacity-20" /><p className="text-sm">准备{mode === 'screenshot' ? '截取' : '录制'}{target === 'screen' ? '整个屏幕' : '当前应用'}</p><p className="mt-1 text-xs">开始前请确认捕获范围和声音选项</p></div>}
