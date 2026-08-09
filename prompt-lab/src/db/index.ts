@@ -309,6 +309,19 @@ function ensureSchema(): void {
       audio BLOB NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_lyric_music_project ON lyric_generated_music(project_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS style_generated_images (
+      id TEXT PRIMARY KEY,
+      prompt TEXT NOT NULL DEFAULT '',
+      style TEXT NOT NULL DEFAULT 'custom',
+      provider TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      aspect_ratio TEXT NOT NULL DEFAULT '1:1',
+      mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+      size INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      image BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_style_images_created ON style_generated_images(created_at DESC);
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -905,6 +918,33 @@ export function dbListGeneratedMusic(projectId: string): DbGeneratedMusicRecord[
 
 export async function dbDeleteGeneratedMusic(id: string): Promise<void> { if (!_sqlDb) throw new Error('DB not initialized'); _sqlDb.run('DELETE FROM lyric_generated_music WHERE id = ?', [id]); await flushDbToDisk(); }
 export async function dbUpdateGeneratedMusic(id: string, patch: { title?: string; favorite?: boolean }): Promise<void> { if (!_sqlDb) throw new Error('DB not initialized'); if (patch.title !== undefined) _sqlDb.run('UPDATE lyric_generated_music SET title = ? WHERE id = ?', [patch.title, id]); if (patch.favorite !== undefined) _sqlDb.run('UPDATE lyric_generated_music SET favorite = ? WHERE id = ?', [patch.favorite ? 1 : 0, id]); await flushDbToDisk(); }
+
+export interface DbGeneratedImageRecord {
+  id: string; prompt: string; style: string; provider: string; model: string; aspectRatio: string;
+  mimeType: string; size: number; createdAt: number; image: Uint8Array;
+}
+
+export async function dbSaveGeneratedImage(record: DbGeneratedImageRecord): Promise<void> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  _sqlDb.run(`INSERT OR REPLACE INTO style_generated_images
+    (id, prompt, style, provider, model, aspect_ratio, mime_type, size, created_at, image)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [record.id, record.prompt, record.style, record.provider, record.model, record.aspectRatio, record.mimeType, record.size, record.createdAt, record.image]);
+  await flushDbToDisk();
+}
+
+export function dbListGeneratedImages(): DbGeneratedImageRecord[] {
+  if (!_sqlDb) return [];
+  const statement = _sqlDb.prepare('SELECT * FROM style_generated_images ORDER BY created_at DESC');
+  const records: DbGeneratedImageRecord[] = [];
+  while (statement.step()) { const row = statement.getAsObject(); records.push({ id: String(row.id), prompt: String(row.prompt), style: String(row.style), provider: String(row.provider), model: String(row.model), aspectRatio: String(row.aspect_ratio), mimeType: String(row.mime_type), size: Number(row.size), createdAt: Number(row.created_at), image: row.image as Uint8Array }); }
+  statement.free(); return records;
+}
+
+export async function dbDeleteGeneratedImage(id: string): Promise<void> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  _sqlDb.run('DELETE FROM style_generated_images WHERE id = ?', [id]);
+  await flushDbToDisk();
+}
 
 // ═══════════════════════════════════════════
 // 数据库浏览器（只读查询）
