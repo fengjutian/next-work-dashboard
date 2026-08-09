@@ -80,6 +80,12 @@ if (started) {
       captureTarget = options.target === 'app' ? 'app' : 'screen'; captureSystemAudio = Boolean(options.systemAudio);
       return { target: captureTarget, systemAudio: captureSystemAudio };
     });
+    ipcMain.handle('screen-capture:primary-source', async () => {
+      const sources = await desktopCapturer.getSources({ types: ['screen'] });
+      const primaryScreen = sources.find((source) => source.id.startsWith('screen:')) ?? sources[0];
+      if (!primaryScreen) throw new Error('没有找到可捕获的屏幕');
+      return primaryScreen.id;
+    });
     ipcMain.on('screen-capture:recording-state', (_event, state: { recording: boolean; paused: boolean; seconds: number }) => setTrayRecordingState(state));
 
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {

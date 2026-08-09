@@ -124,6 +124,7 @@ const electronAPI: ElectronAPI = {
   generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
   screenCapture: {
     setTarget: (target, systemAudio) => ipcRenderer.invoke('screen-capture:set-target', { target, systemAudio }),
+    getPrimaryScreenSourceId: () => ipcRenderer.invoke('screen-capture:primary-source'),
     setRecordingState: (state) => ipcRenderer.send('screen-capture:recording-state', state),
   },
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>
