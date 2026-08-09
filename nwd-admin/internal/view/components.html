@@ -7,7 +7,8 @@
     :root { color-scheme: light; --bg:#f7f7fb; --surface:#fff; --surface-2:#f1f0f7; --text:#1f1b2d; --muted:#716b80; --line:#e6e2ec; --primary:#6d3df0; --primary-dark:#5728d2; --primary-soft:#eee9ff; --danger:#c9364e; --shadow:0 18px 50px rgba(49,35,83,.09); }
     * { box-sizing:border-box; }
     html { scroll-behavior:smooth; }
-    body { margin:0; min-width:320px; background:var(--bg); color:var(--text); font:15px/1.6 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+    body { min-height:100vh; margin:0; min-width:320px; display:flex; flex-direction:column; background:var(--bg); color:var(--text); font:15px/1.6 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+    main { flex:1; }
     a { color:inherit; text-decoration:none; }
     button,input { font:inherit; }
     .shell { width:min(1160px,calc(100% - 40px)); margin-inline:auto; }
