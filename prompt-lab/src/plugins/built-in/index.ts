@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Pencil } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -47,6 +47,7 @@ const lingoHut = preloadable(() => import('../lingohut').then((m) => ({ default:
 const styleImage = preloadable(() => import('../style-image').then((m) => ({ default: m.StyleImagePanel })));
 const screenCapture = preloadable(() => import('../screen-capture').then((m) => ({ default: m.ScreenCapturePanel })));
 const diskSpace = preloadable(() => import('../disk-space').then((m) => ({ default: m.DiskSpacePanel })));
+const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ default: m.LyricStudioPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -67,6 +68,7 @@ const LingoHutPanel = lingoHut.component;
 const StyleImagePanel = styleImage.component;
 const ScreenCapturePanel = screenCapture.component;
 const DiskSpacePanel = diskSpace.component;
+const LyricStudioPanel = lyricStudio.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -349,6 +351,14 @@ const builtInPlugins: Plugin[] = [
     contributions: { commands: [{ id: 'disk-space.scan', title: '分析磁盘空间', category: '磁盘空间' }] },
   },
   {
+    id: 'lyric-studio', name: '歌词工坊', icon: Pencil, component: LyricStudioPanel, enabled: true, order: 25, keepAlive: true,
+    contributions: {
+      commands: [{ id: 'lyric-studio.generate', title: 'AI 生成整首歌词', category: '歌词工坊' }],
+      views: [{ id: 'lyric-studio.main', title: '歌词工坊', component: LyricStudioPanel, location: 'main' }],
+      settings: [{ key: 'lyric-studio.autoSave', label: '自动保存项目', type: 'boolean', default: true }],
+    },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -413,6 +423,7 @@ export function registerBuiltInPlugins(): void {
     'style-image': styleImage.preload,
     'screen-capture': screenCapture.preload,
     'disk-space': diskSpace.preload,
+    'lyric-studio': lyricStudio.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
