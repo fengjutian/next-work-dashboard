@@ -2,7 +2,7 @@ import type { LyricProject, LyricSection } from './types';
 
 export interface MiniMaxMusicSettings {
   apiKey: string;
-  model: 'music-2.6' | 'music-2.6-free';
+  model: 'music-3.0' | 'music-3.0-free' | 'music-2.6' | 'music-2.6-free';
   prompt: string;
   format: 'mp3' | 'wav';
   sampleRate: 32000 | 44100;
