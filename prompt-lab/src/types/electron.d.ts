@@ -44,6 +44,7 @@ export interface ElectronAPI {
   generateImage: (payload: import('../plugins/style-image/types').StyleImageRequest) => Promise<import('../plugins/style-image/types').StyleImageResult>;
   screenCapture: {
     setTarget: (target: 'app' | 'screen', systemAudio: boolean) => Promise<{ target: 'app' | 'screen'; systemAudio: boolean }>;
+    getPrimaryScreenSourceId: () => Promise<string>;
     setRecordingState: (state: { recording: boolean; paused: boolean; seconds: number }) => void;
   };
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) => Promise<{

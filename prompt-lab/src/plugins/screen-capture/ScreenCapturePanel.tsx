@@ -21,6 +21,14 @@ const recordingCountdown = async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 240));
 };
 const displayStream = async (target: 'app' | 'screen', audio: boolean) => {
+  if (target === 'screen') {
+    const sourceId = await window.electronAPI.screenCapture.getPrimaryScreenSourceId();
+    const desktopConstraints = {
+      audio: audio ? { mandatory: { chromeMediaSource: 'desktop' } } : false,
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxFrameRate: 30 } },
+    } as unknown as MediaStreamConstraints;
+    return navigator.mediaDevices.getUserMedia(desktopConstraints);
+  }
   const confirmed = await window.electronAPI.screenCapture.setTarget(target, audio);
   if (confirmed.target !== target || confirmed.systemAudio !== audio) throw new Error('主进程未确认录屏声音配置');
   return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
