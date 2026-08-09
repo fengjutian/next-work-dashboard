@@ -18,6 +18,7 @@ process.env.npm_config_electron_mirror ||= electronMirror;
 process.env.npm_config_disturl ||= electronMirror;
 
 const projectRoot = process.cwd();
+const diskScannerResource = path.join(projectRoot, 'resources', 'disk-scanner');
 
 function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
   const segments = name.split('/');
@@ -62,9 +63,10 @@ const config: ForgeConfig = {
     },
   },
   packagerConfig: {
-    extraResource: fs.existsSync(path.join(projectRoot, 'resources', 'officecli'))
-      ? [path.join(projectRoot, 'resources', 'officecli')]
-      : [],
+    extraResource: [
+      ...(fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
+      ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),
+    ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb}/**',
     },

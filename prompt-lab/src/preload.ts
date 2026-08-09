@@ -312,6 +312,22 @@ const electronAPI: ElectronAPI = {
     },
   },
 
+  diskSpace: {
+    pickRoot: () => ipcRenderer.invoke('disk-space:pick-root'),
+    start: (scanId: string, rootPath: string) => ipcRenderer.invoke('disk-space:start', scanId, rootPath),
+    cancel: (scanId: string) => ipcRenderer.invoke('disk-space:cancel', scanId),
+    onEvent: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, scanId: string, payload: import('./types/electron').DiskScanEvent) => callback(scanId, payload);
+      ipcRenderer.on('disk-space:event', handler);
+      return () => ipcRenderer.removeListener('disk-space:event', handler);
+    },
+    onExit: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, scanId: string, result: { code: number | null; error?: string }) => callback(scanId, result);
+      ipcRenderer.on('disk-space:exit', handler);
+      return () => ipcRenderer.removeListener('disk-space:exit', handler);
+    },
+  },
+
   // Shell 操作
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),

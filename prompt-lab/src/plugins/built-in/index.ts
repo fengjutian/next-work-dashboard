@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -46,6 +46,7 @@ const hanyuJinjie = preloadable(() => import('../hanyu-jinjie').then((m) => ({ d
 const lingoHut = preloadable(() => import('../lingohut').then((m) => ({ default: m.LingoHutPanel })));
 const styleImage = preloadable(() => import('../style-image').then((m) => ({ default: m.StyleImagePanel })));
 const screenCapture = preloadable(() => import('../screen-capture').then((m) => ({ default: m.ScreenCapturePanel })));
+const diskSpace = preloadable(() => import('../disk-space').then((m) => ({ default: m.DiskSpacePanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -65,6 +66,7 @@ const HanyuJinjiePanel = hanyuJinjie.component;
 const LingoHutPanel = lingoHut.component;
 const StyleImagePanel = styleImage.component;
 const ScreenCapturePanel = screenCapture.component;
+const DiskSpacePanel = diskSpace.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -343,6 +345,10 @@ const builtInPlugins: Plugin[] = [
     id: 'screen-capture', name: '屏幕捕获', icon: Image, component: ScreenCapturePanel, enabled: true, order: 23,
   },
   {
+    id: 'disk-space', name: '磁盘空间', icon: HardDrive, component: DiskSpacePanel, enabled: false, order: 24, keepAlive: true,
+    contributions: { commands: [{ id: 'disk-space.scan', title: '分析磁盘空间', category: '磁盘空间' }] },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -406,6 +412,7 @@ export function registerBuiltInPlugins(): void {
     lingohut: lingoHut.preload,
     'style-image': styleImage.preload,
     'screen-capture': screenCapture.preload,
+    'disk-space': diskSpace.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,

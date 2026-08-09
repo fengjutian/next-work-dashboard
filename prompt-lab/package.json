@@ -7,6 +7,7 @@
   "private": true,
   "scripts": {
     "prepare:native": "node scripts/prepare-native-dependencies.mjs",
+    "build:disk-scanner": "node scripts/build-disk-scanner.mjs",
     "start": "npm run prepare:native && electron-forge start",
     "package": "npm run prepare:native && electron-forge package",
     "make": "npm run prepare:native && electron-forge make",

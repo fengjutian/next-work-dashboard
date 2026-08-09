@@ -11,6 +11,10 @@ export interface InjectResult {
   error?: string;
 }
 
+export type DiskScanEvent =
+  | { type: 'file'; path: string; size: number; modifiedAt: number; extension: string }
+  | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
+
 export interface ElectronAPI {
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
@@ -231,6 +235,13 @@ export interface ElectronAPI {
     destroy: (id: string) => Promise<{ success: boolean; error?: string }>;
     onData: (id: string, callback: (data: string) => void) => () => void;
     onExit: (id: string, callback: (exitCode: number) => void) => () => void;
+  };
+  diskSpace: {
+    pickRoot: () => Promise<string | null>;
+    start: (scanId: string, rootPath: string) => Promise<{ success: boolean }>;
+    cancel: (scanId: string) => Promise<boolean>;
+    onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;
+    onExit: (callback: (scanId: string, result: { code: number | null; error?: string }) => void) => () => void;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

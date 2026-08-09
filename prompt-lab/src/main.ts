@@ -9,6 +9,7 @@ import { registerShortcuts } from './main/shortcuts';
 import { destroyAll } from './plugins/terminal/backend/terminal-manager';
 import { mcpManager } from './main/mcp/mcp-manager';
 import { disposeOfficeService } from './plugins/office-studio/backend/office-service';
+import { disposeDiskSpaceService, setupDiskSpaceIPC } from './plugins/disk-space/backend/disk-service';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -101,6 +102,7 @@ if (started) {
     openMainWindow();
     // setupIPC configures the existing window and observes future windows.
     setupIPC(webviewPreloadPath);
+    setupDiskSpaceIPC();
     createTray();
     configureWindowsJumpList();
     registerShortcuts();
@@ -123,5 +125,6 @@ if (started) {
     destroyAll();
     void mcpManager.closeAll();
     void disposeOfficeService();
+    disposeDiskSpaceService();
   });
 }
