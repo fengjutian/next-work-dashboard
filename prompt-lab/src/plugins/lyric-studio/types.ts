@@ -29,6 +29,10 @@ export interface LyricProject {
   collection: string;
   status: 'idea' | 'draft' | 'revising' | 'done';
   coverColor: string;
+  creativePrompt: string;
+  promptHistory: Array<{ id: string; content: string; createdAt: number; model: string }>;
+  promptPriority: 'prompt' | 'planning';
+  scratchpad: string;
   sections: LyricSection[];
   updatedAt: number;
 }
@@ -49,6 +53,8 @@ export interface LyricLineAnalysis {
   breathing: string;
   lengthKind: 'short' | 'medium' | 'long';
   deviation: number;
+  tonePattern: string;
+  singabilityIssues: string[];
 }
 
 export interface HookCandidate {

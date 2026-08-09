@@ -1,21 +1,45 @@
 import type { LyricLineAnalysis, LyricProject, LyricScore } from './types';
 
 const RHYMES: Array<[string, RegExp]> = [
-  ['ang', /(昂|帮|旁|忙|方|房|香|想|响|乡|光|望|忘|伤|长|浪|上)$/],
-  ['ing', /(英|冰|明|星|醒|静|情|晴|影|景|听|停|心|音)$/],
-  ['ai', /(爱|来|海|开|白|在|怀|台|外|败|待)$/],
-  ['ou', /(欧|楼|流|留|秋|愁|走|手|口|后|候|透)$/],
-  ['an', /(安|岸|晚|暖|散|看|难|然|天|年|边|前)$/],
-  ['ong', /(空|风|梦|中|痛|懂|动|拥|红|重|钟|控)$/],
+  ['ang', /(昂|帮|旁|忙|方|房|香|想|响|乡|光|望|忘|伤|长|浪|上|场|墙|霜|凉|黄)$/],
+  ['eng', /(灯|等|冷|声|生|城|程|更|风|梦|疼|仍|曾|层)$/],
+  ['ing', /(英|冰|明|星|醒|静|情|晴|影|景|听|停|心|音|名|铃|萤|宁)$/],
+  ['ai', /(爱|来|海|开|白|在|怀|台|外|败|待|街|鞋|拍|埋)$/],
+  ['ei', /(泪|飞|归|灰|背|北|美|谁|醉|碎|黑|退)$/],
+  ['ao', /(岛|桥|抱|到|少|角|潮|晓|跑|老|草|帽)$/],
+  ['ou', /(欧|楼|流|留|秋|愁|走|手|口|后|候|透|舟|旧|酒)$/],
+  ['an', /(安|岸|晚|暖|散|看|难|然|站|伞|慢|盼)$/],
+  ['ian', /(天|年|边|前|见|间|脸|线|片|远|烟|念)$/],
+  ['en', /(门|尘|痕|人|身|深|真|晨|温|吻|等|冷)$/],
+  ['ong', /(空|风|梦|中|痛|懂|动|拥|红|重|钟|控|虹|冬)$/],
+  ['i', /(你|里|雨|忆|离|期|季|息|纸|字|事|日)$/],
+  ['u', /(路|书|树|雾|哭|住|故|处|渡|幕|孤)$/],
+  ['ie', /(夜|街|写|别|谢|页|鞋|界|却|月|雪)$/],
 ];
 
 export function detectRhyme(line: string): string {
   const clean = line.trim().replace(/[，。！？、,.!?;；:："'”’）)】\]]+$/, '');
-  return RHYMES.find(([, pattern]) => pattern.test(clean))?.[0] ?? (clean.slice(-1) || '—');
+  return RHYMES.find(([, pattern]) => pattern.test(clean))?.[0] ?? (clean ? '未知' : '—');
 }
 
 export function countHan(line: string): number {
   return (line.match(/[\u3400-\u9fff]/g) ?? []).length;
+}
+
+const TONE_GROUPS: Array<[string, string]> = [
+  ['1', '一衣依音英星风空中东春秋灯光天边江乡'],
+  ['2', '人时年情明晴红黄长来回流愁离桥城门'],
+  ['3', '你我雨晚远想等冷走手影醒海里'],
+  ['4', '爱梦痛泪夜月路去后旧站信忘望静'],
+];
+
+function analyzeTone(line: string): { pattern: string; issues: string[] } {
+  const tones = Array.from(line).filter((char) => /[\u3400-\u9fff]/.test(char)).map((char) => TONE_GROUPS.find(([, chars]) => chars.includes(char))?.[0] ?? '?');
+  const pattern = tones.join(''); const issues: string[] = [];
+  if (/333/.test(pattern)) issues.push('连续上声，演唱时可能拗口');
+  if (/4444/.test(pattern)) issues.push('连续去声较密，注意旋律下行压力');
+  if ((pattern.match(/\?/g) ?? []).length > tones.length / 2) issues.push('部分字声调待人工确认');
+  return { pattern: pattern || '—', issues };
 }
 
 const RHYME_WORDS: Record<string, string[]> = {
@@ -42,7 +66,8 @@ export function analyzeLines(lyrics: string, bpm: number): LyricLineAnalysis[] {
   return lines.map((line, index) => {
     const hanCount = counts[index];
     const durationSeconds = Number((Math.max(1, hanCount / 2) * secondsPerBeat).toFixed(1));
-    return { line, hanCount, rhyme: detectRhyme(line), durationSeconds, breathing: hanCount >= 12 ? '建议在中点加入呼吸' : hanCount >= 8 ? '自然换气' : '可连唱', lengthKind: hanCount <= 5 ? 'short' : hanCount <= 10 ? 'medium' : 'long', deviation: Number((hanCount - average).toFixed(1)) };
+    const tone = analyzeTone(line);
+    return { line, hanCount, rhyme: detectRhyme(line), durationSeconds, breathing: hanCount >= 12 ? '建议在中点加入呼吸' : hanCount >= 8 ? '自然换气' : '可连唱', lengthKind: hanCount <= 5 ? 'short' : hanCount <= 10 ? 'medium' : 'long', deviation: Number((hanCount - average).toFixed(1)), tonePattern: tone.pattern, singabilityIssues: tone.issues };
   });
 }
 

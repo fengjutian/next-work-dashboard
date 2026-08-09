@@ -8,7 +8,12 @@ import { analyzeAudioFile, exportLrc, exportMidi } from './music-tools';
 import type { AudioAnalysis, HookCandidate, LrcLine, LyricProject, LyricSection, MelodyNote, ReviewIssue } from './types';
 
 type ToolTab = 'hook' | 'review' | 'imagery' | 'rhyme' | 'rhythm' | 'audio' | 'lrc' | 'melody';
-const TABS: Array<[ToolTab, string]> = [['hook', 'Hook'], ['review', '审稿'], ['imagery', '意象链'], ['rhyme', '押韵热力图'], ['rhythm', '节奏网格'], ['audio', '音频分析'], ['lrc', 'LRC 打轴'], ['melody', '旋律 / MIDI']];
+const TOOL_GROUPS: Array<[string, Array<[ToolTab, string]>]> = [
+  ['创作', [['hook', 'Hook 候选'], ['imagery', '意象链']]],
+  ['分析', [['review', '歌词审稿'], ['rhyme', '押韵热力图'], ['rhythm', '节奏网格']]],
+  ['音乐', [['audio', '音频分析'], ['lrc', 'LRC 打轴'], ['melody', '旋律 / MIDI']]],
+];
+const TABS = TOOL_GROUPS.flatMap(([, tools]) => tools);
 const RHYME_COLORS = ['bg-rose-500/15 text-rose-700', 'bg-blue-500/15 text-blue-700', 'bg-emerald-500/15 text-emerald-700', 'bg-amber-500/15 text-amber-700', 'bg-violet-500/15 text-violet-700'];
 
 interface Props {
