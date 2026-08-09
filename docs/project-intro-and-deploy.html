@@ -1,138 +1,16 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>项目介绍与部署 — next-work-dashboard</title>
-<style>
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#fff;color:#111827;line-height:1.7;margin:0}
-  .wrap{max-width:840px;margin:0 auto;padding:48px 24px 80px}
-  a{color:#2563eb;text-decoration:none} a:hover{text-decoration:underline}
-  h1{font-size:2rem;margin-bottom:8px;color:#111827}
-  h2{font-size:1.3rem;margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;color:#111827}
-  h3{font-size:1.05rem;margin:24px 0 10px;color:#1f2937}
-  table{width:100%;border-collapse:collapse;margin:12px 0}
-  th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:.88rem}
-  th{color:#6b7280}
-  td{color:#374151}
-  code{background:#f3f4f6;color:#1f2937;padding:1px 6px;border-radius:4px;font-size:.85em}
-  pre{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;overflow-x:auto;font-size:.83rem;line-height:1.5;color:#1f2937}
-  .back{margin-bottom:24px;font-size:.85rem}
-  .tag{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:.75rem;font-weight:600}
-  .g{background:#d1fae5;color:#065f46} .y{background:#fef3c7;color:#92400e}
-</style>
-</head>
-<body>
-<div class="wrap">
-
-<div class="back"><a href="index.html">← 返回首页</a></div>
-
-<h1>next-work-dashboard — 项目介绍与部署</h1>
-
-<h2>1. 项目简介</h2>
-<p>基于 Electron 的 AI 提示词注入桌面应用。内置 WebView 浏览器打开 DeepSeek、ChatGPT、Kimi 等 AI 对话网站，支持将预设提示词一键注入到网页输入框中。</p>
-<p><strong>定位：不是又一个 ChatGPT 客户端——是你所有 AI 网站的提示词遥控器。</strong></p>
-
-<h3>差异化优势</h3>
-<table>
-<tr><th>维度</th><th>next-work-dashboard</th><th>ChatBox</th><th>AIPRM</th></tr>
-<tr><td>需要 API Key</td><td>❌ 不需要</td><td>✅ 必须</td><td>❌ 不需要</td></tr>
-<tr><td>保留官网体验</td><td>✅ 完整</td><td>❌ 无</td><td>✅</td></tr>
-<tr><td>多 AI 站点</td><td>✅ 任意可配</td><td>多模型 API</td><td>❌ 仅 ChatGPT</td></tr>
-<tr><td>数据隐私</td><td>✅ 纯本地</td><td>⚠️ API 传输</td><td>✅</td></tr>
-</table>
-
-<h2>2. 技术架构</h2>
-
-<h3>技术栈</h3>
-<table>
-<tr><th>层</th><th>选型</th></tr>
-<tr><td>框架</td><td>Electron 35</td></tr>
-<tr><td>渲染进程</td><td>React 18 + TypeScript 5.4</td></tr>
-<tr><td>UI</td><td>shadcn/ui + Tailwind CSS 3</td></tr>
-<tr><td>状态管理</td><td>Zustand 5</td></tr>
-<tr><td>持久化</td><td>sql.js + drizzle-orm</td></tr>
-<tr><td>图可视化</td><td>@antv/g6 5</td></tr>
-<tr><td>构建</td><td>electron-forge 7 + Vite 5</td></tr>
-<tr><td>测试</td><td>Vitest 2 + Testing Library</td></tr>
-</table>
-
-<h3>进程架构</h3>
-<pre>
-┌─────────────────────────────────────┐
-│            主进程 (Main)              │
-│  src/main.ts                        │
-│  · 窗口管理   · 全局快捷键             │
-│  · 数据持久化 · IPC 通信              │
-└──────────┬──────────────────────────┘
-           │ IPC
-┌──────────▼──────────────────────────┐
-│         Preload 脚本                 │
-│  src/preload.ts                     │
-│  · contextBridge 暴露安全 API        │
-└──────────┬──────────────────────────┘
-           │
-┌──────────▼──────────────────────────┐
-│          渲染进程 (Renderer)          │
-│  src/renderer.tsx → App.tsx         │
-│  · React UI  · WebView 标签页       │
-│  · 插件系统 (内置 + 用户沙箱)         │
-└─────────────────────────────────────┘
-           │
-┌──────────▼──────────────────────────┐
-│      WebView Preload                │
-│  src/webview-preload.ts             │
-│  · DOM 注入引擎 (选择器定位/事件模拟)  │
-└─────────────────────────────────────┘</pre>
-
-<h3>安全模型</h3>
-<ul>
-  <li>WebView 与主应用完全隔离</li>
-  <li><code>contextBridge</code> 暴露受控 API</li>
-  <li>用户插件运行在 <code>sandbox="allow-scripts"</code> iframe + CSP</li>
-  <li>Token 存储使用 <code>safeStorage</code> + OS 原生加密</li>
-  <li>打包时启用 Fuse 保护</li>
-</ul>
-
-<h2>3. 开发环境搭建</h2>
-<pre><code>git clone https://github.com/fengjutian/next-work-dashboard.git
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Next Work Dashboard 项目介绍、开发环境和桌面端构建指南。"><title>项目与部署 · NWD Docs</title><link rel="stylesheet" href="assets/docs.css"></head>
+<body><header class="topbar"><nav class="shell nav"><a class="brand" href="index.html"><span class="mark">N</span><span>Next Work Dashboard Docs</span></a><div class="navlinks"><a aria-current="page" href="project-intro-and-deploy.html">部署</a><a href="plugin-architecture.html">插件</a><a href="security.md">安全</a><a class="repo" href="project-intro-and-deploy.md">完整参考 →</a></div></nav></header>
+<main class="shell article-layout"><aside class="toc"><strong>本页目录</strong><a href="#product">产品定位</a><a href="#architecture">系统架构</a><a href="#develop">本地开发</a><a href="#quality">质量检查</a><a href="#release">构建发布</a><a href="#data">数据位置</a></aside>
+<article class="article"><header class="article-header"><span class="eyebrow">Desktop Workspace · Electron</span><h1>开发、构建并交付<span class="accent">本地优先</span>的 AI 工作台</h1><p class="lead">Next Work Dashboard 将 AI 网站、提示词、知识库、代码编辑、终端和插件能力组织在一个可扩展的桌面应用中。</p></header>
+<h2 id="product">产品定位</h2><p>它不是重新实现 AI 网站的聊天客户端，而是保留官方网站体验，在桌面工作台中统一管理站点、上下文、提示词和本地工具。</p><div class="grid-3"><div class="card"><div class="card-icon">AI</div><h3>多站点协作</h3><p>通过 WebView 使用不同 AI 网站，并将提示词和上下文注入当前会话。</p></div><div class="card"><div class="card-icon">DB</div><h3>本地数据</h3><p>工作区配置和业务数据优先保存在用户设备，敏感令牌使用系统能力保护。</p></div><div class="card"><div class="card-icon">SDK</div><h3>插件扩展</h3><p>内置插件深度集成，用户插件通过 Sandbox 与权限 Bridge 安全扩展。</p></div></div>
+<h2 id="architecture">系统架构</h2><div class="visual"><div class="visual-body"><div class="flow-node"><strong>Main Process</strong> · 窗口、文件、数据库、PTY、系统能力</div><div class="flow-arrow">↕ typed IPC</div><div class="flow-node"><strong>Preload Bridge</strong> · contextBridge 最小化暴露</div><div class="flow-arrow">↕ controlled API</div><div class="flow-node"><strong>React Renderer</strong> · 工作台界面、状态、插件注册表</div><div class="flow-arrow">↕ isolated message</div><div class="flow-node"><strong>WebView / Plugin Sandbox</strong> · AI 页面与低信任用户代码</div></div></div>
+<div class="table-wrap"><table><thead><tr><th>层</th><th>主要技术</th><th>职责</th></tr></thead><tbody><tr><td>Desktop</td><td>Electron 35</td><td>跨平台窗口和系统集成</td></tr><tr><td>UI</td><td>React 18、TypeScript、Tailwind</td><td>工作台界面与交互</td></tr><tr><td>State</td><td>Zustand</td><td>页面状态和持久化协调</td></tr><tr><td>Data</td><td>SQLite、Drizzle、LanceDB</td><td>结构化数据与本地向量检索</td></tr><tr><td>Build</td><td>Vite、Electron Forge</td><td>开发服务器和平台安装包</td></tr><tr><td>Test</td><td>Vitest、Testing Library</td><td>单元、组件和集成验证</td></tr></tbody></table></div>
+<h2 id="develop">本地开发</h2><div class="callout warning"><p><strong>命令目录：</strong>除 Git 操作外，以下 npm 命令默认在仓库的 <code>prompt-lab</code> 目录运行。</p></div><pre><code>git clone https://github.com/fengjutian/next-work-dashboard.git
 cd next-work-dashboard/prompt-lab
 npm install
-npm start           # 开发模式（热重载）
-npm test            # 运行测试
-npm run lint        # 代码检查</code></pre>
-
-<h2>4. 构建与部署</h2>
-<pre><code>npm run make       # 打包为可分发的安装包
-npm run package    # 仅打包（不制作安装包）</code></pre>
-
-<h3>构建产物</h3>
-<table>
-<tr><th>Maker</th><th>产物</th><th>平台</th></tr>
-<tr><td>MakerSquirrel</td><td>.exe 安装程序</td><td>Windows</td></tr>
-<tr><td>MakerZIP</td><td>.zip 便携版</td><td>macOS</td></tr>
-<tr><td>MakerDeb</td><td>.deb 安装包</td><td>Debian/Ubuntu</td></tr>
-<tr><td>MakerRpm</td><td>.rpm 安装包</td><td>Fedora/RHEL</td></tr>
-</table>
-
-<h2>5. 数据存储</h2>
-<table>
-<tr><th>数据类型</th><th>存储方式</th></tr>
-<tr><td>提示词/站点/设置</td><td>sql.js (SQLite) — <code>%APPDATA%/next-work-dashboard/data.db</code></td></tr>
-<tr><td>对话历史</td><td>Markdown 文件</td></tr>
-<tr><td>API Token</td><td>safeStorage 加密 + OS 密钥链</td></tr>
-<tr><td>插件私有数据</td><td>localStorage (按 pluginId 命名空间隔离)</td></tr>
-</table>
-
-<h2>6. 功能完成度</h2>
-<table>
-<tr><th>模块</th><th>完成率</th></tr>
-<tr><td>浏览器 / 注入</td><td><span class="tag g">100%</span></td></tr>
-<tr><td>提示词管理</td><td><span class="tag g">88%</span></td></tr>
-<tr><td>设置</td><td><span class="tag y">40%</span></td></tr>
-<tr><td>总体</td><td>75% (33/44)</td></tr>
-</table>
-
-</div>
-</body>
-</html>
+npm start</code></pre><p>Windows 原生依赖需要可用的 Node.js 构建工具链。若依赖安装或 Electron 原生模块重建失败，先查看 <a href="troubleshooting.md">故障排查</a>。</p>
+<h2 id="quality">质量检查</h2><div class="grid-3"><div class="card"><span class="label">Types</span><h3><code>npm run typecheck</code></h3><p>验证 TypeScript 类型边界。</p></div><div class="card"><span class="label">Style</span><h3><code>npm run lint</code></h3><p>检查代码质量和工程约定。</p></div><div class="card"><span class="label">Tests</span><h3><code>npm test</code></h3><p>运行 Vitest 自动化测试。</p></div></div><p>提交前应运行项目定义的一键检查命令；准确脚本以 <code>prompt-lab/package.json</code> 为准。</p>
+<h2 id="release">构建与发布</h2><pre><code>npm run package   # 生成未安装的应用目录
+npm run make      # 生成当前平台分发产物</code></pre><div class="callout"><p>Electron Forge 默认针对当前系统构建。跨平台发布建议在对应操作系统的 CI Runner 上执行，并在发布前完成原生依赖重建和安装包烟雾测试。</p></div>
+<h2 id="data">数据与备份</h2><p>应用数据位于 Electron 的 <code>userData</code> 目录，不同操作系统路径不同。提示词、站点、设置、知识库、插件与会话数据可能分布于数据库、Local Storage 和工作区文件。</p><div class="grid-2"><div class="card"><span class="label">Backup</span><h3>备份整个 userData</h3><p>关闭应用后复制完整目录，能够避免遗漏数据库旁路文件或插件状态。</p></div><div class="card"><span class="label">Secrets</span><h3>不要手工迁移密文</h3><p>safeStorage 密文可能绑定当前系统账户或密钥链，跨机器恢复需要重新配置令牌。</p></div></div><p class="actions"><a class="button primary" href="project-intro-and-deploy.md">阅读完整部署文档 →</a><a class="button" href="contributing.md">参与贡献</a></p>
+</article></main><footer class="footer"><div class="shell footer-inner"><span>Next Work Dashboard · Build locally, work privately</span><span><a href="index.html">文档首页</a>　·　<a href="user-guide.md">用户手册</a></span></div></footer></body></html>

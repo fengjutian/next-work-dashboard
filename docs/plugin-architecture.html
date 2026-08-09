@@ -1,58 +1,23 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>插件系统 — next-work-dashboard</title>
-  <style>
-    *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;line-height:1.7;background:#fff}.page{max-width:980px;margin:auto;padding:48px 24px 96px}h1{font-size:2.25rem;margin:0 0 8px;color:#111827}h2{margin-top:42px;color:#111827;border-bottom:1px solid #e5e7eb;padding-bottom:8px}h3{margin-top:28px;color:#111827}.muted{color:#6b7280}.notice{padding:14px 18px;border-left:4px solid #7c3aed;background:#f5f3ff;border-radius:6px}pre{padding:18px;overflow:auto;background:#111827;color:#e5e7eb;border-radius:10px}code{font-family:"SFMono-Regular",Consolas,monospace}p code,li code,td code{padding:2px 5px;background:#f3f4f6;color:#374151;border-radius:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e5e7eb;vertical-align:top}th{color:#4b5563;background:#f9fafb}a{color:#2563eb}.risk{color:#991b1b;background:#fef2f2;border-left-color:#dc2626}ul{padding-left:22px}@media(max-width:640px){.page{padding:28px 16px}h1{font-size:1.8rem}table{font-size:.88rem}}
-  </style>
-</head>
-<body><main class="page">
-  <h1>插件系统</h1>
-  <p class="muted">当前实现摘要 · 2026-08-03</p>
-  <p class="notice">完整接口、SDK 示例、Manifest 格式、关键文件和路线图请查看 <a href="plugin-architecture.md">Markdown 主文档</a>。</p>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Next Work Dashboard 插件架构、Sandbox 权限与 .nwd 开发指南。"><title>插件系统 · NWD Docs</title><link rel="stylesheet" href="assets/docs.css"></head>
+<body><header class="topbar"><nav class="shell nav"><a class="brand" href="index.html"><span class="mark">N</span><span>Next Work Dashboard Docs</span></a><div class="navlinks"><a href="project-intro-and-deploy.html">部署</a><a aria-current="page" href="plugin-architecture.html">插件</a><a href="security.md">安全</a><a class="repo" href="plugin-architecture.md">完整参考 →</a></div></nav></header>
+<main class="shell article-layout"><aside class="toc"><strong>本页目录</strong><a href="#overview">架构总览</a><a href="#registry">注册与生命周期</a><a href="#sandbox">Sandbox 边界</a><a href="#permissions">权限模型</a><a href="#bundle">.nwd v1</a><a href="#workflow">开发流程</a></aside>
+<article class="article"><header class="article-header"><span class="eyebrow">Plugin Platform · API v1</span><h1>安全、可组合的<span class="accent">插件系统</span></h1><p class="lead">内置插件提供深度集成，用户插件统一运行在 iframe Sandbox 中，通过受控 Bridge 使用宿主能力。</p></header>
+<div class="callout"><p><strong>当前事实来源：</strong>此页提供架构速览；接口字段、SDK 示例和发布检查清单以 <a href="plugin-architecture.md">Markdown 完整文档</a>及源码类型为准。</p></div>
+<h2 id="overview">架构总览</h2><div class="grid-2"><div class="card"><span class="label">Trusted</span><h3>内置 React 插件</h3><p>随应用编译，运行于宿主 React 树，可提供编辑器、终端和 Office 等深度能力。</p></div><div class="card"><span class="label">Untrusted</span><h3>用户 Sandbox 插件</h3><p>运行在不含 allow-same-origin 的 iframe，通过消息协议请求显式授权的能力。</p></div></div>
+<pre><code>Built-in React plugins ───────────────┐
+                                      ├─ PluginRegistry ─┬─ Activity Bar
+User .nwd ─ iframe Sandbox ─ Bridge ─┘                  ├─ Main Panel
+                                                         ├─ Command Palette
+                                                         └─ Status Bar</code></pre>
+<div class="callout danger"><p><strong>Kernel 用户插件已经移除。</strong>用户提供的代码不得在 Renderer 宿主上下文通过 <code>new Function()</code> 执行。</p></div>
+<h2 id="registry">注册与生命周期</h2><p><code>PluginRegistry</code> 统一管理声明、启用状态、命令、激活以及资源回收。React 视图通过外部 store 订阅注册表变化。</p><pre><code>inactive ── activate() ──▶ activating ──▶ active
+   ▲                                           │
+   └──────── cleanup ◀── deactivating ◀────────┘
 
-  <h2>架构</h2>
-  <pre><code>内置 React 插件 ───────────────────┐
-用户 Kernel 插件 ── DynamicPlugin ─┼─&gt; PluginRegistry
-用户 Sandbox 插件 ─ iframe/Bridge ─┘        │
-                                             ├─ ActivityBar / TitleBar
-                                             ├─ App 主面板
-                                             ├─ CommandPalette
-                                             └─ PluginStatusBar</code></pre>
-
-  <table>
-    <tr><th>模式</th><th>运行位置</th><th>安全边界</th></tr>
-    <tr><td>内置插件</td><td>宿主 React 树</td><td>随应用编译，完全信任</td></tr>
-    <tr><td>Sandbox</td><td><code>sandbox="allow-scripts"</code> iframe</td><td>CSP、权限和 postMessage Bridge</td></tr>
-    <tr><td>Kernel</td><td>Renderer 宿主上下文</td><td>无可靠隔离，仅限可信来源</td></tr>
-  </table>
-
-  <h2>Registry 与生命周期</h2>
-  <p><code>PluginRegistry</code> 统一负责注册、启用状态、命令、生命周期和资源回收。React 组件通过基于 <code>useSyncExternalStore</code> 的 <code>usePluginRegistryVersion()</code> 订阅变化。</p>
-  <pre><code>inactive → activating → active
-    ↑                       │
-    └──── deactivating ─────┘
-
-激活异常 → error</code></pre>
-  <p>插件可以实现异步 <code>activate(context)</code> 和 <code>deactivate()</code>。通过 <code>context.subscriptions.add()</code> 与 <code>context.commands.register()</code> 注册的资源，会在禁用、覆盖或卸载时自动清理。</p>
-
-  <h2>当前内置插件</h2>
-  <p>共 20 个：AI、AI 对话、提示词与技能、知识库、知识图谱、便签、微信读书、Windy、插件管理、终端、数据库、百度翻译、Word、Excel、PPT、Excalidraw、PDF、代码编辑、文本比较和文档知识库。</p>
-
-  <h2>Sandbox 安全约束</h2>
-  <ul>
-    <li>iframe 不启用 <code>allow-same-origin</code>，不能直接读取宿主 DOM 和存储。</li>
-    <li>Host 校验消息来源、协议结构、参数数量和 256 KB 消息上限。</li>
-    <li>SDK 请求具有 30 秒超时。</li>
-    <li>8 类权限控制 Store、剪贴板、注入、外链、数据、预览和文件操作。</li>
-    <li>私有存储按插件 ID 隔离，单插件限制 512 KB。</li>
-    <li>外链只允许 HTTP、HTTPS 和 mailto，禁止 URL 内嵌凭据。</li>
-  </ul>
-
-  <h2>.nwd v1</h2>
-  <pre><code>{
+activation failure ──▶ error</code></pre><p>插件禁用、覆盖或卸载时，宿主会清理通过 context 注册的订阅和命令，避免残留监听器。</p>
+<h2 id="sandbox">Sandbox 安全边界</h2><div class="grid-3"><div class="card"><div class="card-icon">DOM</div><h3>页面隔离</h3><p>iframe 无同源权限，不能直接读取宿主 DOM、Cookie 或 localStorage。</p></div><div class="card"><div class="card-icon">IPC</div><h3>协议校验</h3><p>Bridge 校验消息来源、结构、参数数量、大小与请求超时。</p></div><div class="card"><div class="card-icon">ACL</div><h3>显式授权</h3><p>Manifest 声明权限，用户授权后对应 API 才能执行。</p></div></div>
+<h2 id="permissions">权限模型</h2><div class="table-wrap"><table><thead><tr><th>权限</th><th>能力</th><th>注意事项</th></tr></thead><tbody><tr><td><code>store.read</code></td><td>读取插件私有存储</td><td>按插件 ID 隔离</td></tr><tr><td><code>clipboard</code></td><td>剪贴板访问</td><td>涉及用户敏感内容</td></tr><tr><td><code>inject</code></td><td>向目标站点注入内容</td><td>需要目标页面上下文</td></tr><tr><td><code>external.open</code></td><td>打开外部链接</td><td>仅允许安全协议</td></tr><tr><td><code>data</code> / <code>preview</code></td><td>宿主数据与预览能力</td><td>按 API 参数继续校验</td></tr><tr><td><code>file.read</code> / <code>file.write</code></td><td>授权范围内的文件操作</td><td>必须经过宿主文件边界</td></tr></tbody></table></div>
+<h2 id="bundle">.nwd v1 插件包</h2><p>`.nwd` 是不超过 2 MB 的 UTF-8 JSON 文件。客户端会校验格式、Manifest、语义版本、权限、运行时和非空脚本。</p><pre><code>{
   "format": "nwd-v1",
   "manifest": {
     "id": "example.dashboard",
@@ -62,20 +27,8 @@
     "runtime": "sandbox",
     "permissions": ["store.read", "data"]
   },
-  "script": "PluginSDK.ui.setContent('&lt;h1&gt;Hello&lt;/h1&gt;')"
+  "script": "PluginSDK.ui.setContent('&lt;h1&gt;Hello&lt;/h1&gt;')",
+  "style": null
 }</code></pre>
-  <p>导入器会校验 2 MB 文件上限、格式、语义版本、API 版本、ID、权限、运行时和代码字段。Kernel 包还需要显式高风险确认。</p>
-
-  <h2>Kernel 风险</h2>
-  <p class="notice risk">Kernel 仍通过 <code>new Function()</code> 在 Renderer 中执行。注入 API 白名单不能构成恶意代码隔离；真正的隔离需要 Electron Utility Process。在此之前只能安装完全可信的 Kernel 插件。</p>
-
-  <h2>下一步</h2>
-  <ol>
-    <li>隔离或关闭用户 Kernel 插件。</li>
-    <li>统一插件定义、配置、授权和私有数据存储。</li>
-    <li>增加动态 import、按需挂载与 keepAlive。</li>
-    <li>完善 views、menus、settings、fileEditors 扩展点。</li>
-    <li>增加更新、回滚、日志、崩溃熔断和安全模式。</li>
-  </ol>
-</main></body>
-</html>
+<h2 id="workflow">推荐开发流程</h2><div class="grid-3"><div class="card"><div class="card-icon">1</div><h3>定义边界</h3><p>确认插件只申请完成功能必需的权限。</p></div><div class="card"><div class="card-icon">2</div><h3>本地验证</h3><p>在全新环境测试导入、禁用、覆盖与异常恢复。</p></div><div class="card"><div class="card-icon">3</div><h3>打包发布</h3><p>检查版本、API v1、Sandbox 和 2 MB 上限后导出。</p></div></div><p class="actions"><a class="button primary" href="plugin-architecture.md">阅读完整开发指南 →</a><a class="button" href="security.md">查看安全模型</a></p>
+</article></main><footer class="footer"><div class="shell footer-inner"><span>NWD Plugin Platform · Sandbox first</span><span><a href="index.html">文档首页</a>　·　<a href="troubleshooting.md">故障排查</a></span></div></footer></body></html>
