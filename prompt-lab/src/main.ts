@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut } from 'electron';
+import { app, BrowserWindow, desktopCapturer, globalShortcut, session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -73,6 +73,11 @@ if (started) {
   // 应用生命周期
   app.whenReady().then(() => {
     const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
+
+    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+      const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+      callback({ video: sources[0] });
+    }, { useSystemPicker: true });
 
     openMainWindow();
     // setupIPC configures the existing window and observes future windows.

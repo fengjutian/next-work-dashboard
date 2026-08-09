@@ -45,6 +45,7 @@ const documentKnowledge = preloadable(() => import('../document-knowledge').then
 const hanyuJinjie = preloadable(() => import('../hanyu-jinjie').then((m) => ({ default: m.HanyuJinjiePanel })));
 const lingoHut = preloadable(() => import('../lingohut').then((m) => ({ default: m.LingoHutPanel })));
 const styleImage = preloadable(() => import('../style-image').then((m) => ({ default: m.StyleImagePanel })));
+const screenCapture = preloadable(() => import('../screen-capture').then((m) => ({ default: m.ScreenCapturePanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -63,6 +64,7 @@ const DocumentKnowledgePanel = documentKnowledge.component;
 const HanyuJinjiePanel = hanyuJinjie.component;
 const LingoHutPanel = lingoHut.component;
 const StyleImagePanel = styleImage.component;
+const ScreenCapturePanel = screenCapture.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -338,6 +340,9 @@ const builtInPlugins: Plugin[] = [
     contributions: { commands: [{ id: 'style-image.generate', title: '生成风格图片', category: '风格图片' }] },
   },
   {
+    id: 'screen-capture', name: '屏幕捕获', icon: Image, component: ScreenCapturePanel, enabled: true, order: 23,
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -400,6 +405,7 @@ export function registerBuiltInPlugins(): void {
     'hanyu-jinjie': hanyuJinjie.preload,
     lingohut: lingoHut.preload,
     'style-image': styleImage.preload,
+    'screen-capture': screenCapture.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
