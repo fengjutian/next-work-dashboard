@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Image, Loader2, Sparkles, Trash2, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store/store';
@@ -6,6 +6,8 @@ import { notification } from 'antd';
 
 type ReferenceImage = { file: File; dataUrl: string; base64: string };
 type GeneratedImage = { id: string; dataUrl: string; prompt: string; createdAt: number };
+type ImageProvider = 'openai-compatible' | 'minimax';
+const MINIMAX_KEY_STORAGE = 'nwd:style-image:minimax-api-key';
 
 const STYLES = [
   { id: 'custom', label: '自定义', prompt: '' },
@@ -35,11 +37,18 @@ export const StyleImagePanel: React.FC = () => {
   const [reference, setReference] = useState<ReferenceImage | null>(null);
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState('zine');
+  const [provider, setProvider] = useState<ImageProvider>('minimax');
+  const [miniMaxApiKey, setMiniMaxApiKey] = useState(() => localStorage.getItem(MINIMAX_KEY_STORAGE) || '');
   const [model, setModel] = useState('gpt-image-1');
   const [size, setSize] = useState('1024x1024');
   const [quality, setQuality] = useState('medium');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<GeneratedImage[]>([]);
+  const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [promptOptimizer, setPromptOptimizer] = useState(true);
+
+  useEffect(() => { localStorage.setItem(MINIMAX_KEY_STORAGE, miniMaxApiKey); }, [miniMaxApiKey]);
+  const changeProvider = (next: ImageProvider) => { setProvider(next); setModel(next === 'minimax' ? 'image-01' : 'gpt-image-1'); if (next === 'minimax') setReference(null); };
 
   const showError = useCallback((description: string) => {
     notifApi.error({ message: '图片生成失败', description, placement: 'bottomRight', duration: 6 });
@@ -54,13 +63,14 @@ export const StyleImagePanel: React.FC = () => {
 
   const generate = useCallback(async () => {
     if (!prompt.trim()) { showError('请填写希望生成的画面描述'); return; }
-    if (!aiApi.apiKey.trim() || !aiApi.baseUrl.trim()) { showError('请先在设置中配置 AI API Key 和 Base URL'); return; }
+    const apiKey = provider === 'minimax' ? miniMaxApiKey : aiApi.apiKey;
+    if (!apiKey.trim() || (provider === 'openai-compatible' && !aiApi.baseUrl.trim())) { showError(provider === 'minimax' ? '请填写 MiniMax API Key' : '请先在设置中配置 AI API Key 和 Base URL'); return; }
     const stylePrompt = STYLES.find((item) => item.id === style)?.prompt;
     const finalPrompt = [prompt.trim(), stylePrompt].filter(Boolean).join('. ');
     setLoading(true);
     try {
       const response = await window.electronAPI.generateImage({
-        baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: model.trim(), prompt: finalPrompt, size, quality,
+        provider, baseUrl: provider === 'minimax' ? 'https://api.minimaxi.com/v1' : aiApi.baseUrl, apiKey, model: model.trim(), prompt: finalPrompt, size, quality, aspectRatio, promptOptimizer,
         image: reference ? { dataBase64: reference.base64, mimeType: reference.file.type, name: reference.file.name } : undefined,
       });
       if (!response.success || !response.imageDataUrl) throw new Error(response.error || '模型没有返回图片');
@@ -73,7 +83,7 @@ export const StyleImagePanel: React.FC = () => {
       showError(needsRestart ? '图片服务刚刚安装，需要完全退出并重新启动应用后才能使用。仅刷新页面无效。' : rawMessage);
     }
     finally { setLoading(false); }
-  }, [aiApi, model, notifApi, prompt, quality, reference, showError, size, style]);
+  }, [aiApi, aspectRatio, miniMaxApiKey, model, notifApi, prompt, promptOptimizer, provider, quality, reference, showError, size, style]);
 
   const download = (item: GeneratedImage) => {
     const anchor = document.createElement('a'); anchor.href = item.dataUrl;
@@ -84,16 +94,18 @@ export const StyleImagePanel: React.FC = () => {
     {contextHolder}
     <section className="w-[360px] shrink-0 overflow-y-auto border-r p-5">
       <div className="mb-5"><h1 className="flex items-center gap-2 text-lg font-semibold"><Sparkles className="h-5 w-5 text-primary" />风格图片生成</h1><p className="mt-1 text-xs text-muted-foreground">上传参考图，用提示词生成新的风格化图片</p></div>
+      <label className="mb-2 block text-sm font-medium">生成服务</label>
+      <select className="mb-4 h-9 w-full rounded-md border bg-background px-2 text-sm" value={provider} onChange={(event) => changeProvider(event.target.value as ImageProvider)}><option value="minimax">MiniMax（推荐）</option><option value="openai-compatible">OpenAI 兼容服务</option></select>
+      {provider === 'minimax' && <label className="mb-4 grid gap-1 text-xs"><span>MiniMax API Key</span><input type="password" value={miniMaxApiKey} onChange={(event) => setMiniMaxApiKey(event.target.value)} className="h-9 rounded-md border bg-background px-3" placeholder="在 MiniMax 开放平台创建的 API Key" autoComplete="off" /><span className="text-[10px] text-muted-foreground">仅保存在本机，不使用文本模型的 API Key。</span></label>}
       <label className="mb-2 block text-sm font-medium">参考图片 <span className="font-normal text-muted-foreground">（可选）</span></label>
       <input ref={fileRef} className="hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void chooseFile(event.target.files?.[0])} />
       {reference ? <div className="group relative mb-4 overflow-hidden rounded-lg border bg-muted"><img src={reference.dataUrl} className="h-44 w-full object-contain" alt="参考图片" /><button className="absolute right-2 top-2 rounded bg-background/90 p-1.5 shadow" onClick={() => setReference(null)} title="移除"><Trash2 className="h-4 w-4" /></button></div>
-        : <button className="mb-4 flex h-36 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground hover:border-primary hover:text-primary" onClick={() => fileRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void chooseFile(event.dataTransfer.files[0]); }}><Upload className="h-6 w-6" /><span>点击或拖入图片</span><span className="text-[11px]">PNG / JPEG / WebP，最大 20 MB</span></button>}
+        : <button disabled={provider === 'minimax'} className="mb-4 flex h-36 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50" onClick={() => fileRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (provider !== 'minimax') void chooseFile(event.dataTransfer.files[0]); }}><Upload className="h-6 w-6" /><span>{provider === 'minimax' ? 'MiniMax 当前使用文生图模式' : '点击或拖入图片'}</span><span className="text-[11px]">{provider === 'minimax' ? '切换到 OpenAI 兼容服务可上传参考图' : 'PNG / JPEG / WebP，最大 20 MB'}</span></button>}
       <label className="mb-2 block text-sm font-medium">画面描述</label>
       <textarea className="mb-4 min-h-28 w-full resize-y rounded-md border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30" value={prompt} maxLength={4000} onChange={(event) => setPrompt(event.target.value)} placeholder="例如：一只猫坐在雨夜咖啡馆的窗边，温暖灯光，安静的氛围……" />
       <label className="mb-2 block text-sm font-medium">风格</label>
       <div className="mb-4 grid grid-cols-3 gap-2">{STYLES.map((item) => <button key={item.id} onClick={() => setStyle(item.id)} className={`rounded-md border px-2 py-2 text-xs ${style === item.id ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'}`}>{item.label}</button>)}</div>
-      <div className="mb-4 grid grid-cols-2 gap-3"><label className="text-xs">尺寸<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={size} onChange={(event) => setSize(event.target.value)}><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label><label className="text-xs">质量<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={quality} onChange={(event) => setQuality(event.target.value)}><option value="low">快速</option><option value="medium">标准</option><option value="high">高清</option></select></label></div>
-      <label className="mb-1 block text-xs">图片模型</label><input className="mb-4 h-9 w-full rounded-md border bg-background px-3 text-sm" value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-1" />
+      {provider === 'minimax' ? <><div className="mb-4 grid grid-cols-2 gap-3"><label className="text-xs">模型<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={model} onChange={(event) => setModel(event.target.value)}><option value="image-01">Image 01</option><option value="image-01-live">Image 01 Live</option></select></label><label className="text-xs">画幅<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>{['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', ...(model === 'image-01' ? ['21:9'] : [])].map((ratio) => <option key={ratio}>{ratio}</option>)}</select></label></div><label className="mb-4 flex items-center gap-2 text-xs"><input type="checkbox" checked={promptOptimizer} onChange={(event) => setPromptOptimizer(event.target.checked)} />让 MiniMax 自动优化提示词</label></> : <><div className="mb-4 grid grid-cols-2 gap-3"><label className="text-xs">尺寸<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={size} onChange={(event) => setSize(event.target.value)}><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label><label className="text-xs">质量<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={quality} onChange={(event) => setQuality(event.target.value)}><option value="low">快速</option><option value="medium">标准</option><option value="high">高清</option></select></label></div><label className="mb-1 block text-xs">图片模型</label><input className="mb-4 h-9 w-full rounded-md border bg-background px-3 text-sm" value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-1" /></>}
       <Button className="w-full" disabled={loading || !prompt.trim()} onClick={() => void generate()}>{loading ? <><Loader2 className="mr-2 h-4 w-4" />正在生成（可能需要数分钟）</> : <><Sparkles className="mr-2 h-4 w-4" />生成图片</>}</Button>
     </section>
     <main className="min-w-0 flex-1 overflow-y-auto p-6">{results.length ? <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">{results.map((item, index) => <article key={item.id} className="overflow-hidden rounded-xl border bg-card shadow-sm"><div className="relative bg-[linear-gradient(45deg,#eee_25%,transparent_25%),linear-gradient(-45deg,#eee_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#eee_75%),linear-gradient(-45deg,transparent_75%,#eee_75%)] bg-[length:20px_20px]"><img className="max-h-[620px] w-full object-contain" src={item.dataUrl} alt={`生成结果 ${index + 1}`} /></div><div className="flex items-start gap-3 p-3"><p className="line-clamp-2 flex-1 text-xs text-muted-foreground">{item.prompt}</p><Button size="sm" variant="outline" onClick={() => download(item)}><Download className="mr-1 h-4 w-4" />下载</Button></div></article>)}</div> : <div className="flex h-full min-h-80 flex-col items-center justify-center text-muted-foreground"><Image className="mb-4 h-16 w-16 opacity-20" /><p className="font-medium">生成结果会显示在这里</p><p className="mt-1 text-sm">可不上传图片直接进行文生图</p></div>}</main>
