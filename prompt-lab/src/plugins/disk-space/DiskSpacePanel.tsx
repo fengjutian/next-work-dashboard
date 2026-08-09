@@ -19,7 +19,7 @@ export function DiskSpacePanel() {
   const [duplicates, setDuplicates] = React.useState<DuplicateGroup[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
   const [directories, setDirectories] = React.useState<DirectoryEntry[]>([]);
-  const [exclusionsText, setExclusionsText] = React.useState('.git,node_modules,target');
+  const [exclusionsText, setExclusionsText] = React.useState(() => localStorage.getItem('disk-space.exclusions') ?? '.git,node_modules,target');
   const scanId = React.useRef('');
 
   React.useEffect(() => window.electronAPI.diskSpace.onEvent((id, event: ScanEvent) => {
@@ -39,6 +39,7 @@ export function DiskSpacePanel() {
   React.useEffect(() => window.electronAPI.diskSpace.onExit((id, result) => {
     if (id !== scanId.current) return; setRunning(false); if (result.error) setError(result.error);
   }), []);
+  React.useEffect(() => { localStorage.setItem('disk-space.exclusions', exclusionsText); }, [exclusionsText]);
 
   const choose = async () => { const selected = await window.electronAPI.diskSpace.pickRoot(); if (selected) setRoot(selected); };
   const start = async () => {
@@ -72,6 +73,7 @@ export function DiskSpacePanel() {
     <section className="rounded-lg border p-4"><h2 className="mb-3 font-medium">目录占用（前 50）</h2><div className="space-y-2">{directories.map((directory) => <div key={directory.path} className="relative overflow-hidden rounded-md border px-3 py-2 text-sm"><div className="absolute inset-y-0 left-0 bg-primary/10" style={{ width: `${stats.bytes ? Math.max(1, directory.size / stats.bytes * 100) : 0}%` }} /><div className="relative flex gap-3"><span className="min-w-0 flex-1 truncate" title={directory.path}>{directory.path}</span><span>{formatBytes(directory.size)}</span></div></div>)}</div></section>
     <section className="rounded-lg border p-4"><div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="font-medium">重复文件</h2><p className="text-xs text-muted-foreground">经过完整哈希和逐字节复核；每组请至少保留一个文件。</p></div><button className="flex items-center gap-2 rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive disabled:opacity-50" disabled={selected.length === 0 || running} onClick={trashSelected}><Trash2 className="h-4 w-4" />移入回收站（{selected.length}，{formatBytes(selectedBytes)}）</button></div>
       {duplicates.length === 0 && !running && <p className="text-sm text-muted-foreground">没有发现重复文件。</p>}
+      {duplicates.length > 0 && <p className="mb-3 text-xs text-muted-foreground">注意：硬链接可能显示为重复路径，但移除硬链接不会释放一个完整文件的空间。</p>}
       <div className="space-y-3">{duplicates.map((group) => <div key={group.groupId} className="rounded-md border p-3"><div className="mb-2 text-xs text-muted-foreground">{group.files.length} 个相同文件 · 单个 {formatBytes(group.size)} · 可释放 {formatBytes(group.size * (group.files.length - 1))}</div>{group.files.map((file, index) => <label key={file.path} className="flex items-center gap-2 border-t py-2 text-sm"><input type="checkbox" checked={selected.includes(file.path)} onChange={() => toggleSelected(file.path)} /><span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>{index === 0 && <span className="text-xs text-muted-foreground">建议保留</span>}</label>)}</div>)}</div>
     </section>
   </div>;

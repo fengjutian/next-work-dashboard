@@ -83,6 +83,12 @@ fn normalized_name(value: &str) -> String {
     }
 }
 
+fn should_exclude(path: &Path, exclusions: &HashSet<String>) -> bool {
+    path.file_name()
+        .map(|name| exclusions.contains(&normalized_name(&name.to_string_lossy())))
+        .unwrap_or(false)
+}
+
 fn scan(root: &Path, exclusions: &HashSet<String>) -> io::Result<()> {
     let root = fs::canonicalize(root)?;
     if !root.is_dir() {
@@ -126,8 +132,7 @@ fn scan(root: &Path, exclusions: &HashSet<String>) -> io::Result<()> {
                 continue;
             }
             if file_type.is_dir() {
-                let name = normalized_name(&entry.file_name().to_string_lossy());
-                if exclusions.contains(&name) {
+                if should_exclude(&entry.path(), exclusions) {
                     continue;
                 }
                 stack.push(entry.path());
@@ -311,7 +316,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_hash, same_content};
+    use super::{content_hash, normalized_name, same_content, should_exclude};
+    use std::collections::HashSet;
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -338,5 +344,18 @@ mod tests {
         assert!(same_content(&first, &second).unwrap());
         assert!(!same_content(&first, &different).unwrap());
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn exclusion_matches_a_directory_name_only() {
+        let exclusions = HashSet::from([normalized_name("node_modules")]);
+        assert!(should_exclude(
+            std::path::Path::new("project/node_modules"),
+            &exclusions
+        ));
+        assert!(!should_exclude(
+            std::path::Path::new("project/node_modules-old"),
+            &exclusions
+        ));
     }
 }

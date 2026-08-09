@@ -54,6 +54,7 @@
 | [代码编辑器 Agents Window 剩余工作](./code-editor-agents-window-remaining-work.md) | 阶段 B/C 待实现项 | 📋 规划中 |
 | [终端功能](./terminal-features.md) | 终端架构、功能和已知问题 | 🔄 持续更新 |
 | [Excel 插件方案](./excel-plugin-plan.md) | 技术选型与阶段计划 | 📋 方案 |
+| [磁盘空间插件](./disk-space-plugin.md) | Rust 扫描器、安全边界与打包 | ✅ 已实现 |
 | [Office Studio 插件](./office-studio.md) | OfficeCLI 内置集成、运行与打包说明 | ✅ 已实现 MVP |
 | [知识工作区需求](./knowledge-workspace-requirements.md) | 知识库工作区功能规划 | 📋 规划中 |
 | [MCP 未完成功能](./mcp-remaining-features.md) | MCP 协议待实现项 | 📋 规划中 |
