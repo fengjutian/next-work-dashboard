@@ -245,6 +245,7 @@ export interface ElectronAPI {
     start: (scanId: string, rootPath: string, options?: { exclusions?: string[] }) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
     trash: (scanId: string, paths: string[]) => Promise<{ success: boolean; canceled: boolean; trashed: string[] }>;
+    open: (scanId: string, filePath: string) => Promise<{ success: boolean }>;
     onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;
     onExit: (callback: (scanId: string, result: { code: number | null; error?: string }) => void) => () => void;
   };

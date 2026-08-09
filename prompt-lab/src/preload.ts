@@ -317,6 +317,7 @@ const electronAPI: ElectronAPI = {
     start: (scanId: string, rootPath: string, options?: { exclusions?: string[] }) => ipcRenderer.invoke('disk-space:start', scanId, rootPath, options),
     cancel: (scanId: string) => ipcRenderer.invoke('disk-space:cancel', scanId),
     trash: (scanId: string, paths: string[]) => ipcRenderer.invoke('disk-space:trash', scanId, paths),
+    open: (scanId: string, filePath: string) => ipcRenderer.invoke('disk-space:open', scanId, filePath),
     onEvent: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, scanId: string, payload: import('./types/electron').DiskScanEvent) => callback(scanId, payload);
       ipcRenderer.on('disk-space:event', handler);
