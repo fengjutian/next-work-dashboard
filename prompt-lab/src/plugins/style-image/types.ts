@@ -8,7 +8,9 @@ export interface StyleImageRequest {
   quality: string;
   aspectRatio?: string;
   promptOptimizer?: boolean;
-  image?: { dataBase64: string; mimeType: string; name: string };
+  seed?: number;
+  aigcWatermark?: boolean;
+  image?: { dataBase64?: string; mimeType?: string; name?: string; url?: string };
 }
 
 export interface StyleImageResult {

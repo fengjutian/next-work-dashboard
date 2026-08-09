@@ -983,6 +983,47 @@ export function getTableInfo(): Array<{ table: string; columns: Array<{ name: st
   return tables;
 }
 
+export interface DatabaseTableStats {
+  table: string;
+  rowCount: number;
+  payloadBytes: number;
+}
+
+export interface DatabaseStats {
+  totalBytes: number;
+  pageSize: number;
+  pageCount: number;
+  freePages: number;
+  tables: DatabaseTableStats[];
+}
+
+/** 数据库文件大小为精确值；表级大小是字段数据载荷估算，不包含索引和 SQLite 页开销。 */
+export function getDatabaseStats(): DatabaseStats {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const tableInfo = getTableInfo();
+  const pragmaNumber = (name: 'page_size' | 'page_count' | 'freelist_count'): number =>
+    Number(_sqlDb?.exec(`PRAGMA ${name}`)[0]?.values[0]?.[0] ?? 0);
+  const tables = tableInfo.map(({ table, columns }) => {
+    const escapedTable = table.replace(/"/g, '""');
+    const payloadExpression = columns.length
+      ? columns.map(({ name }) => `COALESCE(length(CAST("${name.replace(/"/g, '""')}" AS BLOB)), 0)`).join(' + ')
+      : '0';
+    const result = _sqlDb!.exec(`SELECT COUNT(*), COALESCE(SUM(${payloadExpression}), 0) FROM "${escapedTable}"`)[0];
+    return {
+      table,
+      rowCount: Number(result?.values[0]?.[0] ?? 0),
+      payloadBytes: Number(result?.values[0]?.[1] ?? 0),
+    };
+  });
+  return {
+    totalBytes: _sqlDb.export().byteLength,
+    pageSize: pragmaNumber('page_size'),
+    pageCount: pragmaNumber('page_count'),
+    freePages: pragmaNumber('freelist_count'),
+    tables,
+  };
+}
+
 // ═══════════════════════════════════════════
 // 持久化到磁盘（立即 flush）
 // ═══════════════════════════════════════════

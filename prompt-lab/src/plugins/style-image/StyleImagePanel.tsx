@@ -64,6 +64,7 @@ export const StyleImagePanel: React.FC = () => {
   const [style, setStyle] = useState('zine');
   const [provider, setProvider] = useState<ImageProvider>('minimax');
   const [miniMaxApiKey, setMiniMaxApiKey] = useState(() => localStorage.getItem(MINIMAX_KEY_STORAGE) || '');
+  const [miniMaxReferenceUrl, setMiniMaxReferenceUrl] = useState('');
   const [model, setModel] = useState('image-01');
   const [size, setSize] = useState('1024x1024');
   const [quality, setQuality] = useState('medium');
@@ -72,6 +73,8 @@ export const StyleImagePanel: React.FC = () => {
   const [selectedImageId, setSelectedImageId] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [promptOptimizer, setPromptOptimizer] = useState(true);
+  const [aigcWatermark, setAigcWatermark] = useState(false);
+  const [seed, setSeed] = useState('');
   const [promptLoading, setPromptLoading] = useState(false);
   const [showAllStyles, setShowAllStyles] = useState(false);
   const selectedImage = useMemo(() => results.find((item) => item.id === selectedImageId) ?? results[0], [results, selectedImageId]);
@@ -122,7 +125,10 @@ export const StyleImagePanel: React.FC = () => {
     try {
       const response = await window.electronAPI.generateImage({
         provider, baseUrl: provider === 'minimax' ? 'https://api.minimaxi.com/v1' : aiApi.baseUrl, apiKey, model: model.trim(), prompt: finalPrompt, size, quality, aspectRatio, promptOptimizer,
-        image: reference ? { dataBase64: reference.base64, mimeType: reference.file.type, name: reference.file.name } : undefined,
+        seed: provider === 'minimax' && seed.trim() ? Number(seed) : undefined, aigcWatermark,
+        image: provider === 'minimax'
+          ? (miniMaxReferenceUrl.trim() ? { url: miniMaxReferenceUrl.trim() } : undefined)
+          : (reference ? { dataBase64: reference.base64, mimeType: reference.file.type, name: reference.file.name } : undefined),
       });
       if (!response.success || !response.imageDataUrl) throw new Error(response.error || '模型没有返回图片');
       const imageDataUrl = response.imageDataUrl;
@@ -137,7 +143,7 @@ export const StyleImagePanel: React.FC = () => {
       showError(needsRestart || staleMiniMaxHandler ? '图片主进程仍是旧版本。请完全退出应用（包括托盘进程）后重新启动；仅刷新页面不会更新 MiniMax 接口。' : rawMessage);
     }
     finally { setLoading(false); }
-  }, [aiApi, aspectRatio, miniMaxApiKey, model, notifApi, prompt, promptOptimizer, provider, quality, reference, refreshLibrary, showError, size, style]);
+  }, [aiApi, aigcWatermark, aspectRatio, miniMaxApiKey, miniMaxReferenceUrl, model, notifApi, prompt, promptOptimizer, provider, quality, reference, refreshLibrary, seed, showError, size, style]);
 
   const download = (item: GeneratedImage) => {
     const anchor = document.createElement('a'); anchor.href = item.dataUrl;

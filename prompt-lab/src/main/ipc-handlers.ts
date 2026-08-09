@@ -292,19 +292,31 @@ export function setupIPC(webviewPreloadPath: string) {
       const prompt = String(payload.prompt || '').trim().slice(0, 8000);
       if (payload.provider === 'minimax') {
         if (!apiKey || !model || !prompt) return { success: false, error: '请填写 MiniMax API Key、模型和提示词' };
-        if (payload.image) return { success: false, error: '当前 MiniMax 接入暂不支持本地参考图，请移除参考图后使用文生图' };
         const allowedModels = new Set(['image-01', 'image-01-live']);
         const allowedRatios = new Set(['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9']);
         if (!allowedModels.has(model)) return { success: false, error: '不支持的 MiniMax 图像模型' };
         const aspectRatio = allowedRatios.has(String(payload.aspectRatio)) ? String(payload.aspectRatio) : '1:1';
         if (model === 'image-01-live' && aspectRatio === '21:9') return { success: false, error: 'image-01-live 不支持 21:9 画幅' };
+        const referenceUrl = String(payload.image?.url || '').trim();
+        if (referenceUrl && !/^https:\/\//i.test(referenceUrl)) return { success: false, error: 'MiniMax 参考图必须是可公网访问的 HTTPS 图片链接' };
+        const seed = Number.isSafeInteger(payload.seed) && Number(payload.seed) >= 0 ? Number(payload.seed) : undefined;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 600_000);
         try {
           const response = await fetch('https://api.minimaxi.com/v1/image_generation', {
             method: 'POST', signal: controller.signal,
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({ model, prompt: prompt.slice(0, 1500), aspect_ratio: aspectRatio, response_format: 'base64', n: 1, prompt_optimizer: payload.promptOptimizer !== false, aigc_watermark: false }),
+            body: JSON.stringify({
+              model,
+              prompt: prompt.slice(0, 1500),
+              aspect_ratio: aspectRatio,
+              response_format: 'base64',
+              n: 1,
+              prompt_optimizer: payload.promptOptimizer === true,
+              aigc_watermark: payload.aigcWatermark === true,
+              ...(seed === undefined ? {} : { seed }),
+              ...(referenceUrl ? { subject_reference: [{ type: 'character', image_file: referenceUrl }] } : {}),
+            }),
           });
           const text = await response.text();
           let data: { data?: { image_base64?: string[]; image_urls?: string[] }; base_resp?: { status_code?: number; status_msg?: string } } | null;
