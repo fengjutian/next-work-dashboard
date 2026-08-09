@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     hash::{DefaultHasher, Hasher},
     io::{self, BufReader, Read, Write},
@@ -75,7 +75,15 @@ fn emit(line: &str) {
     let _ = io::stdout().flush();
 }
 
-fn scan(root: &Path) -> io::Result<()> {
+fn normalized_name(value: &str) -> String {
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value.to_owned()
+    }
+}
+
+fn scan(root: &Path, exclusions: &HashSet<String>) -> io::Result<()> {
     let root = fs::canonicalize(root)?;
     if !root.is_dir() {
         return Err(io::Error::new(
@@ -83,13 +91,14 @@ fn scan(root: &Path) -> io::Result<()> {
             "root is not a directory",
         ));
     }
-    let mut stack: Vec<PathBuf> = vec![root];
+    let mut stack: Vec<PathBuf> = vec![root.clone()];
     let mut files = 0_u64;
     let mut bytes = 0_u64;
     let mut errors = 0_u64;
     let mut largest: Vec<FileResult> = Vec::with_capacity(50);
     let mut extensions: HashMap<String, u64> = HashMap::new();
     let mut by_size: HashMap<u64, Vec<FileResult>> = HashMap::new();
+    let mut directory_bytes: HashMap<PathBuf, u64> = HashMap::new();
     while let Some(directory) = stack.pop() {
         let entries = match fs::read_dir(&directory) {
             Ok(value) => value,
@@ -117,6 +126,10 @@ fn scan(root: &Path) -> io::Result<()> {
                 continue;
             }
             if file_type.is_dir() {
+                let name = normalized_name(&entry.file_name().to_string_lossy());
+                if exclusions.contains(&name) {
+                    continue;
+                }
                 stack.push(entry.path());
                 continue;
             }
@@ -132,6 +145,18 @@ fn scan(root: &Path) -> io::Result<()> {
             };
             files += 1;
             bytes = bytes.saturating_add(metadata.len());
+            let mut parent = entry.path().parent().map(Path::to_path_buf);
+            while let Some(directory) = parent {
+                if !directory.starts_with(&root) {
+                    break;
+                }
+                let directory_total = directory_bytes.entry(directory.clone()).or_insert(0);
+                *directory_total = directory_total.saturating_add(metadata.len());
+                if directory == root {
+                    break;
+                }
+                parent = directory.parent().map(Path::to_path_buf);
+            }
             let modified = metadata
                 .modified()
                 .ok()
@@ -178,6 +203,15 @@ fn scan(root: &Path) -> io::Result<()> {
         emit(&format!(
             r#"{{"type":"extension","extension":"{}","size":{size}}}"#,
             escape_json(&extension)
+        ));
+    }
+    let mut directories = directory_bytes.into_iter().collect::<Vec<_>>();
+    directories.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    directories.truncate(50);
+    for (directory, size) in directories {
+        emit(&format!(
+            r#"{{"type":"directory","path":"{}","size":{size}}}"#,
+            escape_json(&directory.to_string_lossy())
         ));
     }
     emit(r#"{"type":"duplicate-progress","stage":"hashing"}"#);
@@ -257,11 +291,19 @@ fn main() {
     let _binary = args.next();
     let command = args.next();
     let root = args.next();
+    let mut exclusions = HashSet::new();
+    while let Some(argument) = args.next() {
+        if argument == std::ffi::OsStr::new("--exclude") {
+            if let Some(value) = args.next() {
+                exclusions.insert(normalized_name(&value.to_string_lossy()));
+            }
+        }
+    }
     if command.as_deref() != Some(std::ffi::OsStr::new("scan")) || root.is_none() {
         eprintln!("usage: nwd-disk-scanner scan <directory>");
         std::process::exit(2);
     }
-    if let Err(error) = scan(Path::new(&root.unwrap())) {
+    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions) {
         eprintln!("{error}");
         std::process::exit(1);
     }

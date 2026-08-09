@@ -92,7 +92,7 @@ typings/
 out/
 
 dist/
-native/disk-scanner/target/
+native/disk-scanner/target*/
 resources/disk-scanner/
 
 # Project analysis
