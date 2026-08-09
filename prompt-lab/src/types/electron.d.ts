@@ -14,6 +14,8 @@ export interface InjectResult {
 export type DiskScanEvent =
   | { type: 'file'; path: string; size: number; modifiedAt: number; extension: string }
   | { type: 'extension'; extension: string; size: number }
+  | { type: 'duplicate-progress'; stage: 'hashing' }
+  | { type: 'duplicate'; groupId: string; size: number; files: Array<{ path: string; size: number; modifiedAt: number }> }
   | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 
 export interface ElectronAPI {
@@ -241,6 +243,7 @@ export interface ElectronAPI {
     pickRoot: () => Promise<string | null>;
     start: (scanId: string, rootPath: string) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
+    trash: (scanId: string, paths: string[]) => Promise<{ success: boolean; canceled: boolean; trashed: string[] }>;
     onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;
     onExit: (callback: (scanId: string, result: { code: number | null; error?: string }) => void) => () => void;
   };

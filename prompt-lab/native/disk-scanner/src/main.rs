@@ -1,16 +1,57 @@
 use std::{
     collections::HashMap,
     env, fs,
-    io::{self, Write},
+    hash::{DefaultHasher, Hasher},
+    io::{self, BufReader, Read, Write},
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
 
+#[derive(Clone)]
 struct FileResult {
     path: String,
     size: u64,
     modified: u128,
     extension: String,
+}
+
+struct DuplicateGroup {
+    size: u64,
+    files: Vec<FileResult>,
+}
+
+fn content_hash(path: &Path) -> io::Result<u64> {
+    let mut reader = BufReader::new(fs::File::open(path)?);
+    let mut hasher = DefaultHasher::new();
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.write(&buffer[..read]);
+    }
+    Ok(hasher.finish())
+}
+
+fn same_content(left: &Path, right: &Path) -> io::Result<bool> {
+    let mut left = BufReader::new(fs::File::open(left)?);
+    let mut right = BufReader::new(fs::File::open(right)?);
+    let mut left_buffer = [0_u8; 128 * 1024];
+    let mut right_buffer = [0_u8; 128 * 1024];
+    loop {
+        let left_read = left.read(&mut left_buffer)?;
+        let right_read = right.read(&mut right_buffer)?;
+        if left_read != right_read {
+            return Ok(false);
+        }
+        if left_read == 0 {
+            return Ok(true);
+        }
+        if left_buffer[..left_read] != right_buffer[..right_read] {
+            return Ok(false);
+        }
+    }
 }
 
 fn escape_json(value: &str) -> String {
@@ -48,6 +89,7 @@ fn scan(root: &Path) -> io::Result<()> {
     let mut errors = 0_u64;
     let mut largest: Vec<FileResult> = Vec::with_capacity(50);
     let mut extensions: HashMap<String, u64> = HashMap::new();
+    let mut by_size: HashMap<u64, Vec<FileResult>> = HashMap::new();
     while let Some(directory) = stack.pop() {
         let entries = match fs::read_dir(&directory) {
             Ok(value) => value,
@@ -104,12 +146,16 @@ fn scan(root: &Path) -> io::Result<()> {
                 .to_lowercase();
             let extension_bytes = extensions.entry(extension.clone()).or_insert(0);
             *extension_bytes = extension_bytes.saturating_add(metadata.len());
-            largest.push(FileResult {
+            let result = FileResult {
                 path: entry.path().to_string_lossy().into_owned(),
                 size: metadata.len(),
                 modified,
                 extension,
-            });
+            };
+            if result.size > 0 {
+                by_size.entry(result.size).or_default().push(result.clone());
+            }
+            largest.push(result);
             largest.sort_unstable_by(|a, b| b.size.cmp(&a.size));
             largest.truncate(50);
             if files % 250 == 0 {
@@ -134,6 +180,72 @@ fn scan(root: &Path) -> io::Result<()> {
             escape_json(&extension)
         ));
     }
+    emit(r#"{"type":"duplicate-progress","stage":"hashing"}"#);
+    let mut duplicate_groups = Vec::<DuplicateGroup>::new();
+    for (size, candidates) in by_size.into_iter().filter(|(_, values)| values.len() > 1) {
+        let mut by_hash: HashMap<u64, Vec<FileResult>> = HashMap::new();
+        for candidate in candidates {
+            match content_hash(Path::new(&candidate.path)) {
+                Ok(hash) => by_hash.entry(hash).or_default().push(candidate),
+                Err(_) => errors += 1,
+            }
+        }
+        for hash_group in by_hash.into_values().filter(|values| values.len() > 1) {
+            let mut exact_groups: Vec<Vec<FileResult>> = Vec::new();
+            for candidate in hash_group {
+                let mut matched = false;
+                for group in &mut exact_groups {
+                    match same_content(Path::new(&group[0].path), Path::new(&candidate.path)) {
+                        Ok(true) => {
+                            group.push(candidate.clone());
+                            matched = true;
+                            break;
+                        }
+                        Ok(false) => {}
+                        Err(_) => errors += 1,
+                    }
+                }
+                if !matched {
+                    exact_groups.push(vec![candidate]);
+                }
+            }
+            duplicate_groups.extend(
+                exact_groups
+                    .into_iter()
+                    .filter(|values| values.len() > 1)
+                    .map(|files| DuplicateGroup { size, files }),
+            );
+        }
+    }
+    duplicate_groups.sort_unstable_by(|a, b| {
+        let left = a
+            .size
+            .saturating_mul(a.files.len().saturating_sub(1) as u64);
+        let right = b
+            .size
+            .saturating_mul(b.files.len().saturating_sub(1) as u64);
+        right.cmp(&left)
+    });
+    duplicate_groups.truncate(100);
+    for (index, group) in duplicate_groups.iter().enumerate() {
+        let files_json = group
+            .files
+            .iter()
+            .map(|file| {
+                format!(
+                    r#"{{"path":"{}","size":{},"modifiedAt":{}}}"#,
+                    escape_json(&file.path),
+                    file.size,
+                    file.modified
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        emit(&format!(
+            r#"{{"type":"duplicate","groupId":"duplicate-{index}","size":{},"files":[{files_json}]}}"#,
+            group.size
+        ));
+    }
     emit(&format!(
         r#"{{"type":"done","files":{files},"bytes":{bytes},"errors":{errors}}}"#
     ));
@@ -152,5 +264,37 @@ fn main() {
     if let Err(error) = scan(Path::new(&root.unwrap())) {
         eprintln!("{error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{content_hash, same_content};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn hash_candidates_are_verified_byte_for_byte() {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("nwd-disk-scanner-{id}"));
+        fs::create_dir_all(&directory).unwrap();
+        let first = directory.join("first.txt");
+        let second = directory.join("second.txt");
+        let different = directory.join("different.txt");
+        fs::write(&first, b"same content").unwrap();
+        fs::write(&second, b"same content").unwrap();
+        fs::write(&different, b"other content").unwrap();
+        assert_eq!(
+            content_hash(&first).unwrap(),
+            content_hash(&second).unwrap()
+        );
+        assert!(same_content(&first, &second).unwrap());
+        assert!(!same_content(&first, &different).unwrap());
+        fs::remove_dir_all(directory).unwrap();
     }
 }
