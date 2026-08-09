@@ -7,7 +7,12 @@ import readline from 'node:readline';
 const scans = new Map<string, ChildProcess>();
 const authorizedRoots = new Set<string>();
 type AuthorizedFile = { path: string; size: number; modifiedAt: number };
-const scanResults = new Map<string, { root: string; files: Map<string, AuthorizedFile>; groups: Map<string, string[]> }>();
+const scanResults = new Map<string, {
+  root: string;
+  files: Map<string, AuthorizedFile>;
+  groups: Map<string, string[]>;
+  entries: Map<string, 'file' | 'directory'>;
+}>();
 
 function normalizeWindowsPath(value: string): string {
   if (process.platform !== 'win32') return value;
@@ -18,6 +23,12 @@ function normalizeWindowsPath(value: string): string {
 function isWithinRoot(root: string, candidate: string): boolean {
   const relative = path.relative(normalizeWindowsPath(root), normalizeWindowsPath(candidate));
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
+}
+
+function isWithinOrEqualRoot(root: string, candidate: string): boolean {
+  const normalizedRoot = path.resolve(normalizeWindowsPath(root));
+  const normalizedCandidate = path.resolve(normalizeWindowsPath(candidate));
+  return normalizedRoot === normalizedCandidate || isWithinRoot(normalizedRoot, normalizedCandidate);
 }
 
 function scannerPath(): string {
@@ -54,7 +65,7 @@ export function setupDiskSpaceIPC(): void {
     const child = spawn(scannerPath(), scannerArguments, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     if (!child.stdout || !child.stderr) throw new Error('无法连接 Rust 扫描器输出');
     scans.set(scanId, child);
-    scanResults.set(scanId, { root: canonicalRoot, files: new Map(), groups: new Map() });
+    scanResults.set(scanId, { root: canonicalRoot, files: new Map(), groups: new Map(), entries: new Map() });
     while (scanResults.size > 5) {
       const oldest = scanResults.keys().next().value as string | undefined;
       if (!oldest || oldest === scanId) break;
@@ -64,10 +75,16 @@ export function setupDiskSpaceIPC(): void {
     const lines = readline.createInterface({ input: child.stdout });
     lines.on('line', (line) => {
       try {
-        const payload = JSON.parse(line) as { type?: string; groupId?: string; files?: AuthorizedFile[] };
+        const payload = JSON.parse(line) as { type?: string; path?: string; groupId?: string; files?: AuthorizedFile[] };
+        const result = scanResults.get(scanId);
+        if ((payload.type === 'file' || payload.type === 'directory') && typeof payload.path === 'string') {
+          result?.entries.set(payload.path, payload.type);
+        }
         if (payload.type === 'duplicate' && Array.isArray(payload.files)) {
-          const result = scanResults.get(scanId);
-          payload.files.forEach((file) => result?.files.set(file.path, file));
+          payload.files.forEach((file) => {
+            result?.files.set(file.path, file);
+            result?.entries.set(file.path, 'file');
+          });
           if (result && payload.groupId) result.groups.set(payload.groupId, payload.files.map((file) => file.path));
         }
         if (!sender.isDestroyed()) sender.send('disk-space:event', scanId, payload);
@@ -127,6 +144,17 @@ export function setupDiskSpaceIPC(): void {
       result.files.delete(file.path);
     }
     return { success: true, canceled: false, trashed };
+  });
+  ipcMain.handle('disk-space:open', async (_event, scanId: string, requestedPath: string) => {
+    const result = scanResults.get(scanId);
+    if (!result || typeof requestedPath !== 'string' || !result.entries.has(requestedPath)) {
+      throw new Error('文件或目录不属于本次扫描结果');
+    }
+    const canonical = normalizeWindowsPath(fs.realpathSync(requestedPath));
+    if (!isWithinOrEqualRoot(result.root, canonical)) throw new Error('拒绝打开授权目录之外的路径');
+    const error = await shell.openPath(canonical);
+    if (error) throw new Error(error);
+    return { success: true };
   });
 }
 
