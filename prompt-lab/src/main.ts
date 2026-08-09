@@ -80,7 +80,7 @@ if (started) {
 
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
       if (captureTarget === 'app' && request.frame) {
-        callback({ video: request.frame, audio: request.audioRequested ? 'loopback' : undefined, enableLocalEcho: true });
+        callback({ video: request.frame, audio: request.audioRequested ? request.frame : undefined, enableLocalEcho: true });
         return;
       }
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
