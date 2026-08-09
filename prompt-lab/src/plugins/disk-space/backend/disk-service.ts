@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -23,7 +23,7 @@ function scannerPath(): string {
 export function setupDiskSpaceIPC(): void {
   ipcMain.handle('disk-space:pick-root', async () => {
     const window = BrowserWindow.getFocusedWindow();
-    const options: Electron.OpenDialogOptions = { properties: ['openDirectory'], title: '选择要分析的目录' };
+    const options: OpenDialogOptions = { properties: ['openDirectory'], title: '选择要分析的目录' };
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     const selected = result.canceled ? null : result.filePaths[0] ?? null;
     if (selected) authorizedRoots.add(fs.realpathSync(selected));
