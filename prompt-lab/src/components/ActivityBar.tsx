@@ -9,7 +9,7 @@ export const ActivityBar: React.FC = () => {
   usePluginRegistryVersion();
 
   // 从插件注册中心获取已启用的插件（按 order 排序）
-  const bottomNavigationPluginIds = new Set(['plugin-manager', 'database']);
+  const bottomNavigationPluginIds = new Set(['plugin-manager', 'database', 'screen-capture']);
   const plugins = pluginRegistry.getEnabled().filter((plugin) => !bottomNavigationPluginIds.has(plugin.id));
 
   return (
