@@ -2,7 +2,7 @@ const DIMENSIONS = 512;
 
 function tokens(text: string): string[] {
   const normalized = text.toLocaleLowerCase().normalize('NFKC');
-  const result = normalized.match(/[a-z0-9_.-]{2,}/g) ?? [];
+  const result: string[] = normalized.match(/[a-z0-9_.-]{2,}/g) ?? [];
   const chinese = normalized.replace(/[^\u3400-\u9fff]/g, '');
   for (let index = 0; index < chinese.length - 1; index += 1) {
     result.push(chinese.slice(index, index + 2));

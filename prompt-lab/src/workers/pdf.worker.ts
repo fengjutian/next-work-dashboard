@@ -12,4 +12,4 @@ if (typeof bytesPrototype.toHex !== 'function') {
   });
 }
 
-await import('pdfjs-dist/build/pdf.worker.min.mjs');
+void import('pdfjs-dist/build/pdf.worker.min.mjs');
