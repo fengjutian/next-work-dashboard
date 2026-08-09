@@ -120,6 +120,10 @@ const electronAPI: ElectronAPI = {
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
   generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
+  screenCapture: {
+    setTarget: (target) => ipcRenderer.send('screen-capture:set-target', target),
+    setRecordingState: (state) => ipcRenderer.send('screen-capture:recording-state', state),
+  },
   createEmbeddings: (payload: { baseUrl: string; apiKey: string; model: string; inputs: string[] }) =>
     ipcRenderer.invoke('embedding:create', payload),
   memoryIndex: {

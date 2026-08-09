@@ -1,9 +1,9 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { createWindow } from './main/window';
-import { createTray } from './main/tray';
+import { createTray, setTrayRecordingState } from './main/tray';
 import { setupIPC } from './main/ipc-handlers';
 import { registerShortcuts } from './main/shortcuts';
 import { destroyAll } from './plugins/terminal/backend/terminal-manager';
@@ -74,10 +74,19 @@ if (started) {
   app.whenReady().then(() => {
     const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
 
-    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    let captureTarget: 'app' | 'screen' = 'screen';
+    ipcMain.on('screen-capture:set-target', (_event, target: 'app' | 'screen') => { captureTarget = target === 'app' ? 'app' : 'screen'; });
+    ipcMain.on('screen-capture:recording-state', (_event, state: { recording: boolean; paused: boolean; seconds: number }) => setTrayRecordingState(state));
+
+    session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+      if (captureTarget === 'app' && request.frame) {
+        callback({ video: request.frame, audio: request.audioRequested ? 'loopback' : undefined, enableLocalEcho: true });
+        return;
+      }
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
-      callback({ video: sources[0] });
-    }, { useSystemPicker: true });
+      const primaryScreen = sources.find((source) => source.id.startsWith('screen:')) ?? sources[0];
+      callback({ video: primaryScreen, audio: request.audioRequested ? 'loopback' : undefined });
+    }, { useSystemPicker: false });
 
     openMainWindow();
     // setupIPC configures the existing window and observes future windows.
