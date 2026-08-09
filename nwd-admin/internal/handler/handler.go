@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -17,10 +16,8 @@ import (
 
 	"github.com/fjutian/nwd-admin/internal/model"
 	"github.com/fjutian/nwd-admin/internal/service"
+	viewfiles "github.com/fjutian/nwd-admin/internal/view"
 )
-
-//go:embed ../view/*
-var viewFS embed.FS
 
 var (
 	buildVersion  = "dev"
@@ -43,12 +40,12 @@ func init() {
 	if buildVersion == "" || buildVersion == "(devel)" {
 		buildVersion = "dev"
 	}
-	layoutBytes, err := viewFS.ReadFile("view/layout.html")
+	layoutBytes, err := viewfiles.FS.ReadFile("layout.html")
 	if err != nil {
 		panic(fmt.Sprintf("embed layout: %v", err))
 	}
 	baseLayout = template.Must(template.New("layout").Parse(string(layoutBytes)))
-	componentsBytes, err := viewFS.ReadFile("view/components.html")
+	componentsBytes, err := viewfiles.FS.ReadFile("components.html")
 	if err != nil {
 		panic(fmt.Sprintf("embed components: %v", err))
 	}
@@ -196,7 +193,7 @@ func (h *Handler) render(w http.ResponseWriter, pageFile string, data map[string
 	}
 	data["Version"] = buildVersion
 
-	pageBytes, err := viewFS.ReadFile("view/" + pageFile)
+	pageBytes, err := viewfiles.FS.ReadFile(pageFile)
 	if err != nil {
 		http.Error(w, "template not found: "+pageFile, 500)
 		return
