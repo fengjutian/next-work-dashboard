@@ -314,7 +314,7 @@ const electronAPI: ElectronAPI = {
 
   diskSpace: {
     pickRoot: () => ipcRenderer.invoke('disk-space:pick-root'),
-    start: (scanId: string, rootPath: string) => ipcRenderer.invoke('disk-space:start', scanId, rootPath),
+    start: (scanId: string, rootPath: string, options?: { exclusions?: string[] }) => ipcRenderer.invoke('disk-space:start', scanId, rootPath, options),
     cancel: (scanId: string) => ipcRenderer.invoke('disk-space:cancel', scanId),
     trash: (scanId: string, paths: string[]) => ipcRenderer.invoke('disk-space:trash', scanId, paths),
     onEvent: (callback) => {

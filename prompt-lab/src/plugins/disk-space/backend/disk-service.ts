@@ -42,11 +42,16 @@ export function setupDiskSpaceIPC(): void {
     if (selected) authorizedRoots.add(fs.realpathSync(selected));
     return selected;
   });
-  ipcMain.handle('disk-space:start', (event, scanId: string, rootPath: string) => {
+  ipcMain.handle('disk-space:start', (event, scanId: string, rootPath: string, options?: { exclusions?: string[] }) => {
     if (!scanId || typeof rootPath !== 'string' || scans.has(scanId)) throw new Error('无效或重复的扫描任务');
     const canonicalRoot = fs.realpathSync(rootPath);
     if (!authorizedRoots.has(canonicalRoot)) throw new Error('目录未经过用户授权，请重新选择');
-    const child = spawn(scannerPath(), ['scan', canonicalRoot], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const exclusions = [...new Set(options?.exclusions ?? [])];
+    if (exclusions.length > 20 || exclusions.some((value) => typeof value !== 'string' || value.length < 1 || value.length > 64 || value === '.' || value === '..' || /[\\/\0]/.test(value))) {
+      throw new Error('排除目录规则无效');
+    }
+    const scannerArguments = ['scan', canonicalRoot, ...exclusions.flatMap((value) => ['--exclude', value])];
+    const child = spawn(scannerPath(), scannerArguments, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     if (!child.stdout || !child.stderr) throw new Error('无法连接 Rust 扫描器输出');
     scans.set(scanId, child);
     scanResults.set(scanId, { root: canonicalRoot, files: new Map(), groups: new Map() });
