@@ -9,6 +9,33 @@ import { exportPlugin, importPlugin, rollbackPlugin } from './import-export';
 import { usePluginRegistryVersion } from '../usePluginRegistry';
 import { pluginStorage } from '../plugin-storage';
 
+type PluginCategoryId = 'ai' | 'knowledge' | 'office' | 'development' | 'productivity' | 'system' | 'custom';
+
+const PLUGIN_CATEGORIES: Array<{ id: PluginCategoryId; label: string; description: string }> = [
+  { id: 'ai', label: 'AI 与创作', description: 'AI 会话、提示词和内容创作' },
+  { id: 'knowledge', label: '知识管理', description: '知识库、图谱、阅读和文档检索' },
+  { id: 'office', label: '办公文档', description: 'Office、PDF、白板与文本处理' },
+  { id: 'development', label: '开发工具', description: '代码、终端、数据库与系统分析' },
+  { id: 'productivity', label: '效率服务', description: '便签、翻译、天气和语言学习' },
+  { id: 'system', label: '系统组件', description: '工作台自身的管理能力' },
+  { id: 'custom', label: '自定义插件', description: '导入或创建的 Sandbox 插件' },
+];
+
+const BUILT_IN_CATEGORY: Record<string, PluginCategoryId> = {
+  ai: 'ai', chat: 'ai', prompts: 'ai', 'style-image': 'ai',
+  history: 'knowledge', graph: 'knowledge', weread: 'knowledge', 'document-knowledge': 'knowledge',
+  'office-studio': 'office', 'word-preview': 'office', 'excel-preview': 'office', 'ppt-preview': 'office',
+  'pdf-preview': 'office', excalidraw: 'office', compare: 'office',
+  'code-editor': 'development', terminal: 'development', database: 'development', 'disk-space': 'development',
+  'screen-capture': 'productivity', notes: 'productivity', translator: 'productivity', windy: 'productivity',
+  'hanyu-jinjie': 'productivity', lingohut: 'productivity',
+  'plugin-manager': 'system',
+};
+
+function pluginCategory(id: string, isUserPlugin: boolean): PluginCategoryId {
+  return isUserPlugin ? 'custom' : BUILT_IN_CATEGORY[id] ?? 'system';
+}
+
 // ── 主面板 ──
 
 export const PluginManagerPanel: React.FC = () => {
@@ -18,12 +45,21 @@ export const PluginManagerPanel: React.FC = () => {
   // 弹层状态
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [safeMode, setSafeMode] = React.useState(() => pluginStorage.isSafeMode());
+  const [activeCategory, setActiveCategory] = React.useState<'all' | PluginCategoryId>('all');
 
   const allPlugins = pluginRegistry.getAll();
   const enabledCount = pluginRegistry.getEnabled().length;
 
   // 已存在的用户插件 ID 集合（每次渲染重新计算以保持同步）
-  const userPluginIds = new Set(loadUserPlugins().map((d) => d.id));
+  const userDefs = loadUserPlugins();
+  const userPluginIds = new Set(userDefs.map((d) => d.id));
+  const categorizedPlugins = PLUGIN_CATEGORIES.map((category) => ({
+    ...category,
+    plugins: allPlugins.filter((plugin) => pluginCategory(plugin.id, userPluginIds.has(plugin.id)) === category.id),
+  })).filter((category) => category.plugins.length > 0);
+  const visibleCategories = activeCategory === 'all'
+    ? categorizedPlugins
+    : categorizedPlugins.filter((category) => category.id === activeCategory);
 
   // ── 删除用户插件 ──
   const handleDelete = (id: string) => {
@@ -92,6 +128,33 @@ export const PluginManagerPanel: React.FC = () => {
         onCreated={() => undefined}
       />
 
+      {/* 分类筛选 */}
+      <div className="shrink-0 border-b bg-muted/20 px-4 py-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-0.5" role="tablist" aria-label="插件分类">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === 'all'}
+            onClick={() => setActiveCategory('all')}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${activeCategory === 'all' ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-background text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+          >
+            全部 <span className="ml-1 opacity-75">{allPlugins.length}</span>
+          </button>
+          {categorizedPlugins.map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              role="tab"
+              aria-selected={activeCategory === category.id}
+              onClick={() => setActiveCategory(category.id)}
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${activeCategory === category.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-background text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+            >
+              {category.label} <span className="ml-1 opacity-75">{category.plugins.length}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* 插件卡片网格 */}
       <div className="flex-1 overflow-y-auto p-4">
         {allPlugins.length === 0 ? (
@@ -99,63 +162,74 @@ export const PluginManagerPanel: React.FC = () => {
             暂无已注册的插件，点击"新建插件"开始
           </p>
         ) : (
-          <div className="grid grid-cols-4 gap-3">
-            {allPlugins.map((plugin) => {
-              const Icon = plugin.icon;
-              const isUserPlugin = userPluginIds.has(plugin.id);
-              const userDefs = loadUserPlugins();
-              const def = userDefs.find((d) => d.id === plugin.id);
-              const isScriptPlugin = def?.script != null && def.script.length > 0;
-              return (
-                <PluginCard
-                  key={plugin.id}
-                  plugin={plugin}
-                  Icon={Icon}
-                  isUserPlugin={isUserPlugin}
-                  isScriptPlugin={isScriptPlugin}
-                  onDelete={handleDelete}
-                  onExport={async (id) => {
-                    const defs = loadUserPlugins();
-                    const def = defs.find((d) => d.id === id);
-                    if (def) exportPlugin(def);
-                  }}
-                  onRollback={(id) => alert(rollbackPlugin(id).message)}
-                  onLogs={(id) => {
-                    const logs = pluginStorage.getLogs(id);
-                    alert(logs.length ? logs.map((entry) => `[${entry.level}] ${entry.message}`).join('\n') : '暂无日志');
-                  }}
-                  onToggle={(id) => {
-                    const p = pluginRegistry.get(id);
-                    if (p) {
-                      const nextEnabled = !p.enabled;
-                      pluginRegistry.setEnabled(id, nextEnabled);
-                      if (isUserPlugin) {
-                        const defs = loadUserPlugins().map((def) => def.id === id
-                          ? { ...def, enabled: nextEnabled }
-                          : def);
-                        saveUserPlugins(defs);
-                      }
-                      if (isDbReady()) {
-                        // 只保存与内置默认值不同的差量，避免修改默认值后被旧快照覆盖
-                        const builtInDefaults: Record<string, boolean> = {};
-                        for (const bp of builtInPlugins) builtInDefaults[bp.id] = bp.enabled;
-                        const full = pluginRegistry.getEnabledSnapshot();
-                        const delta: Record<string, boolean> = {};
-                        for (const [id, enabled] of Object.entries(full)) {
-                          if (builtInDefaults[id] === undefined || builtInDefaults[id] !== enabled) {
-                            delta[id] = enabled;
+          <div className="space-y-7">
+            {visibleCategories.map((category) => (
+              <section key={category.id} aria-labelledby={`plugin-category-${category.id}`}>
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 id={`plugin-category-${category.id}`} className="text-sm font-semibold text-foreground">{category.label}</h3>
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground">{category.plugins.filter((plugin) => plugin.enabled).length}/{category.plugins.length} 已启用</span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">{category.description}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {category.plugins.map((plugin) => {
+                    const Icon = plugin.icon;
+                    const isUserPlugin = userPluginIds.has(plugin.id);
+                    const def = userDefs.find((item) => item.id === plugin.id);
+                    const isScriptPlugin = def?.script != null && def.script.length > 0;
+                    return (
+                      <PluginCard
+                        key={plugin.id}
+                        plugin={plugin}
+                        Icon={Icon}
+                        isUserPlugin={isUserPlugin}
+                        isScriptPlugin={isScriptPlugin}
+                        onDelete={handleDelete}
+                        onExport={(id) => {
+                          const item = loadUserPlugins().find((definition) => definition.id === id);
+                          if (item) void exportPlugin(item);
+                        }}
+                        onRollback={(id) => alert(rollbackPlugin(id).message)}
+                        onLogs={(id) => {
+                          const logs = pluginStorage.getLogs(id);
+                          alert(logs.length ? logs.map((entry) => `[${entry.level}] ${entry.message}`).join('\n') : '暂无日志');
+                        }}
+                        onToggle={(id) => {
+                          const p = pluginRegistry.get(id);
+                          if (p) {
+                            const nextEnabled = !p.enabled;
+                            pluginRegistry.setEnabled(id, nextEnabled);
+                            if (isUserPlugin) {
+                              const defs = loadUserPlugins().map((item) => item.id === id
+                                ? { ...item, enabled: nextEnabled }
+                                : item);
+                              saveUserPlugins(defs);
+                            }
+                            if (isDbReady()) {
+                              // 只保存与内置默认值不同的差量，避免修改默认值后被旧快照覆盖
+                              const builtInDefaults: Record<string, boolean> = {};
+                              for (const bp of builtInPlugins) builtInDefaults[bp.id] = bp.enabled;
+                              const full = pluginRegistry.getEnabledSnapshot();
+                              const delta: Record<string, boolean> = {};
+                              for (const [pluginId, enabled] of Object.entries(full)) {
+                                if (builtInDefaults[pluginId] === undefined || builtInDefaults[pluginId] !== enabled) {
+                                  delta[pluginId] = enabled;
+                                }
+                              }
+                              dbSetSetting('plugin.enabled.delta', JSON.stringify(delta));
+                              void flushDbToDisk();
+                            }
                           }
-                        }
-                        dbSetSetting('plugin.enabled.delta', JSON.stringify(delta));
-                        // Plugin visibility is user intent, so persist it before a reload can
-                        // restore built-in defaults. The periodic flush remains a safety net.
-                        void flushDbToDisk();
-                      }
-                    }
-                  }}
-                />
-              );
-            })}
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </div>
