@@ -1,4 +1,4 @@
-# nwd-admin config — override via env vars: NWD_SERVER_ADDR, NWD_LOG_LEVEL, etc.
+# nwd-admin config — override via env vars: SERVER_ADDR, LOG_LEVEL, etc.
 server:
   addr: ":8090"
   read_timeout: 5
