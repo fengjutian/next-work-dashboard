@@ -34,6 +34,7 @@ export default function App() {
   const [bottomOverlay, setBottomOverlay] = React.useState<'database' | 'plugin-manager' | 'settings' | null>(null);
   const [captureMode, setCaptureMode] = React.useState<CaptureMode | null>(null);
   const [captureStatus, setCaptureStatus] = React.useState({ recording: false, paused: false, seconds: 0 });
+  const [captureCountdown, setCaptureCountdown] = React.useState(0);
   const visitedPluginIds = React.useRef(new Set<string>());
   if (activeActivity) visitedPluginIds.current.add(activeActivity);
 
@@ -59,9 +60,11 @@ export default function App() {
   React.useEffect(() => {
     const update = (event: Event) => setCaptureStatus((event as CustomEvent<typeof captureStatus>).detail);
     const hide = () => setCaptureMode(null);
+    const countdown = (event: Event) => setCaptureCountdown((event as CustomEvent<number>).detail);
     window.addEventListener('screen-capture:state', update);
     window.addEventListener('screen-capture:hide', hide);
-    return () => { window.removeEventListener('screen-capture:state', update); window.removeEventListener('screen-capture:hide', hide); };
+    window.addEventListener('screen-capture:countdown', countdown);
+    return () => { window.removeEventListener('screen-capture:state', update); window.removeEventListener('screen-capture:hide', hide); window.removeEventListener('screen-capture:countdown', countdown); };
   }, []);
 
   const bottomOverlayPlugin = bottomOverlay === 'database' || bottomOverlay === 'plugin-manager'
@@ -165,6 +168,8 @@ export default function App() {
             <button type="button" className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCaptureMode(null)} title="关闭" aria-label="关闭屏幕捕获"><X className="h-4 w-4" /></button>
           </section>
       </div>
+
+      {captureCountdown > 0 && <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-black/35 backdrop-blur-[2px]" aria-live="assertive" aria-label={`录屏将在 ${captureCountdown} 秒后开始`}><div className="flex h-40 w-40 animate-pulse items-center justify-center rounded-full border-4 border-white/80 bg-[#61245b]/95 text-7xl font-bold text-white shadow-2xl">{captureCountdown}</div><div className="absolute mt-56 rounded-full bg-black/70 px-5 py-2 text-sm text-white">录屏即将开始</div></div>}
 
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
       <div className="h-7 flex items-center px-2 border-t border-[#61245b] bg-[#61245b] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(97_36_91_/_0.16)]">

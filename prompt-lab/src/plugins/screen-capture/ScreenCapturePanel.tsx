@@ -12,6 +12,14 @@ const hideCapturePanel = async () => {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
   await new Promise((resolve) => window.setTimeout(resolve, 420));
 };
+const recordingCountdown = async () => {
+  for (const value of [3, 2, 1]) {
+    window.dispatchEvent(new CustomEvent('screen-capture:countdown', { detail: value }));
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+  }
+  window.dispatchEvent(new CustomEvent('screen-capture:countdown', { detail: 0 }));
+  await new Promise((resolve) => window.setTimeout(resolve, 240));
+};
 const displayStream = (target: 'app' | 'screen', audio: boolean) => {
   window.electronAPI.screenCapture.setTarget(target);
   return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
@@ -75,13 +83,16 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> 
     setBusy(true);
     try {
       await hideCapturePanel();
+      await recordingCountdown();
       const display = await displayStream(target, systemAudio);
       let mic: MediaStream | undefined;
       try { if (microphone) mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
       catch (error) { display.getTracks().forEach((track) => track.stop()); throw new Error(`无法使用麦克风：${error instanceof Error ? error.message : String(error)}`); }
-      const audioStreams = [systemAudio && display.getAudioTracks().length ? display : undefined, microphone ? mic : undefined].filter((item): item is MediaStream => Boolean(item));
-      let mixedAudioTracks: MediaStreamTrack[] = [];
-      if (audioStreams.length) {
+      const sourceAudioTracks = [...(systemAudio ? display.getAudioTracks() : []), ...(microphone ? (mic?.getAudioTracks() ?? []) : [])];
+      sourceAudioTracks.forEach((track) => { track.enabled = true; });
+      let mixedAudioTracks: MediaStreamTrack[] = sourceAudioTracks;
+      if (sourceAudioTracks.length > 1) {
+        const audioStreams = [display.getAudioTracks().length ? display : undefined, mic].filter((item): item is MediaStream => Boolean(item));
         const context = new AudioContext(); audioContext.current = context;
         const destination = context.createMediaStreamDestination();
         audioStreams.forEach((audioStream) => context.createMediaStreamSource(audioStream).connect(destination));
@@ -95,7 +106,7 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> 
       const capture = new MediaStream([...display.getVideoTracks(), ...mixedAudioTracks]);
       stream.current = capture;
       const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(MediaRecorder.isTypeSupported);
-      const mediaRecorder = new MediaRecorder(capture, mimeType ? { mimeType } : undefined);
+      const mediaRecorder = new MediaRecorder(capture, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 192_000, videoBitsPerSecond: 6_000_000 });
       recorder.current = mediaRecorder; chunks.current = []; setSeconds(0); setPaused(false);
       mediaRecorder.ondataavailable = (event) => { if (event.data.size) chunks.current.push(event.data); };
       mediaRecorder.onstop = () => {
