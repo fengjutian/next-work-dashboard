@@ -9,14 +9,15 @@ const timeLabel = (seconds: number) => `${String(Math.floor(seconds / 60)).padSt
 const save = (url: string, name: string) => { const link = document.createElement('a'); link.href = url; link.download = name; link.click(); };
 const hideCapturePanel = async () => {
   window.dispatchEvent(new CustomEvent('screen-capture:hide'));
-  await new Promise((resolve) => window.setTimeout(resolve, 180));
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
+  await new Promise((resolve) => window.setTimeout(resolve, 420));
 };
 const displayStream = (target: 'app' | 'screen', audio: boolean) => {
   window.electronAPI.screenCapture.setTarget(target);
   return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
 };
 
-export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ initialMode = 'screenshot' }) => {
+export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> = ({ initialMode = 'screenshot' }) => {
   const [notice, holder] = notification.useNotification();
   const [mode, setMode] = useState<CaptureMode>(initialMode);
   const [busy, setBusy] = useState(false);
@@ -30,9 +31,10 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
   const [microphone, setMicrophone] = useState(false);
   const recorder = useRef<MediaRecorder>();
   const stream = useRef<MediaStream>();
+  const audioContext = useRef<AudioContext>();
   const chunks = useRef<Blob[]>([]);
 
-  useEffect(() => { if (!recording) setMode(initialMode); }, [initialMode, recording]);
+  useEffect(() => { if (initialMode && !recording) setMode(initialMode); }, [initialMode, recording]);
   useEffect(() => {
     if (!recording || paused) return;
     const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
@@ -45,6 +47,7 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
   }, [paused, recording, seconds]);
   useEffect(() => () => {
     stream.current?.getTracks().forEach((track) => track.stop());
+    void audioContext.current?.close();
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
   }, [imageUrl, videoUrl]);
@@ -55,6 +58,7 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
       await hideCapturePanel();
       capture = await displayStream(target, false);
       const preview = document.createElement('video'); preview.srcObject = capture; preview.muted = true; await preview.play();
+      await new Promise((resolve) => window.setTimeout(resolve, 160));
       const canvas = document.createElement('canvas'); canvas.width = preview.videoWidth; canvas.height = preview.videoHeight;
       canvas.getContext('2d')?.drawImage(preview, 0, 0);
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
@@ -75,7 +79,20 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
       let mic: MediaStream | undefined;
       try { if (microphone) mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
       catch (error) { display.getTracks().forEach((track) => track.stop()); throw new Error(`无法使用麦克风：${error instanceof Error ? error.message : String(error)}`); }
-      const capture = new MediaStream([...display.getVideoTracks(), ...display.getAudioTracks(), ...(mic?.getAudioTracks() ?? [])]);
+      const audioStreams = [systemAudio && display.getAudioTracks().length ? display : undefined, microphone ? mic : undefined].filter((item): item is MediaStream => Boolean(item));
+      let mixedAudioTracks: MediaStreamTrack[] = [];
+      if (audioStreams.length) {
+        const context = new AudioContext(); audioContext.current = context;
+        const destination = context.createMediaStreamDestination();
+        audioStreams.forEach((audioStream) => context.createMediaStreamSource(audioStream).connect(destination));
+        await context.resume();
+        mixedAudioTracks = destination.stream.getAudioTracks();
+      }
+      if ((systemAudio || microphone) && mixedAudioTracks.length === 0) {
+        display.getTracks().forEach((track) => track.stop()); mic?.getTracks().forEach((track) => track.stop());
+        throw new Error(systemAudio ? '系统没有返回可录制的声音轨道，请确认 Windows 允许系统音频捕获' : '麦克风没有返回声音轨道');
+      }
+      const capture = new MediaStream([...display.getVideoTracks(), ...mixedAudioTracks]);
       stream.current = capture;
       const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(MediaRecorder.isTypeSupported);
       const mediaRecorder = new MediaRecorder(capture, mimeType ? { mimeType } : undefined);
@@ -84,11 +101,13 @@ export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode }> = ({ in
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks.current, { type: mediaRecorder.mimeType || 'video/webm' });
         setVideoUrl((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(blob); });
-        capture.getTracks().forEach((track) => track.stop()); display.getTracks().forEach((track) => track.stop()); mic?.getTracks().forEach((track) => track.stop()); stream.current = undefined; recorder.current = undefined;
+        capture.getTracks().forEach((track) => track.stop()); display.getTracks().forEach((track) => track.stop()); mic?.getTracks().forEach((track) => track.stop());
+        void audioContext.current?.close(); audioContext.current = undefined; stream.current = undefined; recorder.current = undefined;
         setRecording(false); setPaused(false); notice.success({ message: '录屏完成', description: '录像可以预览或下载。', placement: 'bottomRight' });
       };
       display.getVideoTracks()[0]?.addEventListener('ended', stop, { once: true });
       mediaRecorder.start(1000); setRecording(true);
+      notice.info({ message: '录屏已开始', description: mixedAudioTracks.length ? `声音已连接：${[systemAudio ? '系统声音' : '', microphone ? '麦克风' : ''].filter(Boolean).join(' + ')}` : '本次录制不包含声音', placement: 'bottomRight', duration: 4 });
     } catch (error) {
       if (!(error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name))) notice.error({ message: '无法开始录屏', description: error instanceof Error ? error.message : String(error) });
     } finally { setBusy(false); }

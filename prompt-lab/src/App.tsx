@@ -161,7 +161,7 @@ export default function App() {
 
       <div className="fixed inset-0 z-50 items-center justify-center bg-black/45 p-5" style={{ display: captureMode ? 'flex' : 'none' }} onMouseDown={() => setCaptureMode(null)} aria-hidden={!captureMode}>
           <section className="relative flex h-[82vh] w-[86vw] max-w-[1400px] flex-col overflow-hidden rounded-xl border bg-background shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="屏幕捕获">
-            <div className="min-h-0 flex-1"><ScreenCapturePanel initialMode={captureMode ?? 'screenshot'} /></div>
+            <div className="min-h-0 flex-1"><ScreenCapturePanel initialMode={captureMode} /></div>
             <button type="button" className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => setCaptureMode(null)} title="关闭" aria-label="关闭屏幕捕获"><X className="h-4 w-4" /></button>
           </section>
       </div>
@@ -169,7 +169,7 @@ export default function App() {
       {/* 底部状态栏 — 插件状态栏项 + 设置 */}
       <div className="h-7 flex items-center px-2 border-t border-[#61245b] bg-[#61245b] text-white/85 select-none flex-shrink-0 gap-2 shadow-[0_-1px_3px_rgb(97_36_91_/_0.16)]">
         <PluginStatusBar />
-        <button className={`flex h-6 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors ${captureMode === 'screenshot' ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/15 hover:text-white'}`} onClick={() => { setBottomOverlay(null); setCaptureMode((current) => current === 'screenshot' ? null : 'screenshot'); }} title="截屏" aria-label="截屏"><Camera className="h-4 w-4" /></button>
+        <button disabled={captureStatus.recording} className={`flex h-6 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${captureMode === 'screenshot' ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/15 hover:text-white'}`} onClick={() => { setBottomOverlay(null); setCaptureMode((current) => current === 'screenshot' ? null : 'screenshot'); }} title={captureStatus.recording ? '请先停止录屏，再使用截屏' : '截屏'} aria-label="截屏"><Camera className="h-4 w-4" /></button>
         <button className={`flex h-6 flex-shrink-0 items-center justify-center gap-1 rounded-md px-1.5 transition-colors ${captureStatus.recording ? 'bg-red-500/90 text-white' : captureMode === 'recording' ? 'bg-white/20 text-white' : 'text-white/80 hover:bg-white/15 hover:text-white'}`} onClick={() => { setBottomOverlay(null); setCaptureMode((current) => current === 'recording' ? null : 'recording'); }} title={captureStatus.recording ? '正在录屏，点击返回控制界面' : '录屏'} aria-label="录屏"><Video className="h-4 w-4" />{captureStatus.recording && <span className="font-mono text-[10px]">{String(Math.floor(captureStatus.seconds / 60)).padStart(2, '0')}:{String(captureStatus.seconds % 60).padStart(2, '0')}</span>}</button>
         <button
           className={`h-6 w-7 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
