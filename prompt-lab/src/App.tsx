@@ -58,8 +58,10 @@ export default function App() {
   }, [bottomOverlay, captureMode]);
   React.useEffect(() => {
     const update = (event: Event) => setCaptureStatus((event as CustomEvent<typeof captureStatus>).detail);
+    const hide = () => setCaptureMode(null);
     window.addEventListener('screen-capture:state', update);
-    return () => window.removeEventListener('screen-capture:state', update);
+    window.addEventListener('screen-capture:hide', hide);
+    return () => { window.removeEventListener('screen-capture:state', update); window.removeEventListener('screen-capture:hide', hide); };
   }, []);
 
   const bottomOverlayPlugin = bottomOverlay === 'database' || bottomOverlay === 'plugin-manager'
