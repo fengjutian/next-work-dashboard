@@ -3,7 +3,7 @@ import { analyzeLines, countHan, detectRhyme, projectToText, rhymePattern, rhyme
 import { matchesProject } from '../src/plugins/lyric-studio/project-store';
 import type { LyricProject } from '../src/plugins/lyric-studio/types';
 
-const project: LyricProject = { id: '1', title: '夏夜', theme: '告别', style: '流行', emotion: '遗憾', language: '中文', bpm: 72, location: '车站', time: '黄昏', story: '没有说完的告别', coreImages: ['车票', '街灯', '雨'], tags: ['青春'], favorite: true, collection: '夏日 EP', status: 'draft', coverColor: '#7c3aed', updatedAt: 0, sections: [
+const project: LyricProject = { id: '1', title: '夏夜', theme: '告别', style: '流行', emotion: '遗憾', language: '中文', bpm: 72, location: '车站', time: '黄昏', story: '没有说完的告别', coreImages: ['车票', '街灯', '雨'], tags: ['青春'], favorite: true, collection: '夏日 EP', status: 'draft', coverColor: '#7c3aed', creativePrompt: '', promptHistory: [], promptPriority: 'prompt', scratchpad: '', beatMarks: {}, favoriteLines: [], updatedAt: 0, sections: [
   { id: 'v', kind: 'Verse', title: 'Verse 1', lyrics: '晚风吹过那片天空\n回忆突然开始失控', emotion: '克制', rhyme: 'ong', syllables: '8-10' },
   { id: 'c', kind: 'Chorus', title: 'Chorus', lyrics: '如果时间能够倒流\n如果时间能够倒流', emotion: '释放', rhyme: 'ou', syllables: '8-10' },
 ] };

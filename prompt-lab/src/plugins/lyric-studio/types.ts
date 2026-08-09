@@ -10,6 +10,7 @@ export interface LyricSection {
   syllables: string;
   locked?: boolean;
   collapsed?: boolean;
+  bars?: number;
 }
 
 export interface LyricProject {
@@ -33,6 +34,8 @@ export interface LyricProject {
   promptHistory: Array<{ id: string; content: string; createdAt: number; model: string }>;
   promptPriority: 'prompt' | 'planning';
   scratchpad: string;
+  beatMarks: Record<string, 'accent' | 'hold' | 'rest' | 'pickup'>;
+  favoriteLines: string[];
   sections: LyricSection[];
   updatedAt: number;
 }
