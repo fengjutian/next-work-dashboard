@@ -293,6 +293,22 @@ function ensureSchema(): void {
       embedding_mode TEXT NOT NULL DEFAULT 'hash-fallback', created_at INTEGER NOT NULL, last_viewed_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_document_knowledge_viewed ON document_knowledge_records(last_viewed_at DESC);
+    CREATE TABLE IF NOT EXISTS lyric_generated_music (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      format TEXT NOT NULL DEFAULT 'mp3',
+      duration_ms INTEGER,
+      sample_rate INTEGER,
+      bitrate INTEGER,
+      size INTEGER NOT NULL,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      audio BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_lyric_music_project ON lyric_generated_music(project_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -865,6 +881,30 @@ export function dbTouchDocumentKnowledge(id: string, lastViewedAt = Date.now()):
   getDb().update(schema.documentKnowledgeRecords).set({ lastViewedAt }).where(eq(schema.documentKnowledgeRecords.id, id)).run();
 }
 export function dbDeleteDocumentKnowledge(id: string): void { getDb().delete(schema.documentKnowledgeRecords).where(eq(schema.documentKnowledgeRecords.id, id)).run(); }
+
+export interface DbGeneratedMusicRecord {
+  id: string; projectId: string; title: string; model: string; prompt: string; format: 'mp3' | 'wav';
+  durationMs?: number; sampleRate?: number; bitrate?: number; size: number; favorite: boolean; createdAt: number; audio: Uint8Array;
+}
+
+export async function dbSaveGeneratedMusic(record: DbGeneratedMusicRecord): Promise<void> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  _sqlDb.run(`INSERT OR REPLACE INTO lyric_generated_music
+    (id, project_id, title, model, prompt, format, duration_ms, sample_rate, bitrate, size, favorite, created_at, audio)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [record.id, record.projectId, record.title, record.model, record.prompt, record.format, record.durationMs ?? null, record.sampleRate ?? null, record.bitrate ?? null, record.size, record.favorite ? 1 : 0, record.createdAt, record.audio]);
+  await flushDbToDisk();
+}
+
+export function dbListGeneratedMusic(projectId: string): DbGeneratedMusicRecord[] {
+  if (!_sqlDb) return [];
+  const statement = _sqlDb.prepare('SELECT * FROM lyric_generated_music WHERE project_id = ? ORDER BY created_at DESC');
+  statement.bind([projectId]); const records: DbGeneratedMusicRecord[] = [];
+  while (statement.step()) { const row = statement.getAsObject(); records.push({ id: String(row.id), projectId: String(row.project_id), title: String(row.title), model: String(row.model), prompt: String(row.prompt), format: row.format === 'wav' ? 'wav' : 'mp3', durationMs: row.duration_ms == null ? undefined : Number(row.duration_ms), sampleRate: row.sample_rate == null ? undefined : Number(row.sample_rate), bitrate: row.bitrate == null ? undefined : Number(row.bitrate), size: Number(row.size), favorite: Boolean(row.favorite), createdAt: Number(row.created_at), audio: row.audio as Uint8Array }); }
+  statement.free(); return records;
+}
+
+export async function dbDeleteGeneratedMusic(id: string): Promise<void> { if (!_sqlDb) throw new Error('DB not initialized'); _sqlDb.run('DELETE FROM lyric_generated_music WHERE id = ?', [id]); await flushDbToDisk(); }
+export async function dbUpdateGeneratedMusic(id: string, patch: { title?: string; favorite?: boolean }): Promise<void> { if (!_sqlDb) throw new Error('DB not initialized'); if (patch.title !== undefined) _sqlDb.run('UPDATE lyric_generated_music SET title = ? WHERE id = ?', [patch.title, id]); if (patch.favorite !== undefined) _sqlDb.run('UPDATE lyric_generated_music SET favorite = ? WHERE id = ?', [patch.favorite ? 1 : 0, id]); await flushDbToDisk(); }
 
 // ═══════════════════════════════════════════
 // 数据库浏览器（只读查询）
