@@ -26,6 +26,7 @@ export function chunkDocument(document: ParsedDocument, options: ChunkOptions = 
         sectionTitle: section.title,
         page: section.page,
         content,
+        chunkIndex: index,
       });
       if (end >= text.length) break;
       start = Math.max(start + 1, end - overlapChars);

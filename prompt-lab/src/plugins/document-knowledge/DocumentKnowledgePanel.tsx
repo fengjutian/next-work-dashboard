@@ -9,7 +9,7 @@ import { useStore } from '@/store';
 import { toast } from '@/components/Toast';
 import { indexDocument, embedQuestion, reembedDocumentChunks } from './pipeline';
 import type { EmbeddingMode } from './pipeline';
-import { buildRagContext, retrieve } from './retrieval';
+import { buildRagContext, prepareRetrievalHits, retrieve } from './retrieval';
 import { isSupportedDocument } from './parser';
 import type { DocumentChunk, ParsedDocument, RagMessage } from './types';
 import { previewParagraphs } from './preview';
@@ -55,7 +55,10 @@ async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChu
   }
 }
 
-async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: number[], modelId: string, limit: number) {
+async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: number[], modelId: string, options: {
+  limit: number; minScore: number; maxPerDocument: number; contextBudget: number;
+}) {
+  const { limit } = options;
   const legacyVectorCandidates = retrieve(chunks, vector, Math.max(50, limit * 10));
   try {
     const lanceMatches = await window.electronAPI.ragWorker.vectorSearch({ vector, modelId, topK: Math.max(50, limit * 10) });
@@ -66,23 +69,25 @@ async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: nu
     });
     const vectorCandidates = lanceCandidates.length ? lanceCandidates : legacyVectorCandidates;
     const lexical = await window.electronAPI.ragWorker.keywordSearch({ query, topK: Math.max(50, limit * 10) });
+    const lexicalScores = new Map(lexical.hits.map((hit) => [hit.chunkId, hit.score]));
     const fused = await window.electronAPI.ragWorker.fuseResults({
       lists: [
         { ids: vectorCandidates.map((hit) => hit.id) },
         { ids: lexical.hits.map((hit) => hit.chunkId) },
       ],
-      topK: limit,
+      topK: Math.max(30, limit * 5),
       rankConstant: 60,
     });
     const vectorScores = new Map(vectorCandidates.map((hit) => [hit.id, hit.score]));
     const hits = fused.hits.flatMap((hit) => {
       const chunk = byId.get(hit.chunkId);
-      return chunk ? [{ ...chunk, score: vectorScores.get(chunk.id) ?? hit.score }] : [];
+      return chunk ? [{ ...chunk, score: vectorScores.get(chunk.id) ?? Math.min(1, hit.score * 60),
+        retrievalScores: { vector: vectorScores.get(chunk.id), lexical: lexicalScores.get(chunk.id), fused: hit.score } }] : [];
     });
-    return hits.length ? hits : vectorCandidates.slice(0, limit);
+    return prepareRetrievalHits(hits.length ? hits : vectorCandidates, options);
   } catch (error) {
     console.warn('[DocumentKnowledge] Rust hybrid retrieval unavailable; using vector search.', error);
-    return legacyVectorCandidates.slice(0, limit);
+    return prepareRetrievalHits(legacyVectorCandidates, options);
   }
 }
 
@@ -251,7 +256,12 @@ export const DocumentKnowledgePanel: React.FC = () => {
     try {
       if (!embeddingMode) throw new Error('文档索引模式不可用，请重新上传文档');
       const vector = await embedQuestion(content, memoryConfig, embeddingMode);
-      const hits = await hybridRetrieve(chunks, content, vector, embeddingIdentity(embeddingMode, memoryConfig), memoryConfig.recallCount || 5);
+      const hits = await hybridRetrieve(chunks, content, vector, embeddingIdentity(embeddingMode, memoryConfig), {
+        limit: memoryConfig.recallCount || 5,
+        minScore: memoryConfig.minScore,
+        maxPerDocument: memoryConfig.maxPerDocument,
+        contextBudget: memoryConfig.contextBudget,
+      });
       const provider = createOpenAIProvider(aiApi);
       const prompt = `仅根据以下资料回答问题。资料不足时明确说明，不要编造。引用结论时使用 [资料 N] 标记。\n\n${buildRagContext(hits)}\n\n问题：${content}`;
       let answer = '';
@@ -336,7 +346,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
         {!messages.length && <div className="text-xs text-muted-foreground leading-6">完成解析和向量化后，可针对全部已上传文档提问。回答会附带命中的文件、章节和页码。</div>}
         {messages.map((message) => <div key={message.id} className={message.role === 'user' ? 'ml-8 rounded-lg bg-primary text-primary-foreground p-3 text-sm' : 'mr-4 rounded-lg bg-muted p-3 text-sm'}>
           {message.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content || '正在生成…'}</ReactMarkdown> : message.content}
-          {!!message.sources?.length && <details className="mt-3 text-[11px] text-muted-foreground"><summary className="cursor-pointer">查看 {message.sources.length} 条引用</summary>{message.sources.map((source, index) => <div key={source.id} className="mt-2 border-t pt-2"><b>[资料 {index + 1}] {source.documentName}</b> · {source.sectionTitle}{source.page ? ` · 第 ${source.page} 页` : ''}<div className="line-clamp-3">{source.content}</div></div>)}</details>}
+          {!!message.sources?.length && <details className="mt-3 text-[11px] text-muted-foreground"><summary className="cursor-pointer">查看 {message.sources.length} 条引用</summary>{message.sources.map((source, index) => <div key={source.id} className="mt-2 border-t pt-2"><b>[资料 {index + 1}] {source.documentName}</b> · {source.sectionTitle}{source.page ? ` · 第 ${source.page} 页` : ''}{source.mergedChunkIds && <span> · 合并 {source.mergedChunkIds.length} 段</span>}<div className="mt-0.5 text-[10px]">综合 {source.retrievalScores?.fused?.toFixed(4) ?? source.score.toFixed(4)}{source.retrievalScores?.vector !== undefined ? ` · 向量 ${source.retrievalScores.vector.toFixed(3)}` : ''}{source.retrievalScores?.lexical !== undefined ? ` · 关键词 ${source.retrievalScores.lexical.toFixed(3)}` : ''}</div><div className="line-clamp-3">{source.content}</div></div>)}</details>}
         </div>)}
       </div>
       <div className="border-t p-3 flex gap-2"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder={chunks.length ? '询问这些文档…' : '请先上传并索引文档'} disabled={!chunks.length}

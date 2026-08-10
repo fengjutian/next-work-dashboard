@@ -28,10 +28,13 @@ export interface DocumentChunk {
   page?: number;
   content: string;
   vector: number[];
+  chunkIndex?: number;
 }
 
 export interface RetrievalHit extends DocumentChunk {
   score: number;
+  mergedChunkIds?: string[];
+  retrievalScores?: { vector?: number; lexical?: number; fused?: number };
 }
 
 export interface RagMessage {
