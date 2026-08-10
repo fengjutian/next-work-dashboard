@@ -33,16 +33,9 @@ export const ActivityBar: React.FC = () => {
             onMouseEnter={warm}
             onFocus={warm}
             onPointerDown={warm}
-            onClick={async () => {
-              if (!isActive) {
-                try {
-                  await prepare();
-                } catch (error) {
-                  console.error(`[ActivityBar] Failed to activate plugin "${id}"`, error);
-                  return;
-                }
-              }
+            onClick={() => {
               setActiveActivity(isActive ? null : id);
+              if (!isActive) warm();
             }}
             title={label}
           >

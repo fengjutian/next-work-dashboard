@@ -71,18 +71,16 @@ export default function App() {
     ? pluginRegistry.get(bottomOverlay)
     : undefined;
   const BottomOverlayPanel = bottomOverlayPlugin?.component;
-  const openPluginOverlay = async (id: 'database' | 'plugin-manager') => {
+  const openPluginOverlay = (id: 'database' | 'plugin-manager') => {
     if (bottomOverlay === id) {
       setBottomOverlay(null);
       return;
     }
     const plugin = pluginRegistry.get(id);
-    try {
-      await plugin?.preload?.();
-      setBottomOverlay(id);
-    } catch (error) {
+    setBottomOverlay(id);
+    void plugin?.preload?.().catch((error) => {
       console.error(`[App] Failed to open plugin overlay "${id}"`, error);
-    }
+    });
   };
 
   return (
@@ -184,7 +182,7 @@ export default function App() {
           }`}
           onMouseEnter={() => { void pluginRegistry.get('database')?.preload?.().catch(console.error); }}
           onFocus={() => { void pluginRegistry.get('database')?.preload?.().catch(console.error); }}
-          onClick={() => { void openPluginOverlay('database'); }}
+          onClick={() => openPluginOverlay('database')}
           title="数据库浏览器"
           aria-label="数据库浏览器"
         >
@@ -198,7 +196,7 @@ export default function App() {
           }`}
           onMouseEnter={() => { void pluginRegistry.get('plugin-manager')?.preload?.().catch(console.error); }}
           onFocus={() => { void pluginRegistry.get('plugin-manager')?.preload?.().catch(console.error); }}
-          onClick={() => { void openPluginOverlay('plugin-manager'); }}
+          onClick={() => openPluginOverlay('plugin-manager')}
           title="插件管理"
           aria-label="插件管理"
         >
