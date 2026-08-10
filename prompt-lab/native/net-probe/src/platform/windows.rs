@@ -15,7 +15,7 @@ use windows::Win32::NetworkManagement::IpHelper::{
     Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho, ICMP_ECHO_REPLY,
     IP_OPTION_INFORMATION,
 };
-use windows::Win32::Networking::WinSock::{WSAStartup, WSADATA, SOCKADDR_IN6};
+use windows::Win32::Networking::WinSock::{WSAStartup, WSADATA, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN6};
 
 static WSA_INIT: Once = Once::new();
 
@@ -166,8 +166,8 @@ pub fn icmp6_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
         let mut dest_addr: SOCKADDR_IN6 = std::mem::zeroed();
         dest_addr.sin6_family = windows::Win32::Networking::WinSock::ADDRESS_FAMILY(23); // AF_INET6
         dest_addr.sin6_port = dest_port;
-        dest_addr.sin6_addr = ipv6.into();
-        // sin6_scope_id stays 0 (link-local handled by resolver returning global IPv6)
+        dest_addr.sin6_flowinfo = 0;
+        dest_addr.sin6_addr = IN6_ADDR { u: IN6_ADDR_0 { Byte: ipv6.octets() } };
 
         let options: IP_OPTION_INFORMATION = IP_OPTION_INFORMATION {
             Ttl: 64,

@@ -55,11 +55,29 @@ pub fn probe_for(kind: &str) -> Option<Box<dyn Probe>> {
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
-/// Resolve hostname to socket addresses. Adds ":0" if the target is a bare host
-/// (to_socket_addrs requires a port).
+/// Resolve hostname / IP literal to socket addresses. Wraps bare IPv6 literals
+/// in `[...]` and adds `:0` port suffix when needed (to_socket_addrs requires
+/// a port).
 pub(crate) fn resolve(target: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
-    use std::net::ToSocketAddrs;
-    let with_port = if target.contains(':') { target.to_string() } else { format!("{target}:0") };
+    use std::net::{IpAddr, ToSocketAddrs};
+    let with_port: String = if target.starts_with('[') {
+        // Already in [ipv6](:port)? form.
+        if target.contains("]:") {
+            target.to_string()
+        } else {
+            format!("{target}:0")
+        }
+    } else if target.parse::<IpAddr>().is_ok() {
+        // Bare IP literal (v4 or v6).
+        if target.contains(':') {
+            format!("[{target}]:0")
+        } else {
+            format!("{target}:0")
+        }
+    } else {
+        // Hostname.
+        format!("{target}:0")
+    };
     with_port.to_socket_addrs().map(|iter| iter.collect())
 }
 

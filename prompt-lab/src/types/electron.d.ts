@@ -184,6 +184,7 @@ export interface ElectronAPI {
     failOutbox: (id: number, error: string) => Promise<{ failed: boolean }>;
   };
   videoPlayer: import('../plugins/video-player/types').VideoPlayerAPI;
+  mycast: import('../plugins/mycast/backend/mycast-types').MyCastApi;
   mcp: {
     listServers: () => Promise<McpServerStatus[]>;
     saveServer: (config: McpServerConfig) => Promise<McpOperationResult>;

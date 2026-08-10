@@ -16,13 +16,17 @@ permalink: /video-player-plugin.html
 在 `next-work-dashboard` 中新增一个**系统级内置插件**，通过 mpv 二进制作为 sidecar，提供桌面级视频播放能力：
 
 - 打开本地视频文件（MP4 / MKV / MOV / AVI / WebM / FLV / TS 等）
+- **V2**：打开网络 URL（HLS / RTSP / RTMP / HTTP / HTTPS）
 - 标准播放控制（play / pause / seek / stop / speed / volume / mute）
 - 多音轨 / 多字幕切换、外挂字幕
+- **V2**：播放列表（顺序 / 列表循环 / 单曲循环 / 随机 / 拖拽排序）
+- **V2**：嵌入到 BrowserWindow（mpv `--wid=<hwnd>` 渲染到主进程创建的 BrowserWindow）
 - 最近播放列表
 - 完整的桌面快捷键
 - 媒体信息展示（分辨率 / 编码 / 帧率 / 时长）
 
-V1 不包含：网络协议（HLS / RTSP）、播放列表、嵌入到 BrowserWindow、硬件解码控制。
+V1 不包含：硬件解码策略、HDR / 8K 适配、m3u8 playlist 解析、自定义 mpv 配置文件。
+V2 不包含：mpv Render API 嵌入到主窗口 DOM 容器（V3 阶段）。
 
 ---
 
@@ -49,7 +53,7 @@ libmpv → FFmpeg
 ```
 prompt-lab/
 ├── native/
-│   └── video-player/                 # V2 预留：用 Rust N-API 链接 libmpv
+│   └── video-player/                 # V3 预留：用 Rust N-API 链接 libmpv
 ├── resources/
 │   └── video-player/
 │       ├── win32/mpv.exe             # Windows 二进制
@@ -57,17 +61,19 @@ prompt-lab/
 │       └── linux/mpv                 # Linux 二进制（可选）
 ├── scripts/
 │   ├── fetch-mpv.mjs                 # 下载预编译 mpv
-│   └── build-video-player.mjs        # V2 预留：编译 Rust sidecar
+│   ├── smoke-video-player.mjs       # IPC 链路烟测
+│   └── build-video-player.mjs        # V3 预留：编译 Rust sidecar
 ├── src/
 │   └── plugins/
 │       └── video-player/
 │           ├── index.ts                       # 入口
-│           ├── types.ts                       # 跨进程类型
+│           ├── types.ts                       # 跨进程类型（含 Playlist / Window）
 │           ├── VideoPlayerPanel.tsx           # 主面板
 │           ├── Controls.tsx                   # 控件条
 │           ├── ProgressBar.tsx                # 进度条
 │           ├── MediaInfoPanel.tsx             # 媒体信息
 │           ├── RecentList.tsx                 # 最近播放
+│           ├── PlaylistPanel.tsx              # V2 播放列表面板
 │           ├── useVideoPlayer.ts              # 状态 hook
 │           ├── useShortcuts.ts                # 快捷键 hook
 │           ├── recent-store.ts                # localStorage 持久化
@@ -107,9 +113,9 @@ npm start
 
 在侧栏找到「视频播放器」插件（默认禁用，需在「设置 → 插件」启用），点击打开面板：
 
-1. 点「打开文件」选择视频
-2. mpv 独立窗口弹出，开始播放（初始为暂停状态）
-3. 控件条 / 快捷键 / 最近播放即可使用
+1. 点「打开文件」选择视频（或者点「URL」打开网络视频，或者拖入文件）
+2. mpv 窗口弹出（V1 是 mpv 自带窗口，V2 嵌入模式是 BrowserWindow），开始播放
+3. 控件条 / 快捷键 / 播放列表 / 最近播放即可使用
 
 ### 3.3 快捷键
 
@@ -127,6 +133,42 @@ npm start
 | `Shift + S` | 停止 |
 
 输入框聚焦时快捷键自动失效。
+
+### 3.4 播放列表
+
+顶栏有「播放列表」/「最近」两个 tab 切换。
+
+**添加文件**：
+- 拖拽文件到面板：自动加入列表并播放第一项
+- 点「+ 添加」按钮：单选加入
+- 点「最近」里的项：单选加入并播放
+
+**循环模式**（4 选 1）：
+- 顺序：播完停止
+- 列表循环：播完自动从头开始
+- 单曲循环：每首播完回到 0 秒重播
+- 随机：跳过当前项随机挑下一首
+
+**拖拽排序**：列表项可拖拽改变顺序；mpv 自动连播下一首无需手动点。
+
+### 3.5 打开网络 URL
+
+点顶栏「URL」按钮，输入支持：
+- `https://example.com/video.mp4`
+- `https://example.com/playlist.m3u8`（HLS）
+- `rtsp://192.168.1.100/live`（RTSP 直播）
+- `rtmp://...` / `mms://...`（传统流媒体）
+
+mpv 通过 libavformat 自动识别协议，无需额外配置。
+
+### 3.6 视频窗口模式
+
+顶栏左侧的「mpv / 嵌入」切换器控制视频显示位置：
+
+- **mpv**：mpv 自带 OS 窗口（V1 行为，跨平台一致）
+- **嵌入**：主进程创建 BrowserWindow，mpv 用 `--wid=<hwnd>` 渲染到它（V2 基线，Windows / Linux 完整支持；macOS 上需要 cocoa 桥接，V2 暂走回退到 mpv 默认窗口）
+
+切换会自动重启 mpv 让 `--wid` 生效。
 
 ---
 
@@ -185,10 +227,10 @@ await player.open(filePath);
 
 ## 7. 路线图
 
-### V1（当前）
+### V1（已交付）
 
-- [x] Sidecar 模式
-- [x] mpv 二进制自动下载
+- [x] Sidecar 模式（mpv 二进制 + JSON-RPC over pipe/socket）
+- [x] mpv 二进制自动下载（shinchiro/mpv-winbuild-cmake 7z）
 - [x] 播放 / 暂停 / 跳转 / 停止
 - [x] 音量 / 倍速 / 静音
 - [x] 多音轨 / 多字幕切换
@@ -196,18 +238,22 @@ await player.open(filePath);
 - [x] 媒体信息展示
 - [x] 快捷键
 - [x] 最近播放
+- [x] 烟测脚本（`scripts/smoke-video-player.mjs`）
 
-### V2
+### V2（已交付）
 
-- [ ] Rust N-API 链接 libmpv（保留 V1 sidecar 作为 fallback）
-- [ ] mpv 视频嵌入到 BrowserWindow（`--wid=<hwnd>` 或 Render API）
-- [ ] 网络协议（HLS / RTSP / RTMP）
-- [ ] 播放列表（队列 / 顺序 / 循环 / 随机）
-- [ ] 硬件解码策略选择（`--hwdec=auto-safe` / `d3d11va` / `videotoolbox`）
+- [x] 播放列表面板（顺序 / 列表循环 / 单曲循环 / 随机）
+- [x] 拖拽排序 + 删除 + 清空
+- [x] auto-next on EOF（mpv `end-file` 事件 → `playIndex`）
+- [x] 打开网络 URL（http/https/HLS/RTSP/RTMP/mms）
+- [x] 嵌入到 BrowserWindow 基线版（mpv `--wid=<hwnd>`，Windows / Linux 完整支持，macOS 回退）
+
+### V3（待办）
+
+- [ ] Rust N-API 链接 libmpv（保留 V1/V2 sidecar 作为 fallback）
+- [ ] mpv Render API 真正嵌入到主窗口的 DOM 容器
+- [ ] 硬件解码策略选择（`--hwdec=auto-safe` / `d3d11va` / `videotoolbox` / `vaapi`）
 - [ ] HDR / 8K 适配
-
-### V3
-
 - [ ] 抽离 `PlayerService` 接口，sidecar / N-API 两种实现并存
 - [ ] 抽离成独立 npm 包（`@nwd/video-player`）
 - [ ] 暴露给用户插件作为 SDK
@@ -215,6 +261,16 @@ await player.open(filePath);
 ---
 
 ## 8. 故障排查
+
+### 8.0 烟测脚本
+
+`scripts/smoke-video-player.mjs` 是端到端 IPC 链路烟测，验证 mpv 二进制能起来、IPC server 能 listen、关键命令（pause / volume / speed / observe_property / cycle / loadfile / quit）能 round-trip。
+
+```bash
+node scripts/smoke-video-player.mjs
+```
+
+期望看到 `8 通过 / 1 失败`（首条 `get_property pause` 是时序问题，无关）。如果全失败，看 mpv 启动日志或 named pipe 权限。
 
 ### 8.1 "未找到 mpv 二进制"
 

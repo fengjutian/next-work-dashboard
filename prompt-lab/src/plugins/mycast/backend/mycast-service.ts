@@ -181,7 +181,7 @@ export async function startDaemon(): Promise<MyCastState> {
         if ((obj as { ok?: unknown }).ok === false) {
           entry.reject(new Error(String((obj as { error?: unknown }).error ?? 'unknown error')));
         } else {
-          const { type: _t, id: _i, ok: _o, ...rest } = obj as Record<string, unknown>;
+          const { type: _, id: __, ok: ___, ...rest } = obj as Record<string, unknown>;
           entry.resolve(rest);
         }
       }
@@ -217,7 +217,7 @@ export async function startDaemon(): Promise<MyCastState> {
           const p = pendingReady;
           pendingReady = null;
           clearTimeout(p.timer);
-          p.resolve();
+          p.resolve({ ...state });
         }
         return;
       }

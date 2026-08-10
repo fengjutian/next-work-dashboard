@@ -50,3 +50,16 @@ export type MyCastEvent =
   | { type: 'stream.start'; sessionId: string; phoneDeviceId: string }
   | { type: 'stream.stop'; sessionId: string; phoneDeviceId: string }
   | { type: 'error'; message: string };
+
+export interface MyCastApi {
+  start: () => Promise<MyCastState>;
+  state: () => Promise<MyCastState>;
+  systemInfo: () => Promise<{ hostname: string; platform: string; arch: string; cpus: number }>;
+  issuePairing: () => Promise<{ pairCode: string; expiresInMs: number }>;
+  listSessions: () => Promise<SessionInfo[]>;
+  listTransfers: () => Promise<TransferInfo[]>;
+  sendToPhone: (deviceId: string, frame: Record<string, unknown>) => Promise<boolean>;
+  endSession: (sessionId: string) => Promise<boolean>;
+  cancelTransfer: (uploadId: string) => Promise<boolean>;
+  onEvent: (handler: (event: MyCastEvent) => void) => () => void;
+}

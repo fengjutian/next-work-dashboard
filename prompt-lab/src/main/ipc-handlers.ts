@@ -49,6 +49,7 @@ import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, ty
 import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
+import { setupMyCastIPC, startDaemon as startMyCastDaemon, shutdownDaemon as shutdownMyCastDaemon } from '../plugins/mycast/backend/mycast-service';
 import { fetchMarketplaceCatalog, installMarketplacePlugin, loadCachedCatalog, loadPluginDefinitions, savePluginDefinitions } from './plugin-marketplace';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
@@ -2361,5 +2362,16 @@ export function setupIPC(webviewPreloadPath: string) {
 
   ipcMain.handle('shell:open-external', async (_event, url: string) => {
     await shell.openExternal(url);
+  });
+
+  // ── MyCast (局域网手机投屏 + 文件传输) ──
+  setupMyCastIPC();
+  // Best-effort warm-start the sidecar so the plugin can immediately render status.
+  startMyCastDaemon().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[mycast] daemon warm-start failed:', err);
+  });
+  app.on('before-quit', () => {
+    void shutdownMyCastDaemon();
   });
 }

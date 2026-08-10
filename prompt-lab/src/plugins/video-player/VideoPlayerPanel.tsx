@@ -12,7 +12,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Video, Upload, X, Keyboard, Link2, ExternalLink, MonitorPlay } from '@/components/icons';
+import { Video, Upload, X, ExternalLink } from '@/components/icons';
+import { Keyboard, Link2, MonitorPlay } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Modal, Input } from 'antd';
 import { Controls } from './Controls';

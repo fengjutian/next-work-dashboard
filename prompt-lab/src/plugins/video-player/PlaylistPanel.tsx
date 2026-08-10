@@ -5,7 +5,8 @@
  */
 
 import { useState } from 'react';
-import { Play, SkipBack, SkipForward, Trash2, X, ListMusic, Repeat, Repeat1, Shuffle, ArrowDown, ArrowUp } from '@/components/icons';
+import { Play, X, Trash2 } from '@/components/icons';
+import { SkipBack, SkipForward, ListMusic, Repeat, Repeat1, Shuffle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { PlaylistItem, PlaylistMode, PlaylistState } from './types';

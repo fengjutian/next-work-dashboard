@@ -154,6 +154,22 @@ const electronAPI: ElectronAPI = {
     completeOutbox: (id) => ipcRenderer.invoke('rag-worker:complete-outbox', id),
     failOutbox: (id, error) => ipcRenderer.invoke('rag-worker:fail-outbox', id, error),
   },
+  mycast: {
+    start: () => ipcRenderer.invoke('mycast:start'),
+    state: () => ipcRenderer.invoke('mycast:state'),
+    systemInfo: () => ipcRenderer.invoke('mycast:system-info'),
+    issuePairing: () => ipcRenderer.invoke('mycast:issue-pairing'),
+    listSessions: () => ipcRenderer.invoke('mycast:list-sessions'),
+    listTransfers: () => ipcRenderer.invoke('mycast:list-transfers'),
+    sendToPhone: (deviceId: string, frame: Record<string, unknown>) => ipcRenderer.invoke('mycast:send-to-phone', deviceId, frame),
+    endSession: (sessionId: string) => ipcRenderer.invoke('mycast:end-session', sessionId),
+    cancelTransfer: (uploadId: string) => ipcRenderer.invoke('mycast:cancel-transfer', uploadId),
+    onEvent: (handler: (event: import('./plugins/mycast/backend/mycast-types').MyCastEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: import('./plugins/mycast/backend/mycast-types').MyCastEvent) => handler(payload);
+      ipcRenderer.on('mycast:event', listener);
+      return () => { ipcRenderer.removeListener('mycast:event', listener); };
+    },
+  },
   videoPlayer: {
     open: (filePath?: string) => ipcRenderer.invoke('video-player:open', filePath),
     openUrl: (url: string) => ipcRenderer.invoke('video-player:open-url', url),
