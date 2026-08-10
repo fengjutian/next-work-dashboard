@@ -7,6 +7,41 @@ use std::{
     time::UNIX_EPOCH,
 };
 
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetLogicalDrives() -> u32;
+    fn GetDiskFreeSpaceExW(
+        directory: *const u16,
+        free_available: *mut u64,
+        total: *mut u64,
+        free_total: *mut u64,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+fn emit_disks() {
+    let mask = unsafe { GetLogicalDrives() };
+    let mut disks = Vec::new();
+    for index in 0..26 {
+        if mask & (1 << index) == 0 { continue; }
+        let letter = (b'A' + index as u8) as char;
+        let root = format!("{letter}:\\");
+        let wide = root.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let (mut available, mut total, mut free) = (0_u64, 0_u64, 0_u64);
+        let success = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, &mut total, &mut free) };
+        if success != 0 && total > 0 {
+            disks.push(format!(r#"{{"path":"{letter}:\\","total":{total},"free":{available},"used":{}}}"#, total.saturating_sub(available)));
+        }
+    }
+    emit(&format!(r#"{{"disks":[{}]}}"#, disks.join(",")));
+}
+
+#[cfg(not(windows))]
+fn emit_disks() {
+    emit(r#"{"disks":[]}"#);
+}
+
 #[derive(Clone)]
 struct FileResult {
     path: String,
@@ -295,6 +330,10 @@ fn main() {
     let mut args = env::args_os();
     let _binary = args.next();
     let command = args.next();
+    if command.as_deref() == Some(std::ffi::OsStr::new("disks")) {
+        emit_disks();
+        return;
+    }
     let root = args.next();
     let mut exclusions = HashSet::new();
     while let Some(argument) = args.next() {

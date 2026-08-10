@@ -20,7 +20,7 @@ export type DiskScanEvent =
   | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 
 export interface DiskSystemInfo {
-  disk: { path: string; total: number; free: number; used: number };
+  disks: Array<{ path: string; total: number; free: number; used: number }>;
   memory: { total: number; free: number; used: number };
   platform: string;
   hostname: string;

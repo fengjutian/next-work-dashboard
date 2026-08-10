@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type MessageBoxOptions, type OpenDialogOptions } from 'electron';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
@@ -59,14 +59,21 @@ const imageMimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'i
 
 export function setupDiskSpaceIPC(): void {
   ipcMain.handle('disk-space:system-info', async () => {
-    const diskPath = path.parse(app.getPath('home')).root || path.parse(process.cwd()).root || '/';
-    const disk = await fs.promises.statfs(diskPath);
-    const total = disk.blocks * disk.bsize;
-    const free = disk.bavail * disk.bsize;
+    let disks: Array<{ path: string; total: number; free: number; used: number }> = [];
+    const result = spawnSync(scannerPath(), ['disks'], { windowsHide: true, encoding: 'utf8', timeout: 10_000 });
+    if (result.status === 0) {
+      try { disks = (JSON.parse(result.stdout) as { disks?: typeof disks }).disks ?? []; } catch { /* use statfs fallback */ }
+    }
+    if (disks.length === 0) {
+      const diskPath = path.parse(app.getPath('home')).root || path.parse(process.cwd()).root || '/';
+      const disk = await fs.promises.statfs(diskPath);
+      const total = disk.blocks * disk.bsize; const free = disk.bavail * disk.bsize;
+      disks = [{ path: diskPath, total, free, used: Math.max(0, total - free) }];
+    }
     const memoryTotal = os.totalmem();
     const memoryFree = os.freemem();
     return {
-      disk: { path: diskPath, total, free, used: Math.max(0, total - free) },
+      disks,
       memory: { total: memoryTotal, free: memoryFree, used: Math.max(0, memoryTotal - memoryFree) },
       platform: `${os.type()} ${os.release()}`,
       hostname: os.hostname(),
