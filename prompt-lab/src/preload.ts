@@ -139,6 +139,7 @@ const electronAPI: ElectronAPI = {
     upsertDocument: (document) => ipcRenderer.invoke('rag-worker:upsert-document', document),
     deleteDocument: (documentId) => ipcRenderer.invoke('rag-worker:delete-document', documentId),
     keywordSearch: (request) => ipcRenderer.invoke('rag-worker:keyword-search', request),
+    vectorSearch: (request) => ipcRenderer.invoke('rag-worker:vector-search', request),
     fuseResults: (request) => ipcRenderer.invoke('rag-worker:fuse-results', request),
     indexStatus: () => ipcRenderer.invoke('rag-worker:index-status'),
     pendingOutbox: (limit) => ipcRenderer.invoke('rag-worker:pending-outbox', limit),

@@ -12,6 +12,7 @@ import { disposeOfficeService } from './plugins/office-studio/backend/office-ser
 import { disposeDiskSpaceService, setupDiskSpaceIPC } from './plugins/disk-space/backend/disk-service';
 import { setupRagWorkerIPC } from './main/rag-worker-ipc';
 import { ragWorkerClient } from './main/rag-worker-client';
+import { startRagIndexCoordinator, stopRagIndexCoordinator } from './main/rag-index-coordinator';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -106,6 +107,7 @@ if (started) {
     setupIPC(webviewPreloadPath);
     setupDiskSpaceIPC();
     setupRagWorkerIPC();
+    startRagIndexCoordinator();
     createTray();
     configureWindowsJumpList();
     registerShortcuts();
@@ -129,6 +131,7 @@ if (started) {
     void mcpManager.closeAll();
     void disposeOfficeService();
     disposeDiskSpaceService();
+    stopRagIndexCoordinator();
     ragWorkerClient.dispose();
   });
 }

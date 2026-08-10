@@ -94,6 +94,7 @@ export interface ElectronAPI {
     upsertDocument: (document: RagWorkerDocumentInput) => Promise<{ documentId: string; unchanged: boolean; jobId: string | null; chunks?: number }>;
     deleteDocument: (documentId: string) => Promise<{ deleted: boolean }>;
     keywordSearch: (request: { query: string; topK?: number; documentIds?: string[] }) => Promise<{ hits: RagWorkerKeywordHit[] }>;
+    vectorSearch: (request: { vector: number[]; modelId: string; topK?: number }) => Promise<Array<{ id: string; distance: number }>>;
     fuseResults: (request: { lists: Array<{ ids: string[]; weight?: number }>; topK?: number; rankConstant?: number }) => Promise<{ hits: Array<{ chunkId: string; score: number; rank: number }> }>;
     indexStatus: () => Promise<{ documents: number; chunks: number; pendingOutbox: number }>;
     pendingOutbox: (limit?: number) => Promise<{ operations: RagWorkerOutboxOperation[] }>;
@@ -274,6 +275,7 @@ export interface RagWorkerChunkInput {
   startOffset?: number;
   endOffset?: number;
   contentHash?: string;
+  vector: number[];
 }
 
 export interface RagWorkerDocumentInput {
@@ -285,6 +287,7 @@ export interface RagWorkerDocumentInput {
   contentHash?: string;
   parserVersion: string;
   chunkerVersion: string;
+  embeddingIdentity: string;
   chunks: RagWorkerChunkInput[];
 }
 

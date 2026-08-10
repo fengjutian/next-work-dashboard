@@ -16,9 +16,15 @@ import { previewParagraphs } from './preview';
 type Stage = 'idle' | 'indexing' | 'ready' | 'asking' | 'error';
 const PANE_PREFS_KEY = 'document-knowledge.panes.v1';
 const RAG_PARSER_VERSION = 'document-knowledge-parser-v1';
-const RAG_CHUNKER_VERSION = 'character-overlap-v1';
+const RAG_CHUNKER_VERSION = 'character-overlap-v2-cjk-fts';
 
-async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChunk[]): Promise<void> {
+function embeddingIdentity(mode: EmbeddingMode, memoryConfig: ReturnType<typeof useStore.getState>['memoryConfig']): string {
+  if (mode === 'remote-semantic') return `remote:${memoryConfig.embeddingBaseUrl}:${memoryConfig.embeddingModel}`;
+  if (mode === 'local-semantic') return `local:${memoryConfig.localEmbeddingModel}`;
+  return 'hash-fallback:512:v1';
+}
+
+async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChunk[], modelId: string): Promise<void> {
   try {
     const status = await window.electronAPI.ragWorker.status();
     if (!status.available) return;
@@ -30,12 +36,14 @@ async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChu
       fileSize: document.size,
       parserVersion: RAG_PARSER_VERSION,
       chunkerVersion: RAG_CHUNKER_VERSION,
+      embeddingIdentity: modelId,
       chunks: chunks.map((chunk, chunkIndex) => ({
         id: chunk.id,
         content: chunk.content,
         chunkIndex,
         sectionTitle: chunk.sectionTitle,
         page: chunk.page,
+        vector: chunk.vector,
       })),
     });
   } catch (error) {
@@ -43,9 +51,16 @@ async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChu
   }
 }
 
-async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: number[], limit: number) {
-  const vectorCandidates = retrieve(chunks, vector, Math.max(50, limit * 10));
+async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: number[], modelId: string, limit: number) {
+  const legacyVectorCandidates = retrieve(chunks, vector, Math.max(50, limit * 10));
   try {
+    const lanceMatches = await window.electronAPI.ragWorker.vectorSearch({ vector, modelId, topK: Math.max(50, limit * 10) });
+    const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+    const lanceCandidates = lanceMatches.flatMap((match) => {
+      const chunk = byId.get(match.id);
+      return chunk ? [{ ...chunk, score: Math.max(0, 1 - match.distance) }] : [];
+    });
+    const vectorCandidates = lanceCandidates.length ? lanceCandidates : legacyVectorCandidates;
     const lexical = await window.electronAPI.ragWorker.keywordSearch({ query, topK: Math.max(50, limit * 10) });
     const fused = await window.electronAPI.ragWorker.fuseResults({
       lists: [
@@ -55,7 +70,6 @@ async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: nu
       topK: limit,
       rankConstant: 60,
     });
-    const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
     const vectorScores = new Map(vectorCandidates.map((hit) => [hit.id, hit.score]));
     const hits = fused.hits.flatMap((hit) => {
       const chunk = byId.get(hit.chunkId);
@@ -64,7 +78,7 @@ async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: nu
     return hits.length ? hits : vectorCandidates.slice(0, limit);
   } catch (error) {
     console.warn('[DocumentKnowledge] Rust hybrid retrieval unavailable; using vector search.', error);
-    return vectorCandidates.slice(0, limit);
+    return legacyVectorCandidates.slice(0, limit);
   }
 }
 
@@ -105,7 +119,19 @@ export const DocumentKnowledgePanel: React.FC = () => {
           const previewUrl = URL.createObjectURL(new Blob([cached.data], { type: 'application/pdf' }));
           setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, previewUrl } : item));
         }));
-        setChunks(records.flatMap((record) => record.chunks as unknown as DocumentChunk[]));
+        const restoredChunks = records.flatMap((record) => record.chunks as unknown as DocumentChunk[]);
+        setChunks(restoredChunks);
+        void (async () => {
+          for (const record of records) {
+            const document = restored.find((item) => item.id === record.id);
+            if (!document) continue;
+            await syncRustRagDocument(
+              document,
+              record.chunks as unknown as DocumentChunk[],
+              embeddingIdentity(record.embeddingMode as EmbeddingMode, useStore.getState().memoryConfig),
+            );
+          }
+        })();
         if (records[0]) { setSelectedId(records[0].id); setEmbeddingMode(records[0].embeddingMode as EmbeddingMode); setStage('ready'); setStatus(`已恢复 ${records.length} 个文档`); }
       } catch { /* A new database can legitimately have no persisted documents. */ }
       return true;
@@ -144,7 +170,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
           dbSaveDocumentKnowledge({ id: result.document.id, name: result.document.name, kind: result.document.kind, size: result.document.size, sections: result.document.sections, plainText: result.document.plainText, chunks: result.chunks, embeddingMode: result.embeddingMode, cachedFilePath: result.document.cachedFilePath, createdAt: result.document.createdAt, lastViewedAt: Date.now() });
           await flushDbToDisk();
         }
-        await syncRustRagDocument(result.document, result.chunks);
+        await syncRustRagDocument(result.document, result.chunks, embeddingIdentity(result.embeddingMode, memoryConfig));
       }
       setStage('ready'); setStatus(`已建立索引：${accepted.length} 个文件`); setProgress(100);
     } catch (error) {
@@ -165,7 +191,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
     try {
       if (!embeddingMode) throw new Error('文档索引模式不可用，请重新上传文档');
       const vector = await embedQuestion(content, memoryConfig, embeddingMode);
-      const hits = await hybridRetrieve(chunks, content, vector, memoryConfig.recallCount || 5);
+      const hits = await hybridRetrieve(chunks, content, vector, embeddingIdentity(embeddingMode, memoryConfig), memoryConfig.recallCount || 5);
       const provider = createOpenAIProvider(aiApi);
       const prompt = `仅根据以下资料回答问题。资料不足时明确说明，不要编造。引用结论时使用 [资料 N] 标记。\n\n${buildRagContext(hits)}\n\n问题：${content}`;
       let answer = '';

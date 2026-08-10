@@ -8,7 +8,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Deserialize)]
 struct Request {
@@ -44,6 +44,7 @@ struct DocumentInput {
     content_hash: Option<String>,
     parser_version: String,
     chunker_version: String,
+    embedding_identity: String,
     #[serde(default)]
     chunks: Vec<ChunkInput>,
 }
@@ -59,6 +60,7 @@ struct ChunkInput {
     start_offset: Option<i64>,
     end_offset: Option<i64>,
     content_hash: Option<String>,
+    vector: Option<Vec<f32>>,
 }
 
 #[derive(Deserialize)]
@@ -158,7 +160,7 @@ fn migrate(connection: &Connection) -> rusqlite::Result<()> {
          CREATE TABLE IF NOT EXISTS documents (
            id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, source_path TEXT,
            file_size INTEGER NOT NULL, content_hash TEXT NOT NULL, parser_version TEXT NOT NULL,
-           chunker_version TEXT NOT NULL, status TEXT NOT NULL, error_message TEXT,
+           chunker_version TEXT NOT NULL, embedding_identity TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, error_message TEXT,
            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
          );
          CREATE TABLE IF NOT EXISTS chunks (
@@ -185,9 +187,26 @@ fn migrate(connection: &Connection) -> rusqlite::Result<()> {
            chunk_id UNINDEXED, document_id UNINDEXED, title, content, tokenize='unicode61'
          );"
     )?;
+    let has_embedding_identity = connection
+        .prepare("PRAGMA table_info(documents)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|column| column == "embedding_identity");
+    if !has_embedding_identity {
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN embedding_identity TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    connection.execute("DELETE FROM index_outbox WHERE status='completed'", [])?;
     connection.execute(
         "INSERT OR IGNORE INTO schema_version(version, applied_at, description) VALUES(?1, ?2, ?3)",
-        params![SCHEMA_VERSION, now_ms(), "initial RAG worker schema"],
+        params![
+            SCHEMA_VERSION,
+            now_ms(),
+            "RAG schema with embedding identity"
+        ],
     )?;
     Ok(())
 }
@@ -224,14 +243,28 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
     let tx = connection
         .transaction()
         .map_err(|error| error.to_string())?;
-    let unchanged = tx.query_row(
-        "SELECT content_hash = ?2 AND parser_version = ?3 AND chunker_version = ?4 FROM documents WHERE id = ?1",
-        params![input.id, document_hash, input.parser_version, input.chunker_version],
-        |row| row.get::<_, bool>(0),
-    ).optional().map_err(|error| error.to_string())?.unwrap_or(false);
-    if unchanged {
+    let existing = tx.query_row(
+        "SELECT content_hash = ?2 AND parser_version = ?3 AND chunker_version = ?4 AND embedding_identity = ?5, status FROM documents WHERE id = ?1",
+        params![input.id, document_hash, input.parser_version, input.chunker_version, input.embedding_identity],
+        |row| Ok((row.get::<_, bool>(0)?, row.get::<_, String>(1)?)),
+    ).optional().map_err(|error| error.to_string())?;
+    if let Some((true, status)) = existing {
+        let requeued = status == "index_error";
+        if requeued {
+            tx.execute(
+                "UPDATE index_outbox SET status='pending', retry_count=0, error_message=NULL, updated_at=?2
+                 WHERE document_id=?1 AND status='failed'",
+                params![input.id, now],
+            ).map_err(|error| error.to_string())?;
+            tx.execute(
+                "UPDATE documents SET status='indexing', error_message=NULL, updated_at=?2 WHERE id=?1",
+                params![input.id, now],
+            ).map_err(|error| error.to_string())?;
+        }
         tx.commit().map_err(|error| error.to_string())?;
-        return Ok(json!({ "documentId": input.id, "unchanged": true, "jobId": Value::Null }));
+        return Ok(
+            json!({ "documentId": input.id, "unchanged": true, "requeued": requeued, "jobId": Value::Null }),
+        );
     }
 
     tx.execute(
@@ -264,13 +297,14 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
     )
     .map_err(|error| error.to_string())?;
     tx.execute(
-        "INSERT INTO documents(id, name, kind, source_path, file_size, content_hash, parser_version, chunker_version, status, created_at, updated_at)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'indexing', ?9, ?9)
+        "INSERT INTO documents(id, name, kind, source_path, file_size, content_hash, parser_version, chunker_version, embedding_identity, status, created_at, updated_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'indexing', ?10, ?10)
          ON CONFLICT(id) DO UPDATE SET name=excluded.name, kind=excluded.kind, source_path=excluded.source_path,
          file_size=excluded.file_size, content_hash=excluded.content_hash, parser_version=excluded.parser_version,
-         chunker_version=excluded.chunker_version, status='indexing', error_message=NULL, updated_at=excluded.updated_at",
+         chunker_version=excluded.chunker_version, embedding_identity=excluded.embedding_identity,
+         status='indexing', error_message=NULL, updated_at=excluded.updated_at",
         params![input.id, input.name, input.kind, input.source_path, input.file_size, document_hash,
-            input.parser_version, input.chunker_version, now],
+            input.parser_version, input.chunker_version, input.embedding_identity, now],
     ).map_err(|error| error.to_string())?;
     for chunk in &input.chunks {
         let chunk_hash = chunk
@@ -293,9 +327,20 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
             ],
         )
         .map_err(|error| error.to_string())?;
-        queue_outbox(&tx, "upsert_vector", Some(&chunk.id), &input.id,
-            json!({ "content": chunk.content, "sectionTitle": chunk.section_title, "page": chunk.page }))
-            .map_err(|error| error.to_string())?;
+        queue_outbox(
+            &tx,
+            "upsert_vector",
+            Some(&chunk.id),
+            &input.id,
+            json!({
+                "content": chunk.content,
+                "sectionTitle": chunk.section_title,
+                "page": chunk.page,
+                "vector": chunk.vector,
+                "modelId": input.embedding_identity
+            }),
+        )
+        .map_err(|error| error.to_string())?;
     }
     tx.execute(
         "UPDATE index_jobs SET status='completed', stage='saved', completed=total, updated_at=?2 WHERE id=?1",
@@ -433,7 +478,9 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
                 .optional()
                 .map_err(|error| error.to_string())?
                 .flatten();
-            connection.execute("UPDATE index_outbox SET status='completed', error_message=NULL, updated_at=?2 WHERE id=?1", params![id, now_ms()]).map_err(|error| error.to_string())?;
+            connection
+                .execute("DELETE FROM index_outbox WHERE id=?1", params![id])
+                .map_err(|error| error.to_string())?;
             if let Some(document_id) = document_id {
                 connection.execute(
                     "UPDATE documents SET status='ready', updated_at=?2 WHERE id=?1 AND NOT EXISTS (
@@ -455,7 +502,14 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
                 .get("error")
                 .and_then(Value::as_str)
                 .unwrap_or("INDEX_OPERATION_FAILED");
-            connection.execute("UPDATE index_outbox SET retry_count=retry_count+1, error_message=?2, updated_at=?3 WHERE id=?1", params![id, error, now_ms()]).map_err(|error| error.to_string())?;
+            connection
+                .execute(
+                    "UPDATE index_outbox SET retry_count=retry_count+1,
+                 status=CASE WHEN retry_count+1 >= 5 THEN 'failed' ELSE 'pending' END,
+                 error_message=?2, updated_at=?3 WHERE id=?1",
+                    params![id, error, now_ms()],
+                )
+                .map_err(|error| error.to_string())?;
             connection
                 .execute(
                     "UPDATE documents SET status='index_error', error_message=?2, updated_at=?3
@@ -569,6 +623,7 @@ mod tests {
                 content_hash: None,
                 parser_version: "pdfjs-1".into(),
                 chunker_version: "char-1".into(),
+                embedding_identity: "local:test".into(),
                 chunks: vec![ChunkInput {
                     id: "chunk-1".into(),
                     content: "refund policy and support".into(),
@@ -578,6 +633,7 @@ mod tests {
                     start_offset: None,
                     end_offset: None,
                     content_hash: None,
+                    vector: Some(vec![1.0, 0.0]),
                 }],
             },
         )
@@ -601,6 +657,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, 1);
+        let payload: String = connection
+            .query_row(
+                "SELECT payload FROM index_outbox WHERE status='pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["modelId"], "local:test");
+        assert_eq!(payload["vector"][0], 1.0);
     }
 
     #[test]
