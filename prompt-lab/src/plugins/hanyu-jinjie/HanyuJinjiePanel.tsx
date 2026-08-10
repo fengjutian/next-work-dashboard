@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Modal, notification } from 'antd';
 import { BookOpen, Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles, Trash2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
@@ -69,6 +70,8 @@ function lispString(value: string): string {
 
 export const HanyuJinjiePanel: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
+  const [modal, modalHolder] = Modal.useModal();
+  const [notice, noticeHolder] = notification.useNotification();
   const [input, setInput] = useState('');
   const [generatedWord, setGeneratedWord] = useState('');
   const [loading, setLoading] = useState(false);
@@ -120,8 +123,20 @@ export const HanyuJinjiePanel: React.FC = () => {
       if (selectedExecutionId === id) {
         setSelectedExecutionId(null); setGeneratedWord(''); setSvgContent(null); setExplanation(''); setError(null);
       }
-    } catch { setError('删除记录失败，请稍后重试'); }
-  }, [selectedExecutionId]);
+      notice.success({ message: '删除成功', description: '这条汉语新解记录已从本地历史中删除。', placement: 'bottomRight' });
+    } catch { notice.error({ message: '删除失败', description: '记录暂时无法删除，请稍后重试。', placement: 'bottomRight' }); }
+  }, [notice, selectedExecutionId]);
+
+  const confirmDeleteExecution = useCallback((execution: HanyuJinjieExecution) => {
+    modal.confirm({
+      title: `删除「${execution.word}」？`,
+      content: '删除后无法恢复，卡片与详解都会从本地历史中移除。',
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => handleDeleteExecution(execution.id),
+    });
+  }, [handleDeleteExecution, modal]);
 
   const openBookEditor = useCallback(() => {
     setBookEntries(executions.filter((entry) => entry.status === 'success' && entry.svgContent && entry.explanation).map((entry) => entry.id));
@@ -194,6 +209,8 @@ export const HanyuJinjiePanel: React.FC = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-muted/20">
+      {modalHolder}
+      {noticeHolder}
       <header className="flex min-h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><HanyuJinjie className="h-6 w-6" /></div>
@@ -234,7 +251,7 @@ export const HanyuJinjiePanel: React.FC = () => {
                 <span className="min-w-0 flex-1 truncate text-xs font-medium">{execution.word}</span>
                 <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(execution.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </button>
-              <button type="button" title={`删除「${execution.word}」`} aria-label={`删除「${execution.word}」`} onClick={() => void handleDeleteExecution(execution.id)} className="mr-1 rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive focus:opacity-100 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+              <button type="button" title={`删除「${execution.word}」`} aria-label={`删除「${execution.word}」`} onClick={() => confirmDeleteExecution(execution)} className="mr-1 rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive focus:opacity-100 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>)}</div>
           </section>}
         </aside>
