@@ -16,7 +16,6 @@ use crate::state::SharedState;
 // (Html / TransferStatus intentionally not imported here.)
 
 pub async fn run() -> anyhow::Result<()> {
-    eprintln!("[mycast] daemon::run() start");
     let cfg = Arc::new(Config::defaults());
     let shared = Arc::new(SharedState::new());
 
@@ -76,7 +75,7 @@ pub async fn run() -> anyhow::Result<()> {
     }
 
     if started {
-        eprintln!("[mycast] services booted, sending ready");
+        tracing::info!(target: "mycast.daemon", "services booted");
         let info = DaemonInfo {
             device_id: cfg.device_id.clone(),
             device_name: cfg.device_name.clone(),
@@ -87,15 +86,10 @@ pub async fn run() -> anyhow::Result<()> {
             mdns_enabled: cfg.mdns_enabled,
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
-        // The parent expects a `ready` event; we send it through the event channel
-        // so it goes out via the same writer.
         let _ = event_tx.send(Event::new("ready", serde_json::to_value(&info).unwrap_or_default()));
     } else {
-        eprintln!("[mycast] boot failed");
         let _ = event_tx.send(Event::new("error", serde_json::json!({ "message": "boot failed" })));
     }
-
-    eprintln!("[mycast] entering main loop");
 
     // Main loop: dispatch control commands. Stay alive until either stdin closes
     // (rpc_reader drops control_tx) or we receive Ctrl-C / SIGTERM.
@@ -141,7 +135,7 @@ pub async fn run() -> anyhow::Result<()> {
     rpc_task.abort();
     event_task.abort();
     drop(control_tx_main);
-    eprintln!("[mycast] daemon::run() exit");
+    tracing::info!(target: "mycast.daemon", "daemon exiting");
     Ok(())
 }
 

@@ -29,6 +29,13 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: Option<u64>, kind: impl Into<String>, payload: serde_json::Value) -> Self {
+        let mut payload = payload;
+        if !payload.is_object() {
+            payload = serde_json::json!({ "value": payload });
+        }
+        if let Some(obj) = payload.as_object_mut() {
+            obj.entry("ok".to_string()).or_insert(serde_json::Value::Bool(true));
+        }
         Self { id, kind: kind.into(), payload }
     }
     pub fn err(id: Option<u64>, kind: impl Into<String>, message: impl Into<String>) -> Self {

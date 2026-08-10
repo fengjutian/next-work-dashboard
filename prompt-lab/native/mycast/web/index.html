@@ -282,13 +282,15 @@ async function pair() {
   if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字', 'err'); return; }
   $('pairBtn').disabled = true;
   try {
-    const r = await fetch(state.pair.httpBase + '/api/pair/complete', {
+    // Issue a pairing request; the desktop returns a 6-digit pair_code for
+    // display and a long session_token we use for authenticated calls.
+    const r = await fetch(state.pair.httpBase + '/api/pair/request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         device_id: state.deviceId,
         device_name: state.deviceName,
-        pairing_code: code,
+        platform: state.platform,
       }),
     });
     if (!r.ok) {
@@ -296,7 +298,12 @@ async function pair() {
       throw new Error(err.error || ('HTTP ' + r.status));
     }
     const data = await r.json();
-    if (!data.ok) throw new Error(data.error || '配对失败');
+    if (!data.pair_code || !data.session_token) throw new Error('配对响应缺少字段');
+    // Sanity check: the user-entered code must match the one displayed on
+    // the desktop (visual confirmation). If they don't match, reject.
+    if (data.pair_code !== code) {
+      throw new Error(`配对码不匹配：服务端返回 ${data.pair_code} ≠ 输入 ${code}`);
+    }
     state.sessionToken = data.session_token;
     localStorage.setItem('mycast.sessionToken', state.sessionToken);
     onPaired(state.sessionToken);

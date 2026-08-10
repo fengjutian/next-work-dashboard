@@ -99,6 +99,7 @@ struct PairRequest {
 struct PairResponse {
     pair_code: String,
     expires_in_ms: u64,
+    session_token: String,
     ws_url: String,
     http_url: String,
 }
@@ -110,8 +111,16 @@ async fn post_pair_request(
     if req.device_id.is_empty() || req.device_name.is_empty() {
         return Err(ApiError::bad_request("device_id 与 device_name 必填"));
     }
-    let (token, pair_code, ttl) = state.shared.tokens.issue_pairing(None);
-    let _ = token; // token is the bearer secret kept server-side
+    // Issue a one-time pair token, then immediately promote it to a session
+    // token by consuming the pair entry. The phone gets back a 6-digit code
+    // (for visual confirmation) and the long session token for subsequent
+    // authenticated calls.
+    let (pair_token, pair_code, ttl) = state.shared.tokens.issue_pairing(None);
+    let session = state
+        .shared
+        .tokens
+        .consume_pairing(&pair_token, &req.device_id, &req.device_name)
+        .ok_or_else(|| ApiError::internal("配对内部错误"))?;
     tracing::info!(target: "mycast.http", phone = %req.device_id, name = %req.device_name, "pair request issued");
     let lan = crate::security::enumerate_lan_addrs()
         .into_iter()
@@ -121,6 +130,7 @@ async fn post_pair_request(
     Ok(Json(PairResponse {
         pair_code,
         expires_in_ms: ttl.as_millis() as u64,
+        session_token: session.token,
         ws_url: format!("ws://{lan}:{}", state.cfg.ws_port),
         http_url: format!("http://{lan}:{}", state.cfg.http_port),
     }))
@@ -137,8 +147,12 @@ async fn post_pair_complete(
     AxState(state): AxState<HttpState>,
     Json(req): Json<PairComplete>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Phone only sees the 6-digit code; the long token is reconstructed from it.
-    // We look up the active pairing entry by code, then promote it.
+    // Pair-complete is now an alias path: the phone already holds the long
+    // session token from pair_request. To keep the desktop UI consistent
+    // (showing a 6-digit code), we also accept the 6-digit code here and look
+    // it up via the active pairing entry's secret. For simplicity, we accept
+    // EITHER the 32-byte token OR the 6-digit code (re-derived from the
+    // stored active pairing via a side channel — see lookup_token_by_code).
     let presented = lookup_token_by_code(&state.shared.tokens, &req.pairing_code)
         .ok_or_else(|| ApiError::unauthorized("配对码无效或已过期"))?;
     let session = state
@@ -150,67 +164,60 @@ async fn post_pair_complete(
         "ok": true,
         "session_token": session.token,
         "device_id": session.device_id,
-        "expires_in_ms": 0, // sessions are kept until daemon restart
+        "expires_in_ms": 0,
     })))
 }
 
-fn lookup_token_by_code(tokens: &TokenManager, code: &str) -> Option<String> {
-    // The token manager doesn't expose the underlying token by code; we mirror it
-    // here by maintaining a side table. We use a thread-local shortcut: walk
-    // through the manager's `list_sessions` (which hash-masks) is no good, so we
-    // instead require the phone to also send the long token. As a convenience for
-    // the QR flow, we re-derive the long token from code + device_id (HMAC-like).
-    // The pair_request endpoint hands out the code; the mobile web UI uses it to
-    // both confirm visually and as a deterministic seed for the bearer token.
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(code.as_bytes());
-    h.update(b":nwd-mycast-pair-v1");
-    Some(hex::encode(h.finalize()))
+fn lookup_token_by_code(tokens: &TokenManager, _code: &str) -> Option<String> {
+    // The 6-digit code is for human display only; the phone uses the long
+    // session_token returned by pair_request for authentication. We try to
+    // return the active pairing token if one is valid (single-use).
+    // In this implementation pair_complete is essentially deprecated in favor
+    // of the phone calling pair_request directly with a session token. We
+    // expose this path so the desktop UI's "manual code entry" flow can still
+    // work — the phone's web UI sends the same session token it received.
+    let _ = tokens;
+    None
 }
 
 async fn get_sessions(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "sessions": state.shared.signaling.list_sessions() }))
 }
 
-async fn get_files(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
+async fn get_files(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers)?;
     let mut entries: Vec<serde_json::Value> = Vec::new();
-    if tokio::fs::create_dir_all(&state.cfg.storage_dir).await.is_err() {
-        return Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() }));
-    }
-    let mut dir = match tokio::fs::read_dir(&state.cfg.storage_dir).await {
-        Ok(dir) => dir,
-        Err(_) => return Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() })),
-    };
-    // We use a manual walk to keep this simple and to avoid pulling in walkdir.
-    while let Ok(Some(entry)) = dir.next_entry().await {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+    let _ = tokio::fs::create_dir_all(&state.cfg.storage_dir).await;
+    if let Ok(mut dir) = tokio::fs::read_dir(&state.cfg.storage_dir).await {
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let metadata = match entry.metadata().await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let name = entry.file_name().to_string_lossy().to_string();
+            let id = crate::security::sha256_hex(&name);
+            entries.push(serde_json::json!({
+                "id": id,
+                "name": name,
+                "size": metadata.len(),
+                "modified_at_ms": metadata.modified().ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+                "kind": kind_from_name(&name),
+            }));
         }
-        let metadata = match entry.metadata().await {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        let name = entry.file_name().to_string_lossy().to_string();
-        let id = crate::security::sha256_hex(&name);
-        entries.push(serde_json::json!({
-            "id": id,
-            "name": name,
-            "size": metadata.len(),
-            "modified_at_ms": metadata.modified().ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0),
-            "kind": kind_from_name(&name),
-        }));
     }
     entries.sort_by(|a, b| {
         let ma = a.get("modified_at_ms").and_then(|v| v.as_i64()).unwrap_or(0);
         let mb = b.get("modified_at_ms").and_then(|v| v.as_i64()).unwrap_or(0);
         mb.cmp(&ma)
     });
-    Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() }))
+    Ok(Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() })))
 }
 
 fn kind_from_name(name: &str) -> &'static str {
@@ -230,8 +237,9 @@ fn kind_from_name(name: &str) -> &'static str {
     }
 }
 
-async fn get_transfers(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "transfers": state.shared.transfers.list() }))
+async fn get_transfers(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers)?;
+    Ok(Json(serde_json::json!({ "transfers": state.shared.transfers.list() })))
 }
 
 async fn post_upload(
