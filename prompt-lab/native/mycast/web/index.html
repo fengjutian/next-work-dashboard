@@ -194,8 +194,23 @@ function toast(msg, kind) {
 }
 const log = (...a) => console.log('[mycast]', ...a);
 
+// `crypto.randomUUID()` is only exposed in secure contexts by several mobile
+// browsers. MyCast is intentionally served over plain HTTP on a LAN address,
+// so calling it during module initialization can abort the whole script before
+// the pairing button handlers are registered. Generate the short local IDs
+// with getRandomValues when possible and keep a compatibility fallback.
+function randomId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  if (globalThis.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 const state = {
-  deviceId: localStorage.getItem('mycast.deviceId') || ('web-' + crypto.randomUUID().slice(0, 8)),
+  deviceId: localStorage.getItem('mycast.deviceId') || ('web-' + randomId().slice(0, 8)),
   deviceName: localStorage.getItem('mycast.deviceName') || (navigator.userAgent.includes('iPhone') ? 'iPhone' : (navigator.userAgent.includes('Android') ? 'Android' : 'Web')),
   platform: navigator.platform || 'web',
   desktop: null,
@@ -424,7 +439,7 @@ $('startCastBtn').addEventListener('click', async () => {
     await state.pc.setLocalDescription(offer);
 
     // Ask desktop to create a session for us.
-    const sessionId = 'sess-' + crypto.randomUUID().slice(0, 8);
+    const sessionId = 'sess-' + randomId().slice(0, 8);
     state.activeSession = sessionId;
     sendSignaling({ type: 'create_session', session_id: sessionId, kind: 'screen' });
     sendSignaling({ type: 'offer', session_id: sessionId, sdp: offer.sdp });

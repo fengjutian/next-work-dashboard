@@ -1,0 +1,53 @@
+name: mycast
+description: "MyCast phone client: LAN screen casting + file transfer"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # WebRTC: cross-platform RTCPeerConnection + video track helpers.
+  flutter_webrtc: ^0.14.2
+
+  # HTTP client for pairing / file upload / download.
+  http: ^1.2.2
+
+  # WebSocket signaling channel (vs the sidecar's /ws endpoint).
+  web_socket_channel: ^3.0.1
+
+  # QR scanning (pair with the desktop's QR code).
+  mobile_scanner: ^5.2.3
+
+  # Persistent storage for device id, name, recent hosts, last session token.
+  shared_preferences: ^2.3.2
+
+  # Per-platform device info for the pairing handshake.
+  device_info_plus: ^11.0.0
+
+  # Runtime permission requests (camera for QR, screen capture, notifications).
+  permission_handler: ^11.3.1
+
+  # App-wide state / DI.
+  provider: ^6.1.2
+
+  # Lightweight logging.
+  logger: ^2.4.0
+
+  # Native file picker.
+  file_picker: ^8.1.2
+
+  # UUID v4 for session/transfer ids.
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

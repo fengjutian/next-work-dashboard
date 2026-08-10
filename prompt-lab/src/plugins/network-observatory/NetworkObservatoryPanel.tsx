@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
+import { BarChart, LineChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
@@ -39,7 +39,7 @@ import type {
 import type { NetProbeEvent, NetProbeState } from '@/types/electron';
 import { computeStats } from './backend/net-probe-stats';
 
-echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
 interface NetProbeAPI {
   start: () => Promise<{ ready: boolean; version: string | null }>;
@@ -129,6 +129,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [draftTarget, setDraftTarget] = useState<string>('1.1.1.1');
   const [draftInterval, setDraftInterval] = useState<number>(5);
   const [draftPort, setDraftPort] = useState<number>(443);
+  const [draftIpVersion, setDraftIpVersion] = useState<string>('auto');
   const [draftRecord, setDraftRecord] = useState<string>('A');
   const [draftResolvers, setDraftResolvers] = useState<string>('1.1.1.1, 8.8.8.8, 9.9.9.9');
   const [draftUrl, setDraftUrl] = useState<string>('');
@@ -242,6 +243,9 @@ export const NetworkObservatoryPanel: React.FC = () => {
       const baseIntervalMs = Math.max(500, Math.floor(draftInterval * 1000));
       const options: Record<string, unknown> = {};
       if (draftKind === 'tcp') options.port = draftPort;
+      if ((draftKind === 'icmp' || draftKind === 'tcp') && draftIpVersion !== 'auto') {
+        options.ip_version = draftIpVersion;
+      }
       if (draftKind === 'dns') {
         options.record = draftRecord;
         options.resolvers = draftResolvers.split(',').map((s) => s.trim()).filter(Boolean);
@@ -261,7 +265,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
     } catch (e) {
       setError(String((e as Error).message ?? e));
     }
-  }, [api, draftKind, draftTarget, draftInterval, draftPort, draftRecord, draftResolvers, draftUrl, draftPath]);
+  }, [api, draftKind, draftTarget, draftInterval, draftPort, draftRecord, draftResolvers, draftUrl, draftPath, draftIpVersion]);
 
   const removeTarget = useCallback(
     async (id: string) => {
@@ -322,6 +326,42 @@ export const NetworkObservatoryPanel: React.FC = () => {
       ],
     };
   }, [history]);
+
+  // Waterfall: for the latest successful HTTP result, show dns / tcp / tls /
+  // ttfb / download as a horizontal stacked bar. Empty for non-http probes.
+  const waterfallOption = useMemo<EChartsCoreOption | null>(() => {
+    if (selectedId == null) return null;
+    const target = targets.find((t) => t.id === selectedId);
+    if (!target || target.probe !== 'http') return null;
+    const last = [...history].reverse().find((r) => r.success && r.payloadJson && r.payloadJson !== '{}');
+    if (!last) return null;
+    let p: { dns_ms?: number; tcp_ms?: number; tls_ms?: number; ttfb_ms?: number; download_ms?: number; total_ms?: number; status?: number };
+    try { p = JSON.parse(last.payloadJson); } catch { return null; }
+    const dns = Number(p.dns_ms ?? 0);
+    const tcp = Number(p.tcp_ms ?? 0);
+    const tls = Number(p.tls_ms ?? 0);
+    const ttfb = Number(p.ttfb_ms ?? 0);
+    const download = Number(p.download_ms ?? 0);
+    return {
+      grid: { left: 64, right: 16, top: 8, bottom: 24 },
+      xAxis: { type: 'value', name: 'ms' },
+      yAxis: { type: 'category', data: ['最近一次'] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: unknown) => {
+        const arr = params as Array<{ seriesName: string; value: number; color: string }>;
+        if (!arr?.length) return '';
+        const total = arr.reduce((s, x) => s + (x.value || 0), 0);
+        const lines = arr.filter((x) => x.value > 0).map((x) => `${x.seriesName}: ${x.value.toFixed(1)} ms`).join('<br/>');
+        return `${last.timestampMs ? new Date(last.timestampMs).toLocaleTimeString() : ''}<br/>${lines}<br/>total: ${total.toFixed(1)} ms${p.status ? ` · status ${p.status}` : ''}`;
+      } },
+      series: [
+        { name: 'DNS',  type: 'bar', stack: 'w', data: [dns],      itemStyle: { color: '#60a5fa' } },
+        { name: 'TCP',  type: 'bar', stack: 'w', data: [tcp],      itemStyle: { color: '#34d399' } },
+        { name: 'TLS',  type: 'bar', stack: 'w', data: [tls],      itemStyle: { color: '#a78bfa' } },
+        { name: 'TTFB', type: 'bar', stack: 'w', data: [ttfb],     itemStyle: { color: '#f59e0b' } },
+        { name: 'DL',   type: 'bar', stack: 'w', data: [download], itemStyle: { color: '#f472b6' } },
+      ],
+    };
+  }, [history, selectedId, targets]);
 
   const stats = useMemo(() => {
     const latencies = history.map((r) => (r.success ? r.latencyMs : null));
@@ -388,6 +428,21 @@ export const NetworkObservatoryPanel: React.FC = () => {
               placeholder={PROBE_KINDS.find((k) => k.value === draftKind)?.placeholder}
               className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
             />
+            {(draftKind === 'icmp' || draftKind === 'tcp') && (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">IP 版本</span>
+                <select
+                  value={draftIpVersion}
+                  onChange={(e) => setDraftIpVersion(e.target.value)}
+                  className="flex-1 rounded border border-border bg-background px-2 py-1 text-xs"
+                  title="auto 解析 host 给的地址;v4/v6 强制单协议栈"
+                >
+                  <option value="auto">自动</option>
+                  <option value="v4">IPv4 only</option>
+                  <option value="v6">IPv6 only</option>
+                </select>
+              </div>
+            )}
             {draftKind === 'tcp' && (
               <div className="mt-2 flex items-center gap-2 text-xs">
                 <span className="text-muted-foreground">端口</span>
@@ -538,6 +593,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
               history={history}
               stats={stats}
               chartOption={chartOption}
+              waterfallOption={waterfallOption}
             />
           ) : showRules ? (
             <RulesPanel
@@ -592,9 +648,10 @@ interface TargetDetailProps {
   history: NetProbeResult[];
   stats: ReturnType<typeof computeStats>;
   chartOption: EChartsCoreOption;
+  waterfallOption: EChartsCoreOption | null;
 }
 
-const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, chartOption }) => {
+const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, chartOption, waterfallOption }) => {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="border-b border-border px-4 py-3">
@@ -613,6 +670,14 @@ const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, cha
         <Stat label="jitter" value={stats.jitter} unit="ms" />
         <Stat label="loss" value={stats.lossPct} unit="%" />
       </div>
+      {waterfallOption && (
+        <div className="h-24 border-b border-border px-4 py-1">
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>Waterfall · 最近一次</span>
+          </div>
+          <Chart option={waterfallOption} className="h-20 w-full" />
+        </div>
+      )}
       <div className="h-48 border-b border-border">
         <Chart option={chartOption} className="h-full w-full" />
       </div>
