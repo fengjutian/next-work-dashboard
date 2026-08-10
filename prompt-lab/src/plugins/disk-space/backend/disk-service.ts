@@ -57,6 +57,18 @@ function authorizedPath(rootPath: string, candidatePath?: string): { root: strin
 const textExtensions = new Set(['.txt', '.md', '.markdown', '.json', '.jsonc', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.xml', '.yaml', '.yml', '.toml', '.ini', '.log', '.csv']);
 const imageMimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
 
+async function commandOutput(command: string, args: string[]): Promise<{ available: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = ''; let error = '';
+    const timer = setTimeout(() => child.kill(), 8_000);
+    child.stdout?.on('data', (chunk) => { output = `${output}${String(chunk)}`.slice(0, 200_000); });
+    child.stderr?.on('data', (chunk) => { error = `${error}${String(chunk)}`.slice(0, 20_000); });
+    child.on('error', () => { clearTimeout(timer); resolve({ available: false, output: '' }); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ available: code === 0, output: (output || error).trim() }); });
+  });
+}
+
 export function setupDiskSpaceIPC(): void {
   ipcMain.handle('disk-space:system-info', async () => {
     let disks: Array<{ path: string; total: number; free: number; used: number }> = [];
@@ -130,6 +142,26 @@ export function setupDiskSpaceIPC(): void {
       } finally { await handle.close(); }
     }
     return { ...base, kind: 'unsupported' as const, message: `暂不支持预览 ${extension || '此类型'} 文件` };
+  });
+  ipcMain.handle('disk-space:probe-specialties', async () => {
+    const [docker, wsl, ollama, npm, pnpm, cargo, gradle, maven, conda, adb, virtualBox, vmware] = await Promise.all([
+      commandOutput('docker', ['system', 'df']), commandOutput('wsl.exe', ['--list', '--verbose']), commandOutput('ollama', ['list']),
+      commandOutput('npm', ['config', 'get', 'cache']), commandOutput('pnpm', ['store', 'path']), commandOutput('cargo', ['--version']),
+      commandOutput('gradle', ['--version']), commandOutput('mvn', ['--version']), commandOutput('conda', ['info']), commandOutput('adb', ['version']), commandOutput('VBoxManage', ['list', 'hdds']), commandOutput('vmrun', ['list']),
+    ]);
+    const make = (id: 'docker' | 'wsl' | 'ollama' | 'node' | 'rust' | 'java' | 'python' | 'android' | 'virtualization', label: string, values: Array<{ available: boolean; output: string }>) => ({ id, label, available: values.some((value) => value.available), summary: values.some((value) => value.available) ? '已检测到，可查看详细信息' : '当前环境未检测到', details: values.filter((value) => value.output).flatMap((value) => value.output.split(/\r?\n/).slice(0, 30)) });
+    return [make('docker', 'Docker', [docker]), make('wsl', 'WSL 与 ext4.vhdx', [wsl]), make('ollama', 'Ollama 模型', [ollama]), make('node', 'npm / pnpm 缓存', [npm, pnpm]), make('rust', 'Rust / Cargo', [cargo]), make('java', 'Gradle / Maven', [gradle, maven]), make('python', 'Conda / Python', [conda]), make('android', 'Android SDK', [adb]), make('virtualization', 'VMware / VirtualBox', [virtualBox, vmware])];
+  });
+  ipcMain.handle('disk-space:run-cleanup', async (_event, action: string) => {
+    const allowlist: Record<string, { command: string; args: string[]; title: string; detail: string }> = {
+      'docker-build-cache': { command: 'docker', args: ['builder', 'prune', '-f'], title: '清理 Docker Build Cache', detail: '将调用 docker builder prune，仅清理未使用的构建缓存。' },
+      'npm-cache': { command: 'npm', args: ['cache', 'clean', '--force'], title: '清理 npm 缓存', detail: '将调用 npm 官方缓存清理命令，之后安装依赖可能需要重新下载。' },
+      'pnpm-store': { command: 'pnpm', args: ['store', 'prune'], title: '整理 pnpm Store', detail: '将调用 pnpm store prune，删除未被项目引用的包。' },
+    };
+    const config = allowlist[action]; if (!config) throw new Error('不允许的清理动作');
+    const window = BrowserWindow.getFocusedWindow(); const options: MessageBoxOptions = { type: 'warning', title: config.title, message: `确认执行“${config.title}”？`, detail: `${config.detail}\n\n命令：${config.command} ${config.args.join(' ')}`, buttons: ['取消', '确认执行'], defaultId: 0, cancelId: 0 };
+    const confirmation = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options); if (confirmation.response !== 1) return { success: false, canceled: true };
+    const result = await commandOutput(config.command, config.args); if (!result.available) throw new Error(result.output || '官方清理命令执行失败'); return { success: true, output: result.output };
   });
   ipcMain.handle('disk-space:start', (event, scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean }) => {
     if (!scanId || typeof rootPath !== 'string' || scans.has(scanId)) throw new Error('无效或重复的扫描任务');

@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Activity } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -353,7 +353,7 @@ const builtInPlugins: Plugin[] = [
     contributions: { commands: [{ id: 'disk-space.scan', title: '分析磁盘空间', category: '磁盘空间' }] },
   },
   {
-    id: 'network-observatory', name: 'Network Observatory', icon: Activity, component: NetworkObservatoryPanel, enabled: false, order: 25, keepAlive: true,
+    id: 'network-observatory', name: 'Network Observatory', icon: Network, component: NetworkObservatoryPanel, enabled: false, order: 25, keepAlive: true,
     contributions: { commands: [{ id: 'network-observatory.add', title: '添加网络目标', category: 'Network Observatory' }] },
   },
   {

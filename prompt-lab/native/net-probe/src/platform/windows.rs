@@ -5,17 +5,33 @@
 //! V1 only handles IPv4 (ICMP). IPv6 (ICMPv6) is V2.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::sync::Once;
 use std::time::{Duration, Instant};
 
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
     IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho, ICMP_ECHO_REPLY, IP_OPTION_INFORMATION,
 };
+use windows::Win32::Networking::WinSock::{WSAStartup, WSADATA};
+
+static WSA_INIT: Once = Once::new();
+
+/// Winsock 2.2 must be initialised before any Winsock call. `IcmpSendEcho`
+/// runs over Winsock under the hood; without WSAStartup, IcmpCreateFile
+/// returns an invalid handle and the first IcmpSendEcho fails with
+/// WSAEPROVIDERFAILEDINIT (10093) / 11050 in some builds.
+fn ensure_winsock() {
+    WSA_INIT.call_once(|| unsafe {
+        let mut data: WSADATA = std::mem::zeroed();
+        // MAKEWORD(2, 2)
+        let _ = WSAStartup(0x0202, &mut data);
+    });
+}
 
 /// Open Icmp handle once per call. Cheap (just a CreateFile), and avoids
 /// process-wide state for now. V2 may cache this.
 pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
+    ensure_winsock();
     // Reject IPv6 early. V1 only supports IPv4.
     let ipv4: Ipv4Addr = match addr {
         SocketAddr::V4(v4) => *v4.ip(),
@@ -36,32 +52,34 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
         }
 
         // 32-byte payload. Anything works; matches typical `ping -l 32` default.
-        let send_data = [0u8; 32];
+        let send_data: [u8; 32] = [0u8; 32];
 
         // Reply buffer must be large enough: ICMP_ECHO_REPLY + 8-byte ICMP header
         // + reply data. sizeof(ICMP_ECHO_REPLY) = 28 on x64; we add 32 for payload
         // + headroom for the ICMP header.
-        let mut reply_buffer = vec![0u8; 64 + send_data.len()];
-        let reply_size = std::mem::size_of::<ICMP_ECHO_REPLY>() as u32;
+        let mut reply_buffer: Vec<u8> = vec![0u8; 64 + send_data.len()];
+        let reply_size: u32 = std::mem::size_of::<ICMP_ECHO_REPLY>() as u32;
 
         // Timeout in ms; cast saturating since duration is bounded.
-        let timeout_ms = u32::try_from(timeout.as_millis().min(u128::from(u32::MAX)))
+        let timeout_ms: u32 = u32::try_from(timeout.as_millis().min(u128::from(u32::MAX)))
             .unwrap_or(u32::MAX);
 
+        let options: IP_OPTION_INFORMATION = IP_OPTION_INFORMATION {
+            Ttl: 64,
+            Tos: 0,
+            Flags: 0,
+            OptionsSize: 0,
+            OptionsData: std::ptr::null_mut(),
+        };
+
         let started = Instant::now();
-        let result = IcmpSendEcho(
+        let result: u32 = IcmpSendEcho(
             handle,
             u32::from(ipv4),
-            PCWSTR::from_raw(send_data.as_ptr() as *const u16),
+            send_data.as_ptr() as *const std::ffi::c_void,
             u16::try_from(send_data.len()).unwrap_or(u16::MAX),
-            Some(&IP_OPTION_INFORMATION {
-                Ttl: 64,
-                Tos: 0,
-                Flags: 0,
-                OptionsSize: 0,
-                OptionsData: std::ptr::null_mut(),
-            }),
-            Some(reply_buffer.as_mut_ptr() as *mut ICMP_ECHO_REPLY),
+            Some(&options as *const IP_OPTION_INFORMATION),
+            reply_buffer.as_mut_ptr() as *mut std::ffi::c_void,
             reply_size,
             timeout_ms,
         );

@@ -5,7 +5,7 @@
  * watch ICMP results stream in. No persistence yet (V1.1 will add storage).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Pause, Play, Plus, RefreshCw, Trash2, Wifi, XCircle } from '@/components/icons';
+import { Network, Pause, Play, Plus, RefreshCw, Trash2, XCircle } from '@/components/icons';
 import type { NetProbeEvent, NetProbeState } from './backend/net-probe-service';
 
 interface NetProbeAPI {
@@ -217,7 +217,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
     <div className="flex h-full flex-col bg-background text-foreground">
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <Activity className="h-5 w-5 text-primary" />
+          <Network className="h-5 w-5 text-primary" />
           <h1 className="text-base font-semibold">Network Observatory</h1>
           <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">v0.1 · ICMP</span>
         </div>
@@ -282,7 +282,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
       <div className="flex-1 overflow-auto">
         {orderedTargets.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Wifi className="h-8 w-8 opacity-30" />
+            <Network className="h-8 w-8 opacity-30" />
             <p>添加一个目标开始 ICMP 探测</p>
             <p className="text-xs opacity-70">V1 仅支持 IPv4,DAEMON 通过 Rust nwd-net-probe 子进程运行</p>
           </div>

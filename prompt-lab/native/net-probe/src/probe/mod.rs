@@ -86,5 +86,10 @@ fn resolve(target: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
     use std::net::ToSocketAddrs;
     // V1: IPv4 only. IPv6 is V2; we intentionally avoid the bigger code path
     // and the ToSocketAddrs dual-stack surprises for now.
-    target.to_socket_addrs().map(|iter| iter.collect())
+    //
+    // `to_socket_addrs` requires a port. If the caller passed a bare IP/host,
+    // append ":0" (port 0 = OS picks). This also handles IPv6 literals like
+    // `::1` correctly because we always carry a port suffix.
+    let with_port = if target.contains(':') { target.to_string() } else { format!("{target}:0") };
+    with_port.to_socket_addrs().map(|iter| iter.collect())
 }

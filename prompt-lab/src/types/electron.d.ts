@@ -48,6 +48,7 @@ export interface DiskFilePreview {
   truncated?: boolean;
   message?: string;
 }
+export interface DiskSpecialtyProbe { id: 'docker' | 'wsl' | 'ollama' | 'node' | 'rust' | 'java' | 'python' | 'android' | 'virtualization'; label: string; available: boolean; summary: string; details: string[]; }
 
 // --- Network Observatory (nwd-net-probe) ---
 
@@ -313,6 +314,8 @@ export interface ElectronAPI {
     pickRoot: () => Promise<string | null>;
     listDirectory: (rootPath: string, directoryPath?: string) => Promise<DiskDirectoryItem[]>;
     preview: (rootPath: string, filePath: string) => Promise<DiskFilePreview>;
+    probeSpecialties: () => Promise<DiskSpecialtyProbe[]>;
+    runCleanup: (action: 'docker-build-cache' | 'npm-cache' | 'pnpm-store', rootPath?: string) => Promise<{ success: boolean; canceled?: boolean; output?: string }>;
     start: (scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean }) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
     pause: (scanId: string) => Promise<boolean>;
