@@ -29,6 +29,7 @@ describe('汉语新解 SVG handling', () => {
 
   it('extracts and limits the detailed explanation', () => {
     expect(extractExplanation('<svg></svg><explanation>  权力的包装术。 </explanation>')).toBe('权力的包装术。');
+    expect(extractExplanation('<explanation>第一层真相。\n\n第二层代价。</explanation>')).toBe('第一层真相。\n\n第二层代价。');
     expect(extractExplanation(`<explanation>${'刺'.repeat(301)}</explanation>`)).toHaveLength(300);
   });
 

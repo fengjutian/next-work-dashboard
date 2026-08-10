@@ -3,7 +3,7 @@ import { Modal, notification } from 'antd';
 import { BookOpen, Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles, Trash2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
-import { dbDeleteHanyuJinjieExecution, dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
+import { dbDeleteHanyuJinjieExecution, dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, dbUpdateHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
 import { useStore } from '@/store/store';
 import { extractExplanation, safeCardFilename, sanitizeGeneratedSvg, svgToPngBlob } from './svg';
 import { exportEpub, exportPdf, type BookMetadata } from './book-export';
@@ -44,7 +44,7 @@ design-principles '(干净 简洁 典雅))
 ;; 1. 启动时必须运行 (start) 函数
 ;; 2. 之后调用主函数 (汉语新解 用户输入)
 ;; 3. 输出完整 SVG 后，必须紧接 <explanation>详解</explanation>
-;; 4. 详解必须是纯文本，不超过 300 个汉字；抓住词语背后的权力关系、利益结构或自我欺骗，犀利、一针见血，不复述卡片文案`;
+;; 4. 详解必须是纯文本，不超过 300 个汉字；分成 2 至 3 个短段落，每段只讲一个观点；抓住词语背后的权力关系、利益结构或自我欺骗，犀利、一针见血，不复述卡片文案`;
 
 const EXAMPLES = ['内卷', '躺平', '赋能', '情绪价值', '松弛感', '已读不回'];
 const MAX_WORD_LENGTH = 24;
@@ -85,6 +85,7 @@ export const HanyuJinjiePanel: React.FC = () => {
   const [bookEntries, setBookEntries] = useState<string[]>([]);
   const [bookMetadata, setBookMetadata] = useState<BookMetadata>({ title: '汉语新解集', author: '', description: '那些被漂亮话包装起来的现实，值得重新拆开看一遍。' });
   const [exporting, setExporting] = useState<'epub' | 'pdf' | null>(null);
+  const [regenerating, setRegenerating] = useState<'card' | 'explanation' | null>(null);
   const requestIdRef = useRef(0);
   const copyTimerRef = useRef<number>();
 
@@ -158,6 +159,37 @@ export const HanyuJinjiePanel: React.FC = () => {
     catch (reason) { setError(errorMessage(reason)); }
     finally { setExporting(null); }
   }, [bookEntries, bookMetadata, executions]);
+
+  const persistCurrentPatch = useCallback(async (patch: Partial<Pick<HanyuJinjieExecution, 'svgContent' | 'explanation'>>) => {
+    if (!selectedExecutionId) return;
+    dbUpdateHanyuJinjieExecution(selectedExecutionId, patch);
+    await flushDbToDisk(); reloadExecutions();
+  }, [reloadExecutions, selectedExecutionId]);
+
+  const regenerateCard = useCallback(async () => {
+    if (!generatedWord || regenerating || loading) return;
+    setRegenerating('card'); setError(null);
+    try {
+      const prompt = `${SYSTEM_PROMPT}\n本次只重新设计卡片。仅输出一个完整 SVG，不要输出 explanation 或其他文字。`;
+      const raw = await llmChat(aiApi.apiKey, aiApi.baseUrl, aiApi.model, [{ role: 'system', content: prompt }, { role: 'user', content: `(汉语新解 "${lispString(generatedWord)}")` }]);
+      const sanitized = sanitizeGeneratedSvg(raw); setSvgContent(sanitized); await persistCurrentPatch({ svgContent: sanitized });
+      notice.success({ message: '卡片已重新生成', description: '下方详解保持不变。', placement: 'bottomRight' });
+    } catch (reason) { notice.error({ message: '卡片生成失败', description: errorMessage(reason), placement: 'bottomRight' }); }
+    finally { setRegenerating(null); }
+  }, [aiApi, generatedWord, loading, notice, persistCurrentPatch, regenerating]);
+
+  const regenerateExplanation = useCallback(async () => {
+    if (!generatedWord || regenerating || loading) return;
+    setRegenerating('explanation'); setError(null);
+    try {
+      const prompt = `你是犀利的中文社会观察者。重新解释用户给出的当代词汇，直指它背后的权力关系、利益结构或自我欺骗。不要复述卡片，不说空话。正文不超过300个汉字，分成2至3个短段落，每段只讲一个观点，句子长短有节奏。只输出：<explanation>正文</explanation>。`;
+      const raw = await llmChat(aiApi.apiKey, aiApi.baseUrl, aiApi.model, [{ role: 'system', content: prompt }, { role: 'user', content: generatedWord }]);
+      const detailedExplanation = extractExplanation(raw); if (!detailedExplanation) throw new Error('模型没有返回有效详解');
+      setExplanation(detailedExplanation); await persistCurrentPatch({ explanation: detailedExplanation });
+      notice.success({ message: '详解已重新生成', description: '上方卡片保持不变。', placement: 'bottomRight' });
+    } catch (reason) { notice.error({ message: '详解生成失败', description: errorMessage(reason), placement: 'bottomRight' }); }
+    finally { setRegenerating(null); }
+  }, [aiApi, generatedWord, loading, notice, persistCurrentPatch, regenerating]);
 
   const handleGenerate = useCallback(async (nextWord?: string) => {
     const word = (nextWord ?? input).trim();
@@ -262,14 +294,14 @@ export const HanyuJinjiePanel: React.FC = () => {
             {svgContent && <div className="flex shrink-0 items-center gap-1">
               <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleCopy()}>{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? '已复制' : '复制 SVG'}</Button>
               <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleDownload()}><Download className="h-3.5 w-3.5" />下载 PNG</Button>
-              <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleGenerate(generatedWord)}><RefreshCw className="h-3.5 w-3.5" />重新生成</Button>
+              <Button variant="ghost" size="sm" disabled={loading || Boolean(regenerating)} onClick={() => void regenerateCard()}>{regenerating === 'card' ? <Loader2 className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}重绘卡片</Button>
             </div>}
           </div>
 
           {error && <div role="alert" className="mx-4 mt-4 flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><span>{error}</span>{input.trim() && <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleGenerate()}>重试</Button>}</div>}
 
           <div className="relative min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,hsl(var(--muted))_1px,transparent_1px)] bg-[size:18px_18px] p-6">
-            {svgContent ? <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center gap-5"><div className="flex w-full min-h-[28rem] justify-center [&>svg]:block [&>svg]:max-h-[720px] [&>svg]:w-auto [&>svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svgContent }} />{explanation && <article className="w-full rounded-2xl border bg-background/95 p-5 shadow-sm"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">一针见血</h3><span className="text-[10px] text-muted-foreground">{explanation.length}/300 字</span></div><p className="whitespace-pre-wrap text-sm leading-7 text-foreground/90">{explanation}</p></article>}</div> : !loading && <div className="flex min-h-full items-center justify-center"><div className="max-w-sm text-center">
+            {svgContent ? <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center gap-6"><div className="flex w-full min-h-[28rem] justify-center [&>svg]:block [&>svg]:max-h-[720px] [&>svg]:w-auto [&>svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svgContent }} />{explanation && <article className="w-full rounded-2xl border bg-background/95 px-6 py-5 shadow-sm sm:px-8"><div className="mx-auto max-w-2xl"><div className="mb-4 flex items-center justify-between gap-3 border-b pb-3"><h3 className="text-base font-semibold tracking-wide">一针见血</h3><div className="flex items-center gap-2"><span className="text-[10px] text-muted-foreground">{explanation.length}/300 字</span><Button variant="ghost" size="sm" disabled={loading || Boolean(regenerating)} onClick={() => void regenerateExplanation()}>{regenerating === 'explanation' ? <Loader2 className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}重写详解</Button></div></div><p className="whitespace-pre-line text-[15px] leading-8 tracking-[0.02em] text-foreground/90">{explanation}</p></div></article>}</div> : !loading && <div className="flex min-h-full items-center justify-center"><div className="max-w-sm text-center">
               <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border bg-background text-primary shadow-sm"><HanyuJinjie className="h-11 w-11" /></div>
               <h2 className="mt-5 text-base font-medium">从一个词开始</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">输入一个当代词汇，生成包含中英日翻译、讽喻解释与抽象插图的卡片，并附一段直指本质的详解。</p>
             </div></div>}

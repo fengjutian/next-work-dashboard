@@ -55,7 +55,11 @@ export function extractExplanation(raw: string): string {
   return tagged
     .replace(/```[\s\S]*?```/g, '')
     .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.replace(/[ \t\n]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n\n')
     .trim()
     .slice(0, EXPLANATION_LIMIT);
 }

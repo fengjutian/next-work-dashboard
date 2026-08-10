@@ -882,6 +882,10 @@ export function dbDeleteHanyuJinjieExecution(id: string): void {
   getDb().delete(schema.hanyuJinjieExecutions).where(eq(schema.hanyuJinjieExecutions.id, id)).run();
 }
 
+export function dbUpdateHanyuJinjieExecution(id: string, patch: Partial<Pick<HanyuJinjieExecution, 'svgContent' | 'explanation'>>): void {
+  getDb().update(schema.hanyuJinjieExecutions).set(patch).where(eq(schema.hanyuJinjieExecutions.id, id)).run();
+}
+
 export interface DocumentKnowledgeRecord {
   id: string; name: string; kind: string; size: number; sections: unknown[]; plainText: string;
   chunks: unknown[]; embeddingMode: string; createdAt: number; lastViewedAt: number;
