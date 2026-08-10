@@ -1,13 +1,13 @@
 //! Cross-platform probe implementations.
 //!
 //! V1.1 supports: icmp / tcp / dns / http.
-//! V2 will add: traceroute.
+//! V2: traceroute (self-built with system-call fallback).
 
 pub mod icmp;
 pub mod tcp;
 pub mod dns;
 pub mod http;
-pub mod traceroute;
+pub mod traceroute_self;
 
 use std::time::Duration;
 
@@ -50,7 +50,7 @@ pub fn probe_for(kind: &str) -> Option<Box<dyn Probe>> {
         "tcp" => Some(Box::new(tcp::TcpProbe::new())),
         "dns" => Some(Box::new(dns::DnsProbe::new())),
         "http" => Some(Box::new(http::HttpProbe::new())),
-        "traceroute" => Some(Box::new(traceroute::TracerouteProbe::new())),
+        "traceroute" => Some(Box::new(traceroute_self::TracerouteProbe::new())),
         _ => None,
     }
 }
