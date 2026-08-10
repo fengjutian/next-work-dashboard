@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
+import os from 'node:os';
 
 const scans = new Map<string, ChildProcess>();
 const authorizedRoots = new Set<string>();
@@ -44,7 +45,33 @@ function scannerPath(): string {
   return found;
 }
 
+function authorizedPath(rootPath: string, candidatePath?: string): { root: string; candidate: string } {
+  if (typeof rootPath !== 'string') throw new Error('无效的授权目录');
+  const root = fs.realpathSync(rootPath);
+  if (!authorizedRoots.has(root)) throw new Error('目录未经过用户授权，请重新选择');
+  const candidate = fs.realpathSync(candidatePath || root);
+  if (!isWithinOrEqualRoot(root, candidate)) throw new Error('拒绝访问授权目录之外的路径');
+  return { root, candidate };
+}
+
+const textExtensions = new Set(['.txt', '.md', '.markdown', '.json', '.jsonc', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.html', '.xml', '.yaml', '.yml', '.toml', '.ini', '.log', '.csv']);
+const imageMimeTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+
 export function setupDiskSpaceIPC(): void {
+  ipcMain.handle('disk-space:system-info', async () => {
+    const diskPath = path.parse(app.getPath('home')).root || path.parse(process.cwd()).root || '/';
+    const disk = await fs.promises.statfs(diskPath);
+    const total = disk.blocks * disk.bsize;
+    const free = disk.bavail * disk.bsize;
+    const memoryTotal = os.totalmem();
+    const memoryFree = os.freemem();
+    return {
+      disk: { path: diskPath, total, free, used: Math.max(0, total - free) },
+      memory: { total: memoryTotal, free: memoryFree, used: Math.max(0, memoryTotal - memoryFree) },
+      platform: `${os.type()} ${os.release()}`,
+      hostname: os.hostname(),
+    };
+  });
   ipcMain.handle('disk-space:pick-root', async () => {
     const window = BrowserWindow.getFocusedWindow();
     const options: OpenDialogOptions = { properties: ['openDirectory'], title: '选择要分析的目录' };
@@ -52,6 +79,43 @@ export function setupDiskSpaceIPC(): void {
     const selected = result.canceled ? null : result.filePaths[0] ?? null;
     if (selected) authorizedRoots.add(fs.realpathSync(selected));
     return selected;
+  });
+  ipcMain.handle('disk-space:list-directory', async (_event, rootPath: string, directoryPath?: string) => {
+    const { candidate } = authorizedPath(rootPath, directoryPath);
+    if (!(await fs.promises.stat(candidate)).isDirectory()) throw new Error('目标不是目录');
+    const entries = await fs.promises.readdir(candidate, { withFileTypes: true });
+    const result = await Promise.all(entries.slice(0, 2000).filter((entry) => !entry.isSymbolicLink()).map(async (entry) => {
+      const entryPath = path.join(candidate, entry.name);
+      try {
+        const stat = await fs.promises.stat(entryPath);
+        if (!stat.isDirectory() && !stat.isFile()) return null;
+        return { name: entry.name, path: entryPath, type: stat.isDirectory() ? 'directory' as const : 'file' as const, size: stat.isFile() ? stat.size : 0, modifiedAt: stat.mtimeMs, extension: stat.isFile() ? path.extname(entry.name).toLowerCase() : '' };
+      } catch { return null; }
+    }));
+    return result.filter(Boolean).sort((a, b) => a!.type === b!.type ? a!.name.localeCompare(b!.name, 'zh-CN') : a!.type === 'directory' ? -1 : 1);
+  });
+  ipcMain.handle('disk-space:preview', async (_event, rootPath: string, filePath: string) => {
+    const { candidate } = authorizedPath(rootPath, filePath);
+    const stat = await fs.promises.stat(candidate);
+    if (!stat.isFile()) throw new Error('目标不是文件');
+    const extension = path.extname(candidate).toLowerCase();
+    const base = { path: candidate, name: path.basename(candidate), size: stat.size, modifiedAt: stat.mtimeMs };
+    if (imageMimeTypes[extension]) {
+      if (stat.size > 10 * 1024 * 1024) return { ...base, kind: 'unsupported' as const, message: '图片超过 10 MB，暂不支持预览' };
+      const content = await fs.promises.readFile(candidate, { encoding: 'base64' });
+      return { ...base, kind: 'image' as const, mimeType: imageMimeTypes[extension], content };
+    }
+    if (textExtensions.has(extension) || stat.size <= 512 * 1024 && extension === '') {
+      const limit = 1024 * 1024;
+      const handle = await fs.promises.open(candidate, 'r');
+      try {
+        const length = Math.min(stat.size, limit);
+        const buffer = Buffer.alloc(length);
+        await handle.read(buffer, 0, length, 0);
+        return { ...base, kind: 'text' as const, mimeType: 'text/plain', content: buffer.toString('utf8'), truncated: stat.size > limit };
+      } finally { await handle.close(); }
+    }
+    return { ...base, kind: 'unsupported' as const, message: `暂不支持预览 ${extension || '此类型'} 文件` };
   });
   ipcMain.handle('disk-space:start', (event, scanId: string, rootPath: string, options?: { exclusions?: string[] }) => {
     if (!scanId || typeof rootPath !== 'string' || scans.has(scanId)) throw new Error('无效或重复的扫描任务');
@@ -145,13 +209,11 @@ export function setupDiskSpaceIPC(): void {
     }
     return { success: true, canceled: false, trashed };
   });
-  ipcMain.handle('disk-space:open', async (_event, scanId: string, requestedPath: string) => {
-    const result = scanResults.get(scanId);
-    if (!result || typeof requestedPath !== 'string' || !result.entries.has(requestedPath)) {
-      throw new Error('文件或目录不属于本次扫描结果');
-    }
+  ipcMain.handle('disk-space:open', async (_event, rootPath: string, requestedPath: string) => {
+    if (typeof requestedPath !== 'string') throw new Error('无效的文件路径');
     const canonical = normalizeWindowsPath(fs.realpathSync(requestedPath));
-    if (!isWithinOrEqualRoot(result.root, canonical)) throw new Error('拒绝打开授权目录之外的路径');
+    const requestedRoot = authorizedRoots.has(rootPath) ? rootPath : [...authorizedRoots].find((root) => isWithinOrEqualRoot(root, canonical));
+    if (!requestedRoot || !isWithinOrEqualRoot(requestedRoot, canonical)) throw new Error('拒绝打开授权目录之外的路径');
     const error = await shell.openPath(canonical);
     if (error) throw new Error(error);
     return { success: true };

@@ -19,6 +19,34 @@ export type DiskScanEvent =
   | { type: 'duplicate'; groupId: string; size: number; files: Array<{ path: string; size: number; modifiedAt: number }> }
   | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 
+export interface DiskSystemInfo {
+  disk: { path: string; total: number; free: number; used: number };
+  memory: { total: number; free: number; used: number };
+  platform: string;
+  hostname: string;
+}
+
+export interface DiskDirectoryItem {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size: number;
+  modifiedAt: number;
+  extension: string;
+}
+
+export interface DiskFilePreview {
+  path: string;
+  name: string;
+  kind: 'text' | 'image' | 'unsupported';
+  mimeType?: string;
+  content?: string;
+  size: number;
+  modifiedAt: number;
+  truncated?: boolean;
+  message?: string;
+}
+
 export interface ElectronAPI {
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
@@ -254,11 +282,14 @@ export interface ElectronAPI {
     onExit: (id: string, callback: (exitCode: number) => void) => () => void;
   };
   diskSpace: {
+    systemInfo: () => Promise<DiskSystemInfo>;
     pickRoot: () => Promise<string | null>;
+    listDirectory: (rootPath: string, directoryPath?: string) => Promise<DiskDirectoryItem[]>;
+    preview: (rootPath: string, filePath: string) => Promise<DiskFilePreview>;
     start: (scanId: string, rootPath: string, options?: { exclusions?: string[] }) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
     trash: (scanId: string, paths: string[]) => Promise<{ success: boolean; canceled: boolean; trashed: string[] }>;
-    open: (scanId: string, filePath: string) => Promise<{ success: boolean }>;
+    open: (rootPath: string, filePath: string) => Promise<{ success: boolean }>;
     onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;
     onExit: (callback: (scanId: string, result: { code: number | null; error?: string }) => void) => () => void;
   };
