@@ -67,7 +67,7 @@ export function useVideoPlayer(): UseVideoPlayerResult {
     };
   }, []);
 
-  const safeCall = useCallback(async <T extends unknown[]>(fn: (...args: T) => Promise<unknown>, ...args: T) => {
+  const safeCall = useCallback(async <R, T extends unknown[]>(fn: (...args: T) => Promise<R>, ...args: T): Promise<R> => {
     if (!API) throw new Error('electronAPI 不可用，请在 Electron 内运行');
     try {
       return await fn(...args);

@@ -9,7 +9,7 @@
  */
 
 import net from 'node:net';
-import { EventEmitter } from 'node:node:events';
+import { EventEmitter } from 'node:events';
 
 export interface MpvEvent {
   event: string;

@@ -6,7 +6,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Video, Upload, X, ExternalLink, Keyboard } from '@/components/icons';
+import { Video, Upload, X, ExternalLink } from '@/components/icons';
+import { Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Modal } from 'antd';
 import { Controls } from './Controls';

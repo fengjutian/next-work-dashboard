@@ -410,7 +410,7 @@ export class VideoPlayerService {
         videoCodec: typeof videoParams?.codec === 'string' ? (videoParams.codec as string) : undefined,
         audioCodec: typeof audioParams?.codec === 'string' ? (audioParams.codec as string) : undefined,
         audioSampleRate: typeof audioParams?.samplerate === 'number' ? (audioParams.samplerate as number) : undefined,
-        audioChannels: typeof audioParams?.channels === {}.constructor ? (audioParams.channels as number) : undefined,
+        audioChannels: typeof audioParams?.channels === 'number' ? (audioParams.channels as number) : undefined,
         container: typeof containerFormat === 'string' ? containerFormat : undefined,
       };
       this.status = {

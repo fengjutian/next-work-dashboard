@@ -2,20 +2,15 @@
  * 视频播放器控件条
  *
  * 包含：播放 / 暂停 / 停止 / 音量 / 倍速 / 字幕 / 音轨 / 静音
+ *
+ * 注：项目没有 shadcn Select 组件，本文件用轻量 wrapper 直接渲染原生 <select>。
  */
 
 import { useMemo } from 'react';
-import { Pause, Play, Square, Volume2, Captions, Gauge, Film } from '@/components/icons';
-import type { TrackInfo, VideoPlayerStatus } from './types';
-import { VolumeHigh, VolumeLow, VolumeMute } from './icons';
+import { Pause, Play, Square, Keyboard } from '@/components/icons';
+import type { VideoPlayerStatus } from './types';
+import { VolumeHigh, VolumeLow, VolumeMute, Captions, Gauge, Film, Speaker } from './icons';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 
 interface ControlsProps {
   status: VideoPlayerStatus;
@@ -45,7 +40,6 @@ export function Controls({
   onOpenHelp,
 }: ControlsProps) {
   const isPlaying = status.state === 'playing';
-  const isPaused = status.state === 'paused';
   const isStopped = status.state === 'idle' || status.state === 'stopped' || status.state === 'ended' || !status.filePath;
   const VolumeIcon = status.muted || status.volume <= 0
     ? VolumeMute
@@ -110,65 +104,56 @@ export function Controls({
 
       <div className="flex items-center gap-1">
         <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
-        <Select
+        <select
+          aria-label="倍速"
           value={String(status.speed)}
-          onValueChange={(v) => onSpeed(Number(v))}
+          onChange={(e) => onSpeed(Number(e.target.value))}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
         >
-          <SelectTrigger className="h-8 w-[88px] text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SPEED_PRESETS.map((s) => (
-              <SelectItem key={s} value={String(s)}>
-                {s.toFixed(2).replace(/\.?0+$/, '')}x
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          {SPEED_PRESETS.map((s) => (
+            <option key={s} value={String(s)}>
+              {formatSpeed(s)}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="flex items-center gap-1">
-        <Volume2 className="h-3.5 w-3.5 text-muted-foreground" />
-        <Select
+        <Speaker className="h-3.5 w-3.5 text-muted-foreground" />
+        <select
+          aria-label="音轨"
           value={selectedAudioId === undefined ? '__none__' : String(selectedAudioId)}
-          onValueChange={(v) => onSelectAudio(v === '__none__' ? 'no' : Number(v))}
+          onChange={(e) => onSelectAudio(e.target.value === '__none__' ? 'no' : Number(e.target.value))}
           disabled={audioTracks.length === 0}
+          className="h-8 max-w-[160px] rounded-md border border-input bg-background px-2 text-xs"
         >
-          <SelectTrigger className="h-8 w-[160px] text-xs">
-            <SelectValue placeholder="音轨" />
-          </SelectTrigger>
-          <SelectContent>
-            {audioTracks.length === 0 ? (
-              <SelectItem value="__none__" disabled>无音轨</SelectItem>
-            ) : (
-              audioTracks.map((t) => (
-                <SelectItem key={t.id} value={String(t.id)}>
-                  {t.title}{t.lang ? ` (${t.lang})` : ''}{t.selected ? ' ✓' : ''}
-                </SelectItem>
-              ))
-            )}
-          </SelectContent>
-        </Select>
+          {audioTracks.length === 0 ? (
+            <option value="__none__" disabled>无音轨</option>
+          ) : (
+            audioTracks.map((t) => (
+              <option key={t.id} value={String(t.id)}>
+                {t.title}{t.lang ? ` (${t.lang})` : ''}{t.selected ? ' ✓' : ''}
+              </option>
+            ))
+          )}
+        </select>
       </div>
 
       <div className="flex items-center gap-1">
         <Captions className="h-3.5 w-3.5 text-muted-foreground" />
-        <Select
+        <select
+          aria-label="字幕"
           value={selectedSubtitleId === undefined ? '__none__' : String(selectedSubtitleId)}
-          onValueChange={(v) => onSelectSubtitle(v === '__none__' ? 'no' : Number(v))}
+          onChange={(e) => onSelectSubtitle(e.target.value === '__none__' ? 'no' : Number(e.target.value))}
+          className="h-8 max-w-[160px] rounded-md border border-input bg-background px-2 text-xs"
         >
-          <SelectTrigger className="h-8 w-[160px] text-xs">
-            <SelectValue placeholder="字幕" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">关闭字幕</SelectItem>
-            {subtitleTracks.map((t) => (
-              <SelectItem key={t.id} value={String(t.id)}>
-                {t.title}{t.lang ? ` (${t.lang})` : ''}{t.selected ? ' ✓' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <option value="__none__">关闭字幕</option>
+          {subtitleTracks.map((t) => (
+            <option key={t.id} value={String(t.id)}>
+              {t.title}{t.lang ? ` (${t.lang})` : ''}{t.selected ? ' ✓' : ''}
+            </option>
+          ))}
+        </select>
         <Button
           type="button"
           variant="ghost"
@@ -183,9 +168,14 @@ export function Controls({
 
       {onOpenHelp && (
         <Button type="button" variant="ghost" size="sm" onClick={onOpenHelp} className="ml-auto">
-          <Film className="h-3.5 w-3.5" /> 快捷键
+          <Keyboard className="h-3.5 w-3.5" /> 快捷键
         </Button>
       )}
     </div>
   );
+}
+
+function formatSpeed(s: number): string {
+  if (s === 1) return '1x';
+  return `${s.toFixed(2).replace(/\.?0+$/, '')}x`;
 }

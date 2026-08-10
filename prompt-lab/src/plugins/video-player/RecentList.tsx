@@ -5,12 +5,13 @@
  */
 
 import { useState } from 'react';
-import { Trash2, X, History, Film } from '@/components/icons';
+import { Trash2, X, History } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { RecentVideoEntry } from './types';
 import { clearRecent, loadRecent, removeRecent } from './recent-store';
 import { fileBaseName, fileDirName, formatDuration } from './format';
+import { Film } from './icons';
 
 interface RecentListProps {
   entries?: RecentVideoEntry[];
