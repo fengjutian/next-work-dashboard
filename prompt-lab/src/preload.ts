@@ -134,6 +134,17 @@ const electronAPI: ElectronAPI = {
     search: (vector: number[], limit: number) => ipcRenderer.invoke('memory:index:search', vector, limit),
     clear: () => ipcRenderer.invoke('memory:index:clear'),
   },
+  ragWorker: {
+    status: () => ipcRenderer.invoke('rag-worker:status'),
+    upsertDocument: (document) => ipcRenderer.invoke('rag-worker:upsert-document', document),
+    deleteDocument: (documentId) => ipcRenderer.invoke('rag-worker:delete-document', documentId),
+    keywordSearch: (request) => ipcRenderer.invoke('rag-worker:keyword-search', request),
+    fuseResults: (request) => ipcRenderer.invoke('rag-worker:fuse-results', request),
+    indexStatus: () => ipcRenderer.invoke('rag-worker:index-status'),
+    pendingOutbox: (limit) => ipcRenderer.invoke('rag-worker:pending-outbox', limit),
+    completeOutbox: (id) => ipcRenderer.invoke('rag-worker:complete-outbox', id),
+    failOutbox: (id, error) => ipcRenderer.invoke('rag-worker:fail-outbox', id, error),
+  },
   // 通用 HTTP fetch（主进程，绕过 CORS）
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) =>
     ipcRenderer.invoke('fetch-url', url, options),

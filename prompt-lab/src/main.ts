@@ -10,6 +10,8 @@ import { destroyAll } from './plugins/terminal/backend/terminal-manager';
 import { mcpManager } from './main/mcp/mcp-manager';
 import { disposeOfficeService } from './plugins/office-studio/backend/office-service';
 import { disposeDiskSpaceService, setupDiskSpaceIPC } from './plugins/disk-space/backend/disk-service';
+import { setupRagWorkerIPC } from './main/rag-worker-ipc';
+import { ragWorkerClient } from './main/rag-worker-client';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -103,6 +105,7 @@ if (started) {
     // setupIPC configures the existing window and observes future windows.
     setupIPC(webviewPreloadPath);
     setupDiskSpaceIPC();
+    setupRagWorkerIPC();
     createTray();
     configureWindowsJumpList();
     registerShortcuts();
@@ -126,5 +129,6 @@ if (started) {
     void mcpManager.closeAll();
     void disposeOfficeService();
     disposeDiskSpaceService();
+    ragWorkerClient.dispose();
   });
 }

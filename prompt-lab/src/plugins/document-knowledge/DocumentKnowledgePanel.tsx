@@ -15,6 +15,58 @@ import { previewParagraphs } from './preview';
 
 type Stage = 'idle' | 'indexing' | 'ready' | 'asking' | 'error';
 const PANE_PREFS_KEY = 'document-knowledge.panes.v1';
+const RAG_PARSER_VERSION = 'document-knowledge-parser-v1';
+const RAG_CHUNKER_VERSION = 'character-overlap-v1';
+
+async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChunk[]): Promise<void> {
+  try {
+    const status = await window.electronAPI.ragWorker.status();
+    if (!status.available) return;
+    await window.electronAPI.ragWorker.upsertDocument({
+      id: document.id,
+      name: document.name,
+      kind: document.kind,
+      sourcePath: document.cachedFilePath,
+      fileSize: document.size,
+      parserVersion: RAG_PARSER_VERSION,
+      chunkerVersion: RAG_CHUNKER_VERSION,
+      chunks: chunks.map((chunk, chunkIndex) => ({
+        id: chunk.id,
+        content: chunk.content,
+        chunkIndex,
+        sectionTitle: chunk.sectionTitle,
+        page: chunk.page,
+      })),
+    });
+  } catch (error) {
+    console.warn('[DocumentKnowledge] Rust RAG shadow indexing unavailable; using legacy index.', error);
+  }
+}
+
+async function hybridRetrieve(chunks: DocumentChunk[], query: string, vector: number[], limit: number) {
+  const vectorCandidates = retrieve(chunks, vector, Math.max(50, limit * 10));
+  try {
+    const lexical = await window.electronAPI.ragWorker.keywordSearch({ query, topK: Math.max(50, limit * 10) });
+    const fused = await window.electronAPI.ragWorker.fuseResults({
+      lists: [
+        { ids: vectorCandidates.map((hit) => hit.id) },
+        { ids: lexical.hits.map((hit) => hit.chunkId) },
+      ],
+      topK: limit,
+      rankConstant: 60,
+    });
+    const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+    const vectorScores = new Map(vectorCandidates.map((hit) => [hit.id, hit.score]));
+    const hits = fused.hits.flatMap((hit) => {
+      const chunk = byId.get(hit.chunkId);
+      return chunk ? [{ ...chunk, score: vectorScores.get(chunk.id) ?? hit.score }] : [];
+    });
+    return hits.length ? hits : vectorCandidates.slice(0, limit);
+  } catch (error) {
+    console.warn('[DocumentKnowledge] Rust hybrid retrieval unavailable; using vector search.', error);
+    return vectorCandidates.slice(0, limit);
+  }
+}
 
 export const DocumentKnowledgePanel: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
@@ -92,6 +144,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
           dbSaveDocumentKnowledge({ id: result.document.id, name: result.document.name, kind: result.document.kind, size: result.document.size, sections: result.document.sections, plainText: result.document.plainText, chunks: result.chunks, embeddingMode: result.embeddingMode, cachedFilePath: result.document.cachedFilePath, createdAt: result.document.createdAt, lastViewedAt: Date.now() });
           await flushDbToDisk();
         }
+        await syncRustRagDocument(result.document, result.chunks);
       }
       setStage('ready'); setStatus(`已建立索引：${accepted.length} 个文件`); setProgress(100);
     } catch (error) {
@@ -112,7 +165,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
     try {
       if (!embeddingMode) throw new Error('文档索引模式不可用，请重新上传文档');
       const vector = await embedQuestion(content, memoryConfig, embeddingMode);
-      const hits = retrieve(chunks, vector, memoryConfig.recallCount || 5);
+      const hits = await hybridRetrieve(chunks, content, vector, memoryConfig.recallCount || 5);
       const provider = createOpenAIProvider(aiApi);
       const prompt = `仅根据以下资料回答问题。资料不足时明确说明，不要编造。引用结论时使用 [资料 N] 标记。\n\n${buildRagContext(hits)}\n\n问题：${content}`;
       let answer = '';
@@ -141,6 +194,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
     setSelectedId(undefined);
     if (isDbReady()) { try { dbDeleteDocumentKnowledge(id); void flushDbToDisk(); } catch { /* Keep UI removal responsive. */ } }
     void window.electronAPI.documentCache.delete(id);
+    void window.electronAPI.ragWorker.deleteDocument(id).catch(() => undefined);
   }, [documents]);
 
   return <div className="flex h-full min-h-0 bg-background text-foreground">

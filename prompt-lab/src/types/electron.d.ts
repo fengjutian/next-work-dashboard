@@ -89,6 +89,17 @@ export interface ElectronAPI {
     search: (vector: number[], limit: number) => Promise<Array<{ id: string; distance: number }>>;
     clear: () => Promise<void>;
   };
+  ragWorker: {
+    status: () => Promise<{ available: boolean; version?: string; schemaVersion?: number; error?: string }>;
+    upsertDocument: (document: RagWorkerDocumentInput) => Promise<{ documentId: string; unchanged: boolean; jobId: string | null; chunks?: number }>;
+    deleteDocument: (documentId: string) => Promise<{ deleted: boolean }>;
+    keywordSearch: (request: { query: string; topK?: number; documentIds?: string[] }) => Promise<{ hits: RagWorkerKeywordHit[] }>;
+    fuseResults: (request: { lists: Array<{ ids: string[]; weight?: number }>; topK?: number; rankConstant?: number }) => Promise<{ hits: Array<{ chunkId: string; score: number; rank: number }> }>;
+    indexStatus: () => Promise<{ documents: number; chunks: number; pendingOutbox: number }>;
+    pendingOutbox: (limit?: number) => Promise<{ operations: RagWorkerOutboxOperation[] }>;
+    completeOutbox: (id: number) => Promise<{ completed: boolean }>;
+    failOutbox: (id: number, error: string) => Promise<{ failed: boolean }>;
+  };
   mcp: {
     listServers: () => Promise<McpServerStatus[]>;
     saveServer: (config: McpServerConfig) => Promise<McpOperationResult>;
@@ -252,6 +263,47 @@ export interface ElectronAPI {
   shell: {
     openExternal: (url: string) => Promise<void>;
   };
+}
+
+export interface RagWorkerChunkInput {
+  id: string;
+  content: string;
+  chunkIndex: number;
+  sectionTitle?: string;
+  page?: number;
+  startOffset?: number;
+  endOffset?: number;
+  contentHash?: string;
+}
+
+export interface RagWorkerDocumentInput {
+  id: string;
+  name: string;
+  kind: string;
+  sourcePath?: string;
+  fileSize: number;
+  contentHash?: string;
+  parserVersion: string;
+  chunkerVersion: string;
+  chunks: RagWorkerChunkInput[];
+}
+
+export interface RagWorkerKeywordHit {
+  chunkId: string;
+  documentId: string;
+  content: string;
+  sectionTitle?: string;
+  page?: number;
+  score: number;
+}
+
+export interface RagWorkerOutboxOperation {
+  id: number;
+  operation: 'upsert_vector' | 'delete_vector' | 'delete_document';
+  chunkId?: string;
+  documentId?: string;
+  payload: { content?: string; sectionTitle?: string; page?: number };
+  retryCount: number;
 }
 
 export interface ConversationFile {
