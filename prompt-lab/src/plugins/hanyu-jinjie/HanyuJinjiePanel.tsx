@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles, Trash2 } from '@/components/icons';
+import { BookOpen, Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles, Trash2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { dbDeleteHanyuJinjieExecution, dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
 import { useStore } from '@/store/store';
 import { extractExplanation, safeCardFilename, sanitizeGeneratedSvg, svgToPngBlob } from './svg';
+import { exportEpub, exportPdf, type BookMetadata } from './book-export';
 
 const SYSTEM_PROMPT = `(defun 新汉语老师 ()
 "你是年轻人,批判现实,思考深刻,语言风趣"
@@ -77,6 +78,10 @@ export const HanyuJinjiePanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [executions, setExecutions] = useState<HanyuJinjieExecution[]>([]);
+  const [bookOpen, setBookOpen] = useState(false);
+  const [bookEntries, setBookEntries] = useState<string[]>([]);
+  const [bookMetadata, setBookMetadata] = useState<BookMetadata>({ title: '汉语新解集', author: '', description: '那些被漂亮话包装起来的现实，值得重新拆开看一遍。' });
+  const [exporting, setExporting] = useState<'epub' | 'pdf' | null>(null);
   const requestIdRef = useRef(0);
   const copyTimerRef = useRef<number>();
 
@@ -117,6 +122,27 @@ export const HanyuJinjiePanel: React.FC = () => {
       }
     } catch { setError('删除记录失败，请稍后重试'); }
   }, [selectedExecutionId]);
+
+  const openBookEditor = useCallback(() => {
+    setBookEntries(executions.filter((entry) => entry.status === 'success' && entry.svgContent && entry.explanation).map((entry) => entry.id));
+    setBookOpen(true); setError(null);
+  }, [executions]);
+
+  const moveBookEntry = useCallback((id: string, offset: -1 | 1) => setBookEntries((current) => {
+    const index = current.indexOf(id); const target = index + offset;
+    if (index < 0 || target < 0 || target >= current.length) return current;
+    const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; return next;
+  }), []);
+
+  const handleBookExport = useCallback(async (format: 'epub' | 'pdf') => {
+    const entries = bookEntries.map((id) => executions.find((entry) => entry.id === id)).filter((entry): entry is HanyuJinjieExecution => Boolean(entry));
+    if (!bookMetadata.title.trim()) { setError('请填写书名'); return; }
+    if (!entries.length) { setError('请至少选择一篇新解'); return; }
+    setExporting(format); setError(null);
+    try { if (format === 'epub') await exportEpub(bookMetadata, entries); else await exportPdf(bookMetadata, entries); }
+    catch (reason) { setError(errorMessage(reason)); }
+    finally { setExporting(null); }
+  }, [bookEntries, bookMetadata, executions]);
 
   const handleGenerate = useCallback(async (nextWord?: string) => {
     const word = (nextWord ?? input).trim();
@@ -201,7 +227,7 @@ export const HanyuJinjiePanel: React.FC = () => {
           </section>
 
           {executions.length > 0 && <section className="rounded-2xl border bg-card p-4">
-            <div className="flex items-center gap-2"><History className="h-4 w-4 text-primary" /><h2 className="text-xs font-medium">最近执行</h2><span className="ml-auto text-[10px] text-muted-foreground">SQLite</span></div>
+            <div className="flex items-center gap-2"><History className="h-4 w-4 text-primary" /><h2 className="text-xs font-medium">最近执行</h2><Button type="button" variant="ghost" size="sm" className="ml-auto h-7 px-2 text-[11px]" onClick={openBookEditor}><BookOpen className="h-3.5 w-3.5" />新解成册</Button><span className="text-[10px] text-muted-foreground">SQLite</span></div>
             <div className="mt-3 space-y-1">{executions.slice(0, 10).map((execution) => <div key={execution.id} className={`group flex items-center rounded-lg transition hover:bg-accent ${selectedExecutionId === execution.id ? 'bg-primary/10' : ''}`}>
               <button type="button" onClick={() => { setInput(execution.word); setGeneratedWord(execution.word); setSvgContent(execution.svgContent || null); setExplanation(execution.explanation || ''); setError(execution.error || null); setSelectedExecutionId(execution.id); }} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left">
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${execution.status === 'success' ? 'bg-success' : 'bg-destructive'}`} />
@@ -234,6 +260,24 @@ export const HanyuJinjiePanel: React.FC = () => {
           </div>
         </section>
       </main>
+
+      {bookOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-label="新解成册">
+        <section className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+          <header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">新解成册</h2><p className="mt-1 text-xs text-muted-foreground">选择篇目、调整顺序并导出为电子书</p></div><button type="button" onClick={() => setBookOpen(false)} className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent">关闭</button></header>
+          <div className="grid min-h-0 flex-1 gap-5 overflow-auto p-5 md:grid-cols-[minmax(15rem,0.8fr)_minmax(18rem,1.2fr)]">
+            <div className="space-y-4">
+              <label className="grid gap-1.5 text-xs font-medium">书名<input value={bookMetadata.title} maxLength={60} onChange={(event) => setBookMetadata((value) => ({ ...value, title: event.target.value }))} className="h-10 rounded-lg border bg-background px-3 text-sm font-normal outline-none focus:border-primary" /></label>
+              <label className="grid gap-1.5 text-xs font-medium">作者<input value={bookMetadata.author} maxLength={40} placeholder="选填" onChange={(event) => setBookMetadata((value) => ({ ...value, author: event.target.value }))} className="h-10 rounded-lg border bg-background px-3 text-sm font-normal outline-none focus:border-primary" /></label>
+              <label className="grid gap-1.5 text-xs font-medium">简介<textarea value={bookMetadata.description} maxLength={200} rows={5} onChange={(event) => setBookMetadata((value) => ({ ...value, description: event.target.value }))} className="resize-none rounded-lg border bg-background p-3 text-sm font-normal leading-6 outline-none focus:border-primary" /><span className="text-right text-[10px] font-normal text-muted-foreground">{bookMetadata.description.length}/200</span></label>
+              <div className="rounded-xl bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">PDF 使用 A5 版式，每篇包含卡片页与详解页；EPUB 会生成可跳转目录并自动适配阅读器。</div>
+            </div>
+            <div className="min-h-0"><div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-medium">收录篇目与顺序</h3><span className="text-[10px] text-muted-foreground">已选 {bookEntries.length} 篇</span></div><div className="max-h-[26rem] space-y-1 overflow-auto rounded-xl border p-2">
+              {[...executions].filter((entry) => entry.status === 'success' && entry.svgContent && entry.explanation).sort((a, b) => { const aIndex = bookEntries.indexOf(a.id); const bIndex = bookEntries.indexOf(b.id); if (aIndex >= 0 && bIndex >= 0) return aIndex - bIndex; if (aIndex >= 0) return -1; if (bIndex >= 0) return 1; return 0; }).map((entry) => { const selectedIndex = bookEntries.indexOf(entry.id); const selected = selectedIndex >= 0; return <div key={entry.id} className={`flex items-center gap-2 rounded-lg px-2 py-2 ${selected ? 'bg-primary/10' : 'hover:bg-accent'}`}><input type="checkbox" checked={selected} aria-label={`收录「${entry.word}」`} onChange={() => setBookEntries((current) => selected ? current.filter((id) => id !== entry.id) : [...current, entry.id])} className="h-4 w-4 accent-primary" /><span className="min-w-0 flex-1 truncate text-sm">{entry.word}</span>{selected && <><span className="w-5 text-center text-[10px] text-muted-foreground">{selectedIndex + 1}</span><button type="button" disabled={selectedIndex === 0} onClick={() => moveBookEntry(entry.id, -1)} className="rounded px-1.5 py-1 text-xs hover:bg-background disabled:opacity-25" aria-label="上移">↑</button><button type="button" disabled={selectedIndex === bookEntries.length - 1} onClick={() => moveBookEntry(entry.id, 1)} className="rounded px-1.5 py-1 text-xs hover:bg-background disabled:opacity-25" aria-label="下移">↓</button></>}</div>; })}
+            </div></div>
+          </div>
+          <footer className="flex flex-wrap items-center justify-end gap-2 border-t px-5 py-4"><Button variant="outline" disabled={Boolean(exporting) || !bookEntries.length} onClick={() => void handleBookExport('epub')}>{exporting === 'epub' ? <Loader2 className="h-4 w-4" /> : <BookOpen className="h-4 w-4" />}导出 EPUB</Button><Button disabled={Boolean(exporting) || !bookEntries.length} onClick={() => void handleBookExport('pdf')}>{exporting === 'pdf' ? <Loader2 className="h-4 w-4" /> : <Download className="h-4 w-4" />}导出 PDF</Button></footer>
+        </section>
+      </div>}
     </div>
   );
 };
