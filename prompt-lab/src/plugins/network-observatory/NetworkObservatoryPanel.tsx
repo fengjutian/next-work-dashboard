@@ -368,6 +368,24 @@ export const NetworkObservatoryPanel: React.FC = () => {
     };
   }, [history, selectedId, targets]);
 
+  // Traceroute path: latest successful result's hops array.
+  const traceroutePath = useMemo<{ hops: Array<{ hop: number; rttMs: number[]; host: string }>; totalMs: number; timestampMs: number; complete: boolean } | null>(() => {
+    if (selectedId == null) return null;
+    const target = targets.find((t) => t.id === selectedId);
+    if (!target || target.probe !== 'traceroute') return null;
+    const last = [...history].reverse().find((r) => r.success && r.payloadJson && r.payloadJson !== '{}');
+    if (!last) return null;
+    let p: { hops?: Array<{ hop: number; rtt_ms: number[]; host: string }>; complete?: boolean };
+    try { p = JSON.parse(last.payloadJson); } catch { return null; }
+    if (!Array.isArray(p.hops)) return null;
+    return {
+      hops: p.hops.map((h) => ({ hop: h.hop, rttMs: h.rtt_ms ?? [], host: h.host ?? '' })),
+      totalMs: last.latencyMs ?? 0,
+      timestampMs: last.timestampMs,
+      complete: Boolean(p.complete),
+    };
+  }, [history, selectedId, targets]);
+
   const stats = useMemo(() => {
     const latencies = history.map((r) => (r.success ? r.latencyMs : null));
     return computeStats(latencies, history.length);
@@ -613,6 +631,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
               stats={stats}
               chartOption={chartOption}
               waterfallOption={waterfallOption}
+              traceroutePath={traceroutePath}
             />
           ) : showRules ? (
             <RulesPanel
@@ -662,15 +681,23 @@ const DaemonStatusBadge: React.FC<{ state: NetProbeState | null }> = ({ state })
   return <span className="rounded bg-muted px-2 py-0.5">未启动</span>;
 };
 
+interface TraceroutePath {
+  hops: Array<{ hop: number; rttMs: number[]; host: string }>;
+  totalMs: number;
+  timestampMs: number;
+  complete: boolean;
+}
+
 interface TargetDetailProps {
   target: NetProbeTarget;
   history: NetProbeResult[];
   stats: ReturnType<typeof computeStats>;
   chartOption: EChartsCoreOption;
   waterfallOption: EChartsCoreOption | null;
+  traceroutePath: TraceroutePath | null;
 }
 
-const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, chartOption, waterfallOption }) => {
+const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, chartOption, waterfallOption, traceroutePath }) => {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="border-b border-border px-4 py-3">
@@ -697,9 +724,13 @@ const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, cha
           <Chart option={waterfallOption} className="h-20 w-full" />
         </div>
       )}
-      <div className="h-48 border-b border-border">
-        <Chart option={chartOption} className="h-full w-full" />
-      </div>
+      {traceroutePath ? (
+        <TraceroutePathView path={traceroutePath} />
+      ) : (
+        <div className="h-48 border-b border-border">
+          <Chart option={chartOption} className="h-full w-full" />
+        </div>
+      )}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-muted/60 text-[10px] uppercase text-muted-foreground">
@@ -761,6 +792,44 @@ const Stat: React.FC<{ label: string; value: number | null; unit: string }> = ({
     <div className="font-mono text-sm font-medium">{value == null ? '—' : value.toFixed(1)} <span className="text-[10px] text-muted-foreground">{unit}</span></div>
   </div>
 );
+
+const TraceroutePathView: React.FC<{ path: TraceroutePath }> = ({ path }) => {
+  return (
+    <div className="flex-1 overflow-auto border-b border-border">
+      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
+        <span>Path · {path.hops.length} hops · total {path.totalMs.toFixed(0)} ms{path.complete ? ' · complete' : ' · partial'}</span>
+        <span className="font-mono text-[10px]">{new Date(path.timestampMs).toLocaleString()}</span>
+      </div>
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-muted/60 text-[10px] uppercase text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 text-right w-12">Hop</th>
+            <th className="px-3 py-2 text-left">Host</th>
+            <th className="px-3 py-2 text-right w-32">RTT #1</th>
+            <th className="px-3 py-2 text-right w-32">RTT #2</th>
+            <th className="px-3 py-2 text-right w-32">RTT #3</th>
+          </tr>
+        </thead>
+        <tbody>
+          {path.hops.map((h) => (
+            <tr key={h.hop} className="border-b border-border/40 hover:bg-muted/20">
+              <td className="px-3 py-1.5 text-right font-mono">{h.hop}</td>
+              <td className="px-3 py-1.5 font-mono text-[11px]">{h.host}</td>
+              {[0, 1, 2].map((i) => {
+                const v = h.rttMs[i];
+                return (
+                  <td key={i} className="px-3 py-1.5 text-right font-mono">
+                    {v == null || v < 0 ? <span className="text-muted-foreground">*</span> : `${v.toFixed(1)} ms`}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 interface RulesPanelProps {
   rules: NetProbeAlertRule[];

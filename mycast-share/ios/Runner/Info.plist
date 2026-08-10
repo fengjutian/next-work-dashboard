@@ -53,6 +53,27 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<key>NSCameraUsageDescription</key>
+	<string>MyCast uses the camera to scan the desktop pairing QR code.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MyCast optionally streams the microphone alongside the screen when casting is active.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MyCast discovers the desktop MyCast daemon on your local network and exchanges pairing tokens.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_nwd-mycast._tcp</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.nextworkdashboard.mycast.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mycast</string>
+			</array>
+		</dict>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
