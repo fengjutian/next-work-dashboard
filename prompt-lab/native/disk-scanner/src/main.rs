@@ -124,7 +124,7 @@ fn should_exclude(path: &Path, exclusions: &HashSet<String>) -> bool {
         .unwrap_or(false)
 }
 
-fn scan(root: &Path, exclusions: &HashSet<String>) -> io::Result<()> {
+fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool) -> io::Result<()> {
     let root = fs::canonicalize(root)?;
     if !root.is_dir() {
         return Err(io::Error::new(
@@ -247,12 +247,18 @@ fn scan(root: &Path, exclusions: &HashSet<String>) -> io::Result<()> {
     }
     let mut directories = directory_bytes.into_iter().collect::<Vec<_>>();
     directories.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-    directories.truncate(50);
+    directories.truncate(500);
     for (directory, size) in directories {
         emit(&format!(
             r#"{{"type":"directory","path":"{}","size":{size}}}"#,
             escape_json(&directory.to_string_lossy())
         ));
+    }
+    if skip_duplicates {
+        emit(&format!(
+            r#"{{"type":"done","files":{files},"bytes":{bytes},"errors":{errors}}}"#
+        ));
+        return Ok(());
     }
     emit(r#"{"type":"duplicate-progress","stage":"hashing"}"#);
     let mut duplicate_groups = Vec::<DuplicateGroup>::new();
@@ -336,18 +342,21 @@ fn main() {
     }
     let root = args.next();
     let mut exclusions = HashSet::new();
+    let mut skip_duplicates = false;
     while let Some(argument) = args.next() {
         if argument == std::ffi::OsStr::new("--exclude") {
             if let Some(value) = args.next() {
                 exclusions.insert(normalized_name(&value.to_string_lossy()));
             }
+        } else if argument == std::ffi::OsStr::new("--skip-duplicates") {
+            skip_duplicates = true;
         }
     }
     if command.as_deref() != Some(std::ffi::OsStr::new("scan")) || root.is_none() {
         eprintln!("usage: nwd-disk-scanner scan <directory>");
         std::process::exit(2);
     }
-    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions) {
+    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions, skip_duplicates) {
         eprintln!("{error}");
         std::process::exit(1);
     }

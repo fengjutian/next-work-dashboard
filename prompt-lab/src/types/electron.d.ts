@@ -286,7 +286,7 @@ export interface ElectronAPI {
     pickRoot: () => Promise<string | null>;
     listDirectory: (rootPath: string, directoryPath?: string) => Promise<DiskDirectoryItem[]>;
     preview: (rootPath: string, filePath: string) => Promise<DiskFilePreview>;
-    start: (scanId: string, rootPath: string, options?: { exclusions?: string[] }) => Promise<{ success: boolean }>;
+    start: (scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean }) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
     trash: (scanId: string, paths: string[]) => Promise<{ success: boolean; canceled: boolean; trashed: string[] }>;
     open: (rootPath: string, filePath: string) => Promise<{ success: boolean }>;
