@@ -13,6 +13,7 @@ echarts.use([LineChart, PieChart, TreemapChart, GridComponent, LegendComponent, 
 
 type FileEntry = Extract<DiskScanEvent, { type: 'file' }>;
 type DirectoryEntry = Extract<DiskScanEvent, { type: 'directory' }>;
+type DuplicateGroup = Extract<DiskScanEvent, { type: 'duplicate' }>;
 type DiskHistoryPoint = { timestamp: number; disks: Array<{ path: string; used: number }> };
 type DirectorySnapshot = { timestamp: number; root: string; directories: Array<{ path: string; size: number }> };
 const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
@@ -99,33 +100,36 @@ export function DiskSpacePanel() {
   const [directorySnapshots, setDirectorySnapshots] = useState<DirectorySnapshot[]>(() => { try { return JSON.parse(localStorage.getItem('disk-space.directory-snapshots') || '[]') as DirectorySnapshot[]; } catch { return []; } });
   const [root, setRoot] = useState(''); const [currentDirectory, setCurrentDirectory] = useState('');
   const [entries, setEntries] = useState<DiskDirectoryItem[]>([]); const [preview, setPreview] = useState<DiskFilePreview | null>(null);
-  const [browserLoading, setBrowserLoading] = useState(false); const [running, setRunning] = useState(false);
+  const [browserLoading, setBrowserLoading] = useState(false); const [running, setRunning] = useState(false); const [paused, setPaused] = useState(false);
   const [largeFileThreshold, setLargeFileThreshold] = useState(0);
   const [customThresholdGb, setCustomThresholdGb] = useState('');
   const [largeFileExtension, setLargeFileExtension] = useState('');
   const [scanTelemetry, setScanTelemetry] = useState({ currentPath: '', directories: 0, files: 0, bytes: 0, elapsedMs: 0 });
-  const [scanErrors, setScanErrors] = useState<Array<{ path: string; message: string }>>([]);
+  const [scanErrors, setScanErrors] = useState<Array<{ path: string; category: 'permission-denied' | 'not-found' | 'busy' | 'io'; message: string }>>([]);
   const [errorsOpen, setErrorsOpen] = useState(false);
   const [stats, setStats] = useState({ files: 0, bytes: 0, errors: 0 }); const [largest, setLargest] = useState<FileEntry[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
   const [extensions, setExtensions] = useState<Record<string, number>>({}); const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [error, setError] = useState(''); const [phase, setPhase] = useState<'scanning' | 'hashing'>('scanning');
   const [exclusionsText, setExclusionsText] = useState(() => localStorage.getItem('disk-space.exclusions') ?? '.git,node_modules,target'); const scanId = useRef('');
   const scannedDirectoriesRef = useRef<DirectoryEntry[]>([]);
+  const largestRef = useRef<FileEntry[]>([]); const extensionsRef = useRef<Record<string, number>>({}); const duplicatesRef = useRef<DuplicateGroup[]>([]);
   const rootRef = useRef('');
 
   const refreshSystem = async () => { try { const next = await window.electronAPI.diskSpace.systemInfo(); setSystem(next); setDiskHistory((current) => { const now = Date.now(); const latest = current.at(-1); if (latest && now - latest.timestamp < 60 * 60 * 1000) return current; const history = [...current, { timestamp: now, disks: next.disks.map((disk) => ({ path: disk.path, used: disk.used })) }].slice(-168); localStorage.setItem('disk-space.history', JSON.stringify(history)); return history; }); } catch (cause) { setError(String(cause)); } };
   useEffect(() => { void refreshSystem(); const timer = window.setInterval(() => void refreshSystem(), 30_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => window.electronAPI.diskSpace.onEvent((id, event) => {
     if (id !== scanId.current) return;
-    if (event.type === 'file') setLargest((value) => [...value, event].sort((a, b) => b.size - a.size).slice(0, 50));
+    if (event.type === 'file') { const next = [...largestRef.current, event].sort((a, b) => b.size - a.size).slice(0, 50); largestRef.current = next; setLargest(next); }
     else if (event.type === 'directory') { const next = [...scannedDirectoriesRef.current, event].sort((a, b) => b.size - a.size).slice(0, 500); scannedDirectoriesRef.current = next; setDirectories(next); }
     else if (event.type === 'duplicate-progress') setPhase('hashing');
     else if (event.type === 'scan-status') setScanTelemetry(event);
-    else if (event.type === 'scan-error') setScanErrors((value) => [...value, { path: event.path, message: event.message }].slice(-100));
-    else if (event.type === 'extension') setExtensions((value) => ({ ...value, [event.extension || '(无扩展名)']: event.size }));
-    else if (event.type === 'progress' || event.type === 'done') { setStats({ files: event.files, bytes: event.bytes, errors: event.errors }); if (event.type === 'done' && rootRef.current) setDirectorySnapshots((current) => { const snapshot: DirectorySnapshot = { timestamp: Date.now(), root: rootRef.current, directories: scannedDirectoriesRef.current.map((item) => ({ path: item.path, size: item.size })) }; const next = [...current, snapshot].slice(-20); localStorage.setItem('disk-space.directory-snapshots', JSON.stringify(next)); return next; }); }
+    else if (event.type === 'scan-error') setScanErrors((value) => [...value, { path: event.path, category: event.category, message: event.message }].slice(-100));
+    else if (event.type === 'duplicate') { const next = [...duplicatesRef.current, event]; duplicatesRef.current = next; setDuplicates(next); }
+    else if (event.type === 'extension') { const next = { ...extensionsRef.current, [event.extension || '(无扩展名)']: event.size }; extensionsRef.current = next; setExtensions(next); }
+    else if (event.type === 'progress' || event.type === 'done') { setStats({ files: event.files, bytes: event.bytes, errors: event.errors }); if (event.type === 'done' && rootRef.current) { localStorage.setItem('disk-space.last-result', JSON.stringify({ root: rootRef.current, savedAt: Date.now(), stats: { files: event.files, bytes: event.bytes, errors: event.errors }, directories: scannedDirectoriesRef.current, largest: largestRef.current, extensions: extensionsRef.current, duplicates: duplicatesRef.current })); setDirectorySnapshots((current) => { const snapshot: DirectorySnapshot = { timestamp: Date.now(), root: rootRef.current, directories: scannedDirectoriesRef.current.map((item) => ({ path: item.path, size: item.size })) }; const next = [...current, snapshot].slice(-20); localStorage.setItem('disk-space.directory-snapshots', JSON.stringify(next)); return next; }); } }
   }), []);
-  useEffect(() => window.electronAPI.diskSpace.onExit((id, result) => { if (id === scanId.current) { setRunning(false); if (result.error) setError(result.error); } }), []);
+  useEffect(() => window.electronAPI.diskSpace.onExit((id, result) => { if (id === scanId.current) { setRunning(false); setPaused(false); if (result.error) setError(result.error); } }), []);
   useEffect(() => { localStorage.setItem('disk-space.exclusions', exclusionsText); }, [exclusionsText]);
   useEffect(() => { setError(''); }, [activeTab]);
 

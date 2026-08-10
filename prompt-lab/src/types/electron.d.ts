@@ -18,7 +18,7 @@ export type DiskScanEvent =
   | { type: 'duplicate-progress'; stage: 'hashing' }
   | { type: 'duplicate'; groupId: string; size: number; files: Array<{ path: string; size: number; modifiedAt: number }> }
   | { type: 'scan-status'; currentPath: string; directories: number; files: number; bytes: number; elapsedMs: number }
-  | { type: 'scan-error'; path: string; message: string }
+  | { type: 'scan-error'; path: string; category: 'permission-denied' | 'not-found' | 'busy' | 'io'; message: string }
   | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 
 export interface DiskSystemInfo {
@@ -315,6 +315,8 @@ export interface ElectronAPI {
     preview: (rootPath: string, filePath: string) => Promise<DiskFilePreview>;
     start: (scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean }) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
+    pause: (scanId: string) => Promise<boolean>;
+    resume: (scanId: string) => Promise<boolean>;
     trash: (scanId: string, paths: string[]) => Promise<{ success: boolean; canceled: boolean; trashed: string[] }>;
     open: (rootPath: string, filePath: string) => Promise<{ success: boolean }>;
     onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;

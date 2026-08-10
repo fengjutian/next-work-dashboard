@@ -2,8 +2,10 @@ use std::{
     collections::{HashMap, HashSet},
     env, fs,
     hash::{DefaultHasher, Hasher},
-    io::{self, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    thread,
     time::{Instant, UNIX_EPOCH},
 };
 
@@ -124,7 +126,16 @@ fn should_exclude(path: &Path, exclusions: &HashSet<String>) -> bool {
         .unwrap_or(false)
 }
 
-fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool) -> io::Result<()> {
+fn error_category(error: &io::Error) -> &'static str {
+    match error.kind() {
+        io::ErrorKind::PermissionDenied => "permission-denied",
+        io::ErrorKind::NotFound => "not-found",
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => "busy",
+        _ => "io",
+    }
+}
+
+fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, paused: Arc<AtomicBool>) -> io::Result<()> {
     let root = fs::canonicalize(root)?;
     if !root.is_dir() {
         return Err(io::Error::new(
@@ -144,6 +155,7 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool) -> io:
     let mut by_size: HashMap<u64, Vec<FileResult>> = HashMap::new();
     let mut directory_bytes: HashMap<PathBuf, u64> = HashMap::new();
     while let Some(directory) = stack.pop() {
+        while paused.load(Ordering::Relaxed) { thread::sleep(std::time::Duration::from_millis(100)); }
         directories_scanned += 1;
         if directories_scanned == 1 || directories_scanned % 25 == 0 {
             emit(&format!(r#"{{"type":"scan-status","currentPath":"{}","directories":{directories_scanned},"files":{files},"bytes":{bytes},"elapsedMs":{}}}"#, escape_json(&directory.to_string_lossy()), started.elapsed().as_millis()));
@@ -153,13 +165,14 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool) -> io:
             Err(error) => {
                 errors += 1;
                 if reported_errors < 100 {
-                    emit(&format!(r#"{{"type":"scan-error","path":"{}","message":"{}"}}"#, escape_json(&directory.to_string_lossy()), escape_json(&error.to_string())));
+                    emit(&format!(r#"{{"type":"scan-error","path":"{}","category":"{}","message":"{}"}}"#, escape_json(&directory.to_string_lossy()), error_category(&error), escape_json(&error.to_string())));
                     reported_errors += 1;
                 }
                 continue;
             }
         };
         for entry in entries {
+            while paused.load(Ordering::Relaxed) { thread::sleep(std::time::Duration::from_millis(100)); }
             let entry = match entry {
                 Ok(value) => value,
                 Err(_) => {
@@ -367,7 +380,18 @@ fn main() {
         eprintln!("usage: nwd-disk-scanner scan <directory>");
         std::process::exit(2);
     }
-    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions, skip_duplicates) {
+    let paused = Arc::new(AtomicBool::new(false));
+    let command_flag = Arc::clone(&paused);
+    thread::spawn(move || {
+        for line in io::stdin().lock().lines().map_while(Result::ok) {
+            match line.trim() {
+                "pause" => command_flag.store(true, Ordering::Relaxed),
+                "resume" => command_flag.store(false, Ordering::Relaxed),
+                _ => {}
+            }
+        }
+    });
+    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions, skip_duplicates, paused) {
         eprintln!("{error}");
         std::process::exit(1);
     }

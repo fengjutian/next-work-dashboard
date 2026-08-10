@@ -140,7 +140,7 @@ export function setupDiskSpaceIPC(): void {
       throw new Error('排除目录规则无效');
     }
     const scannerArguments = ['scan', canonicalRoot, ...exclusions.flatMap((value) => ['--exclude', value]), ...(options?.skipDuplicates ? ['--skip-duplicates'] : [])];
-    const child = spawn(scannerPath(), scannerArguments, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(scannerPath(), scannerArguments, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     if (!child.stdout || !child.stderr) throw new Error('无法连接 Rust 扫描器输出');
     scans.set(scanId, child);
     scanResults.set(scanId, { root: canonicalRoot, files: new Map(), groups: new Map(), entries: new Map() });
@@ -180,6 +180,12 @@ export function setupDiskSpaceIPC(): void {
     const child = scans.get(scanId);
     if (!child) return false;
     child.kill(); scans.delete(scanId); scanResults.delete(scanId); return true;
+  });
+  ipcMain.handle('disk-space:pause', (_event, scanId: string) => {
+    const child = scans.get(scanId); if (!child?.stdin?.writable) return false; child.stdin.write('pause\n'); return true;
+  });
+  ipcMain.handle('disk-space:resume', (_event, scanId: string) => {
+    const child = scans.get(scanId); if (!child?.stdin?.writable) return false; child.stdin.write('resume\n'); return true;
   });
   ipcMain.handle('disk-space:trash', async (_event, scanId: string, requestedPaths: string[]) => {
     const result = scanResults.get(scanId);
