@@ -433,6 +433,7 @@ const electronAPI: ElectronAPI = {
     listIncidents: (opts) => ipcRenderer.invoke('net-probe:list-incidents', opts),
     closeIncident: (id) => ipcRenderer.invoke('net-probe:close-incident', id),
     openIncidentsSnapshot: () => ipcRenderer.invoke('net-probe:open-incidents-snapshot'),
+    testChannel: (args: { notify: string; notifyConfig?: string }) => ipcRenderer.invoke('net-probe:test-channel', args),
     onEvent: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: import('./types/electron').NetProbeEvent) => callback(payload);
       ipcRenderer.on('net-probe:event', handler);

@@ -18,11 +18,28 @@
  * alert engine or affect other channels.
  */
 import { createHmac } from 'node:crypto';
-import { Notification } from 'electron';
 import os from 'node:os';
+import type { Notification as ElectronNotification } from 'electron';
 
 import type { NetProbeAlertRule, NetProbeIncident, NetProbeTarget } from './net-probe-storage';
 import type { NotifyChannelConfig } from '@/types/net-probe-schema';
+
+// Lazy-load electron at runtime so this module can also be imported in pure
+// Node contexts (smoke tests, scripts that don't have the Electron binary).
+let _Notification: typeof ElectronNotification | null = null;
+function getNotification(): typeof ElectronNotification | null {
+  if (_Notification) return _Notification;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const electron = require('electron');
+    if (electron && typeof electron.Notification === 'function') {
+      _Notification = electron.Notification as typeof ElectronNotification;
+    }
+  } catch {
+    // electron module not available (e.g. in pure node tests)
+  }
+  return _Notification;
+}
 
 // ── Payload ──
 
@@ -171,6 +188,10 @@ interface ChannelSender {
 class DesktopChannel implements ChannelSender {
   async send(ev: NotifyEvent): Promise<ChannelSendResult> {
     const t0 = Date.now();
+    const Notification = getNotification();
+    if (!Notification) {
+      return { ok: false, channel: 'desktop', detail: 'electron Notification 不可用 (仅在 Electron 主进程中支持)', durationMs: 0 };
+    }
     try {
       if (!Notification.isSupported()) {
         return { ok: false, channel: 'desktop', detail: 'Notification not supported on this OS', durationMs: 0 };
@@ -241,7 +262,7 @@ class DingTalkChannel implements ChannelSender {
       const sign = createHmac('sha256', cfg.secret).update(stringToSign).digest('base64');
       url = `${cfg.url}${cfg.url.includes('?') ? '&' : '?'}timestamp=${timestamp}&sign=${encodeURIComponent(sign)}`;
     }
-    const at = {
+    const at: { atMobiles: string[]; atUserIds: string[]; isAtAll: boolean } = {
       atMobiles: cfg.atMobiles ?? [],
       atUserIds: [],
       isAtAll: Boolean(cfg.atAll),
@@ -350,18 +371,25 @@ class TelegramChannel implements ChannelSender {
     }
     const parseMode = cfg.parseMode ?? 'Markdown';
     const icon = ev.type === 'open' ? '🚨' : '✅';
-    const text = [
-      `${icon} *${ev.rule.name}* (${ev.type === 'open' ? '告警触发' : '告警恢复'})`,
-      ``,
-      `*${PROBE_TAG[ev.target.probe] ?? ev.target.probe}* \\`${escapeMarkdown(ev.target.target, parseMode)}\\``,
+    // Build the text via concatenation so we can use String.raw-style escaping
+    // for the inline-code backticks that Telegram Markdown requires.
+    const probe = PROBE_TAG[ev.target.probe] ?? ev.target.probe;
+    const target = escapeMarkdown(ev.target.target, parseMode);
+    const host = escapeMarkdown(ev.host.hostname, parseMode);
+    const dur = ev.incident.durationSec != null ? formatDuration(ev.incident.durationSec) : '仍在进行';
+    const lines: string[] = [
+      icon + ' *' + ev.rule.name + '* (' + (ev.type === 'open' ? '告警触发' : '告警恢复') + ')',
+      '',
+      '*' + probe + '* `' + target + '`',
       ev.incident.triggerMessage,
-      ``,
-      `• 阈值: \\`${ev.rule.metric} ${ev.rule.op} ${ev.rule.threshold}\\``,
-      `• 当前: \\`${ev.incident.peakMetric}\\``,
-      `• 持续: ${ev.incident.durationSec != null ? formatDuration(ev.incident.durationSec) : '仍在进行'}`,
-      `• 主机: \\`${escapeMarkdown(ev.host.hostname, parseMode)}\\``,
-      `• 事件 ID: \\`${ev.incident.id}\\``,
-    ].join('\n');
+      '',
+      '• 阈值: `' + ev.rule.metric + ' ' + ev.rule.op + ' ' + ev.rule.threshold + '`',
+      '• 当前: `' + ev.incident.peakMetric + '`',
+      '• 持续: ' + dur,
+      '• 主机: `' + host + '`',
+      '• 事件 ID: `' + ev.incident.id + '`',
+    ];
+    const text = lines.join('\n');
     try {
       const apiUrl = `https://api.telegram.org/bot${encodeURIComponent(cfg.botToken)}/sendMessage`;
       const res = await fetch(apiUrl, {

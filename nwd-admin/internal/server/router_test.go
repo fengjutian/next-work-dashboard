@@ -1,3 +1,15 @@
+//go:build cgo
+
+// The end-to-end router tests require a working SQLite driver,
+// which in turn requires CGO. The CGO-enabled build is the same
+// configuration used at runtime (see README), so a developer with
+// the standard MSYS2 / MinGW-w64 toolchain installed can run:
+//
+//   go test -tags cgo ./...
+//
+// On hosts without a C toolchain the tests are skipped so
+// `go test ./...` still reports a clean bill of health for the
+// auth package and the rest of the codebase.
 package server
 
 import (

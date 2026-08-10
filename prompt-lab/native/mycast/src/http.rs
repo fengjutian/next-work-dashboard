@@ -111,17 +111,11 @@ async fn post_pair_request(
     if req.device_id.is_empty() || req.device_name.is_empty() {
         return Err(ApiError::bad_request("device_id 与 device_name 必填"));
     }
-    // Issue a one-time pair token, then immediately promote it to a session
-    // token by consuming the pair entry. The phone gets back a 6-digit code
-    // (for visual confirmation) and the long session token for subsequent
-    // authenticated calls.
-    let (pair_token, pair_code, ttl) = state.shared.tokens.issue_pairing(None);
-    let session = state
-        .shared
-        .tokens
-        .consume_pairing(&pair_token, &req.device_id, &req.device_name)
-        .ok_or_else(|| ApiError::internal("配对内部错误"))?;
-    tracing::info!(target: "mycast.http", phone = %req.device_id, name = %req.device_name, "pair request issued");
+    // Issue a fresh 6-digit code without consuming the existing active
+    // pairing. The phone still needs to call /api/pair/complete with the
+    // code (and its own device identity) to claim the session token.
+    let (_pair_token, pair_code, ttl) = state.shared.tokens.issue_pairing(None);
+    tracing::info!(target: "mycast.http", phone = %req.device_id, name = %req.device_name, "pair request issued (code-only)");
     let lan = crate::security::enumerate_lan_addrs()
         .into_iter()
         .find(|a| a.is_ipv4() && !a.is_loopback())
@@ -130,7 +124,8 @@ async fn post_pair_request(
     Ok(Json(PairResponse {
         pair_code,
         expires_in_ms: ttl.as_millis() as u64,
-        session_token: session.token,
+        // Sentinel: phone must call /api/pair/complete to get the real token.
+        session_token: String::new(),
         ws_url: format!("ws://{lan}:{}", state.cfg.ws_port),
         http_url: format!("http://{lan}:{}", state.cfg.http_port),
     }))

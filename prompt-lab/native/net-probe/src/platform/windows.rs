@@ -6,16 +6,15 @@
 //!
 //! V1.1.1 supports both ICMP (v4) and ICMPv6 (v6).
 
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
-    Icmp6SendEcho2, IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho, ICMP_ECHO_REPLY,
-    IP_OPTION_INFORMATION,
+    IcmpCloseHandle, IcmpCreateFile, IcmpSendEcho, ICMP_ECHO_REPLY, IP_OPTION_INFORMATION,
 };
-use windows::Win32::Networking::WinSock::{WSAStartup, WSADATA, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN6};
+use windows::Win32::Networking::WinSock::{WSAStartup, WSADATA};
 
 static WSA_INIT: Once = Once::new();
 

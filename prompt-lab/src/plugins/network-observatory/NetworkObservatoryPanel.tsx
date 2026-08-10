@@ -1148,9 +1148,15 @@ const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRe
   const [metric, setMetric] = useState<AlertMetric>('latency_p95');
   const [op, setOp] = useState<AlertOp>('>');
   const [threshold, setThreshold] = useState<number>(200);
+  const [notify, setNotify] = useState<AlertNotify>('desktop');
+  const [draftConfig, setDraftConfig] = useState<NotifyChannelConfig>({});
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [testing, setTesting] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; detail?: string } | null>(null);
 
   const addRule = useCallback(async () => {
     if (!api) return;
+    setDraftError(null);
     try {
       await api.addAlertRule({
         name: name.trim() || '未命名规则',
@@ -1161,13 +1167,28 @@ const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRe
         threshold: Math.round(threshold),
         durationSec: 60,
         enabled: true,
-        notify: 'desktop',
+        notify,
+        notifyConfig: JSON.stringify(draftConfig),
       });
       await onRefresh();
     } catch (e) {
-      // best-effort; the parent shows the error
+      setDraftError(String((e as Error).message ?? e));
     }
-  }, [api, name, targetId, metric, op, threshold, onRefresh]);
+  }, [api, name, targetId, metric, op, threshold, notify, draftConfig, onRefresh]);
+
+  const testDraftChannel = useCallback(async () => {
+    if (!api) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await api.testChannel({ notify, notifyConfig: JSON.stringify(draftConfig) });
+      setTestResult({ ok: r.ok, detail: r.detail });
+    } catch (e) {
+      setTestResult({ ok: false, detail: String((e as Error).message ?? e) });
+    } finally {
+      setTesting(false);
+    }
+  }, [api, notify, draftConfig]);
 
   const removeRule = useCallback(async (id: string) => {
     if (!api) return;
@@ -1200,9 +1221,51 @@ const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRe
             />
           </div>
         </div>
-        <button type="button" onClick={addRule} className="mt-2 inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90">
-          <Plus className="h-3.5 w-3.5" /> 新增规则
-        </button>
+        <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+          <div>
+            <div className="mb-1 text-[10px] uppercase text-muted-foreground">通知通道</div>
+            <select
+              value={notify}
+              onChange={(e) => {
+                setNotify(e.target.value as AlertNotify);
+                setDraftConfig({});
+                setTestResult(null);
+              }}
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
+            >
+              {ALERT_CHANNELS.map((c) => (
+                <option key={c.value} value={c.value}>{c.label} — {c.help}</option>
+              ))}
+            </select>
+          </div>
+          <div className="rounded border border-border bg-muted/30 p-2">
+            <ChannelConfigForm channel={notify} config={draftConfig} onChange={setDraftConfig} />
+          </div>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={testDraftChannel}
+            disabled={testing || notify === 'silent' || notify === 'desktop'}
+            className="inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+            title={notify === 'silent' ? '静默通道无需测试' : notify === 'desktop' ? '桌面通知请直接看系统通知中心' : '发送一次测试通知,验证通道配置正确'}
+          >
+            <Send className="h-3.5 w-3.5" /> {testing ? '测试中…' : '测试通道'}
+          </button>
+          {testResult && (
+            <span className={`text-[11px] ${testResult.ok ? 'text-emerald-600' : 'text-destructive'}`}>
+              {testResult.ok ? '✓ 测试通过' : `✗ ${testResult.detail ?? '失败'}`}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={addRule}
+            className="ml-auto inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+          >
+            <Plus className="h-3.5 w-3.5" /> 新增规则
+          </button>
+        </div>
+        {draftError && <p className="mt-2 text-xs text-destructive">{draftError}</p>}
       </section>
 
       <section className="mb-6">
@@ -1216,6 +1279,7 @@ const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRe
                 <th className="px-2 py-1 text-left">名称</th>
                 <th className="px-2 py-1 text-left">目标</th>
                 <th className="px-2 py-1 text-left">条件</th>
+                <th className="px-2 py-1 text-left">通道</th>
                 <th className="px-2 py-1" />
               </tr>
             </thead>
@@ -1226,6 +1290,11 @@ const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRe
                   <td className="px-2 py-1.5 font-mono text-[11px]">{r.targetId ?? 'all'}</td>
                   <td className="px-2 py-1.5 font-mono text-[11px]">
                     {r.metric} {r.op} {r.threshold}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                      <ShieldAlert className="h-3 w-3" /> {r.notify}
+                    </span>
                   </td>
                   <td className="px-2 py-1.5 text-right">
                     <button onClick={() => removeRule(r.id)} className="rounded p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive">

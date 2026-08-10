@@ -17,7 +17,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use regex::Regex;
 use serde_json::{json, Value};
 
 use super::{Probe, ProbeSample};
@@ -225,11 +224,4 @@ fn parse_rtt_cell_token(tok: &str) -> f64 {
         return -1.0;
     }
     tok.parse::<f64>().unwrap_or(-1.0)
-}
-
-fn parse_rtt_cell(s: &str) -> f64 {
-    // "<N> ms" → N; "*" → -1 sentinel. Kept for backwards compat with
-    // (now-removed) regex path.
-    let _ = s;
-    -1.0
 }
