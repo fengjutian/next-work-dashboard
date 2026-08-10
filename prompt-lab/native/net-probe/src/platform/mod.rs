@@ -3,9 +3,9 @@
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::icmp_echo;
+pub use windows::{icmp_echo, icmp6_echo};
 
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
-pub use unix::icmp_echo;
+pub use unix::{icmp_echo, icmp6_echo};

@@ -1,14 +1,12 @@
-//! Unix ICMP via raw socket (`socket2`).
+//! Unix ICMP / ICMPv6 via raw socket (`socket2`).
 //!
-//! V1 only handles IPv4 (IPPROTO_ICMP). IPv6 (IPPROTO_ICMPV6) is V2.
+//! V1.1.1 handles both v4 and v6. v6 uses IPPROTO_ICMPV6 with IPv6 raw socket.
 //!
-//! Privilege note: on Linux, sending raw ICMP requires `CAP_NET_RAW` (or
-//! the binary being setuid). Modern distros ship `ping` setuid; we don't,
-//! so users will need to grant the capability, or we'll fall back to a
-//! `system("ping ...")` parser in a future V1.1. For now: we require
-//! CAP_NET_RAW and emit a clear error otherwise.
+//! Privilege note: on Linux, sending raw ICMP/ICMPv6 requires `CAP_NET_RAW` (or
+//! the binary being setuid). Modern distros ship `ping`/`ping6` setuid; we
+//! don't, so users will need to grant the capability.
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, Socket, Type};
@@ -107,5 +105,69 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
     }
     let _ = seq; // reserved for future per-target sequencing.
 
+    Ok(if elapsed_ms > 0.0 { elapsed_ms } else { 0.1 })
+}
+
+// ── ICMPv6 ──
+
+const ICMPV6_ECHO: u8 = 128;
+const ICMPV6_ECHO_REPLY: u8 = 129;
+
+fn build_icmp6_socket() -> std::io::Result<Socket> {
+    let sock = Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))?;
+    let addr: SocketAddr = SocketAddr::new(std::net::IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0);
+    sock.bind(&addr.into())?;
+    Ok(sock)
+}
+
+pub fn icmp6_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
+    let ipv6: Ipv6Addr = match addr {
+        SocketAddr::V6(v6) => *v6.ip(),
+        SocketAddr::V4(_) => return Err("icmp6_echo expects v6 address".to_string()),
+    };
+
+    let sock = build_icmp6_socket().map_err(|e| format!("icmp6 socket: {e}"))?;
+    let timeout_ms = timeout.as_millis().min(i64::MAX as u128) as i64;
+    sock.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+        .map_err(|e| format!("set_read_timeout: {e}"))?;
+
+    let ident = std::process::id() as u16;
+    let mut seq: u16 = 0;
+    let payload = [0u8; 32];
+    // ICMPv6 echo request: type(1) | code(1) | checksum(2) | id(2) | seq(2) | data...
+    let mut packet = Vec::with_capacity(8 + payload.len());
+    packet.push(ICMPV6_ECHO);
+    packet.push(0); // code
+    packet.extend_from_slice(&[0, 0]); // checksum (kernel fills in for ICMPv6 raw sockets)
+    packet.extend_from_slice(&ident.to_be_bytes());
+    packet.extend_from_slice(&seq.to_be_bytes());
+    packet.extend_from_slice(&payload);
+
+    let dest: SocketAddr = SocketAddr::new(std::net::IpAddr::V6(ipv6), 0);
+    sock.send_to(&packet, &dest.into())
+        .map_err(|e| format!("icmp6 send: {e}"))?;
+
+    let started = Instant::now();
+    let mut buf = [0u8; 1500];
+    let (n, _src) = sock
+        .recv_from(&mut buf)
+        .map_err(|e| format!("icmp6 recv: {e}"))?;
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    // For ICMPv6 raw socket, kernel strips IPv6 header so the response starts
+    // at index 0 (no IP header). But for hop-limit exceeded messages there is
+    // an IPv6 header; we ignore those (status != ECHO_REPLY).
+    if n < 8 {
+        return Err("icmp6 reply too short".to_string());
+    }
+    let icmp_type = buf[0];
+    let reply_id = u16::from_be_bytes([buf[4], buf[5]]);
+    if icmp_type != ICMPV6_ECHO_REPLY {
+        return Err(format!("unexpected icmp6 type {icmp_type}"));
+    }
+    if reply_id != ident {
+        return Err(format!("icmp6 id mismatch: {reply_id} != {ident}"));
+    }
+    let _ = seq;
     Ok(if elapsed_ms > 0.0 { elapsed_ms } else { 0.1 })
 }

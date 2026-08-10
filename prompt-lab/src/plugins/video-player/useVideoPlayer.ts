@@ -1,12 +1,19 @@
 /**
- * 视频播放器 React 状态 hook
+ * 视频播放器 React 状态 hook（V2 完整版）
  *
  * 订阅主进程推送的 status 事件，并把命令代理到 window.electronAPI.videoPlayer。
- * 组件卸载时自动取消订阅。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VideoPlayerAPI, VideoPlayerEvent, VideoPlayerStatus } from './types';
+import type {
+  PlaylistItem,
+  PlaylistMode,
+  PlaylistState,
+  VideoPlayerAPI,
+  VideoPlayerEvent,
+  VideoPlayerStatus,
+  VideoWindowMode,
+} from './types';
 
 const API: VideoPlayerAPI | undefined = (() => {
   if (typeof window === 'undefined') return undefined;
@@ -23,13 +30,17 @@ const INITIAL_STATUS: VideoPlayerStatus = {
   speed: 1,
   mediaInfo: null,
   trackList: [],
+  playlist: { items: [], currentIndex: -1, mode: 'sequential' },
+  window: { mode: 'mpv', detached: false },
 };
 
 export interface UseVideoPlayerResult {
   status: VideoPlayerStatus;
   latestEvent: VideoPlayerEvent | null;
   open: (filePath?: string) => Promise<void>;
+  openUrl: (url: string) => Promise<void>;
   pickAndOpen: () => Promise<void>;
+  pickAndAddSubtitle: () => Promise<void>;
   close: () => Promise<void>;
   play: () => Promise<void>;
   pause: () => Promise<void>;
@@ -41,7 +52,18 @@ export interface UseVideoPlayerResult {
   setSpeed: (speed: number) => Promise<void>;
   selectAudio: (id: number | 'no') => Promise<void>;
   selectSubtitle: (id: number | 'no') => Promise<void>;
-  addSubtitle: () => Promise<void>;
+  addToPlaylist: (sources: string[]) => Promise<void>;
+  pickAndAddToPlaylist: () => Promise<void>;
+  removeFromPlaylist: (id: string) => Promise<void>;
+  clearPlaylist: () => Promise<void>;
+  playIndex: (index: number) => Promise<void>;
+  playNext: () => Promise<void>;
+  playPrev: () => Promise<void>;
+  setPlaylistMode: (mode: PlaylistMode) => Promise<void>;
+  reorderPlaylist: (from: number, to: number) => Promise<void>;
+  setWindowMode: (mode: VideoWindowMode) => Promise<void>;
+  focusVideoWindow: () => Promise<void>;
+  attachVideoWindow: () => Promise<void>;
 }
 
 export function useVideoPlayer(): UseVideoPlayerResult {
@@ -85,9 +107,18 @@ export function useVideoPlayer(): UseVideoPlayerResult {
       const result = await safeCall(API!.open, filePath);
       if (result) setStatus(result);
     }, [safeCall]),
+    openUrl: useCallback(async (url: string) => {
+      const result = await safeCall(API!.openUrl, url);
+      setStatus(result);
+    }, [safeCall]),
     pickAndOpen: useCallback(async () => {
       const result = await safeCall(API!.open, undefined as any);
       if (result) setStatus(result);
+    }, [safeCall]),
+    pickAndAddSubtitle: useCallback(async () => {
+      const filePath = await API!.pickSubtitle();
+      if (!filePath) return;
+      await safeCall(API!.addSubtitle, filePath);
     }, [safeCall]),
     close: useCallback(() => safeCall(API!.close), [safeCall]),
     play: useCallback(() => safeCall(API!.play), [safeCall]),
@@ -100,10 +131,35 @@ export function useVideoPlayer(): UseVideoPlayerResult {
     setSpeed: useCallback((speed: number) => safeCall(API!.setSpeed, speed), [safeCall]),
     selectAudio: useCallback((id: number | 'no') => safeCall(API!.selectAudio, id), [safeCall]),
     selectSubtitle: useCallback((id: number | 'no') => safeCall(API!.selectSubtitle, id), [safeCall]),
-    addSubtitle: useCallback(async () => {
-      const filePath = await API!.pickFile();
-      if (!filePath) return;
-      await safeCall(API!.addSubtitle, filePath);
+    addToPlaylist: useCallback(async (sources: string[]) => {
+      const result: PlaylistState = await safeCall(API!.addToPlaylist, sources);
+      setStatus((prev) => ({ ...prev, playlist: result }));
     }, [safeCall]),
+    pickAndAddToPlaylist: useCallback(async () => {
+      const result = await safeCall(API!.open, undefined as any);
+      if (!result || !result.filePath) return;
+      // 也加入 playlist
+      const pl: PlaylistState = await safeCall(API!.addToPlaylist, [result.filePath]);
+      setStatus((prev) => ({ ...prev, playlist: pl, ...result }));
+    }, [safeCall]),
+    removeFromPlaylist: useCallback(async (id: string) => {
+      const result: PlaylistState = await safeCall(API!.removeFromPlaylist, id);
+      setStatus((prev) => ({ ...prev, playlist: result }));
+    }, [safeCall]),
+    clearPlaylist: useCallback(async () => {
+      const result: PlaylistState = await safeCall(API!.clearPlaylist);
+      setStatus((prev) => ({ ...prev, playlist: result }));
+    }, [safeCall]),
+    playIndex: useCallback((index: number) => safeCall(API!.playIndex, index), [safeCall]),
+    playNext: useCallback(() => safeCall(API!.playNext), [safeCall]),
+    playPrev: useCallback(() => safeCall(API!.playPrev), [safeCall]),
+    setPlaylistMode: useCallback((mode: PlaylistMode) => safeCall(API!.setPlaylistMode, mode), [safeCall]),
+    reorderPlaylist: useCallback(async (from: number, to: number) => {
+      const result: PlaylistState = await safeCall(API!.reorderPlaylist, from, to);
+      setStatus((prev) => ({ ...prev, playlist: result }));
+    }, [safeCall]),
+    setWindowMode: useCallback((mode: VideoWindowMode) => safeCall(API!.setWindowMode, mode), [safeCall]),
+    focusVideoWindow: useCallback(() => safeCall(API!.focusVideoWindow), [safeCall]),
+    attachVideoWindow: useCallback(() => safeCall(API!.attachVideoWindow), [safeCall]),
   };
 }

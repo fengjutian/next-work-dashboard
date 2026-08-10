@@ -48,6 +48,8 @@ export interface VideoPlayerStatus {
   speed: number;
   mediaInfo: MediaInfo | null;
   trackList: TrackInfo[];
+  playlist: PlaylistState;
+  window: VideoWindowInfo;
   errorMessage?: string;
 }
 
@@ -61,9 +63,11 @@ export type VideoPlayerEvent =
   | { event: string; [key: string]: unknown };
 
 export interface VideoPlayerAPI {
-  // 文件
+  // 文件 / URL
   open: (filePath?: string) => Promise<VideoPlayerStatus | null>;
+  openUrl: (url: string) => Promise<VideoPlayerStatus>;
   pickFile: () => Promise<string | null>;
+  pickSubtitle: () => Promise<string | null>;
   close: () => Promise<void>;
 
   // 播放控制
@@ -84,6 +88,22 @@ export interface VideoPlayerAPI {
   addSubtitle: (filePath: string) => Promise<void>;
   getTracks: () => Promise<TrackInfo[]>;
 
+  // 播放列表（V2）
+  addToPlaylist: (sources: string[]) => Promise<PlaylistState>;
+  removeFromPlaylist: (id: string) => Promise<PlaylistState>;
+  clearPlaylist: () => Promise<PlaylistState>;
+  playIndex: (index: number) => Promise<void>;
+  playNext: () => Promise<void>;
+  playPrev: () => Promise<void>;
+  setPlaylistMode: (mode: PlaylistMode) => Promise<void>;
+  reorderPlaylist: (fromIndex: number, toIndex: number) => Promise<PlaylistState>;
+
+  // 视频窗口（V2 嵌入基线）
+  setWindowMode: (mode: VideoWindowMode) => Promise<void>;
+  detachVideoWindow: () => Promise<void>;
+  attachVideoWindow: () => Promise<void>;
+  focusVideoWindow: () => Promise<void>;
+
   // 状态
   getStatus: () => Promise<VideoPlayerStatus>;
 
@@ -97,4 +117,32 @@ export interface RecentVideoEntry {
   name: string;
   duration?: number;
   lastPlayedAt: number;
+}
+
+// ───────────────────── 播放列表（V2） ─────────────────────
+
+export type PlaylistMode = 'sequential' | 'loop-one' | 'loop-all' | 'shuffle';
+
+export interface PlaylistItem {
+  id: string;
+  source: string;            // 文件路径或 URL
+  title: string;             // 显示名（mpv 加载后用 filename 替换）
+  type: 'file' | 'url';
+  duration?: number;         // mpv 加载后回填
+}
+
+export interface PlaylistState {
+  items: PlaylistItem[];
+  currentIndex: number;       // -1 表示未开始
+  mode: PlaylistMode;
+}
+
+// ───────────────────── 视频窗口（V2 嵌入基线） ─────────────────────
+
+export type VideoWindowMode = 'mpv' | 'browser';
+
+export interface VideoWindowInfo {
+  mode: VideoWindowMode;
+  hwnd?: number;              // Windows HWND
+  detached: boolean;          // 用户是否把视频窗口从主窗口分离
 }

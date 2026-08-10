@@ -156,7 +156,9 @@ const electronAPI: ElectronAPI = {
   },
   videoPlayer: {
     open: (filePath?: string) => ipcRenderer.invoke('video-player:open', filePath),
+    openUrl: (url: string) => ipcRenderer.invoke('video-player:open-url', url),
     pickFile: () => ipcRenderer.invoke('video-player:pick-file'),
+    pickSubtitle: () => ipcRenderer.invoke('video-player:pick-subtitle'),
     close: () => ipcRenderer.invoke('video-player:close'),
     play: () => ipcRenderer.invoke('video-player:play'),
     pause: () => ipcRenderer.invoke('video-player:pause'),
@@ -171,6 +173,18 @@ const electronAPI: ElectronAPI = {
     addSubtitle: (filePath: string) => ipcRenderer.invoke('video-player:add-subtitle', filePath),
     getTracks: () => ipcRenderer.invoke('video-player:get-tracks'),
     getStatus: () => ipcRenderer.invoke('video-player:status'),
+    addToPlaylist: (sources: string[]) => ipcRenderer.invoke('video-player:playlist-add', sources),
+    removeFromPlaylist: (id: string) => ipcRenderer.invoke('video-player:playlist-remove', id),
+    clearPlaylist: () => ipcRenderer.invoke('video-player:playlist-clear'),
+    playIndex: (index: number) => ipcRenderer.invoke('video-player:playlist-play-index', index),
+    playNext: () => ipcRenderer.invoke('video-player:playlist-next'),
+    playPrev: () => ipcRenderer.invoke('video-player:playlist-prev'),
+    setPlaylistMode: (mode: 'sequential' | 'loop-one' | 'loop-all' | 'shuffle') => ipcRenderer.invoke('video-player:playlist-mode', mode),
+    reorderPlaylist: (from: number, to: number) => ipcRenderer.invoke('video-player:playlist-reorder', from, to),
+    setWindowMode: (mode: 'mpv' | 'browser') => ipcRenderer.invoke('video-player:window-mode', mode),
+    detachVideoWindow: () => ipcRenderer.invoke('video-player:window-detach'),
+    attachVideoWindow: () => ipcRenderer.invoke('video-player:window-attach'),
+    focusVideoWindow: () => ipcRenderer.invoke('video-player:window-focus'),
     onStatus: (callback: (status: import('./plugins/video-player/types').VideoPlayerStatus) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, status: import('./plugins/video-player/types').VideoPlayerStatus) => callback(status);
       ipcRenderer.on('video-player:status', handler);
