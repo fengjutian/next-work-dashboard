@@ -402,6 +402,14 @@ function ensureSchema(): void {
   } catch {
     // Some custom sql.js builds omit FTS5. The structured notes table remains searchable.
   }
+
+  // V2.3: per-rule notification config (webhook URL, bot tokens, etc.).
+  // Idempotent migration: ignore "duplicate column name" on existing DBs.
+  try {
+    _sqlDb.run(`ALTER TABLE net_probe_alert_rules ADD COLUMN notify_config TEXT NOT NULL DEFAULT '{}'`);
+  } catch {
+    // column already exists
+  }
   const sessionColumns = new Set((_sqlDb.exec('PRAGMA table_info(agent_sessions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!sessionColumns.has('payload')) _sqlDb.run("ALTER TABLE agent_sessions ADD COLUMN payload TEXT NOT NULL DEFAULT '{}'");
 

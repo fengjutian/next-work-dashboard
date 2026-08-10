@@ -35,6 +35,7 @@ import {
   type HeatmapCell,
 } from './net-probe-storage';
 import { evaluateAlerts, maintenanceTick, getOpenIncidentsSnapshot, resetAlertState } from './net-probe-alerts';
+import { testChannel } from './net-probe-notify';
 
 const DAEMON_START_TIMEOUT_MS = 10_000;
 const INMEM_RESULT_LIMIT = 500;
@@ -478,6 +479,13 @@ export function setupNetProbeIPC(): void {
   ipcMain.handle('net-probe:list-incidents', (_event, opts?: { openOnly?: boolean; limit?: number }) => dbListIncidents(opts ?? {}));
   ipcMain.handle('net-probe:close-incident', (_event, id: string) => dbCloseIncident(id, Date.now()));
   ipcMain.handle('net-probe:open-incidents-snapshot', () => getOpenIncidentsSnapshot());
+  ipcMain.handle('net-probe:test-channel', async (_event, args: { notify: string; notifyConfig?: string }) => {
+    try {
+      return await testChannel(args.notify, args.notifyConfig);
+    } catch (e) {
+      return { ok: false, channel: args.notify, detail: String((e as Error).message ?? e), durationMs: 0 };
+    }
+  });
   ipcMain.handle('net-probe:on-event', () => true); // no-op marker
   ipcMain.on('net-probe:event', (event, payload: NetProbeEvent) => {
     // not used: actual broadcast goes through trackWindow + window.webContents.send

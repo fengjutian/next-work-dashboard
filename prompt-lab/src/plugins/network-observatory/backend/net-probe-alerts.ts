@@ -2,26 +2,28 @@
  * Alert engine for Network Observatory.
  *
  * Listens to probe_result events, evaluates each result against all enabled
- * rules that apply, and opens/closes incidents in storage. Sends desktop
- * notifications on incident open (and close, optionally).
+ * rules that apply, and opens/closes incidents in storage. Sends notifications
+ * (desktop, webhook, 钉钉, Slack, Telegram) on incident open and close.
  *
  * V1.1 simplification: a rule fires when its condition is true for the
  * configured `durationSec` of *consecutive* probe samples. This avoids needing
  * a wall-clock scheduler and is good enough for a personal monitoring tool.
  * V1.2 will use a sliding time window.
  */
-import { Notification } from 'electron';
 import {
   dbListAlertRules,
   dbListIncidents,
+  dbGetTarget,
   dbOpenIncident,
   dbCloseIncident,
   dbPruneOldResults,
   type NetProbeAlertRule,
   type NetProbeIncident,
   type NetProbeResult,
+  type NetProbeTarget,
 } from './net-probe-storage';
 import { computeStats } from './net-probe-stats';
+import { buildNotifyEvent, dispatchNotification, type ChannelSendResult } from './net-probe-notify';
 
 interface AlertState {
   ruleId: string;
@@ -95,13 +97,25 @@ function ruleSatisfied(rule: NetProbeAlertRule, value: number): boolean {
   }
 }
 
-function sendNotification(title: string, body: string): void {
-  try {
-    if (Notification.isSupported()) {
-      new Notification({ title, body, silent: false }).show();
-    }
-  } catch {
-    // best-effort: notifications may be disabled on the OS
+function sendNotification(_title: string, _body: string): void {
+  // (unused — kept as a thin shim in case any external code calls this.
+  // The main flow is now `notifyIncident` → `dispatchNotification` below.)
+}
+
+async function notifyIncident(
+  type: 'open' | 'close',
+  rule: NetProbeAlertRule,
+  target: NetProbeTarget,
+  incident: NetProbeIncident,
+): Promise<void> {
+  // 'desktop' and 'silent' are handled here; everything else goes through dispatchNotification.
+  if (rule.notify === 'silent') return;
+  const event = buildNotifyEvent(type, rule, target, incident);
+  // For 'desktop' we go through the dispatcher too — that keeps a single code path.
+  const result: ChannelSendResult = await dispatchNotification(rule.notify, rule.notifyConfig, event);
+  if (!result.ok) {
+    // eslint-disable-next-line no-console
+    console.warn(`[net-probe] ${result.channel} 通知失败: ${result.detail ?? '未知错误'}`);
   }
 }
 
@@ -141,8 +155,11 @@ export function evaluateAlerts(input: AlertEvaluationInput): NetProbeIncident[] 
         });
         s.openIncidentId = incident.id;
         fired.push(incident);
-        if (rule.notify === 'desktop') {
-          sendNotification(`[Network Observatory] ${rule.name}`, msg);
+        // Resolve the target (best-effort) and dispatch the configured channel.
+        const target = dbGetTarget(result.targetId);
+        if (target) {
+          // Fire-and-forget; alert loop must not await a slow network call.
+          void notifyIncident('open', rule, target, incident);
         }
       } else if (s.openIncidentId) {
         // Already open: bump peak.
@@ -152,10 +169,17 @@ export function evaluateAlerts(input: AlertEvaluationInput): NetProbeIncident[] 
     } else {
       // Condition cleared.
       if (s.openIncidentId) {
-        dbCloseIncident(s.openIncidentId, Date.now());
+        // Look up the closing incident for notify context. We didn't store
+        // the incident object on the alert state, so re-fetch by id.
+        const closing = dbListIncidents({ openOnly: false, limit: 200 }).find((i) => i.id === s.openIncidentId);
+        const ended = Date.now();
+        dbCloseIncident(s.openIncidentId, ended);
         s.openIncidentId = null;
-        if (rule.notify === 'desktop') {
-          sendNotification(`[Network Observatory] 已恢复`, `${rule.name} 状态恢复`);
+        if (closing) {
+          const target = dbGetTarget(closing.targetId);
+          if (target) {
+            void notifyIncident('close', rule, target, { ...closing, endedAt: ended });
+          }
         }
       }
       s.consecutiveHit = 0;

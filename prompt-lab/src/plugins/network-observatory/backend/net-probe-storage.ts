@@ -54,6 +54,7 @@ export interface NetProbeAlertRule {
   durationSec: number;
   enabled: boolean;
   notify: string;
+  notifyConfig: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -320,6 +321,7 @@ export interface UpsertAlertRuleInput {
   durationSec: number;
   enabled: boolean;
   notify: string;
+  notifyConfig?: string;
 }
 
 export function dbUpsertAlertRule(input: UpsertAlertRuleInput): NetProbeAlertRule {
@@ -337,6 +339,7 @@ export function dbUpsertAlertRule(input: UpsertAlertRuleInput): NetProbeAlertRul
     durationSec: input.durationSec,
     enabled: input.enabled ? 1 : 0,
     notify: input.notify,
+    notifyConfig: input.notifyConfig ?? existing?.notifyConfig ?? '{}',
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -356,6 +359,7 @@ export function dbUpsertAlertRule(input: UpsertAlertRuleInput): NetProbeAlertRul
           durationSec: row.durationSec,
           enabled: row.enabled,
           notify: row.notify,
+          notifyConfig: row.notifyConfig,
           updatedAt: row.updatedAt,
         },
       })

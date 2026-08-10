@@ -18,16 +18,15 @@ import (
 	"github.com/fjutian/nwd-admin/internal/db"
 	"github.com/fjutian/nwd-admin/internal/handler"
 	"github.com/fjutian/nwd-admin/internal/repository"
+	"github.com/fjutian/nwd-admin/internal/server"
 	"github.com/fjutian/nwd-admin/internal/service"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 // CLI subcommands. `serve` is the default; `gen-password` produces a
-// bcrypt hash for the admin password_hash config field.
+// bcrypt hash for the admin.password_hash config field.
 const (
-	cmdServe         = "serve"
-	cmdGenPassword   = "gen-password"
+	cmdServe       = "serve"
+	cmdGenPassword = "gen-password"
 )
 
 func main() {
@@ -129,31 +128,9 @@ func runServe(args []string) error {
 	defer sqlDB.Close()
 
 	hdlr := handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)))
-
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RealIP)
-	r.Use(securityHeaders)
-
-	// Public read endpoints and pages.
-	r.Get("/", hdlr.HomePage)
-	r.Get("/plugins", hdlr.PluginsPage)
-	r.Get("/api/plugins", hdlr.ListPlugins)
-	r.Get("/api/plugins/{id}/download", hdlr.DownloadPlugin)
-
-	// Write endpoints require admin authentication when configured.
-	r.Group(func(r chi.Router) {
-		if verifier != nil {
-			r.Use(verifier.Middleware)
-		}
-		r.Post("/api/plugins", hdlr.UploadPlugin)
-		r.Delete("/api/plugins/{id}", hdlr.DeletePlugin)
-	})
-
 	srv := &http.Server{
 		Addr:         cfg.Server.Addr,
-		Handler:      r,
+		Handler:      server.NewRouter(hdlr, verifier),
 		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 		IdleTimeout:  time.Duration(cfg.Server.IdleTimeout) * time.Second,
@@ -223,19 +200,4 @@ func buildVerifier(cfg *config.Config) (*auth.Verifier, error) {
 		return nil, nil
 	}
 	return auth.NewVerifier(cfg.Admin)
-}
-
-// securityHeaders adds defensive HTTP response headers to every
-// response. These protect against common browser-side attacks; they
-// do not replace authentication.
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'")
-		h.Set("Permissions-Policy", "interest-cohort=()")
-		next.ServeHTTP(w, r)
-	})
 }

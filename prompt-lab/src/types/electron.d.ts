@@ -370,6 +370,7 @@ export interface ElectronAPI {
     listIncidents: (opts?: { openOnly?: boolean; limit?: number }) => Promise<import('./net-probe-schema').NetProbeIncident[]>;
     closeIncident: (id: string) => Promise<boolean>;
     openIncidentsSnapshot: () => Promise<import('./net-probe-schema').NetProbeIncident[]>;
+    testChannel: (args: { notify: string; notifyConfig?: string }) => Promise<{ ok: boolean; channel: string; detail?: string; durationMs: number }>;
     onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
   };
   shell: {

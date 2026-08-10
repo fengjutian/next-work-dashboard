@@ -25,6 +25,8 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Send,
+  ShieldAlert,
   Trash2,
   XCircle,
 } from '@/components/icons';
@@ -36,6 +38,8 @@ import type {
   NetProbeAlertRule,
   AlertMetric,
   AlertOp,
+  AlertNotify,
+  NotifyChannelConfig,
   NetProbeIncident,
 } from '@/types/net-probe-schema';
 import type { NetProbeEvent, NetProbeState } from '@/types/electron';
@@ -62,8 +66,9 @@ interface NetProbeAPI {
   listResults: (opts?: { targetId?: string; sinceMs?: number; untilMs?: number; limit?: number }) => Promise<NetProbeResult[]>;
   heatmap: (opts: { targetId: string; sinceMs?: number }) => Promise<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>;
   listAlertRules: () => Promise<NetProbeAlertRule[]>;
-  addAlertRule: (input: Omit<NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'>) => Promise<NetProbeAlertRule>;
+  addAlertRule: (input: Omit<NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt' | 'notifyConfig'> & { notifyConfig?: string }) => Promise<NetProbeAlertRule>;
   removeAlertRule: (id: string) => Promise<boolean>;
+  testChannel: (args: { notify: string; notifyConfig?: string }) => Promise<{ ok: boolean; channel: string; detail?: string; durationMs: number }>;
   listIncidents: (opts?: { openOnly?: boolean; limit?: number }) => Promise<NetProbeIncident[]>;
   closeIncident: (id: string) => Promise<boolean>;
   onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
@@ -89,6 +94,15 @@ const ALERT_METRICS: { value: AlertMetric; label: string; unit: string }[] = [
   { value: 'status', label: '可用性 (1=失联)', unit: 'flag' },
 ];
 const ALERT_OPS: AlertOp[] = ['>', '<', '==', '!='];
+
+const ALERT_CHANNELS: { value: AlertNotify; label: string; help: string }[] = [
+  { value: 'desktop', label: '桌面通知 (系统)', help: '通过 Electron 弹系统通知' },
+  { value: 'webhook', label: 'Webhook (通用 HTTP)', help: 'POST JSON 到任意 URL,可对接自建服务' },
+  { value: 'dingtalk', label: '钉钉机器人', help: '钉钉群自定义机器人,支持加签和 @' },
+  { value: 'slack', label: 'Slack', help: 'Slack Incoming Webhook' },
+  { value: 'telegram', label: 'Telegram', help: 'Telegram Bot API' },
+  { value: 'silent', label: '静默 (仅记录)', help: '不发送任何通知,只入库事件' },
+];
 
 interface ChartProps {
   option: EChartsCoreOption;
@@ -925,6 +939,207 @@ interface RulesPanelProps {
   onRefresh: () => void;
   onCloseIncident: (id: string) => Promise<void>;
 }
+
+interface ChannelConfigFormProps {
+  channel: AlertNotify;
+  config: NotifyChannelConfig;
+  onChange: (cfg: NotifyChannelConfig) => void;
+}
+
+const ChannelConfigForm: React.FC<ChannelConfigFormProps> = ({ channel, config, onChange }) => {
+  if (channel === 'desktop' || channel === 'silent') {
+    return <p className="text-[11px] text-muted-foreground">该通道无需额外配置</p>;
+  }
+
+  if (channel === 'webhook') {
+    return (
+      <div className="space-y-2 text-xs">
+        <Field label="Webhook URL" required>
+          <input
+            value={config.url ?? ''}
+            onChange={(e) => onChange({ ...config, url: e.target.value })}
+            placeholder="https://example.com/webhook"
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="方法">
+            <select
+              value={config.method ?? 'POST'}
+              onChange={(e) => onChange({ ...config, method: e.target.value as 'POST' | 'PUT' })}
+              className="w-full rounded border border-border bg-background px-2 py-1"
+            >
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+            </select>
+          </Field>
+          <Field label="载荷格式">
+            <select
+              value={config.bodyTemplate ?? 'json'}
+              onChange={(e) => onChange({ ...config, bodyTemplate: e.target.value as 'json' | 'text' | 'none' })}
+              className="w-full rounded border border-border bg-background px-2 py-1"
+            >
+              <option value="json">完整 JSON (含所有字段)</option>
+              <option value="text">仅文本 (Slack/钉钉兼容)</option>
+              <option value="none">空 body</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="额外请求头 (JSON,可选)">
+          <input
+            value={config.headers ? JSON.stringify(config.headers) : ''}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              if (!v) return onChange({ ...config, headers: undefined });
+              try {
+                const parsed = JSON.parse(v);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  onChange({ ...config, headers: parsed as Record<string, string> });
+                }
+              } catch {
+                // ignore — keep last valid
+              }
+            }}
+            placeholder='{"X-Auth-Token": "..."}'
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+      </div>
+    );
+  }
+
+  if (channel === 'dingtalk') {
+    return (
+      <div className="space-y-2 text-xs">
+        <Field label="Webhook URL" required>
+          <input
+            value={config.url ?? ''}
+            onChange={(e) => onChange({ ...config, url: e.target.value })}
+            placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+        <Field label="加签密钥 (可选,设置后必须用,签名算法 HmacSHA256)">
+          <input
+            value={config.secret ?? ''}
+            onChange={(e) => onChange({ ...config, secret: e.target.value || undefined })}
+            placeholder="SEC..."
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="@ 手机号 (逗号分隔,可选)">
+            <input
+              value={(config.atMobiles ?? []).join(',')}
+              onChange={(e) => {
+                const v = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                onChange({ ...config, atMobiles: v.length > 0 ? v : undefined });
+              }}
+              placeholder="13800138000"
+              className="w-full rounded border border-border bg-background px-2 py-1"
+            />
+          </Field>
+          <Field label="@所有人">
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={Boolean(config.atAll)}
+                onChange={(e) => onChange({ ...config, atAll: e.target.checked })}
+              />
+              触发时 @所有人
+            </label>
+          </Field>
+        </div>
+      </div>
+    );
+  }
+
+  if (channel === 'slack') {
+    return (
+      <div className="space-y-2 text-xs">
+        <Field label="Incoming Webhook URL" required>
+          <input
+            value={config.url ?? ''}
+            onChange={(e) => onChange({ ...config, url: e.target.value })}
+            placeholder="https://hooks.slack.com/services/T.../B.../..."
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="频道 (覆盖默认)">
+            <input
+              value={config.channel ?? ''}
+              onChange={(e) => onChange({ ...config, channel: e.target.value || undefined })}
+              placeholder="#alerts"
+              className="w-full rounded border border-border bg-background px-2 py-1"
+            />
+          </Field>
+          <Field label="显示名 (覆盖默认)">
+            <input
+              value={config.username ?? ''}
+              onChange={(e) => onChange({ ...config, username: e.target.value || undefined })}
+              placeholder="Network Observatory"
+              className="w-full rounded border border-border bg-background px-2 py-1"
+            />
+          </Field>
+        </div>
+        <Field label="图标 emoji (覆盖默认)">
+          <input
+            value={config.iconEmoji ?? ''}
+            onChange={(e) => onChange({ ...config, iconEmoji: e.target.value || undefined })}
+            placeholder=":satellite:"
+            className="w-full rounded border border-border bg-background px-2 py-1"
+          />
+        </Field>
+      </div>
+    );
+  }
+
+  if (channel === 'telegram') {
+    return (
+      <div className="space-y-2 text-xs">
+        <Field label="Bot Token" required>
+          <input
+            value={config.botToken ?? ''}
+            onChange={(e) => onChange({ ...config, botToken: e.target.value })}
+            placeholder="123456:ABC-DEF..."
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+        <Field label="Chat ID" required>
+          <input
+            value={config.chatId ?? ''}
+            onChange={(e) => onChange({ ...config, chatId: e.target.value })}
+            placeholder="-100123456789 或 @username"
+            className="w-full rounded border border-border bg-background px-2 py-1 font-mono"
+          />
+        </Field>
+        <Field label="解析模式">
+          <select
+            value={config.parseMode ?? 'Markdown'}
+            onChange={(e) => onChange({ ...config, parseMode: e.target.value as 'Markdown' | 'HTML' | 'MarkdownV2' })}
+            className="w-full rounded border border-border bg-background px-2 py-1"
+          >
+            <option value="Markdown">Markdown</option>
+            <option value="HTML">HTML</option>
+            <option value="MarkdownV2">MarkdownV2 (转义最严格)</option>
+          </select>
+        </Field>
+      </div>
+    );
+  }
+
+  return null;
+};
+
+const Field: React.FC<{ label: string; required?: boolean; children: React.ReactNode }> = ({ label, required, children }) => (
+  <label className="block">
+    <div className="mb-1 text-[10px] uppercase text-muted-foreground">
+      {label} {required && <span className="text-destructive">*</span>}
+    </div>
+    {children}
+  </label>
+);
 
 const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRefresh, onCloseIncident }) => {
   const api = useMemo(() => getAPI(), []);

@@ -260,7 +260,9 @@ export const netProbeAlertRules = sqliteTable('net_probe_alert_rules', {
   threshold: integer('threshold').notNull(),  // ms (for latency/jitter) or 0-100 (for loss)
   durationSec: integer('duration_sec').notNull().default(60),  // sustained for N seconds
   enabled: integer('enabled').notNull().default(1),
-  notify: text('notify').notNull().default('desktop'),  // 'desktop' | 'silent'
+  notify: text('notify').notNull().default('desktop'),  // 'desktop' | 'webhook' | 'dingtalk' | 'slack' | 'telegram' | 'silent'
+  // JSON config for the channel (webhook URL, bot tokens, etc.). Empty {} for 'desktop'/'silent'.
+  notifyConfig: text('notify_config').notNull().default('{}'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });

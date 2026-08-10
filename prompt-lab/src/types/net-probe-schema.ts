@@ -43,7 +43,30 @@ export interface NetProbeResult {
 
 export type AlertMetric = 'latency_p95' | 'latency_avg' | 'loss_pct' | 'jitter' | 'status';
 export type AlertOp = '>' | '<' | '==' | '!=';
-export type AlertNotify = 'desktop' | 'silent';
+export type AlertNotify = 'desktop' | 'webhook' | 'dingtalk' | 'slack' | 'telegram' | 'silent';
+
+/** Configuration for a notification channel. See net-probe-notify.ts for the per-channel shape. */
+export interface NotifyChannelConfig {
+  // Generic webhook
+  url?: string;
+  method?: 'POST' | 'PUT';
+  headers?: Record<string, string>;
+  bodyTemplate?: 'json' | 'text' | 'none';
+  // DingTalk-specific
+  secret?: string;
+  atMobiles?: string[];
+  atAll?: boolean;
+  // Slack-specific
+  channel?: string;
+  iconEmoji?: string;
+  username?: string;
+  // Telegram-specific
+  botToken?: string;
+  chatId?: string;
+  parseMode?: 'Markdown' | 'HTML' | 'MarkdownV2';
+  // Free-form extras (forward-compat)
+  [k: string]: unknown;
+}
 
 export interface NetProbeAlertRule {
   id: string;
@@ -56,6 +79,8 @@ export interface NetProbeAlertRule {
   durationSec: number;
   enabled: boolean;
   notify: AlertNotify;
+  /** JSON string of NotifyChannelConfig. Empty {} for 'desktop' / 'silent'. */
+  notifyConfig: string;
   createdAt: number;
   updatedAt: number;
 }
