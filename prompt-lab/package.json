@@ -64,8 +64,8 @@
     "postcss": "^8.5.21",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.4.5",
-    "vite-node": "^2.1.9",
     "vite": "^5.4.0",
+    "vite-node": "^2.1.9",
     "vitest": "^2.1.0"
   },
   "dependencies": {
@@ -102,6 +102,7 @@
     "lucide-react": "^1.25.0",
     "mammoth": "^1.12.0",
     "mermaid": "^11.16.0",
+    "meyda": "^5.6.3",
     "monaco-editor": "^0.52.2",
     "node-pty": "1.1.0",
     "pdfjs-dist": "^6.2.108",
@@ -116,6 +117,7 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",
     "tslib": "^2.8.1",
+    "wavesurfer.js": "^7.11.1",
     "xlsx": "^0.18.5",
     "zustand": "^5.0.14"
   }

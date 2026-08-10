@@ -1,4 +1,25 @@
-import type { AudioAnalysis, LrcLine, MelodyNote } from './types';
+import Meyda from 'meyda';
+import { buildCandidateSegments } from './audio-structure';
+import type { AudioAnalysis, AudioFeatureFrame, LrcLine, MelodyNote } from './types';
+
+function extractAudioFeatures(data: Float32Array, sampleRate: number): AudioFeatureFrame[] {
+  const frameSize = 4096;
+  const hopSize = Math.max(frameSize, Math.round(sampleRate * 0.5));
+  Meyda.bufferSize = frameSize;
+  const frames: AudioFeatureFrame[] = [];
+  for (let offset = 0; offset + frameSize <= data.length; offset += hopSize) {
+    const result = Meyda.extract(['rms', 'spectralCentroid', 'chroma', 'mfcc'], data.slice(offset, offset + frameSize));
+    if (!result || Array.isArray(result)) continue;
+    frames.push({
+      time: offset / sampleRate,
+      rms: Number(result.rms ?? 0),
+      spectralCentroid: Number(result.spectralCentroid ?? 0),
+      chroma: Array.from(result.chroma ?? []).map(Number),
+      mfcc: Array.from(result.mfcc ?? []).map(Number),
+    });
+  }
+  return frames;
+}
 
 export async function analyzeAudioFile(file: File): Promise<{ analysis: AudioAnalysis; buffer: AudioBuffer }> {
   const context = new AudioContext();
@@ -23,7 +44,9 @@ export async function analyzeAudioFile(file: File): Promise<{ analysis: AudioAna
     const sampleLimit = Math.min(data.length, buffer.sampleRate * 12); const stride = 8;
     for (let pitch = 0; pitch < 12; pitch += 1) for (let octave = 3; octave <= 5; octave += 1) { const frequency = 440 * 2 ** (((octave + 1) * 12 + pitch - 69) / 12); let real = 0; let imaginary = 0; for (let i = 0; i < sampleLimit; i += stride) { const phase = 2 * Math.PI * frequency * i / buffer.sampleRate; real += data[i] * Math.cos(phase); imaginary -= data[i] * Math.sin(phase); } pitchEnergy[pitch] += Math.hypot(real, imaginary); }
     const key = pitchNames[pitchEnergy.indexOf(Math.max(...pitchEnergy))] || 'C';
-    return { buffer, analysis: { name: file.name, duration: buffer.duration, bpm, sampleRate: buffer.sampleRate, channels: buffer.numberOfChannels, key: `${key}（估算）`, waveform } };
+    const features = extractAudioFeatures(data, buffer.sampleRate);
+    const segments = buildCandidateSegments(features, buffer.duration, bpm);
+    return { buffer, analysis: { name: file.name, duration: buffer.duration, bpm, sampleRate: buffer.sampleRate, channels: buffer.numberOfChannels, key: `${key}（估算）`, waveform, features, segments } };
   } finally { void context.close(); }
 }
 

@@ -85,6 +85,28 @@ export interface AudioAnalysis {
   channels: number;
   key: string;
   waveform: number[];
+  features: AudioFeatureFrame[];
+  segments: AudioStructureSegment[];
+}
+
+export interface AudioFeatureFrame {
+  time: number;
+  rms: number;
+  spectralCentroid: number;
+  chroma: number[];
+  mfcc: number[];
+}
+
+export interface AudioStructureSegment {
+  id: string;
+  start: number;
+  end: number;
+  kind: SectionKind | 'Unknown';
+  confidence: number;
+  energy: number;
+  bars: number;
+  emotion: string;
+  reason: string;
 }
 
 export interface LrcLine {
