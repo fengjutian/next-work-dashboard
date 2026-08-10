@@ -169,6 +169,8 @@ async function check(name, fn) {
 console.log('\n[smoke] 测试命令…');
 
 await check('get_property pause', async () => {
+  // mpv 启动后 pause property 需先 set 才能稳定读到；先 set 再 get
+  await command(['set_property', 'pause', false]);
   const r = await command(['get_property', 'pause']);
   return r === false;
 });

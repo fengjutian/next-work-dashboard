@@ -55,27 +55,32 @@ pub fn probe_for(kind: &str) -> Option<Box<dyn Probe>> {
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
-/// Resolve hostname / IP literal to socket addresses. Wraps bare IPv6 literals
-/// in `[...]` and adds `:0` port suffix when needed (to_socket_addrs requires
-/// a port).
+/// Resolve hostname / IP literal to socket addresses. Accepts:
+/// - bare hostnames ("example.com")
+/// - bare IPv4 literals ("1.1.1.1")
+/// - bare IPv6 literals ("2001::1")
+/// - host:port or [ipv6]:port (already-formed)
+///
+/// Strategy: try `target.to_socket_addrs()` first (handles already-formed
+/// strings). If empty, append `:0` to the bare form, wrapping IPv6 literals
+/// in `[...]`.
 pub(crate) fn resolve(target: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
-    use std::net::{IpAddr, ToSocketAddrs};
+    use std::net::ToSocketAddrs;
+    if let Ok(it) = target.to_socket_addrs() {
+        let v: Vec<_> = it.collect();
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    // Fall back: append port. IPv6 literals need `[...]` wrapping.
     let with_port: String = if target.starts_with('[') {
-        // Already in [ipv6](:port)? form.
-        if target.contains("]:") {
-            target.to_string()
-        } else {
-            format!("{target}:0")
-        }
-    } else if target.parse::<IpAddr>().is_ok() {
-        // Bare IP literal (v4 or v6).
-        if target.contains(':') {
-            format!("[{target}]:0")
-        } else {
-            format!("{target}:0")
-        }
+        // [ipv6] without port.
+        format!("{target}:0")
+    } else if target.contains(':') {
+        // Bare IPv6 literal like "2001::1".
+        format!("[{target}]:0")
     } else {
-        // Hostname.
+        // Hostname or bare IPv4 literal.
         format!("{target}:0")
     };
     with_port.to_socket_addrs().map(|iter| iter.collect())

@@ -95,6 +95,10 @@ export function useVideoPlayer(): UseVideoPlayerResult {
       return await fn(...args);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // 用户取消文件选择器 / URL 输入对话框等场景：不要当作错误
+      if (/canceled|cancelled|cancel/i.test(message)) {
+        throw err; // 重新抛出，但不改 state
+      }
       setStatus((prev) => ({ ...prev, state: 'error', errorMessage: message }));
       throw err;
     }

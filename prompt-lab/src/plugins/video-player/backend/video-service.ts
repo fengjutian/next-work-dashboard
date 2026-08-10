@@ -405,8 +405,9 @@ export class VideoPlayerService {
 
   async openUrl(url: string): Promise<VideoPlayerStatus> {
     if (!url) throw new Error('URL 不能为空');
-    if (!/^https?:\/\//i.test(url) && !/^rtsp:\/\//i.test(url) && !/^rtmp:\/\//i.test(url) && !/^mms:\/\//i.test(url)) {
-      throw new Error('仅支持 http(s) / rtsp / rtmp / mms 协议');
+    // mpv 通过 libavformat 支持广泛的协议；这里仅过滤明显不安全的 scheme
+    if (!/^(https?|ftp|sftp|rtmp|rtmps|rtsp|mms|mmsh|mmst|file|data|blob):\/\//i.test(url)) {
+      throw new Error('URL 协议不支持。请使用 http(s) / ftp / sftp / rtmp / rtsp / mms / mmsh / mmst / file / data / blob');
     }
     await this.ensureMpv();
     if (!this.client) throw new Error('mpv 客户端未就绪');
@@ -661,6 +662,7 @@ export class VideoPlayerService {
 
   async setWindowMode(mode: VideoWindowMode): Promise<void> {
     if (this.windowMode === mode) return;
+    const previousMode = this.windowMode;
     this.windowMode = mode;
     this.status.window = { mode, hwnd: mode === 'browser' ? this.hwndNumber() : undefined, detached: this.status.window.detached };
     // 重启 mpv 让 --wid 生效
@@ -671,6 +673,11 @@ export class VideoPlayerService {
     this.client = null;
     if (this.child && !this.child.killed) this.child.kill();
     this.child = null;
+    // 从 'browser' 切回 'mpv' 时关闭旧 BrowserWindow（避免屏幕上两个窗口叠加）
+    if (previousMode === 'browser' && mode === 'mpv' && this.videoWindow && !this.videoWindow.isDestroyed()) {
+      this.videoWindow.close();
+    }
+    this.videoWindow = null;
     if (mode === 'browser') this.ensureVideoWindow();
     this.broadcastStatus();
   }
