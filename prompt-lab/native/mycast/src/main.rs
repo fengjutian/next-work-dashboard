@@ -19,7 +19,8 @@ mod transfer;
 
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
         Some("daemon") => {
@@ -31,7 +32,7 @@ fn main() -> ExitCode {
                         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,nwd_mycast=debug")),
                 )
                 .try_init();
-            match daemon::run() {
+            match daemon::run().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("nwd-mycast: daemon error: {e:#}");

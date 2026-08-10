@@ -27,7 +27,7 @@ impl MdnsAdvertiser {
             service_type,
             &instance,
             &format!("{instance}.local."),
-            host_ipv4,
+            std::net::IpAddr::V4(host_ipv4),
             http_port,
             properties.as_slice(),
         )?;

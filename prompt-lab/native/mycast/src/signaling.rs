@@ -109,10 +109,11 @@ impl SignalingHub {
             }
             SignalingFrame::CreateSession { session_id, kind } => {
                 let mut guard = self.inner.write().expect("signaling lock");
+                let phone_device_name = self.phone_display_name(&guard, from_device);
                 guard.sessions.insert(session_id.clone(), SessionEntry {
                     session_id: session_id.clone(),
                     phone_device_id: from_device.to_string(),
-                    phone_device_name: self.phone_display_name(&guard, from_device),
+                    phone_device_name,
                     kind: *kind,
                     created_at_ms: chrono::Utc::now().timestamp_millis(),
                 });
@@ -203,5 +204,11 @@ impl SignalingHub {
         if let Some(tx) = self.inner.read().expect("signaling lock").events.as_ref() {
             let _ = tx.send(event);
         }
+    }
+}
+
+impl Default for SignalingHub {
+    fn default() -> Self {
+        Self::new()
     }
 }

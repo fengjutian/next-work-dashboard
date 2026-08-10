@@ -1,6 +1,6 @@
 //! Pairing token generation & validation.
 
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use sha2::{Digest, Sha256};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
@@ -139,7 +139,7 @@ pub fn enumerate_lan_addrs() -> Vec<std::net::IpAddr> {
 
     let mut addrs: Vec<IpAddr> = Vec::new();
     // Loop over local interface addresses via a transient UDP "connect" trick.
-    if let Ok(local_ip) = local_ip_for_outbound() {
+    if let Some(local_ip) = local_ip_for_outbound() {
         addrs.push(local_ip);
     }
     // Sanity probe: try a quick TCP connect to a public DNS to confirm routability

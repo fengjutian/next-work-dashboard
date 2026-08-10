@@ -761,6 +761,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "futures-util",
  "hex",
  "mdns-sd",
  "mime_guess",

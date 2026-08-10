@@ -15,6 +15,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -174,12 +175,13 @@ async fn get_sessions(AxState(state): AxState<HttpState>) -> Json<serde_json::Va
 
 async fn get_files(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
     let mut entries: Vec<serde_json::Value> = Vec::new();
-    let mut dir = tokio::fs::read_dir(&state.cfg.storage_dir).await.unwrap_or_else(|_| {
-        let _ = std::fs::create_dir_all(&state.cfg.storage_dir);
-        // re-open
-        Box::leak(Box::new(()));
-        tokio::fs::read_dir(&state.cfg.storage_dir).await.unwrap()
-    });
+    if tokio::fs::create_dir_all(&state.cfg.storage_dir).await.is_err() {
+        return Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() }));
+    }
+    let mut dir = match tokio::fs::read_dir(&state.cfg.storage_dir).await {
+        Ok(dir) => dir,
+        Err(_) => return Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() })),
+    };
     // We use a manual walk to keep this simple and to avoid pulling in walkdir.
     while let Ok(Some(entry)) = dir.next_entry().await {
         let path = entry.path();
@@ -255,15 +257,13 @@ async fn post_upload(
     {
         let field_name = field.name().unwrap_or("file").to_string();
         if field_name == "size" {
-            if let Some(text) = field.text().await.map_err(|e| ApiError::bad_request(e.to_string()))? {
-                declared_size = text.parse().unwrap_or(0);
-            }
+            let text = field.text().await.map_err(|e| ApiError::bad_request(e.to_string()))?;
+            declared_size = text.parse().unwrap_or(0);
             continue;
         }
         if field_name == "filename" {
-            if let Some(text) = field.text().await.map_err(|e| ApiError::bad_request(e.to_string()))? {
-                target_name = Some(sanitize_filename(&text));
-            }
+            let text = field.text().await.map_err(|e| ApiError::bad_request(e.to_string()))?;
+            target_name = Some(sanitize_filename(&text));
             continue;
         }
         if field_name == "file" {
