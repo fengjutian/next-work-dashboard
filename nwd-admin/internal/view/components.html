@@ -64,8 +64,17 @@
     .admin-page { padding:46px 0 72px; }
     .page-head { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:24px; }
     .page-head h1 { margin:0; font-size:32px; letter-spacing:-.04em; }
+    .page-head-actions { display:flex; gap:10px; flex-wrap:wrap; }
     .panel { border:1px solid var(--line); border-radius:17px; background:var(--surface); box-shadow:0 8px 26px rgba(49,35,83,.04); }
-    .upload-panel { padding:24px; margin-bottom:20px; }
+    .upload-panel, .creds-panel { padding:24px; margin-bottom:20px; }
+    .creds-row { display:grid; gap:6px; margin-bottom:14px; }
+    .creds-row .field-label { margin-bottom:0; }
+    .text-input { width:100%; min-height:42px; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#faf9fc; color:var(--text); }
+    .text-input:focus { outline:2px solid var(--primary-soft); border-color:var(--primary); }
+    .creds-status { margin-left:6px; font-size:13px; font-weight:700; }
+    .creds-status[data-kind="ok"] { color:#258559; }
+    .creds-status[data-kind="error"] { color:var(--danger); }
+    .creds-status[data-kind="pending"] { color:var(--muted); }
     .hidden { display:none !important; }
     .field-label { display:block; margin-bottom:8px; font-size:13px; font-weight:750; }
     .file-input { width:100%; padding:10px; border:1px dashed #cfc6dc; border-radius:12px; color:var(--muted); background:#faf9fc; }

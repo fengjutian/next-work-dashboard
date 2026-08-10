@@ -2,7 +2,7 @@
 
 `nwd-admin` 是 next-work-dashboard 的轻量插件分发服务，提供公开落地页、插件管理页面和 `.nwd` 下载 API。
 
-当前版本适合本地网络或受信任环境使用。上传和删除接口尚未加入管理员鉴权，不应直接暴露到公网。
+读接口（落地页、插件列表、下载）始终公开。写接口（上传、删除）默认受 Basic Auth 保护；当未配置管理员凭证时，服务器会发出警告并以"trusted-local"模式运行，仅适合本地网络或受信任环境。
 
 ## 功能
 
@@ -13,6 +13,8 @@
 - SQLite 持久化，自动建表并启用 WAL
 - 结构化日志、HTTP 超时和优雅退出
 - 页面模板与样式嵌入 Go 二进制，不依赖前端 CDN
+- 写接口 Basic Auth 保护，bcrypt 密码哈希
+- 通用安全响应头（CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy）
 
 ## 环境要求
 
@@ -36,6 +38,8 @@ go run .
 
 ```bash
 go run . -config ./config.yaml
+# 等价于
+go run . serve -config ./config.yaml
 ```
 
 生产构建：
@@ -45,6 +49,53 @@ go build -trimpath -ldflags="-s -w" -o nwd-admin .
 ```
 
 不要设置 `CGO_ENABLED=0`，当前 SQLite 驱动依赖 CGO。
+
+## 管理员认证
+
+读接口（`/`、`/plugins`、`/api/plugins`、`/api/plugins/{id}/download`）始终公开。写接口（`POST /api/plugins`、`DELETE /api/plugins/{id}`）在配置了管理员凭证后强制 Basic Auth。
+
+未配置凭证时服务以 "trusted-local" 模式启动，**仅适合本机或受信任网络**；启动日志会明确警告。设置凭证后即自动启用保护，**必须配置 username + password_hash 完整配对**——只设一个会被视为未配置。
+
+### 生成密码哈希
+
+```bash
+nwd-admin gen-password
+# 提示输入并确认明文密码，输出一行 bcrypt 哈希
+```
+
+非交互模式（适合脚本）：
+
+```bash
+echo 'mypassword' | nwd-admin gen-password -stdin
+```
+
+将得到的哈希填到 `config.yaml` 的 `admin.password_hash`：
+
+```yaml
+admin:
+  username: "admin"
+  password_hash: "$2a$12$..."
+  realm: "nwd-admin"
+```
+
+环境变量等价（同名大写、点号转下划线）：
+
+```powershell
+$env:ADMIN_USERNAME = 'admin'
+$env:ADMIN_PASSWORD_HASH = (echo 'mypassword' | nwd-admin gen-password -stdin)
+go run .
+```
+
+### 在浏览器中使用
+
+`/plugins` 页面右上角新增了"管理员凭证"按钮：填一次账号密码，服务端会用一条无害的 DELETE 探针校验，成功后凭证仅保存到本会话的 `sessionStorage`，所有后续写请求都会自动带上 `Authorization: Basic ...` 头。关闭标签页即清除，无需依赖浏览器原生的认证弹窗。
+
+`curl` 直接访问写接口：
+
+```bash
+curl -u admin:mypassword -F "bundle=@my-plugin.nwd" http://localhost:8090/api/plugins
+curl -u admin:mypassword -X DELETE http://localhost:8090/api/plugins/my-plugin
+```
 
 ## 配置
 
@@ -63,6 +114,11 @@ database:
 log:
   level: "info"
   format: "json"
+
+admin:
+  username: ""
+  password_hash: ""
+  realm: "nwd-admin"
 ```
 
 配置优先级为：环境变量 > 配置文件 > 内置默认值。
@@ -78,6 +134,9 @@ log:
 | `database.data_dir` | `DATABASE_DATA_DIR` | `/var/lib/nwd-admin` |
 | `log.level` | `LOG_LEVEL` | `debug` |
 | `log.format` | `LOG_FORMAT` | `text` |
+| `admin.username` | `ADMIN_USERNAME` | `admin` |
+| `admin.password_hash` | `ADMIN_PASSWORD_HASH` | `$2a$12$...` |
+| `admin.realm` | `ADMIN_REALM` | `nwd-admin` |
 
 PowerShell 示例：
 
@@ -195,13 +254,14 @@ go build ./...
 
 ## 当前限制
 
-- 上传和删除接口没有认证、授权或 CSRF 防护
+- 写接口已加入 Basic Auth，但**没有 CSRF 防护**；浏览器直访需自行处理 CSRF
 - 每个插件 ID 只保存一个版本
 - 没有分页、搜索、审核流和操作审计
 - 插件包存入 SQLite，不适合大规模下载或 CDN 分发
 - 下载计数会受到爬虫、重试和预取影响
+- 没有请求限流（速率限制）和暴力破解防护
 
-公网部署前至少应加入管理员认证、HTTPS、请求限流、安全响应头和操作审计。
+公网部署前仍需加入 HTTPS、CSRF 防护、请求限流、审计日志。
 
 ## 相关文档
 

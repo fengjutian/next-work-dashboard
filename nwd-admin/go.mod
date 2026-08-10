@@ -5,6 +5,8 @@ go 1.25.0
 require (
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/spf13/viper v1.19.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/term v0.45.0
 	gorm.io/driver/sqlite v1.5.6
 	gorm.io/gorm v1.25.12
 )

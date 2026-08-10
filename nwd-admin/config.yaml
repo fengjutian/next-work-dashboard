@@ -11,3 +11,16 @@ database:
 log:
   level: "info"   # debug | info | warn | error
   format: "json"  # json | text
+
+# Admin authentication. Leave both username and password_hash empty
+# to run in trusted-local mode (write endpoints are unprotected).
+# As soon as either field is set, the server requires the matching
+# pair — a half-configured admin is refused at startup.
+#
+# Generate the password_hash with:
+#   nwd-admin gen-password
+admin:
+  username: ""                                  # e.g. "admin"
+  password_hash: ""                             # bcrypt hash from `gen-password`
+  realm: "nwd-admin"                            # Basic auth realm
+

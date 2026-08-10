@@ -264,11 +264,13 @@ export const MyCastPanel: React.FC = () => {
   /* ── QR 码生成 ── */
   useEffect(() => {
     if (!state?.ready || !pairCode) { setQrSvg(null); return; }
-    const url = buildMobileUrl(state, pairCode);
-    QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 220 })
+    const { deepLink } = buildMobileUrl(state, pairCode);
+    QRCode.toString(deepLink, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 220 })
       .then(setQrSvg)
       .catch(() => setQrSvg(null));
   }, [state, pairCode]);
+
+  const httpFallbackUrl = state && pairCode ? buildMobileUrl(state, pairCode).httpLink : null;
 
   /* ── 自动刷新会话 / 传输 ── */
   useEffect(() => {
@@ -401,7 +403,23 @@ const HomeTab: React.FC<{
               <div className="mt-3 flex justify-center" dangerouslySetInnerHTML={{ __html: qrSvg }} />
             )}
             {mobileUrl && (
-              <p className="mt-2 break-all text-center font-mono text-[11px] text-muted-foreground">{mobileUrl}</p>
+              <>
+                <p className="mt-2 break-all text-center font-mono text-[10px] text-muted-foreground">
+                  {mobileUrl.deepLink}
+                </p>
+                <p className="mt-1 text-center text-[10px] text-muted-foreground">
+                  扫码优先唤起 MyCast 手机端 App；未安装时{' '}
+                  <a
+                    className="text-primary underline"
+                    href={mobileUrl.httpLink}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    用浏览器打开
+                  </a>
+                  （仅文件传输，无投屏）。
+                </p>
+              </>
             )}
           </>
         ) : (
@@ -596,7 +614,7 @@ const statusFg = (s: TransferInfo['status']) => {
  *  Helpers
  * ========================================================================= */
 
-function buildMobileUrl(state: MyCastState, pairCode: string): string {
+export function buildMobileUrl(state: MyCastState, pairCode: string): { deepLink: string; httpLink: string } {
   // Prefer the daemon-discovered LAN IP. If for some reason we don't have one
   // (e.g. daemon not yet ready), fall back to bindAddr (which is usually
   // 0.0.0.0 and unroutable — better than nothing for a transient placeholder).
@@ -605,5 +623,12 @@ function buildMobileUrl(state: MyCastState, pairCode: string): string {
     || (typeof window !== 'undefined' ? window.location.hostname : null)
     || '127.0.0.1';
   const port = state.httpPort ?? 17890;
-  return `http://${host}:${port}/?pair=${encodeURIComponent(pairCode)}`;
+  const wsPort = state.wsPort ?? 17891;
+  const deepLink = `mycast://pair?host=${encodeURIComponent(host)}&httpPort=${port}&wsPort=${wsPort}&code=${encodeURIComponent(pairCode)}`;
+  const httpLink = `http://${host}:${port}/?pair=${encodeURIComponent(pairCode)}`;
+  return { deepLink, httpLink };
+}
+
+export function buildHttpMobileUrl(state: MyCastState, pairCode: string): string {
+  return buildMobileUrl(state, pairCode).httpLink;
 }

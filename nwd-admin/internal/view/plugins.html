@@ -2,11 +2,31 @@
 <div class="shell admin-page">
     <div class="page-head">
         <div><h1>插件管理</h1><p class="section-copy">发布和维护 NWD 插件分发内容。</p></div>
-        <button id="upload-toggle" type="button" class="btn btn-primary" aria-expanded="false" aria-controls="upload-form">＋ 上传插件</button>
+        <div class="page-head-actions">
+            <button id="creds-toggle" type="button" class="btn" aria-expanded="false" aria-controls="creds-panel">管理员凭证</button>
+            <button id="upload-toggle" type="button" class="btn btn-primary" aria-expanded="false" aria-controls="upload-form">＋ 上传插件</button>
+        </div>
+    </div>
+
+    <div id="creds-panel" class="panel creds-panel hidden" aria-live="polite">
+        <div class="creds-row">
+            <label class="field-label" for="creds-username">管理员账号</label>
+            <input id="creds-username" class="text-input" type="text" autocomplete="username" placeholder="admin">
+        </div>
+        <div class="creds-row">
+            <label class="field-label" for="creds-password">管理员密码</label>
+            <input id="creds-password" class="text-input" type="password" autocomplete="current-password" placeholder="••••••">
+        </div>
+        <p class="form-help">凭证仅保存在本会话的 sessionStorage，关闭标签页即清除。服务端只保存密码的 bcrypt 哈希。</p>
+        <div class="form-actions">
+            <button id="creds-save" type="button" class="btn btn-primary">保存并测试</button>
+            <button id="creds-clear" type="button" class="btn">清除</button>
+            <span id="creds-status" class="creds-status"></span>
+        </div>
     </div>
 
     <div id="upload-form" class="panel upload-panel hidden">
-        <form action="/api/plugins" method="POST" enctype="multipart/form-data">
+        <form id="upload-element" action="/api/plugins" method="POST" enctype="multipart/form-data">
             <label class="field-label" for="bundle">插件包 (.nwd)</label>
             <input id="bundle" class="file-input" type="file" name="bundle" accept=".nwd,application/json" required>
             <p class="form-help">仅接受 nwd-v1、Sandbox 运行时，文件大小不超过 2 MB。</p>
@@ -35,15 +55,122 @@
 </div>
 <script>
 (() => {
+    const STORAGE_KEY = 'nwd-admin-credentials';
+
+    // ── Credentials management ────────────────────────────────────────
+    const credsPanel = document.getElementById('creds-panel');
+    const credsToggle = document.getElementById('creds-toggle');
+    const credsUser = document.getElementById('creds-username');
+    const credsPass = document.getElementById('creds-password');
+    const credsStatus = document.getElementById('creds-status');
+
+    const stored = (() => {
+        try {
+            const raw = sessionStorage.getItem(STORAGE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+    })();
+    if (stored) {
+        credsUser.value = stored.username || '';
+        credsPass.value = stored.password || '';
+    }
+
+    const setCredsOpen = (open) => {
+        credsPanel.classList.toggle('hidden', !open);
+        credsToggle.setAttribute('aria-expanded', String(open));
+        if (open) credsUser.focus();
+    };
+    credsToggle.addEventListener('click', () => setCredsOpen(credsToggle.getAttribute('aria-expanded') !== 'true'));
+
+    function setStatus(text, kind) {
+        credsStatus.textContent = text || '';
+        credsStatus.dataset.kind = kind || '';
+    }
+
+    function buildAuthHeader() {
+        const u = credsUser.value.trim();
+        const p = credsPass.value;
+        if (!u || !p) return null;
+        return 'Basic ' + btoa(unescape(encodeURIComponent(u + ':' + p)));
+    }
+
+    document.getElementById('creds-save').addEventListener('click', async () => {
+        const header = buildAuthHeader();
+        if (!header) { setStatus('请填写账号和密码', 'error'); return; }
+        setStatus('验证中…', 'pending');
+        // Probe the DELETE endpoint with an obviously-invalid id; we
+        // only care about 401 vs everything else. 401 means creds
+        // are wrong; 400/404/405 means the server accepted auth.
+        try {
+            const probe = await fetch('/api/plugins/__probe__', { method: 'DELETE', headers: { 'Authorization': header } });
+            if (probe.status === 401) { setStatus('凭证无效', 'error'); return; }
+        } catch (e) {
+            setStatus('无法连接服务器', 'error');
+            return;
+        }
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ username: credsUser.value.trim(), password: credsPass.value }));
+        setStatus('已保存', 'ok');
+    });
+
+    document.getElementById('creds-clear').addEventListener('click', () => {
+        sessionStorage.removeItem(STORAGE_KEY);
+        credsUser.value = '';
+        credsPass.value = '';
+        setStatus('已清除', 'ok');
+    });
+
+    // ── Upload form ───────────────────────────────────────────────────
     const form = document.getElementById('upload-form');
     const toggle = document.getElementById('upload-toggle');
     const setOpen = (open) => { form.classList.toggle('hidden', !open); toggle.setAttribute('aria-expanded', String(open)); if (open) document.getElementById('bundle').focus(); };
     toggle.addEventListener('click', () => setOpen(toggle.getAttribute('aria-expanded') !== 'true'));
     document.getElementById('upload-cancel').addEventListener('click', () => setOpen(false));
+
+    document.getElementById('upload-element').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const header = buildAuthHeader();
+        if (!header) {
+            if (!confirm('尚未保存管理员凭证，是否使用浏览器原生 Basic 弹窗？')) return;
+            // Fall back to native form submit (browser shows its own auth dialog).
+            event.target.submit();
+            return;
+        }
+        const data = new FormData(event.target);
+        const response = await fetch('/api/plugins', { method: 'POST', body: data, headers: { 'Authorization': header } });
+        if (response.status === 401) {
+            alert('管理员凭证无效，请先在上方"管理员凭证"中重新保存。');
+            return;
+        }
+        if (response.redirected) {
+            location.href = response.url;
+            return;
+        }
+        if (response.ok) {
+            location.href = '/plugins';
+            return;
+        }
+        const text = await response.text();
+        alert('上传失败：' + text);
+    });
+
+    // ── Delete buttons ────────────────────────────────────────────────
     document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', async () => {
         if (!confirm(`确定删除 ${button.dataset.deleteName}？此操作不可撤销。`)) return;
-        const response = await fetch('/api/plugins/' + encodeURIComponent(button.dataset.deleteId), { method: 'DELETE' });
-        if (response.ok) location.reload(); else alert('删除失败，请稍后重试。');
+        const header = buildAuthHeader();
+        if (!header) {
+            alert('请先在上方"管理员凭证"中保存凭证。');
+            return;
+        }
+        const response = await fetch('/api/plugins/' + encodeURIComponent(button.dataset.deleteId), {
+            method: 'DELETE',
+            headers: { 'Authorization': header },
+        });
+        if (response.status === 401) {
+            alert('管理员凭证无效，请重新保存后再试。');
+            return;
+        }
+        if (response.ok) location.reload();
+        else alert('删除失败，请稍后重试。');
     }));
 })();
 </script>
