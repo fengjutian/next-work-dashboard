@@ -18,6 +18,8 @@ import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 import {
   CheckCircle,
   Circle,
+  Download,
+  FileText,
   Network,
   Pause,
   Play,
@@ -38,6 +40,13 @@ import type {
 } from '@/types/net-probe-schema';
 import type { NetProbeEvent, NetProbeState } from '@/types/electron';
 import { computeStats } from './backend/net-probe-stats';
+import {
+  buildReportData,
+  buildHtmlReport,
+  buildMarkdownReport,
+  suggestReportFilename,
+  type ReportData,
+} from './backend/net-probe-report';
 
 echarts.use([BarChart, HeatmapChart, LineChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 
@@ -50,12 +59,12 @@ interface NetProbeAPI {
   removeTarget: (id: string) => Promise<{ removed: boolean }>;
   updateTarget: (id: string, patch: Partial<NetProbeTargetInput>) => Promise<NetProbeTarget | null>;
   setTargetEnabled: (id: string, enabled: boolean) => Promise<NetProbeTarget | null>;
-  listResults: (opts?: { targetId?: string; sinceMs?: number; limit?: number }) => Promise<NetProbeResult[]>;
+  listResults: (opts?: { targetId?: string; sinceMs?: number; untilMs?: number; limit?: number }) => Promise<NetProbeResult[]>;
   heatmap: (opts: { targetId: string; sinceMs?: number }) => Promise<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>;
   listAlertRules: () => Promise<NetProbeAlertRule[]>;
   addAlertRule: (input: Omit<NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'>) => Promise<NetProbeAlertRule>;
   removeAlertRule: (id: string) => Promise<boolean>;
-  listIncidents: (opts?: { openOnly?: boolean }) => Promise<NetProbeIncident[]>;
+  listIncidents: (opts?: { openOnly?: boolean; limit?: number }) => Promise<NetProbeIncident[]>;
   closeIncident: (id: string) => Promise<boolean>;
   onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
 }
@@ -126,6 +135,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [autoStart, setAutoStart] = useState<boolean>(true);
   const [showRules, setShowRules] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
 
   // Add-target form state
   const [draftKind, setDraftKind] = useState<NetProbeKind>('icmp');
@@ -392,6 +402,43 @@ export const NetworkObservatoryPanel: React.FC = () => {
     };
   }, [history, selectedId, targets]);
 
+  // Heatmap: 7 days × 24 hours grid of average latency. Only meaningful for
+  // continuous probes (icmp / tcp / dns / http). Traceroute runs infrequently
+  // so its heatmap is sparse — we still show it but with a small dataset.
+  const heatmapOption = useMemo<EChartsCoreOption | null>(() => {
+    if (selectedId == null) return null;
+    if (heatmap.length === 0) return null;
+    const days = ['一', '二', '三', '四', '五', '六', '日'];
+    const hours = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
+    const data: Array<[number, number, number]> = [];
+    for (const c of heatmap) {
+      if (c.avgLatencyMs != null) {
+        data.push([c.hourOfDay, c.dayOfWeek, c.avgLatencyMs]);
+      }
+    }
+    return {
+      grid: { left: 36, right: 16, top: 16, bottom: 50 },
+      xAxis: { type: 'category', data: hours, splitArea: { show: true }, axisLabel: { fontSize: 9 } },
+      yAxis: { type: 'category', data: days, splitArea: { show: true }, axisLabel: { fontSize: 10 } },
+      visualMap: {
+        min: 0, max: 200, calculable: true, orient: 'horizontal',
+        left: 'center', bottom: 0, itemHeight: 60, textStyle: { fontSize: 9 },
+        inRange: { color: ['#10b981', '#fbbf24', '#f97316', '#ef4444'] },
+      },
+      tooltip: {
+        position: 'top',
+        formatter: (params: unknown) => {
+          const arr = params as Array<{ data: [number, number, number] }>;
+          if (!arr?.length) return '';
+          const [h, d, v] = arr[0].data;
+          return `${days[d] ?? '?'} ${String(h).padStart(2, '0')}:00<br/>avg ${v.toFixed(1)} ms`;
+        },
+      },
+      series: [{ type: 'heatmap', data, progressive: 1000, animation: false }],
+    };
+  }, [heatmap, selectedId]);
+  const heatmapCellCount = useMemo(() => heatmap.filter((c) => c.avgLatencyMs != null).length, [heatmap]);
+
   const stats = useMemo(() => {
     const latencies = history.map((r) => (r.success ? r.latencyMs : null));
     return computeStats(latencies, history.length);
@@ -416,6 +463,14 @@ export const NetworkObservatoryPanel: React.FC = () => {
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           {systemInfo && <span>{systemInfo.hostname} · {systemInfo.platform}</span>}
           <DaemonStatusBadge state={daemonState} />
+          <button
+            type="button"
+            onClick={() => setShowExportModal(true)}
+            className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+            title="导出报告 (Markdown / HTML)"
+          >
+            <FileText className="h-3.5 w-3.5" /> 导出报告
+          </button>
           <button
             type="button"
             onClick={restartDaemon}
@@ -638,6 +693,8 @@ export const NetworkObservatoryPanel: React.FC = () => {
               chartOption={chartOption}
               waterfallOption={waterfallOption}
               traceroutePath={traceroutePath}
+              heatmapOption={heatmapOption}
+              heatmapCellCount={heatmapCellCount}
             />
           ) : showRules ? (
             <RulesPanel
@@ -660,6 +717,16 @@ export const NetworkObservatoryPanel: React.FC = () => {
           )}
         </main>
       </div>
+
+      {showExportModal && (
+        <ExportReportModal
+          api={api}
+          targets={targets}
+          systemInfo={systemInfo}
+          selectedId={selectedId}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
     </div>
   );
 };
@@ -701,9 +768,11 @@ interface TargetDetailProps {
   chartOption: EChartsCoreOption;
   waterfallOption: EChartsCoreOption | null;
   traceroutePath: TraceroutePath | null;
+  heatmapOption: EChartsCoreOption | null;
+  heatmapCellCount: number;
 }
 
-const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, chartOption, waterfallOption, traceroutePath }) => {
+const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, chartOption, waterfallOption, traceroutePath, heatmapOption, heatmapCellCount }) => {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="border-b border-border px-4 py-3">
@@ -733,9 +802,21 @@ const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, cha
       {traceroutePath ? (
         <TraceroutePathView path={traceroutePath} />
       ) : (
-        <div className="h-48 border-b border-border">
-          <Chart option={chartOption} className="h-full w-full" />
-        </div>
+        <>
+          <div className="h-48 border-b border-border">
+            <Chart option={chartOption} className="h-full w-full" />
+          </div>
+          {heatmapOption && (
+            <div className="border-b border-border px-4 py-1">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>Heatmap · 7 天 × 24 小时(平均延迟) · {heatmapCellCount} cells</span>
+              </div>
+              <div className="h-44">
+                <Chart option={heatmapOption} className="h-full w-full" />
+              </div>
+            </div>
+          )}
+        </>
       )}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs">
@@ -980,6 +1061,278 @@ const RulesPanel: React.FC<RulesPanelProps> = ({ rules, incidents, targets, onRe
           </table>
         )}
       </section>
+    </div>
+  );
+};
+
+// ── Export Report modal ──
+
+interface ExportReportModalProps {
+  api: NetProbeAPI;
+  targets: NetProbeTarget[];
+  systemInfo: { hostname: string; platform: string } | null;
+  selectedId: string | null;
+  onClose: () => void;
+}
+
+const RANGE_PRESETS: { value: '1h' | '6h' | '24h' | '7d'; label: string; ms: number }[] = [
+  { value: '1h', label: '最近 1 小时', ms: 60 * 60 * 1000 },
+  { value: '6h', label: '最近 6 小时', ms: 6 * 60 * 60 * 1000 },
+  { value: '24h', label: '最近 24 小时', ms: 24 * 60 * 60 * 1000 },
+  { value: '7d', label: '最近 7 天', ms: 7 * 24 * 60 * 60 * 1000 },
+];
+
+const ExportReportModal: React.FC<ExportReportModalProps> = ({ api, targets, systemInfo, selectedId, onClose }) => {
+  const [range, setRange] = useState<'1h' | '6h' | '24h' | '7d'>('24h');
+  const [format, setFormat] = useState<'md' | 'html'>('html');
+  const [scope, setScope] = useState<'all' | 'enabled' | 'selected'>('all');
+  const [title, setTitle] = useState<string>('Network Observatory Report');
+  const [busy, setBusy] = useState<boolean>(false);
+  const [preview, setPreview] = useState<ReportData | null>(null);
+  const [previewBusy, setPreviewBusy] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+
+  const generate = useCallback(async (): Promise<ReportData | null> => {
+    setError(null);
+    setPreviewBusy(true);
+    try {
+      const preset = RANGE_PRESETS.find((p) => p.value === range);
+      const sinceMs = Date.now() - (preset?.ms ?? 24 * 60 * 60 * 1000);
+      const untilMs = Date.now();
+
+      const targetIds: string[] | undefined =
+        scope === 'all'
+          ? undefined
+          : scope === 'enabled'
+            ? targets.filter((t) => t.enabled).map((t) => t.id)
+            : selectedId
+              ? [selectedId]
+              : targets.map((t) => t.id); // no selection → fall back to all
+      const effectiveTargetIds = targetIds;
+
+      // Pull everything in parallel.
+      const [allResults, rules, incidents] = await Promise.all([
+        api.listResults({ sinceMs, untilMs, limit: 100_000 }),
+        api.listAlertRules(),
+        api.listIncidents({ limit: 500 }),
+      ]);
+
+      // Build per-target heatmaps.
+      const selectedTargets = (effectiveTargetIds
+        ? targets.filter((t) => effectiveTargetIds.includes(t.id))
+        : targets
+      ).filter((t) => t.probe !== 'traceroute'); // traceroute doesn't have continuous heatmaps
+
+      const heatmaps: Record<string, Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>> = {};
+      await Promise.all(
+        selectedTargets.map(async (t) => {
+          try {
+            const hm = await api.heatmap({ targetId: t.id, sinceMs });
+            heatmaps[t.id] = hm;
+          } catch {
+            heatmaps[t.id] = [];
+          }
+        }),
+      );
+
+      const data = buildReportData({
+        title,
+        targets,
+        targetIds: effectiveTargetIds,
+        sinceMs,
+        untilMs,
+        results: allResults,
+        heatmaps,
+        incidents,
+        rules,
+        system: systemInfo,
+      });
+      return data;
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+      return null;
+    } finally {
+      setPreviewBusy(false);
+    }
+  }, [api, range, scope, title, targets, systemInfo, selectedId]);
+
+  const handlePreview = useCallback(async () => {
+    const data = await generate();
+    if (data) setPreview(data);
+  }, [generate]);
+
+  const handleExport = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    setSavedPath(null);
+    try {
+      const data = preview ?? (await generate());
+      if (!data) return;
+      setPreview(data);
+      const content = format === 'html' ? buildHtmlReport(data) : buildMarkdownReport(data);
+      const filename = suggestReportFilename(title, format);
+      type SaveFileFn = (c: string, n?: string, o?: { encoding?: 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk'; lineEnding?: 'LF' | 'CRLF' }) => Promise<{ success: boolean; path?: string; modifiedAt?: number; error?: string }>;
+      const saveFile = (window as unknown as { electronAPI?: { saveFile?: SaveFileFn } }).electronAPI?.saveFile;
+      if (!saveFile) {
+        setError('electronAPI.saveFile 不可用');
+        return;
+      }
+      const result = await saveFile(content, filename, { encoding: 'utf8' });
+      if (result.success) {
+        setSavedPath(result.path ?? null);
+      } else {
+        setError(result.error ?? '保存失败');
+      }
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }, [format, generate, preview, title]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">导出报告</h2>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="关闭">
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-auto p-4 text-sm">
+          <section>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">报告标题</label>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="例如: 2026 W32 网络质量周报"
+              className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+            />
+          </section>
+
+          <div className="grid grid-cols-2 gap-3">
+            <section>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">时间范围</label>
+              <select
+                value={range}
+                onChange={(e) => setRange(e.target.value as '1h' | '6h' | '24h' | '7d')}
+                className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+              >
+                {RANGE_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+            </section>
+            <section>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">输出格式</label>
+              <select
+                value={format}
+                onChange={(e) => setFormat(e.target.value as 'md' | 'html')}
+                className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm"
+              >
+                <option value="html">HTML (浏览器可打印为 PDF)</option>
+                <option value="md">Markdown (可粘贴到 Slack / 文档)</option>
+              </select>
+            </section>
+          </div>
+
+          <section>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">目标范围</label>
+            <div className="flex flex-wrap gap-3 text-xs">
+              {(['all', 'enabled', 'selected'] as const).map((s) => (
+                <label key={s} className="inline-flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    name="scope"
+                    value={s}
+                    checked={scope === s}
+                    onChange={() => setScope(s)}
+                  />
+                  {s === 'all' ? '全部目标' : s === 'enabled' ? '仅启用' : '当前选中目标 (在主面板选)'}
+                </label>
+              ))}
+            </div>
+          </section>
+
+          {error && (
+            <div className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {error}
+            </div>
+          )}
+
+          {savedPath && (
+            <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600">
+              ✓ 已保存到 <code className="font-mono">{savedPath}</code>
+            </div>
+          )}
+
+          {preview && (
+            <section className="rounded border border-border bg-muted/30 p-3">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="font-medium text-muted-foreground">预览</span>
+                <span className="text-muted-foreground">
+                  {preview.totals.targetCount} 目标 · {preview.totals.resultCount} 样本 · {preview.totals.incidentCount} 事件
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded bg-background px-2 py-1.5">
+                  <div className="text-[10px] text-muted-foreground">运行中</div>
+                  <div className="font-mono">{preview.totals.enabledTargetCount}/{preview.totals.targetCount}</div>
+                </div>
+                <div className="rounded bg-background px-2 py-1.5">
+                  <div className="text-[10px] text-muted-foreground">整体失联率</div>
+                  <div className="font-mono">
+                    {preview.totals.resultCount > 0
+                      ? `${(((preview.totals.resultCount - preview.totals.successCount) / preview.totals.resultCount) * 100).toFixed(2)}%`
+                      : '—'}
+                  </div>
+                </div>
+                <div className="rounded bg-background px-2 py-1.5">
+                  <div className="text-[10px] text-muted-foreground">进行中告警</div>
+                  <div className="font-mono">{preview.totals.openIncidentCount}</div>
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/30 px-4 py-3">
+          <button
+            type="button"
+            onClick={handlePreview}
+            disabled={previewBusy}
+            className="inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+          >
+            {previewBusy ? '生成中…' : '预览数据'}
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-border px-3 py-1.5 text-xs hover:bg-muted"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {busy ? '导出中…' : `导出 ${format.toUpperCase()}`}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
