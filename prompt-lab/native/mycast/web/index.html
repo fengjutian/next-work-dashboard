@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>MyCast · 局域网投屏</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-2: #6366f1;
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --err: #ef4444;
+    --border: #334155;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; }
+  .app { display: flex; flex-direction: column; min-height: 100%; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { padding: 18px 20px 8px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: 0.3px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { flex: 1; padding: 0 16px 16px; }
+  .card { background: var(--panel); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 20px rgba(0,0,0,0.35); }
+  .card h2 { margin: 0 0 8px; font-size: 15px; color: var(--muted); font-weight: 500; }
+  .device { display: flex; align-items: center; gap: 10px; }
+  .device .name { font-weight: 600; font-size: 17px; }
+  .device .meta { color: var(--muted); font-size: 12px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--panel-2); color: var(--muted); }
+  .pill.ok { background: rgba(16,185,129,0.15); color: var(--ok); }
+  .pill.warn { background: rgba(245,158,11,0.15); color: var(--warn); }
+  .pill.err { background: rgba(239,68,68,0.15); color: var(--err); }
+  input, button, select { font: inherit; color: inherit; }
+  input[type="text"], input[type="number"] { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; width: 100%; color: var(--fg); outline: none; }
+  input:focus { border-color: var(--accent); }
+  button { background: var(--accent); color: #0c1726; border: 0; border-radius: 10px; padding: 12px 14px; font-weight: 600; cursor: pointer; transition: filter 0.15s; }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; filter: none; }
+  button.secondary { background: var(--panel-2); color: var(--fg); }
+  button.danger { background: var(--err); color: #fff; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn-row > * { flex: 1 1 140px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .file-list { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto; }
+  .file-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; }
+  .file-list li + li { margin-top: 2px; }
+  .file-list li:hover { background: var(--panel-2); }
+  .file-list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-list .size { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .file-list a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  .status-line { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; color: var(--muted); }
+  .status-line .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .status-line.live .dot { background: var(--ok); box-shadow: 0 0 0 4px rgba(16,185,129,0.15); }
+  .status-line.err .dot { background: var(--err); }
+  .progress { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--accent); width: 0; transition: width 0.2s; }
+  .video-wrap { position: relative; width: 100%; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; }
+  .video-wrap video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .video-wrap .placeholder { color: var(--muted); font-size: 14px; padding: 20px; text-align: center; }
+  .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .metric-grid div { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--muted); }
+  .metric-grid strong { display: block; color: var(--fg); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .section-hidden { display: none; }
+  .footer { text-align: center; color: var(--muted); font-size: 11px; padding: 10px 0 18px; }
+  .footer a { color: inherit; }
+  .qrcode { display: flex; justify-content: center; padding: 16px 0 4px; }
+  .qrcode svg { width: 160px; height: 160px; background: #fff; border-radius: 10px; padding: 6px; }
+  .tabbar { display: flex; gap: 4px; padding: 4px; background: var(--panel-2); border-radius: 10px; margin: 8px 16px 14px; }
+  .tabbar button { flex: 1; background: transparent; color: var(--muted); padding: 9px 0; font-weight: 500; }
+  .tabbar button.active { background: var(--accent); color: #0c1726; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel-2); color: var(--fg); padding: 10px 16px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); z-index: 99; opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translate(-50%, -6px); }
+  .toast.err { background: rgba(239,68,68,0.9); color: #fff; }
+  .toast.ok { background: rgba(16,185,129,0.9); color: #042a1d; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>MyCast</h1>
+    <p id="deviceLabel">局域网投屏 · 文件传输</p>
+  </header>
+
+  <div class="tabbar">
+    <button data-tab="pair" class="active">配对</button>
+    <button data-tab="cast">投屏</button>
+    <button data-tab="files">文件</button>
+  </div>
+
+  <main>
+    <!-- ── 配对页 ── -->
+    <section id="tab-pair">
+      <div class="card">
+        <h2>桌面端</h2>
+        <div class="device">
+          <div style="flex:1">
+            <div class="name" id="desktopName">—</div>
+            <div class="meta" id="desktopMeta">等待连接…</div>
+          </div>
+          <span class="pill" id="connPill">未连接</span>
+        </div>
+      </div>
+
+      <div class="card" id="pairCard">
+        <h2>输入配对码</h2>
+        <p style="margin:0 0 10px;color:var(--muted);font-size:13px;">在桌面端 MyCast 插件的首页可以看到 6 位配对码。</p>
+        <label>配对码</label>
+        <input id="pairCode" type="text" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="6 位数字" autocomplete="off">
+        <div style="height:10px"></div>
+        <button id="pairBtn">连接</button>
+      </div>
+
+      <div class="card section-hidden" id="pairedCard">
+        <h2>已配对</h2>
+        <div class="status-line live">
+          <span class="dot"></span>
+          <span id="pairedText">已建立会话</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 投屏页 ── -->
+    <section id="tab-cast" class="section-hidden">
+      <div class="card">
+        <h2>实时画面</h2>
+        <div class="video-wrap">
+          <video id="remoteVideo" autoplay playsinline muted></video>
+          <div class="placeholder" id="castPlaceholder">点击下方按钮开始投屏（屏幕/窗口/标签）</div>
+        </div>
+        <div class="metric-grid" style="margin-top:10px">
+          <div>分辨率<strong id="mRes">—</strong></div>
+          <div>码率<strong id="mBitrate">—</strong></div>
+          <div>状态<strong id="mState">空闲</strong></div>
+        </div>
+        <div style="height:12px"></div>
+        <div class="btn-row">
+          <button id="startCastBtn">开始投屏</button>
+          <button id="stopCastBtn" class="secondary" disabled>停止</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 文件页 ── -->
+    <section id="tab-files" class="section-hidden">
+      <div class="card">
+        <h2>上传到桌面</h2>
+        <label>选择文件（可多个）</label>
+        <input id="uploadInput" type="file" multiple>
+        <div id="uploadProgress" style="margin-top:10px"></div>
+      </div>
+
+      <div class="card">
+        <h2>桌面文件</h2>
+        <ul class="file-list" id="fileList">
+          <li><span class="meta">加载中…</span></li>
+        </ul>
+        <div style="height:10px"></div>
+        <button id="refreshFilesBtn" class="secondary">刷新</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="footer">
+    MyCast v<span id="version">0.0.0</span> · 局域网 P2P
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+ *  MyCast 移动端 Web UI
+ *  - 输入 6 位配对码
+ *  - 与桌面建立 WebSocket (信令) + WebRTC
+ *  - 投屏 (getDisplayMedia -> RTCPeerConnection)
+ *  - 文件上传 / 下载
+ * ========================================================================= */
+
+const $ = (id) => document.getElementById(id);
+const elToast = $('toast');
+function toast(msg, kind) {
+  elToast.textContent = msg;
+  elToast.className = 'toast show' + (kind ? ' ' + kind : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { elToast.className = 'toast'; }, 2400);
+}
+const log = (...a) => console.log('[mycast]', ...a);
+
+const state = {
+  deviceId: localStorage.getItem('mycast.deviceId') || ('web-' + crypto.randomUUID().slice(0, 8)),
+  deviceName: localStorage.getItem('mycast.deviceName') || (navigator.userAgent.includes('iPhone') ? 'iPhone' : (navigator.userAgent.includes('Android') ? 'Android' : 'Web')),
+  platform: navigator.platform || 'web',
+  desktop: null,
+  sessionToken: localStorage.getItem('mycast.sessionToken') || '',
+  pair: { httpBase: '', wsUrl: '' },
+  ws: null,
+  pc: null,
+  localStream: null,
+  remoteStream: null,
+  statsTimer: null,
+  bytesSent: 0,
+  bytesLast: 0,
+  bitrate: 0,
+  activeSession: null,
+};
+
+localStorage.setItem('mycast.deviceId', state.deviceId);
+localStorage.setItem('mycast.deviceName', state.deviceName);
+
+/* ── 选项卡切换 ── */
+document.querySelectorAll('.tabbar button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('main > section').forEach((s) => {
+      s.classList.toggle('section-hidden', s.id !== 'tab-' + tab);
+    });
+    if (tab === 'files') refreshFiles();
+  });
+});
+
+/* ── 启动：探测桌面信息 ── */
+async function boot() {
+  // 信息端点部署在主机的 17890 端口，但浏览器从哪里发起？我们通过 /api/info 拿到
+  // host header 推断桌面地址。如果是从 QR 扫码进入，地址会带在 path 里 (?host=...)。
+  const params = new URLSearchParams(location.search);
+  if (params.get('host')) {
+    state.pair.httpBase = params.get('host');
+  } else {
+    // 兜底：尝试当前 origin
+    state.pair.httpBase = location.origin;
+  }
+  await fetchInfo();
+  if (state.sessionToken) {
+    await validateExistingSession();
+  }
+}
+
+async function fetchInfo() {
+  try {
+    const r = await fetch(state.pair.httpBase + '/api/info');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const info = await r.json();
+    state.desktop = info;
+    $('desktopName').textContent = info.device_name;
+    $('desktopMeta').textContent = `${info.platform} · HTTP :${info.http_port} · WS :${info.ws_port}` + (info.lan_addrs?.length ? ' · ' + info.lan_addrs[0] : '');
+    $('version').textContent = info.version;
+    state.pair.wsUrl = `ws://${(info.lan_addrs?.[0] || location.hostname)}:${info.ws_port}`;
+    if (info.pair_code) $('pairCode').placeholder = `当前码: ${info.pair_code}`;
+    $('connPill').textContent = '桌面在线';
+    $('connPill').className = 'pill ok';
+  } catch (e) {
+    log('fetchInfo failed', e);
+    $('connPill').textContent = '未找到桌面';
+    $('connPill').className = 'pill err';
+    $('desktopName').textContent = '未连接';
+    $('desktopMeta').textContent = '请检查网络或重新扫码';
+  }
+}
+
+async function validateExistingSession() {
+  if (!state.sessionToken) return;
+  try {
+    const r = await fetch(state.pair.httpBase + '/api/files', { headers: { 'Authorization': 'Bearer ' + state.sessionToken } });
+    if (r.ok) onPaired(state.sessionToken);
+  } catch (_) { /* ignore */ }
+}
+
+/* ── 配对 ── */
+$('pairBtn').addEventListener('click', pair);
+$('pairCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') pair(); });
+
+async function pair() {
+  const code = $('pairCode').value.trim();
+  if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字', 'err'); return; }
+  $('pairBtn').disabled = true;
+  try {
+    const r = await fetch(state.pair.httpBase + '/api/pair/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: state.deviceId,
+        device_name: state.deviceName,
+        pairing_code: code,
+      }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'HTTP ' + r.status }));
+      throw new Error(err.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || '配对失败');
+    state.sessionToken = data.session_token;
+    localStorage.setItem('mycast.sessionToken', state.sessionToken);
+    onPaired(state.sessionToken);
+  } catch (e) {
+    toast('配对失败：' + e.message, 'err');
+  } finally {
+    $('pairBtn').disabled = false;
+  }
+}
+
+function onPaired(token) {
+  $('pairCard').classList.add('section-hidden');
+  $('pairedCard').classList.remove('section-hidden');
+  $('connPill').textContent = '已配对';
+  $('connPill').className = 'pill ok';
+  $('pairedText').textContent = `设备 ${state.deviceName} 已连接`;
+  connectSignaling();
+}
+
+/* ── 信令 (WebSocket + WebRTC) ── */
+function connectSignaling() {
+  if (!state.pair.wsUrl) return;
+  const url = state.pair.wsUrl + '/ws';
+  log('connecting WS', url);
+  const ws = new WebSocket(url, ['mycast', 'bearer', state.sessionToken]);
+  state.ws = ws;
+  ws.onopen = () => {
+    toast('已连接桌面', 'ok');
+    sendSignaling({ type: 'hello', device_id: state.deviceId, device_name: state.deviceName, platform: state.platform });
+  };
+  ws.onclose = () => { toast('与桌面断开，3 秒后重连', 'err'); setTimeout(connectSignaling, 3000); };
+  ws.onerror = (e) => log('ws error', e);
+  ws.onmessage = async (ev) => {
+    let frame; try { frame = JSON.parse(ev.data); } catch { return; }
+    await onSignalingFrame(frame);
+  };
+}
+
+function sendSignaling(frame) {
+  if (state.ws && state.ws.readyState === 1) state.ws.send(JSON.stringify(frame));
+}
+
+async function onSignalingFrame(frame) {
+  log('frame', frame);
+  if (frame.type === 'session_created') {
+    state.activeSession = frame.session_id;
+  } else if (frame.type === 'webrtc_offer') {
+    // Desktop offers first (desktop is the receiver); we answer.
+    await ensurePeerConnection();
+    await state.pc.setRemoteDescription({ type: 'offer', sdp: frame.sdp });
+    const answer = await state.pc.createAnswer();
+    await state.pc.setLocalDescription(answer);
+    sendSignaling({ type: 'answer', session_id: frame.session_id, sdp: answer.sdp });
+  } else if (frame.type === 'webrtc_ice') {
+    if (state.pc && frame.candidate) {
+      try { await state.pc.addIceCandidate(frame.candidate); } catch (e) { log('addIce failed', e); }
+    }
+  } else if (frame.type === 'stream_start') {
+    $('mState').textContent = '推流中';
+  } else if (frame.type === 'stream_stop') {
+    $('mState').textContent = '已停止';
+    stopLocalStream();
+  }
+}
+
+function ensurePeerConnection() {
+  if (state.pc) return Promise.resolve(state.pc);
+  const pc = new RTCPeerConnection({
+    iceServers: [], // LAN only
+    iceTransportPolicy: 'all',
+  });
+  state.pc = pc;
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate && state.activeSession) {
+      sendSignaling({ type: 'ice', session_id: state.activeSession, candidate: ev.candidate });
+    }
+  };
+  pc.onconnectionstatechange = () => {
+    log('pc state', pc.connectionState);
+    if (pc.connectionState === 'connected') $('mState').textContent = '已连接';
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') $('mState').textContent = '连接异常';
+  };
+  return Promise.resolve(pc);
+}
+
+$('startCastBtn').addEventListener('click', async () => {
+  if (!state.sessionToken) { toast('请先配对', 'err'); return; }
+  try {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      toast('当前浏览器不支持 getDisplayMedia', 'err'); return;
+    }
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    state.localStream = stream;
+    $('remoteVideo').srcObject = stream;
+    $('castPlaceholder')?.remove();
+    stream.getVideoTracks()[0].addEventListener('ended', () => stopCast());
+
+    await ensurePeerConnection();
+    state.localStream.getTracks().forEach((t) => state.pc.addTrack(t, state.localStream));
+    const offer = await state.pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+    await state.pc.setLocalDescription(offer);
+
+    // Ask desktop to create a session for us.
+    const sessionId = 'sess-' + crypto.randomUUID().slice(0, 8);
+    state.activeSession = sessionId;
+    sendSignaling({ type: 'create_session', session_id: sessionId, kind: 'screen' });
+    sendSignaling({ type: 'offer', session_id: sessionId, sdp: offer.sdp });
+    sendSignaling({ type: 'stream_start', session_id: sessionId });
+    $('mState').textContent = '协商中';
+    $('stopCastBtn').disabled = false;
+    $('startCastBtn').disabled = true;
+    startStatsTimer();
+  } catch (e) {
+    toast('无法开始投屏：' + e.message, 'err');
+  }
+});
+
+$('stopCastBtn').addEventListener('click', stopCast);
+
+function stopCast() {
+  if (state.activeSession) sendSignaling({ type: 'stream_stop', session_id: state.activeSession });
+  stopLocalStream();
+  $('mState').textContent = '空闲';
+  $('stopCastBtn').disabled = true;
+  $('startCastBtn').disabled = false;
+  if (state.statsTimer) { clearInterval(state.statsTimer); state.statsTimer = null; }
+  $('mBitrate').textContent = '—';
+  $('mRes').textContent = '—';
+}
+
+function stopLocalStream() {
+  state.localStream?.getTracks().forEach((t) => t.stop());
+  state.localStream = null;
+  $('remoteVideo').srcObject = null;
+}
+
+function startStatsTimer() {
+  if (state.statsTimer) clearInterval(state.statsTimer);
+  state.bytesLast = 0;
+  state.bytesSent = 0;
+  state.bitrate = 0;
+  state.statsTimer = setInterval(async () => {
+    if (!state.pc) return;
+    try {
+      const stats = await state.pc.getStats();
+      let total = 0; let w = 0; let h = 0;
+      stats.forEach((report) => {
+        if (report.type === 'outbound-rtp' && report.kind === 'video') {
+          total += report.bytesSent || 0;
+          w = report.frameWidth || w; h = report.frameHeight || h;
+        }
+      });
+      state.bytesSent = total;
+      const delta = state.bytesSent - state.bytesLast;
+      state.bytesLast = state.bytesSent;
+      state.bitrate = (state.bitrate * 0.6) + (delta * 8 / 1000 * 0.4);
+      $('mBitrate').textContent = (state.bitrate / 1000).toFixed(1) + ' Mbps';
+      if (w && h) $('mRes').textContent = `${w}×${h}`;
+    } catch (e) { /* ignore */ }
+  }, 1000);
+}
+
+/* ── 文件 ── */
+$('uploadInput').addEventListener('change', uploadFiles);
+$('refreshFilesBtn').addEventListener('click', refreshFiles);
+
+async function uploadFiles() {
+  if (!state.sessionToken) { toast('请先配对', 'err'); return; }
+  const files = Array.from($('uploadInput').files || []);
+  if (!files.length) return;
+  const progressRoot = $('uploadProgress');
+  progressRoot.innerHTML = '';
+  for (const file of files) {
+    const row = document.createElement('div');
+    row.style.marginTop = '6px';
+    row.innerHTML = `<div class="status-line"><span class="dot"></span><span style="flex:1">${file.name} · ${(file.size/1024).toFixed(1)} KB</span><span class="meta">0%</span></div><div class="progress" style="margin-top:4px"><div></div></div>`;
+    progressRoot.appendChild(row);
+    const dot = row.querySelector('.dot');
+    const label = row.querySelector('span.meta');
+    const bar = row.querySelector('.progress > div');
+    try {
+      const fd = new FormData();
+      fd.append('filename', file.name);
+      fd.append('size', String(file.size));
+      fd.append('file', file);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', state.pair.httpBase + '/api/files/upload');
+      xhr.setRequestHeader('Authorization', 'Bearer ' + state.sessionToken);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          bar.style.width = pct + '%';
+          label.textContent = pct + '%';
+        }
+      };
+      await new Promise((resolve, reject) => {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            dot.style.background = 'var(--ok)';
+            label.textContent = '已上传';
+            resolve();
+          } else {
+            dot.style.background = 'var(--err)';
+            try { const r = JSON.parse(xhr.responseText); label.textContent = r.error || ('HTTP ' + xhr.status); } catch { label.textContent = 'HTTP ' + xhr.status; }
+            reject(new Error(label.textContent));
+          }
+        };
+        xhr.onerror = () => { dot.style.background = 'var(--err)'; label.textContent = '失败'; reject(new Error('网络错误')); };
+        xhr.send(fd);
+      });
+    } catch (e) {
+      log('upload failed', e);
+    }
+  }
+  $('uploadInput').value = '';
+  refreshFiles();
+}
+
+async function refreshFiles() {
+  if (!state.sessionToken) {
+    $('fileList').innerHTML = '<li><span class="meta">请先在「配对」页配对</span></li>';
+    return;
+  }
+  try {
+    const r = await fetch(state.pair.httpBase + '/api/files', { headers: { 'Authorization': 'Bearer ' + state.sessionToken } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    renderFiles(data.files || []);
+  } catch (e) {
+    $('fileList').innerHTML = '<li><span class="meta">加载失败：' + e.message + '</span></li>';
+  }
+}
+
+function renderFiles(files) {
+  const ul = $('fileList');
+  if (!files.length) { ul.innerHTML = '<li><span class="meta">桌面还没有文件</span></li>'; return; }
+  ul.innerHTML = '';
+  for (const f of files) {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = f.name;
+    const size = document.createElement('span');
+    size.className = 'size';
+    size.textContent = humanSize(f.size);
+    const a = document.createElement('a');
+    a.textContent = '下载';
+    a.href = state.pair.httpBase + '/api/files/download/' + f.id;
+    a.setAttribute('download', f.name);
+    li.appendChild(name); li.appendChild(size); li.appendChild(a);
+    ul.appendChild(li);
+  }
+}
+
+function humanSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  if (n < 1024*1024*1024) return (n/1024/1024).toFixed(1) + ' MB';
+  return (n/1024/1024/1024).toFixed(2) + ' GB';
+}
+
+boot();
+</script>
+</body>
+</html>

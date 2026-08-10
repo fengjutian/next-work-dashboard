@@ -21,6 +21,7 @@ const projectRoot = process.cwd();
 const diskScannerResource = path.join(projectRoot, 'resources', 'disk-scanner');
 const ragWorkerResource = path.join(projectRoot, 'resources', 'rag-worker');
 const videoPlayerResource = path.join(projectRoot, 'resources', 'video-player');
+const mycastResource = path.join(projectRoot, 'resources', 'mycast');
 
 function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
   const segments = name.split('/');
@@ -70,6 +71,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),
       ...(fs.existsSync(ragWorkerResource) ? [ragWorkerResource] : []),
       ...(fs.existsSync(videoPlayerResource) ? [videoPlayerResource] : []),
+      ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
     ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb}/**',
