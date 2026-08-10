@@ -25,7 +25,7 @@ export function normalizeStructureSegments(segments: AudioStructureSegment[], du
     .filter((segment) => segment.end - segment.start >= 1)
     .sort((a, b) => a.start - b.start)
     .map((segment, index, sorted) => {
-      const start = index ? sorted[index - 1].end : segment.start;
+      const start = index ? sorted[index - 1].end : 0;
       const end = index === sorted.length - 1 ? safeDuration : Math.max(start + 1, segment.end);
       return { ...segment, start, end, bars: Math.max(1, Math.round((end - start) * Math.max(40, bpm) / 240)) };
     });
@@ -39,7 +39,7 @@ export function buildCandidateSegments(frames: AudioFeatureFrame[], duration: nu
   const boundaries = [0];
   novelty.forEach((value, index) => {
     const time = frames[index].time;
-    if (value >= threshold && time - boundaries.at(-1)! >= minGap && duration - time >= minGap / 2) boundaries.push(time);
+    if (value >= threshold && time - (boundaries.at(-1) ?? 0) >= minGap && duration - time >= minGap / 2) boundaries.push(time);
   });
   boundaries.push(duration);
 

@@ -16,7 +16,7 @@ export const AudioStructureTimeline: React.FC<{
 }> = ({ audioUrl, segments, onChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const waveRef = useRef<WaveSurfer>();
-  const regionsRef = useRef<RegionsPlugin>();
+  const regionsRef = useRef<ReturnType<typeof RegionsPlugin.create>>();
   const segmentsRef = useRef(segments);
   const syncingRef = useRef(false);
   segmentsRef.current = segments;
@@ -24,10 +24,13 @@ export const AudioStructureTimeline: React.FC<{
   useEffect(() => {
     if (!containerRef.current || !audioUrl) return;
     const regions = RegionsPlugin.create();
+    const timeline = TimelinePlugin.create({ height: 18 });
     const wave = WaveSurfer.create({
       container: containerRef.current, url: audioUrl, height: 132, normalize: true,
       waveColor: '#a78bfa', progressColor: '#6d28d9', cursorColor: '#111827',
-      plugins: [regions, TimelinePlugin.create({ height: 18 })],
+      // wavesurfer v7 publishes plugin declarations through package exports, which
+      // TypeScript's legacy `node` resolver cannot connect to the core BasePlugin type.
+      plugins: [regions as never, timeline as never],
     });
     waveRef.current = wave; regionsRef.current = regions;
     regions.on('region-updated', (region) => {

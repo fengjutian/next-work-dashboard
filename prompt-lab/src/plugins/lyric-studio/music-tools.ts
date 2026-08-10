@@ -13,7 +13,7 @@ function extractAudioFeatures(data: Float32Array, sampleRate: number): AudioFeat
     frames.push({
       time: offset / sampleRate,
       rms: Number(result.rms ?? 0),
-      spectralCentroid: Number(result.spectralCentroid ?? 0),
+      spectralCentroid: Number(result.spectralCentroid ?? 0) * sampleRate / frameSize,
       chroma: Array.from(result.chroma ?? []).map(Number),
       mfcc: Array.from(result.mfcc ?? []).map(Number),
     });
