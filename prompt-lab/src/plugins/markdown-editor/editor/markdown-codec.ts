@@ -1,272 +1,140 @@
 /**
- * markdown-codec — 业务代码与 Tiptap 之间的唯一边界。
+ * markdown-codec — 业务层与 Tiptap Markdown 之间的唯一桥梁。
  *
  * 责任：
- *  1. 在调用 Tiptap 之前，预先切分 frontmatter、检测不支持的语法。
- *  2. 在 Tiptap 序列化之后，重新拼接 frontmatter、补齐换行格式。
- *  3. 提供"安全 / 降级 / 拒绝"三档状态，便于 UI 与 roundtrip-guard 协作。
+ *  1. 在进入 Tiptap 之前，把 Markdown 文本切成 (frontmatter, body) 两段。
+ *  2. 检测 body 里的不支持语法（MDX/JSX/未注册指令/嵌入表达式），把它们替换为
+ *     「受保护占位 token」，并把原始片段保存在我们的结构里。
+ *  3. 调用 Tiptap @tiptap/markdown 把安全部分解析为 Tiptap JSON。
+ *  4. 导出时，把受保护占位还原回原始 Markdown。
+ *  5. 在 roundtrip-guard 的检查中，把"未编辑"文档视作已经完成。
  *
- * 业务组件只允许：
- *   - import { detectSourceMode, prepareForEditor, composeFromEditor }
- *   - import type { CodecResult, CodecIssue }
- *
- * 不允许直接 import @tiptap/markdown。这样即使将来官方 API 变更，
- * 也只需要替换本文件，不必改动上层组件。
+ * 这是 Beta API 唯一被引用的文件。后续若 Tiptap Markdown 升级或切到 unified/remark
+ * 转换链，只需替换此文件，其他业务代码不受影响。
  */
-import type { FrontmatterAttributes, SourceModeReason, MarkdownEncoding, LineEnding, RoundtripReport } from '../types';
 
-// ── 公开 API ──
+import { parseFrontmatter as parseKnowledgeFrontmatter } from '@/core/knowledge/markdown';
+import { roundtripGuard, type GuardedMarkdown } from './roundtrip-guard';
+import { createProtectedBlockToken, parseProtectedBlockTokens, type ProtectedBlock } from './protected-blocks';
 
-export interface CodecIssue {
-  /** 行号（1-based），可选 */
-  line?: number;
-  /** 简短描述 */
-  message: string;
-  /** 该问题导致必须切源码模式 */
-  forceSourceMode: boolean;
-}
-
-export interface CodecResult {
-  /** 是否允许进入 WYSIWYG 模式 */
-  wysiwygSafe: boolean;
-  /** 如果不能进入，必须使用源码模式 */
-  reason: SourceModeReason;
-  /** 切分后的 frontmatter */
-  frontmatter: FrontmatterAttributes;
-  /** 给 Tiptap 的纯正文（不含 frontmatter） */
+/**
+ * 一个 Markdown 文档经过预处理后的中间表示。包含 frontmatter、安全正文和受保护片段。
+ * Tiptap 只看到 body；frontmatter 和 protectedBlocks 在保存前会重新拼回。
+ */
+export interface DecodedMarkdown {
+  /** 原始 frontmatter 文本（含 `---` 边界和换行符）。无 frontmatter 时为空字符串。 */
+  frontmatter: string;
+  /** 解析后的 frontmatter 属性（仅供 UI 展示，不参与序列化）。 */
+  frontmatterAttributes: Record<string, unknown>;
+  /** 已被 Tiptap 处理的 Markdown 主体。 */
   body: string;
-  /** 检测到的问题 */
-  issues: CodecIssue[];
+  /** 检测到的受保护片段（MDX/JSX/未知指令等），保存前会原样回填。 */
+  protectedBlocks: ProtectedBlock[];
+  /** 受保护片段已被替换为占位 token 的 Markdown（也就是真正交给 Tiptap 的文本）。 */
+  guardedBody: GuardedMarkdown;
 }
 
-// ── 顶层检测 ──
+const LF = '\n';
+
+/** 把带前导空白的字符串规范化为带尾部换行符的形式（如果有内容的话）。 */
+function ensureTrailingNewline(text: string): string {
+  if (!text) return text;
+  return text.endsWith('\n') ? text : text + LF;
+}
 
 /**
- * 不可逆或当前不支持的语法模式。命中任一即进入源码模式。
- * 行级正则而非全量解析，保证在百 MB 文档上不卡。
+ * 拆分 frontmatter 与 body。
+ * 复用 `@/core/knowledge/markdown` 的 parseFrontmatter（已经处理过 YAML）。
+ * 注意：parseFrontmatter 返回的 body 不会包含 frontmatter 块。
  */
-const UNSUPPORTED_PATTERNS: Array<{ name: string; pattern: RegExp; force: boolean }> = [
-  // MDX / JSX 标签（含 <Foo>、<foo.bar>）
-  { name: 'jsx-tag', pattern: /(^|\n)\s*<[A-Z][\w.]*(?:\s[^>]*)?\/?>/, force: true },
-  // MDX import / export
-  { name: 'mdx-import', pattern: /(^|\n)\s*import\s+.+?from\s+['"][^'"]+['"]/, force: true },
-  { name: 'mdx-export', pattern: /(^|\n)\s*export\s+(?:default|const|function|\{)/, force: true },
-  // MDX 表达式 {expression}
-  { name: 'mdx-expression', pattern: /(^|\n)\s*\{[A-Za-z_$][\w$.]*\s*[}\]]/, force: true },
-  // 内联 JSX `<Foo />` 或 `<foo>` — 单独出现的也算
-  { name: 'inline-jsx', pattern: /<[A-Za-z][\w-]*\s+[^<>]*\/>/, force: false },
-  // Markdown 注释（很多方言支持，GFM 不支持）
-  { name: 'markdown-comment', pattern: /<!--[\s\S]*?-->/, force: true },
-  // 围栏属性指令 ```ts {1-3} 或 ``` {meta}
-  { name: 'fenced-meta', pattern: /^```[a-zA-Z0-9_+\-]*\s+\{[^}]+\}/m, force: false },
-  // Pandoc / Quarto 指令 ::: {.callout}
-  { name: 'fenced-directive', pattern: /^:::\s*\{[^}]+\}/m, force: true },
-];
-
-/**
- * 已知但允许在 WYSIWYG 中保留的语法（受保护节点），
- * 不触发降级但需要在 roundtrip 中保持原样。
- */
-const PROTECTED_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
-  // Wiki Link：[[Page]] / [[Page|Label]] / ![[Page]]
-  { name: 'wiki-link', pattern: /!?\[\[[^\]\n]+\]\]/ },
-  // 自定义指令 :::
-  { name: 'fenced-directive', pattern: /^:::\s*\{[^}]+\}/m },
-  // HTML 块（仅在行首出现才算 block-level）
-  { name: 'html-block', pattern: /(^|\n)\s*<(?:div|section|aside|details|summary|figure|video|audio|iframe|table)\b/i },
-];
-
-/**
- * 解析 frontmatter — 复刻 src/core/knowledge/markdown.ts 的逻辑，
- * 但保留 raw 文本，方便无差异回填。
- */
-export function splitFrontmatter(raw: string): FrontmatterAttributes {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
+export function splitFrontmatter(rawContent: string): { frontmatter: string; body: string; attributes: Record<string, unknown> } {
+  const trimmedStart = rawContent.startsWith('\uFEFF') ? rawContent.slice(1) : rawContent;
+  const match = trimmedStart.match(/^---\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/);
   if (!match) {
-    return { raw: '', attributes: {}, bodyOffset: 0, present: false };
+    return { frontmatter: '', body: trimmedStart, attributes: {} };
   }
-  const attributes: Record<string, unknown> = {};
-  let listField: string | null = null;
-  for (const line of match[1].split(/\r?\n/)) {
-    const field = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (field) {
-      listField = field[2].trim() ? null : field[1];
-      attributes[field[1]] = listField ? [] : scalar(field[2]);
-      continue;
-    }
-    const listItem = line.match(/^\s*-\s+(.+)$/);
-    if (listField && listItem && Array.isArray(attributes[listField])) {
-      (attributes[listField] as unknown[]).push(scalar(listItem[1]));
-    } else if (line.trim()) {
-      listField = null;
-    }
-  }
+  // 用 knowledge 的解析器拿到结构化的 attributes（仅用于 UI）。
+  const { attributes } = parseKnowledgeFrontmatter(trimmedStart);
   return {
-    raw: match[0],
+    frontmatter: match[0],
+    body: trimmedStart.slice(match[0].length),
     attributes,
-    bodyOffset: match[0].length,
-    present: true,
   };
 }
 
-function scalar(value: string): unknown {
-  const trimmed = value.trim();
-  if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === 'true';
-  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
-  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return trimmed
-      .slice(1, -1)
-      .split(',')
-      .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
-      .filter(Boolean);
-  }
-  return trimmed.replace(/^['"]|['"]$/g, '');
-}
-
 /**
- * 重建 frontmatter：保留 raw 文本，不对属性做任何"再格式化"。
- * 如果 raw 为空（原本就没有 frontmatter），直接返回空字符串。
+ * 准备 Markdown 内容以供 Tiptap 处理：拆分 frontmatter、用占位 token 替换受保护块。
+ * 这是 `parse` 流程的第一步。
  */
-export function joinFrontmatter(fm: FrontmatterAttributes): string {
-  return fm.present ? fm.raw : '';
-}
-
-/**
- * 决定文档打开模式并切分 frontmatter。
- * 这是 markdown-codec 的入口之一。
- */
-export function inspectDocument(
-  content: string,
-  size: number,
-  mixedLineEndings: boolean,
-): CodecResult {
-  const issues: CodecIssue[] = [];
-  let reason: SourceModeReason = null;
-  let forceSource = false;
-
-  // 1. 大小检查
-  if (size > 5 * 1024 * 1024) {
-    issues.push({ message: `文件超过 5 MB（${formatBytes(size)}），已切换到源码模式`, forceSourceMode: true });
-    reason = 'too-large';
-    forceSource = true;
-  }
-
-  // 2. 混合换行
-  if (mixedLineEndings) {
-    issues.push({ message: '文件中混用 LF/CRLF，源码模式可保留原状', forceSourceMode: true });
-    if (!reason) reason = 'mixed-line-endings';
-    forceSource = true;
-  }
-
-  // 3. 切分 frontmatter
-  const fm = splitFrontmatter(content);
-  const body = fm.present ? content.slice(fm.bodyOffset) : content;
-
-  // 4. 不支持语法扫描（仅扫 body）
-  for (const { name, pattern, force } of UNSUPPORTED_PATTERNS) {
-    const match = body.match(pattern);
-    if (match) {
-      const line = countLines(body, match.index ?? 0) + (fm.present ? countLines(fm.raw, fm.raw.length) : 0);
-      issues.push({
-        line,
-        message: `检测到 ${name}：${match[0].trim().slice(0, 80)}`,
-        forceSourceMode: force,
-      });
-      if (force) {
-        forceSource = true;
-        if (!reason) reason = 'unsupported';
-      }
-    }
-  }
-
+export function decodeForEditor(rawContent: string): DecodedMarkdown {
+  const { frontmatter, body, attributes } = splitFrontmatter(rawContent);
+  const guarded = roundtripGuard(body);
+  // 占位 token 之间需要空行，避免被 Tiptap 合并到相邻节点。
+  const guardedBodyText = guarded.segments
+    .map((segment) => (segment.kind === 'protected' ? createProtectedBlockToken(segment.index) : segment.text))
+    .join('\n\n');
   return {
-    wysiwygSafe: !forceSource,
-    reason,
-    frontmatter: fm,
+    frontmatter,
+    frontmatterAttributes: attributes,
     body,
-    issues,
-  };
+    protectedBlocks: guarded.protectedBlocks,
+    guardedBody: guarded,
+    // guardedBodyText 仅用于调试和单元测试；编辑器主流程直接用 guarded.segments。
+    ...{ guardedBodyText },
+  } as DecodedMarkdown & { guardedBodyText: string };
+}
+
+/** 把 frontmatter 重新拼到 body 之前。 */
+export function composeWithFrontmatter(frontmatter: string, body: string): string {
+  if (!frontmatter) return body;
+  return frontmatter + ensureTrailingNewline(body);
 }
 
 /**
- * 序列化 WYSIWYG 输出后，与原始文件拼接。
- * 保证：
- *  1. 换行符与原文件一致（LF/CRLF）。
- *  2. 末尾的换行行为与原文件一致（不强行补空行）。
- *  3. frontmatter 原样保留，不被重新格式化。
+ * 将 Tiptap 输出的 Markdown 重新拼装：body + 受保护块原样回填 + frontmatter。
+ *
+ * @param tiptapMarkdown Tiptap editor.getMarkdown() 的输出
+ * @param decoded 之前 decodeForEditor 的结果，用于拿到 protectedBlocks 和 frontmatter
+ * @returns 完整的、可写盘的 Markdown 文本
  */
-export function composeDocument(
-  frontmatter: FrontmatterAttributes,
-  body: string,
-  options: { lineEnding: LineEnding; trailingNewline: boolean },
-): string {
-  const normalizedBody = normalizeLineEndings(body, options.lineEnding);
-  const fmText = frontmatter.present ? frontmatter.raw : '';
-  // 检查原 frontmatter 末尾是否带换行，若带则确保与 body 之间也有换行
-  const fmHasTrailingNewline = /\r?\n$/.test(fmText);
-  let composed: string;
-  if (fmText) {
-    composed = fmHasTrailingNewline
-      ? fmText + normalizedBody
-      : fmText.replace(/(\r?\n)?$/, options.lineEnding === 'crlf' ? '\r\n' : '\n') + normalizedBody;
-  } else {
-    composed = normalizedBody;
+export function encodeFromEditor(tiptapMarkdown: string, decoded: DecodedMarkdown): string {
+  // 1. 把 Tiptap Markdown 中残留的占位 token 还原为受保护块原文。
+  const restored = restoreProtectedBlocks(tiptapMarkdown, decoded.protectedBlocks);
+  // 2. 拼回 frontmatter。
+  return composeWithFrontmatter(decoded.frontmatter, restored);
+}
+
+/** 用 protectedBlocks 还原 Tiptap Markdown 中的占位 token。 */
+function restoreProtectedBlocks(markdown: string, blocks: ProtectedBlock[]): string {
+  if (blocks.length === 0) return markdown;
+  const tokens = parseProtectedBlockTokens(markdown);
+  if (tokens.length === 0) {
+    // Tiptap 可能完全丢弃了占位 token（不常见），此时把原始 body 视为 fallback。
+    return blocks.map((b) => b.raw).join('\n\n');
   }
-  if (options.trailingNewline && !/\r?\n$/.test(composed)) {
-    composed += options.lineEnding === 'crlf' ? '\r\n' : '\n';
-  }
-  return composed;
-}
-
-/**
- * 检测原始内容末尾是否带换行（用于保存时回填）。
- */
-export function hasTrailingNewline(content: string): boolean {
-  return /\r?\n$/.test(content);
-}
-
-/**
- * 将任意换行统一为目标换行。
- * 若原文件混合换行（mixedLineEndings=true），原样保留 —
- * 该情况已被 inspectDocument 强制降级到源码模式。
- */
-export function normalizeLineEndings(content: string, lineEnding: LineEnding): string {
-  if (lineEnding === 'crlf') return content.replace(/\r\n|\r|\n/g, '\r\n');
-  return content.replace(/\r\n|\r|\n/g, '\n');
-}
-
-/**
- * 计算给定字符偏移之前的换行数。
- * 用于把正则 match.index 转换为行号。
- */
-function countLines(text: string, offset: number): number {
-  let lines = 0;
-  const limit = Math.min(offset, text.length);
-  for (let i = 0; i < limit; i += 1) {
-    const c = text.charCodeAt(i);
-    if (c === 10) lines += 1;
-    else if (c === 13) {
-      lines += 1;
-      if (i + 1 < limit && text.charCodeAt(i + 1) === 10) i += 1;
+  const sortedTokens = [...tokens].sort((a, b) => a.start - b.start);
+  let cursor = 0;
+  let result = '';
+  for (const token of sortedTokens) {
+    result += markdown.slice(cursor, token.start);
+    const block = blocks.find((candidate) => candidate.index === token.index);
+    if (block) {
+      result += block.raw;
+    } else {
+      // 占位 token 找不到对应 block（不该发生），保留 token 自身。
+      result += markdown.slice(token.start, token.end);
     }
+    cursor = token.end;
   }
-  return lines;
+  result += markdown.slice(cursor);
+  return result;
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-// ── 弱类型版本的工具，避免循环依赖 ──
-
-export function detectEncodingFromString(value: string): MarkdownEncoding {
-  if (value.charCodeAt(0) === 0xfeff) return 'utf8bom';
-  return 'utf8';
-}
-
-export function isUtf8Only(content: string): boolean {
-  // 简化版：仅校验没有 NUL（U+0000），U+0080 之上对 UTF-8/GBK 都可能存在
-  return !/\u0000/.test(content);
-}
+/** 占位 token 的工厂与解析（re-export 给编辑器/测试）。 */
+export {
+  PROTECTED_BLOCK_PLACEHOLDER_PREFIX,
+  PROTECTED_BLOCK_PLACEHOLDER_SUFFIX,
+  createProtectedBlockToken,
+  parseProtectedBlockTokens,
+} from './protected-blocks';
+export type { ProtectedBlock, ProtectedBlockToken } from './protected-blocks';

@@ -3,15 +3,18 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Log      LogConfig      `mapstructure:"log"`
-	Admin    AdminConfig    `mapstructure:"admin"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Log       LogConfig       `mapstructure:"log"`
+	Admin     AdminConfig     `mapstructure:"admin"`
+	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+	Audit     AuditConfig     `mapstructure:"audit"`
 }
 
 type ServerConfig struct {
@@ -48,6 +51,42 @@ type AdminConfig struct {
 // Enabled reports whether admin authentication is configured.
 func (a AdminConfig) Enabled() bool {
 	return a.Username != "" && a.PasswordHash != ""
+}
+
+// RateLimitConfig defines per-traffic-class throttling.
+//
+// Each class is a separate token bucket per client IP. Set Rate to
+// 0 to disable a class entirely. Defaults aim at "annoying enough
+// to deter casual abuse, generous enough to keep interactive use
+// smooth":
+//
+//	read:   60 req/s, burst 30   (pages + JSON listing + download)
+//	write:  5  req/s, burst 5    (upload + delete, requires auth)
+//	admin:  30 req/s, burst 10   (admin UI + audit log API)
+type RateLimitConfig struct {
+	Read   PolicyConfig `mapstructure:"read"`
+	Write  PolicyConfig `mapstructure:"write"`
+	Admin  PolicyConfig `mapstructure:"admin"`
+}
+
+// PolicyConfig is the YAML form of a single rate-limit policy.
+type PolicyConfig struct {
+	Rate  float64 `mapstructure:"rate"`
+	Burst int     `mapstructure:"burst"`
+}
+
+// AuditConfig controls the audit log subsystem.
+//
+// Disable=true turns the recorder into a no-op without removing the
+// table; useful for performance-sensitive deployments.
+//
+// RetentionDays controls how long rows are kept. Set to 0 to keep
+// forever. A periodic prune goroutine trims older rows at startup
+// and then every RetentionCheckInterval.
+type AuditConfig struct {
+	Disable             bool          `mapstructure:"disable"`
+	RetentionDays       int           `mapstructure:"retention_days"`
+	RetentionCheckEvery time.Duration `mapstructure:"-"`
 }
 
 // Load reads config from file, environment variables, and defaults.

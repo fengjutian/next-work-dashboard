@@ -29,7 +29,7 @@ func Open(dataDir string) (*gorm.DB, error) {
 	db.Exec("PRAGMA foreign_keys=ON")
 	db.Exec("PRAGMA busy_timeout=5000")
 
-	if err := db.AutoMigrate(&model.Plugin{}); err != nil {
+	if err := db.AutoMigrate(&model.Plugin{}, &model.AuditLog{}); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 

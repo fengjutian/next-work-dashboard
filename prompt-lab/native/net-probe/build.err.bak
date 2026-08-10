@@ -1,0 +1,26 @@
+   Compiling nwd-net-probe v0.1.0 (D:\github\next-work-dashboard\prompt-lab\native\net-probe)
+warning: field `port` is never read
+   --> src\probe\traceroute_self.rs:178:5
+    |
+174 | struct ProbeSend {
+    |        --------- field in this struct
+...
+178 |     port: u16,
+    |     ^^^^
+    |
+    = note: `ProbeSend` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `from_ip` is never read
+   --> src\probe\traceroute_self.rs:389:5
+    |
+387 | struct ProbeResult {
+    |        ----------- field in this struct
+388 |     rtt_ms: f64, // -1.0 == *
+389 |     from_ip: Option<IpAddr>,
+    |     ^^^^^^^
+    |
+    = note: `ProbeResult` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `nwd-net-probe` (bin "nwd-net-probe") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 43.59s

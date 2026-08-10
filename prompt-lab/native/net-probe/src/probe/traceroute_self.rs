@@ -42,9 +42,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use socket2::{Domain, Protocol, Socket};
+use socket2::{Domain, Protocol, Socket, Type};
+use std::os::raw::c_int;
 
 use super::{Probe, ProbeSample};
+
+// SOCK_RAW = 3 on both Linux/macOS and Windows. socket2 0.5 gates `Type::RAW`
+// behind the `all` feature, so we construct the int value directly.
+const SOCK_RAW: c_int = 3;
 
 // ── Probe trait impl ──────────────────────────────────────────────────
 
@@ -159,7 +164,7 @@ fn resolve_target_v4(target: &str) -> Result<IpAddr, String> {
 
 fn open_raw_icmp_socket() -> std::io::Result<Socket> {
     // SOCK_RAW + IPPROTO_ICMP requires admin / CAP_NET_RAW.
-    let sock = Socket::new_raw(Domain::IPV4, Protocol::ICMPV4)?;
+    let sock = Socket::new(Domain::IPV4, Type::from(SOCK_RAW), Some(Protocol::ICMPV4))?;
     // Non-blocking so we can manage the recv deadline ourselves.
     sock.set_nonblocking(true)?;
     Ok(sock)
@@ -168,9 +173,6 @@ fn open_raw_icmp_socket() -> std::io::Result<Socket> {
 #[derive(Debug, Clone)]
 struct ProbeSend {
     send_t: Instant,
-    /// Outgoing dest port (we vary per probe to help the kernel avoid
-    /// collapsing duplicates; the receive side doesn't actually need it).
-    port: u16,
 }
 
 #[derive(Debug)]
@@ -194,7 +196,7 @@ fn trace_self(
         .map_err(|e| format!("open raw ICMP: {e} (admin / CAP_NET_RAW required)"))?;
 
     // UDP socket bound to an ephemeral port.
-    let udp = Socket::new(Domain::IPV4, socket2::Type::DGRAM, Some(Protocol::UDP))
+    let udp = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
         .map_err(|e| format!("open UDP: {e}"))?;
     udp.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into())
         .map_err(|e| format!("bind UDP: {e}"))?;
@@ -226,7 +228,7 @@ fn trace_self(
             if std_udp.send_to(&payload, dest).is_err() {
                 continue; // skip this probe; pad with * at the end
             }
-            sends.push(ProbeSend { send_t, port });
+            sends.push(ProbeSend { send_t });
         }
 
         // Read ICMP replies until either we've matched `queries` replies
@@ -379,6 +381,7 @@ fn trace_self(
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ProbeResult {
     rtt_ms: f64, // -1.0 == *
     from_ip: Option<IpAddr>,

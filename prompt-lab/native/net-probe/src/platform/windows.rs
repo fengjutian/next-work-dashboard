@@ -6,7 +6,7 @@
 //!
 //! V1.1.1 supports both ICMP (v4) and ICMPv6 (v6).
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
@@ -39,7 +39,6 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
         SocketAddr::V4(v4) => *v4.ip(),
         SocketAddr::V6(_) => return Err("ipv6 not supported in v1".to_string()),
     };
-    let dest = SocketAddrV4::new(ipv4, 0);
 
     unsafe {
         let handle: HANDLE = match IcmpCreateFile() {
@@ -115,8 +114,6 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
             0.1
         };
 
-        // Sanity: result==1 means one reply; anything else is unexpected on V1.
-        let _ = dest; // currently unused; keep for future per-hop tracking.
         Ok(rtt)
     }
 }

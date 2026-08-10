@@ -211,7 +211,7 @@ export const PluginManagerPanel: React.FC = () => {
                     <p className="mt-0.5 text-[11px] text-muted-foreground">{category.description}</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                   {category.plugins.map((plugin) => {
                     const Icon = plugin.icon;
                     const isUserPlugin = userPluginIds.has(plugin.id);
@@ -303,7 +303,7 @@ const OnlinePluginList: React.FC<{
       <button className="rounded border px-3 py-1.5 text-xs" disabled={busy} onClick={() => void onRefresh()}>{busy ? '刷新中…' : '刷新目录'}</button>
     </div>
     {!catalog ? <p className="py-16 text-center text-sm text-muted-foreground">尚未配置或缓存 Marketplace catalog。</p> :
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{catalog.plugins.map((entry) => <div key={entry.id} className="rounded-lg border bg-background p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">{catalog.plugins.map((entry) => <div key={entry.id} className="rounded-lg border bg-background p-4">
         <h4 className="text-sm font-medium">{entry.name}</h4><p className="mt-1 text-xs text-muted-foreground">{entry.description || entry.id}</p>
         <div className="mt-3 flex items-center justify-between"><span className="text-[11px] text-muted-foreground">v{entry.version}</span>
           <button className="rounded bg-primary px-2.5 py-1 text-xs text-primary-foreground disabled:opacity-50" disabled={installing === entry.id || installed.get(entry.id) === entry.version} onClick={() => void install(entry)}>

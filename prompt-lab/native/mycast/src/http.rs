@@ -402,16 +402,26 @@ async fn ws_upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
-    // Optional auth: client may include a "Sec-WebSocket-Protocol: bearer, <token>".
-    let proto = headers
+    // Optional auth. Two transports are accepted:
+    //   1. `Authorization: Bearer <token>` — preferred, works with browser
+    //      WS clients that support custom headers (e.g. desktop tests).
+    //   2. `Sec-WebSocket-Protocol: bearer, <token>` — fallback for clients
+    //      that cannot set custom headers (e.g. browser WebSocket). Note that
+    //      per RFC 6455 subprotocols must not contain commas; the value is
+    //      sent as a single subprotocol entry named `bearer-<short>` and
+    //      the server tolerates a comma-separated hack for older clients.
+    let auth_token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ").map(|t| t.trim().to_string()));
+    let proto_token = headers
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let token = proto
-        .as_deref()
         .and_then(|p| p.split(',').nth(1).map(|s| s.trim().to_string()));
+    let token = auth_token.or(proto_token);
+    tracing::info!(target: "mycast.ws", token_present = token.is_some(), "ws upgrade");
     if let Some(t) = token.as_deref() {
-        if state.shared.tokens.validate_session(t).is_none() {
+        if !t.is_empty() && state.shared.tokens.validate_session(t).is_none() {
             return Err(ApiError::unauthorized("session token 无效"));
         }
     }

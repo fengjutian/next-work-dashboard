@@ -1,16 +1,10 @@
 /**
- * Tiptap 扩展集合 — 为 markdown-editor 准备的 extension 数组。
+ * Tiptap extensions 集合 — 业务层用到的节点/标记/扩展集中配置。
  *
- * 关键设计：
- *  1. StarterKit 覆盖 90% 节点/标记（标题、列表、粗体、行内代码、代码块等），
- *     但 StarterKit 自带的 CodeBlock 不带语法高亮，这里关掉，
- *     用 CodeBlockLowlight 替代。
- *  2. P0 暂不注册 FrontmatterNode / WikiLinkNode / UnsupportedBlock：
- *     frontmatter 由 markdown-codec 在 Tiptap 之外处理；
- *     wiki link / MDX / JSX 命中"不支持语法"时直接降级到源码模式。
- *     这避免与 Tiptap markdown Beta 解析器的边界情况正面冲突。
- *  3. 所有扩展锁版本 3.29.x，由 createMarkdownEditor 处统一 verify。
+ * 注意：所有 Tiptap 相关包只在这里和 createMarkdownEditor.ts 引用，业务层不直接 import。
+ * 这是 markdown-codec 之外的另一层封装，让 Beta API 改动影响面可控。
  */
+
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Table from '@tiptap/extension-table';
@@ -21,44 +15,67 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { Markdown } from '@tiptap/markdown';
 import { common, createLowlight } from 'lowlight';
-
-import type { Extensions } from '@tiptap/core';
-
-/**
- * 共享的 lowlight 实例。只注册常用语言，避免首屏加载全部 ~190 种。
- * lowlight v3 使用 `common` 提供 36 种常用语法，足以覆盖 Markdown 文档场景。
- */
-export const sharedLowlight = createLowlight(common);
+import { Markdown } from '@tiptap/markdown';
+import type { AnyExtension } from '@tiptap/core';
 
 /**
- * 创建 Tiptap 扩展数组。
- * `placeholder` 用于空文档时显示提示。
- *
- * 重要：`Markdown` 扩展必须放在数组前面。
- * 它会注册一个全局的 markdown manager，并给 Editor 类型加上
- * `getMarkdown()` / `setContent({ contentType: 'markdown' })` 能力。
+ * 注册在 Tiptap 中的常用语法高亮语言清单。
+ * 不一次性加载全部语言，避免首屏体积膨胀。
  */
-export function createExtensions(options: { placeholder?: string } = {}): Extensions {
+const SUPPORTED_LANGUAGES: ReadonlyArray<string> = [
+  'plaintext',
+  'javascript',
+  'typescript',
+  'tsx',
+  'jsx',
+  'json',
+  'bash',
+  'shell',
+  'python',
+  'go',
+  'rust',
+  'java',
+  'kotlin',
+  'swift',
+  'c',
+  'cpp',
+  'csharp',
+  'ruby',
+  'php',
+  'sql',
+  'yaml',
+  'markdown',
+  'html',
+  'css',
+  'scss',
+  'less',
+  'vue',
+  'svelte',
+  'diff',
+  'dockerfile',
+  'makefile',
+  'ini',
+  'toml',
+  'xml',
+  'graphql',
+];
+
+const lowlight = createLowlight(common);
+
+export function getCommonExtensions(options: { placeholder?: string; editable?: boolean } = {}): AnyExtension[] {
   return [
+    StarterKit.configure({
+      // 启用 Markdown 双向转换需要 codeBlock 由低亮接管，故关闭内置的 codeBlock。
+      codeBlock: false,
+      heading: { levels: [1, 2, 3, 4, 5, 6] },
+      link: { openOnClick: false, autolink: true, protocols: ['http', 'https', 'mailto'] },
+    }),
     Markdown.configure({
       indentation: { style: 'space', size: 2 },
+      markedOptions: { gfm: true, breaks: false },
     }),
-    StarterKit.configure({
-      // 用 CodeBlockLowlight 替代默认 CodeBlock，关闭 StarterKit 自带版本
-      codeBlock: false,
-      // 不需要 link 的 openOnClick（编辑器内点击不应直接打开浏览器）
-      link: {
-        openOnClick: false,
-        autolink: true,
-        HTMLAttributes: { rel: 'noopener noreferrer', target: '_blank' },
-      },
-    }),
-    Placeholder.configure({
-      placeholder: options.placeholder ?? '开始输入 Markdown …（使用右上角切换源码）',
-      emptyEditorClass: 'markdown-editor-is-empty',
-    }),
+    Placeholder.configure({ placeholder: options.placeholder ?? '开始输入 Markdown…' }),
     Table.configure({ resizable: true, allowTableNodeSelection: true }),
     TableRow,
     TableHeader,
@@ -66,6 +83,13 @@ export function createExtensions(options: { placeholder?: string } = {}): Extens
     TaskList,
     TaskItem.configure({ nested: true }),
     Image.configure({ inline: false, allowBase64: true }),
-    CodeBlockLowlight.configure({ lowlight: sharedLowlight, defaultLanguage: 'plaintext' }),
+    CodeBlockLowlight.configure({
+      lowlight,
+      defaultLanguage: 'plaintext',
+      HTMLAttributes: { class: 'md-code-block' },
+    }),
   ];
 }
+
+/** 暴露给 UI 的高亮语言清单（用于代码块语言选择器）。 */
+export const SUPPORTED_CODE_LANGUAGES = SUPPORTED_LANGUAGES;

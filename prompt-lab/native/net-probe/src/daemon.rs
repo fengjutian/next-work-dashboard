@@ -236,6 +236,13 @@ fn spawn_worker(target: Target, emit: Sender<Outbound>) -> WorkerHandle {
             }
         };
 
+        // Keep clones of (emit, id, probe_kind) for the panic-recovery path —
+        // the closure below moves them, and the borrow checker would otherwise
+        // refuse to let us touch them after catch_unwind returns.
+        let emit_for_err = emit.clone();
+        let id_for_err = id.clone();
+        let probe_kind_for_err = probe_kind.clone();
+
         // catch_unwind so a panicking probe doesn't silently kill the target's
         // monitoring. The probe trait doesn't bound on UnwindSafe, so wrap the
         // closure in AssertUnwindSafe.
@@ -270,8 +277,8 @@ fn spawn_worker(target: Target, emit: Sender<Outbound>) -> WorkerHandle {
 
         if let Err(panic) = result {
             let msg = panic_message(&panic);
-            let _ = emit.send(Outbound::Error {
-                message: format!("worker {id} ({probe_kind}) panicked: {msg}"),
+            let _ = emit_for_err.send(Outbound::Error {
+                message: format!("worker {id_for_err} ({probe_kind_for_err}) panicked: {msg}"),
             });
         }
     });

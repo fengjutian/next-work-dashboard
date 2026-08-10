@@ -194,8 +194,10 @@ async function main() {
   // ── 7. WebSocket signaling: hello + offer → answer roundtrip ────────────
   // The sidecar is a relay: phone sends offer → desktop receives `webrtc.offer`
   // event on stdout → desktop pushes `Answer` frame back via `send_to_phone` RPC.
+  // Note: WS is served on the same port as HTTP (single axum server). The
+  // `ws_port` field in the ready event is an advertised label only.
   console.log('\n[7] WebSocket signaling');
-  const wsOk = await runWebSocketRoundtrip(host, wsPort, sendRpc, eventSubs);
+  const wsOk = await runWebSocketRoundtrip(host, port, token, sendRpc, eventSubs);
   check('ws hello + offer → answer roundtrip', wsOk, '');
 
   // ── 8. RPC roundtrip over stdin/stdout (mimics Electron Main) ──────────
@@ -240,10 +242,14 @@ function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-async function runWebSocketRoundtrip(host, port, sendRpc, eventSubs) {
+async function runWebSocketRoundtrip(host, port, sessionToken, sendRpc, eventSubs) {
   return await new Promise((resolve) => {
     const phoneDeviceId = 'e2e-ws';
-    const ws = new WebSocket(`ws://${host}:${port}/ws`, ['mycast', 'bearer']);
+    // Pass the session token via Authorization header. The sidecar's
+    // ws_upgrade handler validates it against the live token table.
+    const ws = new WebSocket(`ws://${host}:${port}/ws`, {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
     let helloOk = false;
     let offerSent = false;
     let answerOk = false;
