@@ -6,7 +6,7 @@ description = "MyCast: 局域网手机投屏 + 文件传输 sidecar (HTTP + WebS
 
 [dependencies]
 axum = { version = "0.7", features = ["ws", "multipart", "macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync", "signal", "fs", "stream"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync", "signal", "fs"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tower = "0.5"
 tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
