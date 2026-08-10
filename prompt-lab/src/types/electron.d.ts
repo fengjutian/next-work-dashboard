@@ -63,6 +63,7 @@ export type NetProbeEvent =
       success: boolean;
       latencyMs: number | null;
       error: string | null;
+      payload: Record<string, unknown> | null;
     }
   | { type: 'error'; message: string; timestampMs: number }
   | { type: 'exit'; code: number | null; error?: string; timestampMs: number };

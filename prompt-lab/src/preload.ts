@@ -382,10 +382,19 @@ const electronAPI: ElectronAPI = {
   netProbe: {
     start: () => ipcRenderer.invoke('net-probe:start'),
     state: () => ipcRenderer.invoke('net-probe:state'),
-    results: () => ipcRenderer.invoke('net-probe:results'),
-    addTarget: (target) => ipcRenderer.invoke('net-probe:add-target', target),
-    removeTarget: (id) => ipcRenderer.invoke('net-probe:remove-target', id),
     systemInfo: () => ipcRenderer.invoke('net-probe:system-info'),
+    listTargets: () => ipcRenderer.invoke('net-probe:list-targets'),
+    addTarget: (input) => ipcRenderer.invoke('net-probe:add-target', input),
+    removeTarget: (id) => ipcRenderer.invoke('net-probe:remove-target', id),
+    updateTarget: (id, patch) => ipcRenderer.invoke('net-probe:update-target', id, patch),
+    setTargetEnabled: (id, enabled) => ipcRenderer.invoke('net-probe:set-target-enabled', id, enabled),
+    listResults: (opts) => ipcRenderer.invoke('net-probe:list-results', opts),
+    listAlertRules: () => ipcRenderer.invoke('net-probe:list-alert-rules'),
+    addAlertRule: (input) => ipcRenderer.invoke('net-probe:add-alert-rule', input),
+    removeAlertRule: (id) => ipcRenderer.invoke('net-probe:remove-alert-rule', id),
+    listIncidents: (opts) => ipcRenderer.invoke('net-probe:list-incidents', opts),
+    closeIncident: (id) => ipcRenderer.invoke('net-probe:close-incident', id),
+    openIncidentsSnapshot: () => ipcRenderer.invoke('net-probe:open-incidents-snapshot'),
     onEvent: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: import('./types/electron').NetProbeEvent) => callback(payload);
       ipcRenderer.on('net-probe:event', handler);

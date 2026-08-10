@@ -20,28 +20,75 @@ import {
   type NetProbeIncidentRow,
 } from '@/db/schema';
 
-export type NetProbeTarget = Omit<NetProbeTargetRow, 'enabled'> & { enabled: boolean };
-export type NetProbeResult = Omit<NetProbeResultRow, 'success'> & { success: boolean };
-export type NetProbeAlertRule = Omit<NetProbeAlertRuleRow, 'enabled'> & { enabled: boolean };
-export type NetProbeIncident = Omit<NetProbeIncidentRow, 'acknowledged'> & { acknowledged: boolean };
-
-function toTarget(row: NetProbeTargetRow): NetProbeTarget {
-  return { ...row, enabled: row.enabled === 1 };
+// Public-facing types: `enabled` and `success` and `acknowledged` are booleans
+// (not 0/1). The internal row types keep ints because that's what SQLite likes.
+export interface NetProbeTarget {
+  id: string;
+  target: string;
+  probe: string;
+  intervalMs: number;
+  timeoutMs: number;
+  optionsJson: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
 }
-function toResult(row: NetProbeResultRow): NetProbeResult {
-  return { ...row, success: row.success === 1 };
+export interface NetProbeResult {
+  id: string;
+  targetId: string;
+  probe: string;
+  timestampMs: number;
+  success: boolean;
+  latencyMs: number | null;
+  error: string | null;
+  payloadJson: string;
 }
-function toAlertRule(row: NetProbeAlertRuleRow): NetProbeAlertRule {
-  return { ...row, enabled: row.enabled === 1 };
+export interface NetProbeAlertRule {
+  id: string;
+  name: string;
+  targetId: string | null;
+  probe: string | null;
+  metric: string;
+  op: string;
+  threshold: number;
+  durationSec: number;
+  enabled: boolean;
+  notify: string;
+  createdAt: number;
+  updatedAt: number;
 }
-function toIncident(row: NetProbeIncidentRow): NetProbeIncident {
-  return { ...row, acknowledged: row.acknowledged === 1 };
+export interface NetProbeIncident {
+  id: string;
+  ruleId: string;
+  targetId: string;
+  startedAt: number;
+  endedAt: number | null;
+  peakMetric: number;
+  triggerMessage: string;
+  acknowledged: boolean;
 }
 
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function uid(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function toTarget(r: NetProbeTargetRow): NetProbeTarget {
+  return { ...r, enabled: r.enabled === 1 };
+}
+function toResult(r: NetProbeResultRow): NetProbeResult {
+  return { ...r, success: r.success === 1 };
+}
+function toAlertRule(r: NetProbeAlertRuleRow): NetProbeAlertRule {
+  return { ...r, enabled: r.enabled === 1 };
+}
+function toIncident(r: NetProbeIncidentRow): NetProbeIncident {
+  return { ...r, acknowledged: r.acknowledged === 1 };
+}
+function intFlag(b: boolean | undefined, fallback: number): number {
+  if (b === undefined) return fallback;
+  return b ? 1 : 0;
 }
 
 // ── Targets ──
@@ -57,7 +104,7 @@ export function dbGetTarget(id: string): NetProbeTarget | null {
   return row ? toTarget(row) : null;
 }
 
-export function dbUpsertTarget(input: {
+export interface UpsertTargetInput {
   id?: string;
   target: string;
   probe?: string;
@@ -65,42 +112,42 @@ export function dbUpsertTarget(input: {
   timeoutMs?: number;
   optionsJson?: string;
   enabled?: boolean;
-}): NetProbeTarget {
+}
+
+export function dbUpsertTarget(input: UpsertTargetInput): NetProbeTarget {
   const now = Date.now();
   const id = input.id ?? uid('tgt');
   const existing = dbGetTarget(id);
-  const enabledInt: number = input.enabled != null
-    ? (input.enabled ? 1 : 0)
-    : (existing?.enabled ?? 1);
-  const row: NetProbeTarget = {
+  const row: NetProbeTargetRow = {
     id,
     target: input.target,
     probe: input.probe ?? existing?.probe ?? 'icmp',
     intervalMs: input.intervalMs ?? existing?.intervalMs ?? 5000,
     timeoutMs: input.timeoutMs ?? existing?.timeoutMs ?? 3000,
     optionsJson: input.optionsJson ?? existing?.optionsJson ?? '{}',
-    enabled: enabledInt,
+    enabled: intFlag(input.enabled, existing ? (existing.enabled ? 1 : 0) : 1),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  if (!isDbReady()) return row;
-  getDb()
-    .insert(netProbeTargets)
-    .values(row)
-    .onConflictDoUpdate({
-      target: netProbeTargets.id,
-      set: {
-        target: row.target,
-        probe: row.probe,
-        intervalMs: row.intervalMs,
-        timeoutMs: row.timeoutMs,
-        optionsJson: row.optionsJson,
-        enabled: row.enabled,
-        updatedAt: row.updatedAt,
-      },
-    })
-    .run();
-  return row;
+  if (isDbReady()) {
+    getDb()
+      .insert(netProbeTargets)
+      .values(row)
+      .onConflictDoUpdate({
+        target: netProbeTargets.id,
+        set: {
+          target: row.target,
+          probe: row.probe,
+          intervalMs: row.intervalMs,
+          timeoutMs: row.timeoutMs,
+          optionsJson: row.optionsJson,
+          enabled: row.enabled,
+          updatedAt: row.updatedAt,
+        },
+      })
+      .run();
+  }
+  return toTarget(row);
 }
 
 export function dbDeleteTarget(id: string): boolean {
@@ -112,7 +159,8 @@ export function dbDeleteTarget(id: string): boolean {
 
 // ── Results (history) ──
 
-export function dbInsertResult(input: {
+export interface InsertResultInput {
+  id?: string;
   targetId: string;
   probe: string;
   timestampMs: number;
@@ -120,9 +168,11 @@ export function dbInsertResult(input: {
   latencyMs: number | null;
   error: string | null;
   payloadJson?: string;
-}): NetProbeResult {
-  const row: NetProbeResult = {
-    id: uid('res'),
+}
+
+export function dbInsertResult(input: InsertResultInput): NetProbeResult {
+  const row: NetProbeResultRow = {
+    id: input.id ?? uid('res'),
     targetId: input.targetId,
     probe: input.probe,
     timestampMs: input.timestampMs,
@@ -137,12 +187,14 @@ export function dbInsertResult(input: {
   return toResult(row);
 }
 
-export function dbListResults(opts: {
+export interface ListResultsOptions {
   targetId?: string;
   sinceMs?: number;
   untilMs?: number;
   limit?: number;
-}): NetProbeResult[] {
+}
+
+export function dbListResults(opts: ListResultsOptions): NetProbeResult[] {
   if (!isDbReady()) return [];
   const conds = [];
   if (opts.targetId) conds.push(eq(netProbeResults.targetId, opts.targetId));
@@ -158,12 +210,10 @@ export function dbListResults(opts: {
   return query.all().map(toResult);
 }
 
-/** Delete results older than the retention window. */
+/** Delete results older than the retention window. Returns number deleted. */
 export function dbPruneOldResults(): number {
   if (!isDbReady()) return 0;
   const cutoff = Date.now() - RETENTION_MS;
-  // sql.js doesn't surface `changes` from the drizzle run() result, so we
-  // delete via a count-then-delete approach for accurate reporting.
   const countRow = getDb()
     .select({ n: sql<number>`count(*)` })
     .from(netProbeResults)
@@ -192,11 +242,24 @@ export function dbGetAlertRule(id: string): NetProbeAlertRule | null {
   return row ? toAlertRule(row) : null;
 }
 
-export function dbUpsertAlertRule(input: Omit<NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): NetProbeAlertRule {
+export interface UpsertAlertRuleInput {
+  id?: string;
+  name: string;
+  targetId?: string | null;
+  probe?: string | null;
+  metric: string;
+  op: string;
+  threshold: number;
+  durationSec: number;
+  enabled: boolean;
+  notify: string;
+}
+
+export function dbUpsertAlertRule(input: UpsertAlertRuleInput): NetProbeAlertRule {
   const now = Date.now();
   const existing = input.id ? dbGetAlertRule(input.id) : null;
   const id = input.id ?? uid('rule');
-  const row: NetProbeAlertRule = {
+  const row: NetProbeAlertRuleRow = {
     id,
     name: input.name,
     targetId: input.targetId ?? null,
@@ -205,7 +268,7 @@ export function dbUpsertAlertRule(input: Omit<NetProbeAlertRule, 'id' | 'created
     op: input.op,
     threshold: input.threshold,
     durationSec: input.durationSec,
-    enabled: input.enabled,
+    enabled: input.enabled ? 1 : 0,
     notify: input.notify,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -257,15 +320,18 @@ export function dbListIncidents(opts: { openOnly?: boolean; limit?: number } = {
     .map(toIncident);
 }
 
-export function dbOpenIncident(input: {
+export interface OpenIncidentInput {
+  id?: string;
   ruleId: string;
   targetId: string;
   startedAt: number;
   peakMetric: number;
   triggerMessage: string;
-}): NetProbeIncident {
-  const row: NetProbeIncident = {
-    id: uid('inc'),
+}
+
+export function dbOpenIncident(input: OpenIncidentInput): NetProbeIncident {
+  const row: NetProbeIncidentRow = {
+    id: input.id ?? uid('inc'),
     ruleId: input.ruleId,
     targetId: input.targetId,
     startedAt: input.startedAt,

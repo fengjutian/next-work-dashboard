@@ -464,7 +464,7 @@ export function setupNetProbeIPC(): void {
       intervalMs: patch.intervalMs ?? existing.intervalMs,
       timeoutMs: patch.timeoutMs ?? existing.timeoutMs,
       optionsJson: patch.options ? JSON.stringify(patch.options) : existing.optionsJson,
-      enabled: patch.enabled != null ? patch.enabled : existing.enabled === 1,
+      enabled: patch.enabled != null ? patch.enabled : existing.enabled,
     });
   });
   ipcMain.handle('net-probe:set-target-enabled', (_event, id: string, enabled: boolean) => updateTargetEnabled(id, enabled));

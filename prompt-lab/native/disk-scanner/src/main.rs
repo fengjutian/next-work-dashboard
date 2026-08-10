@@ -465,7 +465,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_hash, normalized_name, same_content, should_exclude};
+    use super::{content_hash, normalized_name, retain_largest, same_content, should_exclude, FileResult};
     use std::collections::HashSet;
     use std::{
         fs,
@@ -506,5 +506,17 @@ mod tests {
             std::path::Path::new("project/node_modules-old"),
             &exclusions
         ));
+    }
+
+    #[test]
+    fn top_files_remain_bounded_for_large_streams() {
+        let mut largest = Vec::new();
+        for size in 0..1_000_000_u64 {
+            retain_largest(&mut largest, FileResult { path: size.to_string(), size, modified: 0, extension: String::new() }, 50);
+        }
+        largest.sort_unstable_by(|a, b| b.size.cmp(&a.size));
+        assert_eq!(largest.len(), 50);
+        assert_eq!(largest[0].size, 999_999);
+        assert_eq!(largest[49].size, 999_950);
     }
 }
