@@ -878,6 +878,10 @@ export function dbLoadHanyuJinjieExecutions(limit = 30): HanyuJinjieExecution[] 
   return getDb().select().from(schema.hanyuJinjieExecutions).orderBy(desc(schema.hanyuJinjieExecutions.createdAt)).limit(Math.max(1, Math.min(200, limit))).all() as HanyuJinjieExecution[];
 }
 
+export function dbDeleteHanyuJinjieExecution(id: string): void {
+  getDb().delete(schema.hanyuJinjieExecutions).where(eq(schema.hanyuJinjieExecutions.id, id)).run();
+}
+
 export interface DocumentKnowledgeRecord {
   id: string; name: string; kind: string; size: number; sections: unknown[]; plainText: string;
   chunks: unknown[]; embeddingMode: string; createdAt: number; lastViewedAt: number;

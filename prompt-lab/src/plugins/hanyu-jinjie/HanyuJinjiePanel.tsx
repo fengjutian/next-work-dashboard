@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles } from '@/components/icons';
+import { Check, Copy, Download, HanyuJinjie, History, Loader2, RefreshCw, Send, Sparkles, Trash2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
-import { dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
+import { dbDeleteHanyuJinjieExecution, dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
 import { useStore } from '@/store/store';
 import { extractExplanation, safeCardFilename, sanitizeGeneratedSvg, svgToPngBlob } from './svg';
 
@@ -73,6 +73,7 @@ export const HanyuJinjiePanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [explanation, setExplanation] = useState('');
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [executions, setExecutions] = useState<HanyuJinjieExecution[]>([]);
@@ -96,13 +97,26 @@ export const HanyuJinjiePanel: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [reloadExecutions]);
 
-  const persistExecution = useCallback(async (execution: Omit<HanyuJinjieExecution, 'id' | 'createdAt'>) => {
-    if (!isDbReady()) return;
+  const persistExecution = useCallback(async (execution: Omit<HanyuJinjieExecution, 'id' | 'createdAt'>): Promise<string | null> => {
+    if (!isDbReady()) return null;
     try {
-      dbSaveHanyuJinjieExecution({ ...execution, id: crypto.randomUUID(), createdAt: Date.now() });
+      const id = crypto.randomUUID();
+      dbSaveHanyuJinjieExecution({ ...execution, id, createdAt: Date.now() });
       await flushDbToDisk(); reloadExecutions();
-    } catch { /* Persistence must not hide a generated card or its original error. */ }
+      return id;
+    } catch { return null; /* Persistence must not hide a generated card or its original error. */ }
   }, [reloadExecutions]);
+
+  const handleDeleteExecution = useCallback(async (id: string) => {
+    try {
+      dbDeleteHanyuJinjieExecution(id);
+      await flushDbToDisk();
+      setExecutions((current) => current.filter((execution) => execution.id !== id));
+      if (selectedExecutionId === id) {
+        setSelectedExecutionId(null); setGeneratedWord(''); setSvgContent(null); setExplanation(''); setError(null);
+      }
+    } catch { setError('删除记录失败，请稍后重试'); }
+  }, [selectedExecutionId]);
 
   const handleGenerate = useCallback(async (nextWord?: string) => {
     const word = (nextWord ?? input).trim();
@@ -120,9 +134,9 @@ export const HanyuJinjiePanel: React.FC = () => {
       const sanitized = sanitizeGeneratedSvg(raw);
       const detailedExplanation = extractExplanation(raw);
       if (!detailedExplanation) throw new Error('模型没有返回卡片详解，请重新生成');
-      await persistExecution({ word, status: 'success', svgContent: sanitized, explanation: detailedExplanation, error: '', model: aiApi.model });
+      const executionId = await persistExecution({ word, status: 'success', svgContent: sanitized, explanation: detailedExplanation, error: '', model: aiApi.model });
       if (requestId !== requestIdRef.current) return;
-      setSvgContent(sanitized); setExplanation(detailedExplanation); setGeneratedWord(word);
+      setSvgContent(sanitized); setExplanation(detailedExplanation); setGeneratedWord(word); setSelectedExecutionId(executionId);
     } catch (reason) {
       const message = errorMessage(reason);
       await persistExecution({ word, status: 'error', svgContent: '', explanation: '', error: message, model: aiApi.model });
@@ -188,11 +202,14 @@ export const HanyuJinjiePanel: React.FC = () => {
 
           {executions.length > 0 && <section className="rounded-2xl border bg-card p-4">
             <div className="flex items-center gap-2"><History className="h-4 w-4 text-primary" /><h2 className="text-xs font-medium">最近执行</h2><span className="ml-auto text-[10px] text-muted-foreground">SQLite</span></div>
-            <div className="mt-3 space-y-1">{executions.slice(0, 10).map((execution) => <button key={execution.id} type="button" onClick={() => { setInput(execution.word); setGeneratedWord(execution.word); setSvgContent(execution.svgContent || null); setExplanation(execution.explanation || ''); setError(execution.error || null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${execution.status === 'success' ? 'bg-success' : 'bg-destructive'}`} />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">{execution.word}</span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(execution.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-            </button>)}</div>
+            <div className="mt-3 space-y-1">{executions.slice(0, 10).map((execution) => <div key={execution.id} className={`group flex items-center rounded-lg transition hover:bg-accent ${selectedExecutionId === execution.id ? 'bg-primary/10' : ''}`}>
+              <button type="button" onClick={() => { setInput(execution.word); setGeneratedWord(execution.word); setSvgContent(execution.svgContent || null); setExplanation(execution.explanation || ''); setError(execution.error || null); setSelectedExecutionId(execution.id); }} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${execution.status === 'success' ? 'bg-success' : 'bg-destructive'}`} />
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">{execution.word}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(execution.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+              </button>
+              <button type="button" title={`删除「${execution.word}」`} aria-label={`删除「${execution.word}」`} onClick={() => void handleDeleteExecution(execution.id)} className="mr-1 rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive focus:opacity-100 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+            </div>)}</div>
           </section>}
         </aside>
 
