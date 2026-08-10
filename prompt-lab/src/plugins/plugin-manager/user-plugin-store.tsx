@@ -6,7 +6,9 @@ import type { PluginPermission, PluginManifest } from '../sandbox/types';
 import { getUserPluginDefaultEnabled } from '../defaults';
 import { pluginStorage } from '../plugin-storage';
 
-// ── localStorage 持久化 ──
+// Plugin definitions live under Electron userData/plugins. The synchronous cache
+// keeps registry consumers simple after the renderer bootstrap has completed.
+let cachedDefinitions: UserPluginDef[] = [];
 
 export interface UserPluginDef {
   id: string;
@@ -23,11 +25,28 @@ export interface UserPluginDef {
 }
 
 export function loadUserPlugins(): UserPluginDef[] {
-  return pluginStorage.loadDefinitions<UserPluginDef>();
+  return cachedDefinitions.map((definition) => ({ ...definition }));
 }
 
 export function saveUserPlugins(defs: UserPluginDef[]): void {
-  pluginStorage.saveDefinitions(defs);
+  cachedDefinitions = defs.map((definition) => ({ ...definition }));
+  void window.electronAPI.plugins.saveDefinitions(cachedDefinitions).catch((error) => {
+    console.error('[PluginStore] Failed to persist plugin definitions', error);
+  });
+}
+
+export async function initializeUserPlugins(): Promise<void> {
+  const diskDefinitions = await window.electronAPI.plugins.loadDefinitions() as UserPluginDef[];
+  if (diskDefinitions.length > 0) {
+    cachedDefinitions = diskDefinitions;
+    return;
+  }
+  const legacyDefinitions = pluginStorage.loadDefinitions<UserPluginDef>();
+  cachedDefinitions = legacyDefinitions;
+  if (legacyDefinitions.length > 0) {
+    await window.electronAPI.plugins.saveDefinitions(legacyDefinitions);
+    pluginStorage.clearDefinitions();
+  }
 }
 
 /** 重新注册所有用户插件（启动时调用，幂等） */

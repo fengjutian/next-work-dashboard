@@ -77,7 +77,30 @@ export interface NetProbeState {
   lastExit: { code: number | null; error?: string; timestampMs: number } | null;
 }
 
+export interface MarketplacePlugin {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  downloadUrl: string;
+  sha256: string;
+  size?: number;
+}
+
+export interface MarketplaceCatalog {
+  schemaVersion: 1;
+  plugins: MarketplacePlugin[];
+  fetchedAt?: number;
+}
+
 export interface ElectronAPI {
+  plugins: {
+    loadDefinitions: () => Promise<unknown[]>;
+    saveDefinitions: (definitions: unknown[]) => Promise<void>;
+    getCachedCatalog: () => Promise<MarketplaceCatalog | null>;
+    fetchCatalog: (url: string) => Promise<MarketplaceCatalog>;
+    install: (entry: MarketplacePlugin) => Promise<{ path: string; sha256: string; bundle: string }>;
+  };
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
   isMaximized: () => Promise<boolean>;

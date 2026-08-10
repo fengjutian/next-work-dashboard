@@ -11,12 +11,10 @@ import { ToastProvider } from '@/components/Toast';
 import { usePersistence } from '@/hooks/usePersistence';
 import { useDbPersistence } from '@/hooks/useDbPersistence';
 import { useStore } from '@/store';
-import { pluginRegistry, registerBuiltInPlugins, rehydrateUserPlugins, usePluginRegistryVersion } from '@/plugins';
+import { pluginRegistry, usePluginRegistryVersion } from '@/plugins';
 import { ScreenCapturePanel, type CaptureMode } from '@/plugins/screen-capture';
 
 // 模块加载时注册所有内置插件（一次性、幂等）
-registerBuiltInPlugins();
-rehydrateUserPlugins();
 
 // ── 空状态（无标签页时，仅 AI 模式显示） ──
 

@@ -3,6 +3,13 @@ import type { ElectronAPI, MemoryFile } from './types/electron';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
+  plugins: {
+    loadDefinitions: () => ipcRenderer.invoke('plugins:definitions:load'),
+    saveDefinitions: (definitions) => ipcRenderer.invoke('plugins:definitions:save', definitions),
+    getCachedCatalog: () => ipcRenderer.invoke('plugins:marketplace:cached'),
+    fetchCatalog: (url) => ipcRenderer.invoke('plugins:marketplace:fetch', url),
+    install: (entry) => ipcRenderer.invoke('plugins:marketplace:install', entry),
+  },
   // 窗口控制
   minimize: () => ipcRenderer.invoke('window-minimize'),
   maximize: () => ipcRenderer.invoke('window-maximize'),

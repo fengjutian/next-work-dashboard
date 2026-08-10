@@ -8,6 +8,8 @@ import { CreatePluginDialog } from './CreatePluginDialog';
 import { exportPlugin, importPlugin, rollbackPlugin } from './import-export';
 import { usePluginRegistryVersion } from '../usePluginRegistry';
 import { pluginStorage } from '../plugin-storage';
+import type { MarketplaceCatalog, MarketplacePlugin } from '@/types/electron';
+import { availableUpdates, getMarketplaceUrl, installOnlinePlugin, loadMarketplace, setMarketplaceUrl } from './marketplace';
 
 type PluginCategoryId = 'ai' | 'knowledge' | 'office' | 'development' | 'productivity' | 'system' | 'custom';
 
@@ -46,6 +48,28 @@ export const PluginManagerPanel: React.FC = () => {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [safeMode, setSafeMode] = React.useState(() => pluginStorage.isSafeMode());
   const [activeCategory, setActiveCategory] = React.useState<'all' | PluginCategoryId>('all');
+  const [onlineMode, setOnlineMode] = React.useState(false);
+  const [catalog, setCatalog] = React.useState<MarketplaceCatalog | null>(null);
+  const [marketplaceBusy, setMarketplaceBusy] = React.useState(false);
+
+  const refreshMarketplace = async () => {
+    setMarketplaceBusy(true);
+    try {
+      const currentUrl = getMarketplaceUrl();
+      if (!currentUrl) {
+        const nextUrl = window.prompt('Marketplace catalog URL（HTTPS 或 localhost）', currentUrl);
+        if (!nextUrl) return;
+        setMarketplaceUrl(nextUrl);
+      }
+      setCatalog(await loadMarketplace(true));
+    } catch (error) {
+      alert(`Marketplace 加载失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setMarketplaceBusy(false);
+    }
+  };
+
+  React.useEffect(() => { void loadMarketplace().then(setCatalog).catch(() => undefined); }, []);
 
   const allPlugins = pluginRegistry.getAll();
   const enabledCount = pluginRegistry.getEnabled().length;
@@ -83,6 +107,16 @@ export const PluginManagerPanel: React.FC = () => {
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOnlineMode((value) => !value)}>
+            {onlineMode ? '已安装插件' : '在线插件'}
+          </button>
+          <button className="text-xs text-muted-foreground hover:text-foreground" disabled={marketplaceBusy} onClick={async () => {
+            await refreshMarketplace();
+            const updates = availableUpdates(await loadMarketplace());
+            alert(updates.length ? `发现 ${updates.length} 个更新：\n${updates.map((item) => `${item.name} ${item.version}`).join('\n')}` : '当前没有可用更新');
+          }}>
+            {marketplaceBusy ? '检查中…' : '检查更新'}
+          </button>
           <button
             className={`px-2 py-1 rounded text-xs ${safeMode ? 'bg-destructive/10 text-destructive' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => { const next = !safeMode; pluginRegistry.setSafeMode(next); setSafeMode(next); }}
@@ -128,6 +162,9 @@ export const PluginManagerPanel: React.FC = () => {
         onCreated={() => undefined}
       />
 
+      {onlineMode ? (
+        <OnlinePluginList catalog={catalog} busy={marketplaceBusy} onRefresh={refreshMarketplace} />
+      ) : <>
       {/* 分类筛选 */}
       <div className="shrink-0 border-b bg-muted/20 px-4 py-3">
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5" role="tablist" aria-label="插件分类">
@@ -242,8 +279,38 @@ export const PluginManagerPanel: React.FC = () => {
           绿色图标 = 自定义插件
         </span>
       </div>
+      </>}
     </div>
   );
+};
+
+const OnlinePluginList: React.FC<{
+  catalog: MarketplaceCatalog | null;
+  busy: boolean;
+  onRefresh: () => Promise<void>;
+}> = ({ catalog, busy, onRefresh }) => {
+  const [installing, setInstalling] = React.useState<string | null>(null);
+  const installed = new Map(loadUserPlugins().map((item) => [item.id, item.manifest?.version]));
+  const install = async (entry: MarketplacePlugin) => {
+    setInstalling(entry.id);
+    try { alert((await installOnlinePlugin(entry)).message); }
+    catch (error) { alert(`安装失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setInstalling(null); }
+  };
+  return <div className="flex-1 overflow-y-auto p-4">
+    <div className="mb-4 flex items-center justify-between">
+      <div><h3 className="text-sm font-semibold">在线插件</h3><p className="text-xs text-muted-foreground">目录会缓存在本机；插件安装前校验大小与 SHA-256。</p></div>
+      <button className="rounded border px-3 py-1.5 text-xs" disabled={busy} onClick={() => void onRefresh()}>{busy ? '刷新中…' : '刷新目录'}</button>
+    </div>
+    {!catalog ? <p className="py-16 text-center text-sm text-muted-foreground">尚未配置或缓存 Marketplace catalog。</p> :
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{catalog.plugins.map((entry) => <div key={entry.id} className="rounded-lg border bg-background p-4">
+        <h4 className="text-sm font-medium">{entry.name}</h4><p className="mt-1 text-xs text-muted-foreground">{entry.description || entry.id}</p>
+        <div className="mt-3 flex items-center justify-between"><span className="text-[11px] text-muted-foreground">v{entry.version}</span>
+          <button className="rounded bg-primary px-2.5 py-1 text-xs text-primary-foreground disabled:opacity-50" disabled={installing === entry.id || installed.get(entry.id) === entry.version} onClick={() => void install(entry)}>
+            {installed.get(entry.id) === entry.version ? '已安装' : installing === entry.id ? '安装中…' : installed.has(entry.id) ? '更新' : '安装'}
+          </button></div>
+      </div>)}</div>}
+  </div>;
 };
 
 // ── 插件卡片子组件 ──

@@ -49,6 +49,7 @@ import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, ty
 import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
+import { fetchMarketplaceCatalog, installMarketplacePlugin, loadCachedCatalog, loadPluginDefinitions, savePluginDefinitions } from './plugin-marketplace';
 
 const WORKSPACE_IGNORED_NAMES = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.next', '.cache',
@@ -133,6 +134,11 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 
 export function setupIPC(webviewPreloadPath: string) {
   registerOfficeIpc();
+  ipcMain.handle('plugins:definitions:load', () => loadPluginDefinitions());
+  ipcMain.handle('plugins:definitions:save', (_event, definitions: unknown[]) => savePluginDefinitions(definitions));
+  ipcMain.handle('plugins:marketplace:cached', () => loadCachedCatalog());
+  ipcMain.handle('plugins:marketplace:fetch', (_event, url: string) => fetchMarketplaceCatalog(url));
+  ipcMain.handle('plugins:marketplace:install', (_event, entry) => installMarketplacePlugin(entry));
   const workspaceWatchers = new Map<number, fs.FSWatcher>();
   const dialogAuthorizedFiles = new Set<string>();
 

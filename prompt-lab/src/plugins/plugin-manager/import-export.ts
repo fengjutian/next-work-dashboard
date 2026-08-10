@@ -91,12 +91,11 @@ export async function exportPlugin(def: UserPluginDef): Promise<void> {
 }
 
 /** 从 .nwd 文件导入插件 */
-export async function importPlugin(file: File): Promise<{ ok: boolean; message: string }> {
+export async function importPluginText(text: string, fileSize = new Blob([text]).size): Promise<{ ok: boolean; message: string }> {
   try {
-    if (file.size > MAX_PLUGIN_FILE_SIZE) {
+    if (fileSize > MAX_PLUGIN_FILE_SIZE) {
       return { ok: false, message: '插件文件不能超过 2 MB' };
     }
-    const text = await file.text();
     const bundle: unknown = JSON.parse(text);
     const validation = validateBundle(bundle);
     if ('message' in validation) return validation;
@@ -141,6 +140,10 @@ export async function importPlugin(file: File): Promise<{ ok: boolean; message: 
   } catch (err) {
     return { ok: false, message: '解析失败：' + (err as Error).message };
   }
+}
+
+export async function importPlugin(file: File): Promise<{ ok: boolean; message: string }> {
+  return importPluginText(await file.text(), file.size);
 }
 
 export function rollbackPlugin(pluginId: string): { ok: boolean; message: string } {

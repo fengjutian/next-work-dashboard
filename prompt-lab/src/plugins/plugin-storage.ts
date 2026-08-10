@@ -98,6 +98,11 @@ export const pluginStorage = {
     }
     writeState(state);
   },
+  clearDefinitions(): void {
+    const state = readState();
+    for (const record of Object.values(state.plugins)) delete record.definition;
+    writeState(state);
+  },
   getData(pluginId: string): Record<string, unknown> { return { ...(readState().plugins[pluginId]?.data ?? {}) }; },
   setData(pluginId: string, data: Record<string, unknown>): void { updateRecord(pluginId, (record) => { record.data = data; }); },
   getConfig(pluginId: string): Record<string, unknown> { return { ...(readState().plugins[pluginId]?.config ?? {}) }; },
