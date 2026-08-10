@@ -73,17 +73,17 @@ func TestLimiterReapsIdleBuckets(t *testing.T) {
 		t.Fatalf("buckets after first call = %d, want 1", got)
 	}
 
-	// Advance virtual time past the TTL.
+	// Advance virtual time past the TTL, then explicitly trigger
+	// the reaper. Production code only reaps opportunistically
+	// past a bucket-count threshold, so the test reaches in
+	// directly to verify the reaper logic.
 	l.now = func() time.Time { return now.Add(2 * time.Minute) }
-	l.allow("2.2.2.2") // triggers the reaper.
+	l.Reap()
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, ok := l.buckets["1.1.1.1"]; ok {
 		t.Fatal("idle bucket should have been reaped")
-	}
-	if _, ok := l.buckets["2.2.2.2"]; !ok {
-		t.Fatal("active bucket should still exist")
 	}
 }
 

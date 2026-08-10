@@ -34,6 +34,7 @@
 //! - `port_base` (u16, default 33434): starting UDP port
 //! - `mode` ("self" | "system", default "self"): algorithm selection
 use std::io::Read;
+use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -235,12 +236,14 @@ fn trace_self(
         let mut hop_host: Option<IpAddr> = None;
 
         while probes.len() < queries as usize && Instant::now() < hop_deadline {
-            let mut buf = [0u8; 256];
+            let mut buf = [MaybeUninit::<u8>::uninit(); 256];
             match recv_sock.recv_from(&mut buf) {
                 Ok((len, src_addr)) => {
                     if len < 28 {
                         continue;
                     }
+                    // SAFETY: `len` bytes at the start of `buf` are now initialized.
+                    let buf: &[u8] = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, len) };
                     let icmp_type = buf[0];
                     let icmp_code = buf[1];
                     let recv_t = Instant::now();
@@ -297,7 +300,7 @@ fn trace_self(
                     }
                     probes.push(ProbeResult {
                         rtt_ms: rtt_ms.max(0.0),
-                        from_ip: src_ip,
+                        from_ip: Some(src_ip),
                     });
 
                     if reached {

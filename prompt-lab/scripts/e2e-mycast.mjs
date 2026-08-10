@@ -49,8 +49,16 @@ async function main() {
   console.log('');
 
   // ── 1. Spawn the sidecar and wait for ready ────────────────────────────
+  // Use non-default ports so we never collide with an Electron-managed
+  // sidecar the developer may have running on the standard 17890/17891.
   console.log('[1] spawn sidecar + await ready');
-  const proc = spawn(bin, ['daemon'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(bin, [
+    'daemon',
+    '--http-port', '27890',
+    '--ws-port',   '27891',
+    '--no-mdns',
+    '--device-name', 'E2E Sidecar',
+  ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   proc.stderr.on('data', (d) => writeFileSync(stderrLog, d, { flag: 'a' }));
 
   // Single stdout reader. Dispatches by `type`:

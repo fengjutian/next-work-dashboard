@@ -92,15 +92,28 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	if !l.policy.Enabled() {
 		return next
 	}
+	retryAfter := strconv.Itoa(int(math.Ceil(1.0 / l.policy.Rate)))
+	if retryAfter == "0" {
+		retryAfter = "1"
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if !l.allow(ip) {
-			w.Header().Set("Retry-After", strconv.Itoa(int(l.policy.Rate)))
+			w.Header().Set("Retry-After", retryAfter)
 			http.Error(w, "请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Reap removes idle per-IP buckets. Exposed so callers (and tests)
+// can trigger reaping without waiting for the opportunistic
+// threshold inside allow.
+func (l *Limiter) Reap() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reapLocked(l.now())
 }
 
 // allow consumes a single token from the calling IP's bucket and

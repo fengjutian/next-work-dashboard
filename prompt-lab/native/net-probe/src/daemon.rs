@@ -1,13 +1,17 @@
 //! Daemon event loop. Owns the set of active targets, dispatches probes, and
 //! emits JSONL events on stdout.
 //!
-//! V1.1: per-target probe type, per-target options (port for tcp, resolvers
-//! for dns, url for http). Each target runs on its own thread; probes are
-//! sequential within a thread.
+//! V1.1.2: per-worker cancel flag + cooperative shutdown. When a target is
+//! reconfigured or removed (or on Shutdown), the old worker is signalled and
+//! joined (bounded wait) before the new state is installed. A worker whose
+//! probe panics is caught and reported as an Error event instead of silently
+//! dying.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,9 +34,20 @@ struct Target {
 
 type TargetMap = Arc<Mutex<HashMap<String, Target>>>;
 
+/// Bounds how long `stop_worker` will wait for an in-flight probe to drain.
+/// Anything longer is leaked; the worker thread is bounded by the probe's own
+/// `timeout` and will exit on its own.
+const STOP_GRACE: Duration = Duration::from_secs(5);
+
+struct WorkerHandle {
+    handle: thread::JoinHandle<()>,
+    cancel: Arc<AtomicBool>,
+}
+
 pub fn run() -> io::Result<()> {
     let targets: TargetMap = Arc::new(Mutex::new(HashMap::new()));
     let (emit_tx, emit_rx) = channel::<Outbound>();
+    let (shutdown_tx, shutdown_rx) = channel::<()>();
 
     spawn_emit_thread(emit_rx);
 
@@ -41,13 +56,16 @@ pub fn run() -> io::Result<()> {
         pid: std::process::id(),
     });
 
-    spawn_stdin_thread(targets.clone(), emit_tx.clone());
+    spawn_stdin_thread(targets.clone(), emit_tx.clone(), shutdown_tx);
 
-    let mut workers: HashMap<String, thread::JoinHandle<()>> = HashMap::new();
+    let mut workers: HashMap<String, WorkerHandle> = HashMap::new();
     let mut last_seen: HashMap<String, Target> = HashMap::new();
 
     loop {
-        thread::sleep(Duration::from_millis(200));
+        match shutdown_rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
 
         let snapshot: Vec<Target> = {
             let map = targets.lock().expect("targets poisoned");
@@ -56,7 +74,8 @@ pub fn run() -> io::Result<()> {
 
         for t in &snapshot {
             if !last_seen.contains_key(&t.id) {
-                workers.insert(t.id.clone(), spawn_worker(t.clone(), emit_tx.clone()));
+                let h = spawn_worker(t.clone(), emit_tx.clone());
+                workers.insert(t.id.clone(), h);
             }
         }
 
@@ -68,29 +87,49 @@ pub fn run() -> io::Result<()> {
                     || prev.probe_kind != t.probe_kind
                     || prev.options != t.options;
                 if changed {
-                    if let Some(h) = workers.remove(&t.id) {
-                        drop(h);
+                    if let Some(old) = workers.remove(&t.id) {
+                        stop_worker(old);
                     }
-                    workers.insert(t.id.clone(), spawn_worker(t.clone(), emit_tx.clone()));
+                    let h = spawn_worker(t.clone(), emit_tx.clone());
+                    workers.insert(t.id.clone(), h);
                 }
             }
         }
 
-        let live_ids: std::collections::HashSet<String> =
-            snapshot.iter().map(|t| t.id.clone()).collect();
+        let live_ids: HashSet<String> = snapshot.iter().map(|t| t.id.clone()).collect();
         let dead: Vec<String> = last_seen
             .keys()
             .filter(|id| !live_ids.contains(*id))
             .cloned()
             .collect();
         for id in dead {
-            if let Some(h) = workers.remove(&id) {
-                drop(h);
+            if let Some(old) = workers.remove(&id) {
+                stop_worker(old);
             }
         }
 
         last_seen = snapshot.into_iter().map(|t| (t.id.clone(), t)).collect();
     }
+
+    // Shutdown: stop all workers, then drop emit_tx so the emit thread exits.
+    for (_, w) in workers.drain() {
+        stop_worker(w);
+    }
+    drop(emit_tx);
+    Ok(())
+}
+
+fn stop_worker(w: WorkerHandle) {
+    w.cancel.store(true, Ordering::Relaxed);
+    // Bounded join: spawn a thread to call join() and notify us; we move on
+    // after STOP_GRACE even if the probe is still running. The probe itself
+    // is bounded by its `timeout`, so the thread will exit on its own.
+    let (done_tx, done_rx) = channel::<()>();
+    thread::spawn(move || {
+        let _ = w.handle.join();
+        let _ = done_tx.send(());
+    });
+    let _ = done_rx.recv_timeout(STOP_GRACE);
 }
 
 fn spawn_emit_thread(rx: Receiver<Outbound>) -> thread::JoinHandle<()> {
@@ -107,7 +146,11 @@ fn spawn_emit_thread(rx: Receiver<Outbound>) -> thread::JoinHandle<()> {
     })
 }
 
-fn spawn_stdin_thread(targets: TargetMap, emit: Sender<Outbound>) -> thread::JoinHandle<()> {
+fn spawn_stdin_thread(
+    targets: TargetMap,
+    emit: Sender<Outbound>,
+    shutdown: Sender<()>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let stdin = io::stdin();
         let mut locked = stdin.lock();
@@ -161,14 +204,17 @@ fn spawn_stdin_thread(targets: TargetMap, emit: Sender<Outbound>) -> thread::Joi
                     targets.lock().expect("targets poisoned").remove(&id);
                 }
                 Inbound::Shutdown => {
-                    std::process::exit(0);
+                    let _ = shutdown.send(());
+                    return;
                 }
             }
         }
+        // On EOF / read error, the `shutdown` Sender drops; the main loop's
+        // recv_timeout returns Disconnected and we shut down cleanly.
     })
 }
 
-fn spawn_worker(target: Target, emit: Sender<Outbound>) -> thread::JoinHandle<()> {
+fn spawn_worker(target: Target, emit: Sender<Outbound>) -> WorkerHandle {
     let probe_kind = target.probe_kind.clone();
     let id = target.id.clone();
     let target_str = target.target.clone();
@@ -176,7 +222,10 @@ fn spawn_worker(target: Target, emit: Sender<Outbound>) -> thread::JoinHandle<()
     let timeout = target.timeout;
     let options = target.options.clone();
 
-    thread::spawn(move || {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_thread = cancel.clone();
+
+    let handle = thread::spawn(move || {
         let probe: Box<dyn Probe> = match probe_for(&probe_kind) {
             Some(p) => p,
             None => {
@@ -187,27 +236,57 @@ fn spawn_worker(target: Target, emit: Sender<Outbound>) -> thread::JoinHandle<()
             }
         };
 
-        let mut next = Instant::now();
-        loop {
-            let sample: ProbeSample = probe.run(&target_str, &options, timeout);
-            let _ = emit.send(Outbound::ProbeResult {
-                id: id.clone(),
-                probe: probe_kind.clone(),
-                timestamp_ms: now_ms(),
-                success: sample.success,
-                latency_ms: sample.latency_ms,
-                error: sample.error,
-                payload: sample.payload,
-            });
-            next += interval;
-            let now = Instant::now();
-            if next > now {
-                thread::sleep(next - now);
-            } else {
-                next = now + interval;
+        // catch_unwind so a panicking probe doesn't silently kill the target's
+        // monitoring. The probe trait doesn't bound on UnwindSafe, so wrap the
+        // closure in AssertUnwindSafe.
+        let result = catch_unwind(AssertUnwindSafe(move || {
+            let mut next = Instant::now();
+            loop {
+                if cancel_for_thread.load(Ordering::Relaxed) {
+                    return;
+                }
+                let sample: ProbeSample = probe.run(&target_str, &options, timeout);
+                if cancel_for_thread.load(Ordering::Relaxed) {
+                    return;
+                }
+                let _ = emit.send(Outbound::ProbeResult {
+                    id: id.clone(),
+                    probe: probe_kind.clone(),
+                    timestamp_ms: now_ms(),
+                    success: sample.success,
+                    latency_ms: sample.latency_ms,
+                    error: sample.error,
+                    payload: sample.payload,
+                });
+                next += interval;
+                let now = Instant::now();
+                if next > now {
+                    thread::sleep(next - now);
+                } else {
+                    next = now + interval;
+                }
             }
+        }));
+
+        if let Err(panic) = result {
+            let msg = panic_message(&panic);
+            let _ = emit.send(Outbound::Error {
+                message: format!("worker {id} ({probe_kind}) panicked: {msg}"),
+            });
         }
-    })
+    });
+
+    WorkerHandle { handle, cancel }
+}
+
+fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = panic.downcast_ref::<&'static str>() {
+        s.to_string()
+    } else if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 fn now_ms() -> u64 {
