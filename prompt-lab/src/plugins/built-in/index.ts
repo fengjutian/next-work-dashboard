@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -49,6 +49,7 @@ const screenCapture = preloadable(() => import('../screen-capture').then((m) => 
 const diskSpace = preloadable(() => import('../disk-space').then((m) => ({ default: m.DiskSpacePanel })));
 const networkObservatory = preloadable(() => import('../network-observatory').then((m) => ({ default: m.NetworkObservatoryPanel })));
 const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ default: m.LyricStudioPanel })));
+const videoPlayer = preloadable(() => import('../video-player').then((m) => ({ default: m.VideoPlayerPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -71,6 +72,7 @@ const ScreenCapturePanel = screenCapture.component;
 const DiskSpacePanel = diskSpace.component;
 const NetworkObservatoryPanel = networkObservatory.component;
 const LyricStudioPanel = lyricStudio.component;
+const VideoPlayerPanel = videoPlayer.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -370,6 +372,39 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'video-player',
+    name: '视频播放器',
+    icon: Video,
+    component: VideoPlayerPanel,
+    enabled: false,
+    order: 26,
+    keepAlive: true,
+    contributions: {
+      commands: [
+        { id: 'video-player.open', title: '打开视频文件', category: '视频播放器' },
+        { id: 'video-player.toggle', title: '播放 / 暂停', category: '视频播放器' },
+        { id: 'video-player.close', title: '关闭当前视频', category: '视频播放器' },
+      ],
+      views: [{ id: 'video-player.main', title: '视频播放器', component: VideoPlayerPanel, location: 'main' }],
+      fileEditors: [{ id: 'video-player.main', extensions: ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.wmv', '.m4v', '.ts', '.m2ts', '.mpg', '.mpeg'], viewId: 'video-player.main', priority: 80 }],
+      settings: [
+        { key: 'video-player.volume', label: '默认音量', type: 'number', default: 100 },
+        { key: 'video-player.hardwareDecoding', label: '硬件解码', type: 'boolean', default: true },
+      ],
+    },
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('video-player.open', () => {
+        window.dispatchEvent(new CustomEvent('video-player:command', { detail: { command: 'open' } }));
+      }));
+      context.subscriptions.add(context.commands.register('video-player.toggle', () => {
+        window.dispatchEvent(new CustomEvent('video-player:command', { detail: { command: 'toggle' } }));
+      }));
+      context.subscriptions.add(context.commands.register('video-player.close', () => {
+        window.dispatchEvent(new CustomEvent('video-player:command', { detail: { command: 'close' } }));
+      }));
+    },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -436,6 +471,7 @@ export function registerBuiltInPlugins(): void {
     'disk-space': diskSpace.preload,
     'network-observatory': networkObservatory.preload,
     'lyric-studio': lyricStudio.preload,
+    'video-player': videoPlayer.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,

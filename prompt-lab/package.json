@@ -10,6 +10,7 @@
     "build:rag-worker": "node scripts/build-rag-worker.mjs",
     "build:disk-scanner": "node scripts/build-disk-scanner.mjs",
     "build:net-probe": "node scripts/build-net-probe.mjs",
+    "fetch:mpv": "node scripts/fetch-mpv.mjs",
     "start": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge start",
     "package": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge package",
     "make": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge make",

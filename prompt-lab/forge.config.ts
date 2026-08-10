@@ -20,6 +20,7 @@ process.env.npm_config_disturl ||= electronMirror;
 const projectRoot = process.cwd();
 const diskScannerResource = path.join(projectRoot, 'resources', 'disk-scanner');
 const ragWorkerResource = path.join(projectRoot, 'resources', 'rag-worker');
+const videoPlayerResource = path.join(projectRoot, 'resources', 'video-player');
 
 function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
   const segments = name.split('/');
@@ -68,6 +69,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
       ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),
       ...(fs.existsSync(ragWorkerResource) ? [ragWorkerResource] : []),
+      ...(fs.existsSync(videoPlayerResource) ? [videoPlayerResource] : []),
     ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb}/**',

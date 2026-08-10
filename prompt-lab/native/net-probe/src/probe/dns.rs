@@ -18,11 +18,14 @@ use std::time::{Duration, Instant};
 
 use hickory_resolver::config::{NameServerConfigGroup, ResolverConfig, ResolverOpts};
 use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::TokioResolver;
+use hickory_resolver::proto::rr::RecordType;
+use hickory_resolver::AsyncResolver;
 use serde_json::{json, Value};
 use tokio::runtime::Runtime;
 
 use super::{Probe, ProbeSample};
+
+type TokioResolver = AsyncResolver<TokioConnectionProvider>;
 
 pub struct DnsProbe {
     runtime: Arc<Runtime>,
@@ -30,8 +33,6 @@ pub struct DnsProbe {
 
 impl DnsProbe {
     pub fn new() -> Self {
-        // hickory-resolver is async; we run a single-threaded tokio runtime
-        // dedicated to DNS so callers don't need to know about async.
         let runtime = Runtime::new().expect("create tokio runtime for dns probe");
         Self { runtime: Arc::new(runtime) }
     }
@@ -41,17 +42,15 @@ fn default_resolvers() -> Vec<String> {
     vec!["1.1.1.1:53".into(), "8.8.8.8:53".into(), "9.9.9.9:53".into()]
 }
 
-fn build_resolver(resolver_addr: &str) -> Result<TokioResolver, String> {
+fn build_resolver(resolver_addr: &str) -> Result<AsyncResolver<hickory_resolver::name_server::TokioConnectionProvider>, String> {
     let mut parts = resolver_addr.rsplitn(2, ':');
     let port = parts.next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(53);
     let host = parts.next().unwrap_or(resolver_addr);
-    let ns = NameServerConfigGroup::from_ips_clear(&[host.parse().map_err(|e| format!("parse ip {host}: {e}"))?], port, true);
+    let ip: std::net::IpAddr = host.parse().map_err(|e| format!("parse ip {host}: {e}"))?;
+    let ns = NameServerConfigGroup::from_ips_clear(&[ip], port, true);
     let cfg = ResolverConfig::from_parts(None, vec![], ns);
     let opts = ResolverOpts::default();
-    TokioResolver::builder_with_config(cfg, TokioConnectionProvider::default())
-        .with_options(opts)
-        .build()
-        .map_err(|e| format!("build resolver: {e}"))
+    Ok(AsyncResolver::tokio(cfg, opts))
 }
 
 impl Probe for DnsProbe {
@@ -60,10 +59,11 @@ impl Probe for DnsProbe {
     }
 
     fn run(&self, target: &str, options: &Value, _timeout: Duration) -> ProbeSample {
-        let record = options
+        let record: String = options
             .get("record")
             .and_then(|v| v.as_str())
-            .unwrap_or("A");
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "A".to_string());
         let resolvers: Vec<String> = options
             .get("resolvers")
             .and_then(|v| v.as_array())
@@ -78,6 +78,7 @@ impl Probe for DnsProbe {
         let runtime = self.runtime.clone();
         let target_owned = target.to_string();
         let resolvers_clone = resolvers.clone();
+        let record_owned = record.clone();
 
         // Run all resolvers in parallel; collect per-resolver timings.
         let results: Vec<(String, Option<f64>, Vec<String>, Option<String>)> = runtime.block_on(async move {
@@ -85,41 +86,48 @@ impl Probe for DnsProbe {
             for r in resolvers_clone.iter() {
                 let r_clone = r.clone();
                 let t_clone = target_owned.clone();
+                let record_clone = record_owned.clone();
                 handles.push(tokio::spawn(async move {
                     let started = Instant::now();
                     let result: Result<TokioResolver, String> = build_resolver(&r_clone);
                     match result {
                         Err(e) => (r_clone, None, vec![], Some(e)),
                         Ok(resolver) => {
-                            let lookup = match record {
-                                "A" => resolver.lookup_ip(t_clone.clone()).await.map(|l| {
-                                    l.into_iter().map(|ip| ip.to_string()).collect::<Vec<_>>()
-                                }),
+                            let lookup: Result<Vec<String>, String> = match record_clone.as_str() {
+                                "A" => resolver
+                                    .lookup_ip(t_clone.clone())
+                                    .await
+                                    .map(|l| l.into_iter().map(|ip| ip.to_string()).collect())
+                                    .map_err(|e| e.to_string()),
                                 "AAAA" => resolver
                                     .lookup_ip(t_clone.clone())
                                     .await
-                                    .map(|l| l.into_iter().map(|ip| ip.to_string()).collect::<Vec<_>>()),
+                                    .map(|l| l.into_iter().map(|ip| ip.to_string()).collect())
+                                    .map_err(|e| e.to_string()),
                                 "CNAME" => resolver
-                                    .lookup(format!("{t_clone}."))
+                                    .lookup(format!("{t_clone}."), RecordType::CNAME)
                                     .await
-                                    .map(|l| l.iter().map(|r| r.to_string()).collect::<Vec<_>>()),
+                                    .map(|l| l.iter().map(|r| r.to_string()).collect())
+                                    .map_err(|e| e.to_string()),
                                 "TXT" => resolver
-                                    .lookup(format!("{t_clone}."))
+                                    .lookup(format!("{t_clone}."), RecordType::TXT)
                                     .await
                                     .map(|l| {
                                         l.iter()
                                             .filter_map(|r| r.as_txt().map(|t| t.to_string()))
-                                            .collect::<Vec<_>>()
-                                    }),
+                                            .collect()
+                                    })
+                                    .map_err(|e| e.to_string()),
                                 "MX" => resolver
                                     .mx_lookup(format!("{t_clone}."))
                                     .await
                                     .map(|l| {
                                         l.iter()
                                             .map(|r| format!("{} {}", r.preference(), r.exchange()))
-                                            .collect::<Vec<_>>()
-                                    }),
-                                _ => Err(format!("unsupported record type: {record}")),
+                                            .collect()
+                                    })
+                                    .map_err(|e| e.to_string()),
+                                _ => Err(format!("unsupported record type: {record_clone}")),
                             };
                             let latency = started.elapsed().as_secs_f64() * 1000.0;
                             match lookup {
