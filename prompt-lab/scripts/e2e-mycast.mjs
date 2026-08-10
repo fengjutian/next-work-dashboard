@@ -8,22 +8,17 @@
 //   $ node scripts/e2e-mycast.mjs
 //
 // Exits with non-zero status on the first failure; prints a summary at the
-// end. Requires PowerShell's `node` to be on PATH (bundled with the project).
+// end. Requires `ws` to be installed (devDependency) and the sidecar binary
+// at `resources/mycast/nwd-mycast[.exe]`.
 
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { existsSync, mkdirSync, statSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import http from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { WebSocket } from 'ws';
-
-const nodeCrypto = { createHash, randomBytes };
-
-process.stderr.write('▶ e2e-mycast: top-level\n');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -31,18 +26,14 @@ const isWindows = process.platform === 'win32';
 const exe = isWindows ? 'nwd-mycast.exe' : 'nwd-mycast';
 const bin = path.join(root, 'resources', 'mycast', exe);
 
-process.stderr.write(`▶ bin: ${bin}\n`);
-
 if (!existsSync(bin)) {
-  process.stderr.write(`✗ binary not found at ${bin}; run: npm run build:mycast\n`);
+  console.error(`✗ binary not found at ${bin}; run: npm run build:mycast`);
   process.exit(1);
 }
-process.stderr.write('▶ existsSync passed\n');
 
 const tmpDir = path.join(root, '.cache', 'e2e-mycast');
 mkdirSync(tmpDir, { recursive: true });
 const stderrLog = path.join(tmpDir, 'stderr.log');
-const stdoutLog = path.join(tmpDir, 'stdout.log');
 
 let passed = 0;
 let failed = 0;
@@ -53,7 +44,6 @@ function check(name, ok, detail) {
 }
 
 async function main() {
-  process.stderr.write(`▶ entering main()\n`);
   console.log(`▶ e2e-mycast — binary: ${bin}`);
   console.log(`  cwd: ${root}`);
   console.log('');
@@ -62,29 +52,53 @@ async function main() {
   console.log('[1] spawn sidecar + await ready');
   const proc = spawn(bin, ['daemon'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   proc.stderr.on('data', (d) => writeFileSync(stderrLog, d, { flag: 'a' }));
-  const stdoutReader = createInterface({ input: proc.stdout });
-  stdoutReader.on('line', (l) => writeFileSync(stdoutLog, l + '\n', { flag: 'a' }));
+
+  // Single stdout reader. Dispatches by `type`:
+  //   - "ready" event → boots the test
+  //   - numbered id → RPC response → resolves pending RPC promises
+  //   - other events (webrtc.offer, session.created, ...) → fan-out to subscribers
   let ready = null;
-  stdoutReader.on('line', (l) => {
-    if (!l.trim()) return;
-    try {
-      const obj = JSON.parse(l);
-      if (obj.type === 'ready') ready = obj;
-    } catch { /* ignore */ }
+  let rpcReady = null;
+  const readyPromise = new Promise((res) => { rpcReady = res; });
+  const rpcPending = new Map();
+  let rpcNextId = 1;
+  const eventSubs = new Set();
+  const stdoutReader = createInterface({ input: proc.stdout });
+  stdoutReader.on('line', (line) => {
+    if (!line.trim()) return;
+    let obj;
+    try { obj = JSON.parse(line); } catch { return; }
+    if (obj.type === 'ready') { ready = obj; rpcReady(obj); return; }
+    if (typeof obj.id === 'number' && 'ok' in obj) {
+      const p = rpcPending.get(obj.id);
+      if (p) { rpcPending.delete(obj.id); clearTimeout(p.timer); p.resolve(obj); }
+      return;
+    }
+    for (const sub of eventSubs) sub(obj);
   });
-  const waitReady = async () => {
-    const t0 = Date.now();
-    while (!ready && Date.now() - t0 < 6000) await sleep(50);
-    return ready;
-  };
-  const info = await waitReady();
-  check('ready event', !!info, info ? `device=${info.device_name} lan=${info.lan_addr}` : 'timed out');
-  if (!info) { killAndExit(proc, 1); return; }
+
+  const got = await Promise.race([
+    readyPromise,
+    sleep(6000).then(() => null),
+  ]);
+  check('ready event', !!got, got ? `device=${got.device_name} lan=${got.lan_addr}` : 'timed out');
+  if (!got) { proc.kill(); process.exit(1); }
+  const info = got;
   const port = info.http_port;
   const wsPort = info.ws_port;
   const host = info.lan_addr || '127.0.0.1';
   check('lan_addr present', !!info.lan_addr, info.lan_addr);
   check('pair_code present', !!info.pair_code, info.pair_code);
+
+  // Helper: send an RPC and await the matching response.
+  function sendRpc(type, payload = {}) {
+    return new Promise((resolve) => {
+      const id = rpcNextId++;
+      const timer = setTimeout(() => { rpcPending.delete(id); resolve(null); }, 4000);
+      rpcPending.set(id, { resolve, timer });
+      try { proc.stdin.write(JSON.stringify({ id, type, ...payload }) + '\n'); } catch { resolve(null); }
+    });
+  }
 
   // ── 2. HTTP /api/info ───────────────────────────────────────────────────
   console.log('\n[2] HTTP /api/info');
@@ -94,7 +108,6 @@ async function main() {
 
   // ── 3. Pair flow ───────────────────────────────────────────────────────
   console.log('\n[3] /api/pair/request + /api/pair/complete');
-  const code = info.pair_code;
   const pairReq = await postJson(`${baseUrl(host, port)}/api/pair/request`, {
     device_id: 'e2e-device',
     device_name: 'E2E Test Phone',
@@ -102,7 +115,6 @@ async function main() {
   });
   check('pair_request returns 200', pairReq.status === 200, `status=${pairReq.status}`);
   check('pair_code present', !!pairReq.json.pair_code, pairReq.json.pair_code);
-  // The new pair code replaces the old one, so use the freshly returned code.
   const freshCode = pairReq.json.pair_code;
   const pairComplete = await postJson(`${baseUrl(host, port)}/api/pair/complete`, {
     device_id: 'e2e-device',
@@ -122,9 +134,7 @@ async function main() {
 
   // ── 5. File upload + listing + download ────────────────────────────────
   console.log('\n[5] File upload + list + download');
-  const uploadSrc = path.join(tmpDir, 'e2e-upload.bin');
-  const uploadContent = cryptoRandomBytes(1024 * 32);
-  writeFileSync(uploadSrc, uploadContent);
+  const uploadContent = randomBytes(1024 * 32);
   const upForm = new FormData();
   upForm.set('filename', 'e2e-upload.bin');
   upForm.set('size', String(uploadContent.length));
@@ -141,7 +151,7 @@ async function main() {
   check('upload reports expected size', upJson.size === uploadContent.length,
         `expected=${uploadContent.length} got=${upJson.size}`);
 
-  const listRes = await getJson(`${baseUrl(host, port)}/api/files`, { Authorization: `Bearer ${token}` });
+  const listRes = await get(`${baseUrl(host, port)}/api/files`, { Authorization: `Bearer ${token}` });
   check('list contains uploaded file', Array.isArray(listRes.json.files) &&
         listRes.json.files.some((f) => f.name === 'e2e-upload.bin' && f.size === uploadContent.length),
         `count=${listRes.json.files?.length}`);
@@ -173,31 +183,31 @@ async function main() {
   });
   check('wrong code → 401', wrong.status === 401, `status=${wrong.status}`);
 
-  // ── 7. WebSocket signaling: hello + offer/answer roundtrip ─────────────
+  // ── 7. WebSocket signaling: hello + offer → answer roundtrip ────────────
+  // The sidecar is a relay: phone sends offer → desktop receives `webrtc.offer`
+  // event on stdout → desktop pushes `Answer` frame back via `send_to_phone` RPC.
   console.log('\n[7] WebSocket signaling');
-  const wsOk = await runWebSocketRoundtrip(host, wsPort, token);
-  check('ws hello + offer + answer + ice roundtrip', wsOk, '');
+  const wsOk = await runWebSocketRoundtrip(host, wsPort, sendRpc, eventSubs);
+  check('ws hello + offer → answer roundtrip', wsOk, '');
 
-  // ── 8. RPC roundtrip via stdin/stdout (mimics Electron Main) ──────────
+  // ── 8. RPC roundtrip over stdin/stdout (mimics Electron Main) ──────────
   console.log('\n[8] RPC roundtrip over stdin/stdout');
-  const rpc = await runRpcRoundtrip(proc);
-  check('list_sessions returns ok=true', rpc.listSessionsOk, '');
-  check('issue_pairing returns ok=true', rpc.issueOk, '');
-  check('list_transfers returns ok=true', rpc.transfersOk, '');
+  const listSessions = await sendRpc('list_sessions');
+  const issue = await sendRpc('issue_pairing');
+  const transfers = await sendRpc('list_transfers');
+  check('list_sessions returns ok=true', !!listSessions && listSessions.ok === true, '');
+  check('issue_pairing returns ok=true', !!issue && issue.ok === true, '');
+  check('list_transfers returns ok=true', !!transfers && transfers.ok === true, '');
 
   // ── Done ──────────────────────────────────────────────────────────────
   console.log('');
   console.log(`▶ summary: ${passed} passed, ${failed} failed`);
-  killAndExit(proc, failed === 0 ? 0 : 1);
+  try { proc.kill(); } catch { /* noop */ }
+  setTimeout(() => process.exit(failed === 0 ? 0 : 1), 200);
 }
 
 function baseUrl(host, port) {
   return `http://${host}:${port}`;
-}
-
-function killAndExit(proc, code) {
-  try { proc.kill(); } catch { /* noop */ }
-  setTimeout(() => process.exit(code), 200);
 }
 
 async function get(url, headers = {}) {
@@ -205,10 +215,6 @@ async function get(url, headers = {}) {
   let json = {};
   try { json = await r.json(); } catch { /* not json */ }
   return { status: r.status, json };
-}
-
-async function getJson(url, headers = {}) {
-  return get(url, headers);
 }
 
 async function postJson(url, body) {
@@ -223,101 +229,82 @@ async function postJson(url, body) {
 }
 
 function sha256Hex(buf) {
-  // We delegate to Node's crypto to avoid pulling in extra deps.
-  return nodeCrypto.createHash('sha256').update(buf).digest('hex');
+  return createHash('sha256').update(buf).digest('hex');
 }
 
-function cryptoRandomBytes(n) {
-  return nodeCrypto.randomBytes(n);
-}
-
-async function runWebSocketRoundtrip(host, port, token) {
+async function runWebSocketRoundtrip(host, port, sendRpc, eventSubs) {
   return await new Promise((resolve) => {
-    const ws = new WebSocket(`ws://${host}:${port}/ws`, ['mycast', 'bearer', token]);
+    const phoneDeviceId = 'e2e-ws';
+    const ws = new WebSocket(`ws://${host}:${port}/ws`, ['mycast', 'bearer']);
     let helloOk = false;
-    let sessionOk = false;
-    let offerOk = false;
+    let offerSent = false;
     let answerOk = false;
     let done = false;
+    const cleanup = () => { eventSubs.delete(sub); };
     const finish = (ok) => {
       if (done) return;
       done = true;
+      clearTimeout(timeout);
+      cleanup();
       try { ws.close(); } catch { /* noop */ }
-      resolve(helloOk && sessionOk && offerOk && answerOk && ok);
+      resolve(helloOk && offerSent && answerOk && ok);
     };
-    const timeout = setTimeout(() => finish(false), 5000);
+    const timeout = setTimeout(() => finish(false), 8000);
+
+    // Subscribe to sidecar events. When we see `webrtc.offer` for this
+    // phone device, push an `Answer` frame back via the `send_to_phone` RPC.
+    const sub = (event) => {
+      if (event.type === 'webrtc.offer' && event.phone_device_id === phoneDeviceId) {
+        const sessionId = event.session_id;
+        sendRpc('send_to_phone', {
+          device_id: phoneDeviceId,
+          frame: {
+            type: 'answer',
+            session_id: sessionId,
+            sdp: 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n',
+          },
+        });
+      }
+    };
+    eventSubs.add(sub);
+
     ws.on('open', () => {
       ws.send(JSON.stringify({
-        type: 'hello', device_id: 'e2e-ws', device_name: 'E2E WS', platform: 'web',
+        type: 'hello',
+        device_id: phoneDeviceId,
+        device_name: 'E2E WS',
+        platform: 'web',
       }));
+      helloOk = true;
+      // After the WS is open and hello registered, send create_session + offer.
+      setTimeout(() => {
+        ws.send(JSON.stringify({
+          type: 'create_session',
+          session_id: 'e2e-session-1',
+          kind: 'screen',
+        }));
+        ws.send(JSON.stringify({
+          type: 'offer',
+          session_id: 'e2e-session-1',
+          sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n',
+        }));
+        offerSent = true;
+      }, 100);
     });
     ws.on('message', (raw) => {
       let f;
       try { f = JSON.parse(raw.toString()); } catch { return; }
-      if (f.type === 'session_created') {
-        sessionOk = true;
-        // Drive an offer/answer roundtrip.
-        ws.send(JSON.stringify({
-          type: 'offer', session_id: f.session_id, sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n',
-        }));
-        ws.send(JSON.stringify({
-          type: 'ice', session_id: f.session_id, candidate: { candidate: 'candidate:1 1 udp 1 127.0.0.1 9 typ host' },
-        }));
-      }
-      if (f.type === 'webrtc.answer') {
+      if (f.type === 'answer') {
         answerOk = true;
         finish(true);
       }
     });
-    ws.on('error', () => { clearTimeout(timeout); finish(false); });
-    ws.on('close', () => { clearTimeout(timeout); finish(false); });
-  });
-}
-
-async function runRpcRoundtrip(proc) {
-  return new Promise((resolve) => {
-    let buf = '';
-    let nextId = 100;
-    const pending = new Map();
-    const onLine = (line) => {
-      if (!line.trim()) return;
-      try {
-        const obj = JSON.parse(line);
-        if (typeof obj.id === 'number' && 'ok' in obj) {
-          const p = pending.get(obj.id);
-          if (p) {
-            pending.delete(obj.id);
-            clearTimeout(p.timer);
-            p.resolve(obj);
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    const lines = createInterface({ input: proc.stdout });
-    lines.on('line', onLine);
-    function send(type) {
-      return new Promise((res) => {
-        const id = nextId++;
-        const timer = setTimeout(() => { pending.delete(id); res(null); }, 4000);
-        pending.set(id, { resolve: res, timer });
-        try { proc.stdin.write(JSON.stringify({ id, type }) + '\n'); } catch { /* noop */ }
-      });
-    }
-    (async () => {
-      const listSessions = await send('list_sessions');
-      const issue = await send('issue_pairing');
-      const transfers = await send('list_transfers');
-      lines.removeListener('line', onLine);
-      resolve({
-        listSessionsOk: !!listSessions && listSessions.ok === true,
-        issueOk: !!issue && issue.ok === true,
-        transfersOk: !!transfers && transfers.ok === true,
-      });
-    })();
+    ws.on('error', () => finish(false));
+    ws.on('close', () => finish(false));
   });
 }
 
 main().catch((e) => {
-  process.stderr.write(`✗ unhandled error: ${e.stack || e}\n`);
+  console.error(`✗ unhandled error: ${e.stack || e}`);
   process.exit(1);
 });

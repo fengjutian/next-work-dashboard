@@ -1,0 +1,68 @@
+{
+  "webhook": {
+    "ok": true,
+    "channel": "webhook",
+    "detail": "HTTP 200",
+    "durationMs": 36
+  },
+  "webhookText": {
+    "ok": true,
+    "channel": "webhook",
+    "detail": "HTTP 200",
+    "durationMs": 3
+  },
+  "dingtalk": {
+    "ok": true,
+    "channel": "dingtalk",
+    "detail": "HTTP 200",
+    "durationMs": 3
+  },
+  "dingtalkSigned": {
+    "ok": true,
+    "channel": "dingtalk",
+    "detail": "HTTP 200",
+    "durationMs": 2
+  },
+  "slack": {
+    "ok": true,
+    "channel": "slack",
+    "detail": "HTTP 200",
+    "durationMs": 1
+  },
+  "telegram": {
+    "ok": false,
+    "channel": "telegram",
+    "detail": "fetch failed",
+    "durationMs": 10596
+  },
+  "testChannel": {
+    "ok": true,
+    "channel": "webhook",
+    "detail": "HTTP 200",
+    "durationMs": 4
+  },
+  "errorNoUrl": {
+    "ok": false,
+    "channel": "webhook",
+    "detail": "url is required",
+    "durationMs": 0
+  },
+  "errorConnRefused": {
+    "ok": false,
+    "channel": "webhook",
+    "detail": "fetch failed",
+    "durationMs": 0
+  },
+  "silent": {
+    "ok": true,
+    "channel": "silent",
+    "detail": "no-op",
+    "durationMs": 0
+  },
+  "desktop": {
+    "ok": false,
+    "channel": "desktop",
+    "detail": "electron Notification 不可用 (仅在 Electron 主进程中支持)",
+    "durationMs": 0
+  }
+}

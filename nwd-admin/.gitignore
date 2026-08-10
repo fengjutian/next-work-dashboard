@@ -1,0 +1,16 @@
+# Compiled binaries and test artifacts.
+nwd-admin
+nwd-admin.exe
+nwd-admin-*.exe
+nwd-admin-*.exe.tmp*
+*.tmp
+*.tmp.cleaned
+
+# Runtime data (SQLite + WAL + SHM).
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local config overrides.
+config.local.yaml

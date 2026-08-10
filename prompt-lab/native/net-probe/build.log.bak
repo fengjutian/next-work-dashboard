@@ -1,0 +1,8 @@
+﻿cargo.exe :    Compiling nwd-net-probe v0.1.0 (D:\github\next-work-dashboard\prompt-lab\native\net-probe)
+所在位置 行:1 字符: 359
++ ... { $_.LastWriteTime = Get-Date }; & cargo build --release *>&1 | Out-F ...
++                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling nw...tive\net-probe):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `release` profile [optimized] target(s) in 1m 03s

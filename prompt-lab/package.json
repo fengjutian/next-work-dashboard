@@ -69,7 +69,8 @@
     "typescript": "~5.4.5",
     "vite": "^5.4.0",
     "vite-node": "^2.1.9",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "ws": "^8.18.0"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
