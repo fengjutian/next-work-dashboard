@@ -229,6 +229,73 @@ export function dbPruneOldResults(): number {
   return n;
 }
 
+// ── Heatmap aggregation ──
+
+/** A single cell in a 7×24 heatmap (day-of-week × hour-of-day). */
+export interface HeatmapCell {
+  /** ISO-style day of week: 0 = Monday, ..., 6 = Sunday. */
+  dayOfWeek: number;
+  /** 0-23. */
+  hourOfDay: number;
+  /** Mean latency over successful samples in this cell, ms. Null if no samples. */
+  avgLatencyMs: number | null;
+  /** Total probe count in this cell (success + failure). */
+  sampleCount: number;
+  /** Failure rate 0-100 over this cell. */
+  lossPct: number;
+}
+
+/** Aggregate results into a 7×24 grid. Buckets are by day-of-week and hour-of-day in the local timezone. */
+export function dbAggregateHeatmap(opts: { targetId: string; sinceMs?: number }): HeatmapCell[] {
+  if (!isDbReady()) return [];
+  const rows = dbListResults({
+    targetId: opts.targetId,
+    sinceMs: opts.sinceMs ?? Date.now() - 7 * 24 * 60 * 60 * 1000,
+    limit: 100_000, // hard cap
+  });
+
+  // 7 days × 24 hours = 168 cells.
+  const cells = new Map<string, HeatmapCell>();
+  for (let d = 0; d < 7; d++) {
+    for (let h = 0; h < 24; h++) {
+      cells.set(`${d}:${h}`, { dayOfWeek: d, hourOfDay: h, avgLatencyMs: null, sampleCount: 0, lossPct: 0 });
+    }
+  }
+
+  // Group by (dayOfWeek, hourOfDay).
+  const sums = new Map<string, { sumLat: number; count: number; loss: number }>();
+  for (const r of rows) {
+    const d = new Date(r.timestampMs);
+    // JS getDay(): 0 = Sunday .. 6 = Saturday. Convert to ISO (Mon=0..Sun=6).
+    const dow = (d.getDay() + 6) % 7;
+    const hod = d.getHours();
+    const key = `${dow}:${hod}`;
+    const cell = cells.get(key);
+    if (!cell) continue;
+    cell.sampleCount += 1;
+    if (!r.success) {
+      const agg = sums.get(key) ?? { sumLat: 0, count: 0, loss: 0 };
+      agg.loss += 1;
+      sums.set(key, agg);
+    } else if (r.latencyMs != null) {
+      const agg = sums.get(key) ?? { sumLat: 0, count: 0, loss: 0 };
+      agg.sumLat += r.latencyMs;
+      agg.count += 1;
+      sums.set(key, agg);
+    }
+  }
+  for (const [key, agg] of sums) {
+    const cell = cells.get(key);
+    if (!cell) continue;
+    cell.avgLatencyMs = agg.count > 0 ? agg.sumLat / agg.count : null;
+    cell.lossPct = cell.sampleCount > 0 ? (agg.loss / cell.sampleCount) * 100 : 0;
+  }
+
+  return Array.from(cells.values()).sort(
+    (a, b) => a.dayOfWeek - b.dayOfWeek || a.hourOfDay - b.hourOfDay,
+  );
+}
+
 // ── Alert rules ──
 
 export function dbListAlertRules(): NetProbeAlertRule[] {

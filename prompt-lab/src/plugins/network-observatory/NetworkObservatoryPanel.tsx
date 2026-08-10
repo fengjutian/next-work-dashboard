@@ -11,8 +11,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
-import { BarChart, LineChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent } from 'echarts/components';
+import { BarChart, HeatmapChart, LineChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 import {
@@ -39,7 +39,7 @@ import type {
 import type { NetProbeEvent, NetProbeState } from '@/types/electron';
 import { computeStats } from './backend/net-probe-stats';
 
-echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, HeatmapChart, LineChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 
 interface NetProbeAPI {
   start: () => Promise<{ ready: boolean; version: string | null }>;
@@ -51,6 +51,7 @@ interface NetProbeAPI {
   updateTarget: (id: string, patch: Partial<NetProbeTargetInput>) => Promise<NetProbeTarget | null>;
   setTargetEnabled: (id: string, enabled: boolean) => Promise<NetProbeTarget | null>;
   listResults: (opts?: { targetId?: string; sinceMs?: number; limit?: number }) => Promise<NetProbeResult[]>;
+  heatmap: (opts: { targetId: string; sinceMs?: number }) => Promise<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>;
   listAlertRules: () => Promise<NetProbeAlertRule[]>;
   addAlertRule: (input: Omit<NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'>) => Promise<NetProbeAlertRule>;
   removeAlertRule: (id: string) => Promise<boolean>;
@@ -119,6 +120,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [incidents, setIncidents] = useState<NetProbeIncident[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [history, setHistory] = useState<NetProbeResult[]>([]);
+  const [heatmap, setHeatmap] = useState<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>([]);
   const [systemInfo, setSystemInfo] = useState<{ hostname: string; platform: string } | null>(null);
   const [daemonState, setDaemonState] = useState<NetProbeState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -218,18 +220,22 @@ export const NetworkObservatoryPanel: React.FC = () => {
     return off;
   }, [api, selectedId]);
 
-  // Load history when selection changes
+  // Load history + heatmap when selection changes
   useEffect(() => {
     if (!api || !selectedId) {
       setHistory([]);
+      setHeatmap([]);
       return;
     }
     (async () => {
       try {
-        const rows = await api.listResults({ targetId: selectedId, limit: 500 });
-        // Most recent first; sort ascending for chart
+        const [rows, hm] = await Promise.all([
+          api.listResults({ targetId: selectedId, limit: 500 }),
+          api.heatmap({ targetId: selectedId }),
+        ]);
         const sorted = [...rows].sort((a, b) => a.timestampMs - b.timestampMs);
         setHistory(sorted);
+        setHeatmap(hm);
       } catch (e) {
         setError(String((e as Error).message ?? e));
       }

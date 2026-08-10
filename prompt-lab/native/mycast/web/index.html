@@ -79,19 +79,68 @@
   .toast.show { opacity: 1; transform: translate(-50%, -6px); }
   .toast.err { background: rgba(239,68,68,0.9); color: #fff; }
   .toast.ok { background: rgba(16,185,129,0.9); color: #042a1d; }
+
+  /* App-promo banner shown above the tabs on the mobile web UI. */
+  .app-promo {
+    margin: 12px 16px 0;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(6,182,212,0.18));
+    border: 1px solid rgba(99,102,241,0.4);
+    border-radius: 12px;
+    font-size: 12px;
+  }
+  .app-promo__title { font-weight: 600; margin-bottom: 4px; }
+  .app-promo__body { color: var(--muted); line-height: 1.5; }
+  .app-promo__body code { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 4px; }
+  .app-promo__hint { margin-top: 6px; color: var(--accent); }
+
+  /* "投屏" page placeholder. */
+  .cast-blocked {
+    padding: 20px 4px;
+    text-align: center;
+  }
+  .cast-blocked__icon { font-size: 40px; margin-bottom: 8px; }
+  .cast-blocked__title { font-weight: 600; font-size: 16px; margin-bottom: 6px; }
+  .cast-blocked__body { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .cast-blocked__body code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; }
+  .cast-blocked__steps {
+    text-align: left;
+    margin: 12px auto 0;
+    max-width: 320px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.7;
+    padding-left: 18px;
+  }
+  .cast-blocked__steps li::marker { color: var(--accent); }
+  .cast-blocked__alt {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--accent);
+  }
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <h1>MyCast</h1>
-    <p id="deviceLabel">局域网投屏 · 文件传输</p>
+    <p id="deviceLabel">局域网配对 · 文件传输（投屏请用 App）</p>
   </header>
 
   <div class="tabbar">
     <button data-tab="pair" class="active">配对</button>
     <button data-tab="cast">投屏</button>
     <button data-tab="files">文件</button>
+  </div>
+
+  <div class="app-promo" id="appPromo">
+    <div class="app-promo__title">📱 投屏请安装 MyCast 手机端</div>
+    <div class="app-promo__body">
+      手机浏览器无法调用系统屏幕采集 API（MediaProjection / ReplayKit）。
+      想要投屏，请前往 prompt-lab 的 <code>mycast-share/</code> 目录，
+      编译 <strong>MyCast Android</strong> 或 <strong>iOS</strong> 客户端。
+    </div>
+    <div class="app-promo__hint">本页面继续支持「配对 + 文件传输」；只是「投屏」功能需要原生 App。</div>
   </div>
 
   <main>
@@ -124,26 +173,46 @@
           <span class="dot"></span>
           <span id="pairedText">已建立会话</span>
         </div>
+        <p class="meta" style="margin:6px 0 0;font-size:12px;">
+          想要投屏？请切到「投屏」tab，<strong>该功能仅在 MyCast 手机端 App 中可用</strong>。本页面继续支持文件传输。
+        </p>
       </div>
     </section>
 
     <!-- ── 投屏页 ── -->
     <section id="tab-cast" class="section-hidden">
       <div class="card">
-        <h2>实时画面</h2>
-        <div class="video-wrap">
-          <video id="remoteVideo" autoplay playsinline muted></video>
-          <div class="placeholder" id="castPlaceholder">点击下方按钮开始投屏（屏幕/窗口/标签）</div>
+        <h2>投屏</h2>
+        <div class="cast-blocked">
+          <div class="cast-blocked__icon" aria-hidden="true">📱</div>
+          <div class="cast-blocked__title">本页面无法投屏</div>
+          <p class="cast-blocked__body">
+            手机浏览器没有权限调用 <code>MediaProjection</code>（Android）或 <code>ReplayKit</code>（iOS）
+            等系统级屏幕采集 API。请安装 <strong>MyCast 手机端</strong>：
+          </p>
+          <ul class="cast-blocked__steps">
+            <li>从 prompt-lab 的 <code>mycast-share/</code> 目录编译 Android/iOS App</li>
+            <li>打开 App，在「主页」输入主机地址和 6 位配对码</li>
+            <li>回到桌面端 MyCast 插件 → 投屏 tab，即可看到手机画面</li>
+          </ul>
+          <p class="cast-blocked__alt">本页面「文件」tab 仍可用于上传/下载文件。</p>
         </div>
-        <div class="metric-grid" style="margin-top:10px">
-          <div>分辨率<strong id="mRes">—</strong></div>
-          <div>码率<strong id="mBitrate">—</strong></div>
-          <div>状态<strong id="mState">空闲</strong></div>
-        </div>
-        <div style="height:12px"></div>
-        <div class="btn-row">
-          <button id="startCastBtn">开始投屏</button>
-          <button id="stopCastBtn" class="secondary" disabled>停止</button>
+        <!-- 旧版投屏控件保留在 DOM 中但视觉上隐藏，方便 fallback / debug。 -->
+        <div class="section-hidden" id="legacyCastUi">
+          <div class="video-wrap">
+            <video id="remoteVideo" autoplay playsinline muted></video>
+            <div class="placeholder" id="castPlaceholder">点击下方按钮开始投屏（屏幕/窗口/标签）</div>
+          </div>
+          <div class="metric-grid" style="margin-top:10px">
+            <div>分辨率<strong id="mRes">—</strong></div>
+            <div>码率<strong id="mBitrate">—</strong></div>
+            <div>状态<strong id="mState">空闲</strong></div>
+          </div>
+          <div style="height:12px"></div>
+          <div class="btn-row">
+            <button id="startCastBtn">开始投屏</button>
+            <button id="stopCastBtn" class="secondary" disabled>停止</button>
+          </div>
         </div>
       </div>
     </section>

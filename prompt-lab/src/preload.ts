@@ -426,6 +426,7 @@ const electronAPI: ElectronAPI = {
     updateTarget: (id, patch) => ipcRenderer.invoke('net-probe:update-target', id, patch),
     setTargetEnabled: (id, enabled) => ipcRenderer.invoke('net-probe:set-target-enabled', id, enabled),
     listResults: (opts) => ipcRenderer.invoke('net-probe:list-results', opts),
+    heatmap: (opts) => ipcRenderer.invoke('net-probe:heatmap', opts),
     listAlertRules: () => ipcRenderer.invoke('net-probe:list-alert-rules'),
     addAlertRule: (input) => ipcRenderer.invoke('net-probe:add-alert-rule', input),
     removeAlertRule: (id) => ipcRenderer.invoke('net-probe:remove-alert-rule', id),

@@ -27,10 +27,12 @@ import {
   dbDeleteAlertRule,
   dbListIncidents,
   dbCloseIncident,
+  dbAggregateHeatmap,
   type NetProbeTarget,
   type NetProbeResult,
   type NetProbeAlertRule,
   type NetProbeIncident,
+  type HeatmapCell,
 } from './net-probe-storage';
 import { evaluateAlerts, maintenanceTick, getOpenIncidentsSnapshot, resetAlertState } from './net-probe-alerts';
 
@@ -469,6 +471,7 @@ export function setupNetProbeIPC(): void {
   });
   ipcMain.handle('net-probe:set-target-enabled', (_event, id: string, enabled: boolean) => updateTargetEnabled(id, enabled));
   ipcMain.handle('net-probe:list-results', (_event, opts: { targetId?: string; sinceMs?: number; untilMs?: number; limit?: number }) => dbListResults(opts ?? {}));
+  ipcMain.handle('net-probe:heatmap', (_event, opts: { targetId: string; sinceMs?: number }) => dbAggregateHeatmap(opts));
   ipcMain.handle('net-probe:list-alert-rules', () => dbListAlertRules());
   ipcMain.handle('net-probe:add-alert-rule', (_event, input: Omit<NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => dbUpsertAlertRule(input));
   ipcMain.handle('net-probe:remove-alert-rule', (_event, id: string) => dbDeleteAlertRule(id));

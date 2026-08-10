@@ -363,6 +363,7 @@ export interface ElectronAPI {
     updateTarget: (id: string, patch: Partial<import('./net-probe-schema').NetProbeTargetInput>) => Promise<import('./net-probe-schema').NetProbeTarget | null>;
     setTargetEnabled: (id: string, enabled: boolean) => Promise<import('./net-probe-schema').NetProbeTarget | null>;
     listResults: (opts?: { targetId?: string; sinceMs?: number; untilMs?: number; limit?: number }) => Promise<import('./net-probe-schema').NetProbeResult[]>;
+    heatmap: (opts: { targetId: string; sinceMs?: number }) => Promise<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>;
     listAlertRules: () => Promise<import('./net-probe-schema').NetProbeAlertRule[]>;
     addAlertRule: (input: Omit<import('./net-probe-schema').NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => Promise<import('./net-probe-schema').NetProbeAlertRule>;
     removeAlertRule: (id: string) => Promise<boolean>;

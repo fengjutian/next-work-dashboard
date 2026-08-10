@@ -141,10 +141,9 @@ class TransferService extends ChangeNotifier {
 
     try {
       final streamed = await req.send();
-      // http sets contentLength on the request after send(); if it's still
-      // null (older versions), fall back to the known file length.
-      final sent = req.contentLength;
-      _uploads[key] = _uploads[key]!.copyWith(sent: sent ?? length);
+      // After `send()` the request's contentLength is set to the actual body
+      // length (we always read the file into a buffer first).
+      _uploads[key] = _uploads[key]!.copyWith(sent: req.contentLength);
       notifyListeners();
       if (streamed.statusCode == 200) {
         _uploads[key] = _uploads[key]!.copyWith(status: UploadStatus.completed);
