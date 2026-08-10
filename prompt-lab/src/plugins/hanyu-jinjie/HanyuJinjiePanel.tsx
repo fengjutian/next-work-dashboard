@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { dbLoadHanyuJinjieExecutions, dbSaveHanyuJinjieExecution, flushDbToDisk, isDbReady, type HanyuJinjieExecution } from '@/db';
 import { useStore } from '@/store/store';
-import { safeCardFilename, sanitizeGeneratedSvg } from './svg';
+import { extractExplanation, safeCardFilename, sanitizeGeneratedSvg, svgToPngBlob } from './svg';
 
 const SYSTEM_PROMPT = `(defun 新汉语老师 ()
 "你是年轻人,批判现实,思考深刻,语言风趣"
@@ -40,7 +40,9 @@ design-principles '(干净 简洁 典雅))
 (print "说吧, 他们又用哪个词来忽悠你了?")))
 ;; 运行规则
 ;; 1. 启动时必须运行 (start) 函数
-;; 2. 之后调用主函数 (汉语新解 用户输入)`;
+;; 2. 之后调用主函数 (汉语新解 用户输入)
+;; 3. 输出完整 SVG 后，必须紧接 <explanation>详解</explanation>
+;; 4. 详解必须是纯文本，不超过 300 个汉字；抓住词语背后的权力关系、利益结构或自我欺骗，犀利、一针见血，不复述卡片文案`;
 
 const EXAMPLES = ['内卷', '躺平', '赋能', '情绪价值', '松弛感', '已读不回'];
 const MAX_WORD_LENGTH = 24;
@@ -70,6 +72,7 @@ export const HanyuJinjiePanel: React.FC = () => {
   const [generatedWord, setGeneratedWord] = useState('');
   const [loading, setLoading] = useState(false);
   const [svgContent, setSvgContent] = useState<string | null>(null);
+  const [explanation, setExplanation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [executions, setExecutions] = useState<HanyuJinjieExecution[]>([]);
@@ -113,13 +116,16 @@ export const HanyuJinjiePanel: React.FC = () => {
     setInput(word); setLoading(true); setError(null); setCopied(false);
     try {
       const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: `(汉语新解 "${lispString(word)}")` }];
-      const sanitized = sanitizeGeneratedSvg(await llmChat(aiApi.apiKey, aiApi.baseUrl, aiApi.model, messages));
-      await persistExecution({ word, status: 'success', svgContent: sanitized, error: '', model: aiApi.model });
+      const raw = await llmChat(aiApi.apiKey, aiApi.baseUrl, aiApi.model, messages);
+      const sanitized = sanitizeGeneratedSvg(raw);
+      const detailedExplanation = extractExplanation(raw);
+      if (!detailedExplanation) throw new Error('模型没有返回卡片详解，请重新生成');
+      await persistExecution({ word, status: 'success', svgContent: sanitized, explanation: detailedExplanation, error: '', model: aiApi.model });
       if (requestId !== requestIdRef.current) return;
-      setSvgContent(sanitized); setGeneratedWord(word);
+      setSvgContent(sanitized); setExplanation(detailedExplanation); setGeneratedWord(word);
     } catch (reason) {
       const message = errorMessage(reason);
-      await persistExecution({ word, status: 'error', svgContent: '', error: message, model: aiApi.model });
+      await persistExecution({ word, status: 'error', svgContent: '', explanation: '', error: message, model: aiApi.model });
       if (requestId === requestIdRef.current) setError(message);
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
@@ -133,15 +139,17 @@ export const HanyuJinjiePanel: React.FC = () => {
       setCopied(true);
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopied(false), 1800);
-    } catch { setError('无法访问剪贴板，请使用下载功能保存 SVG'); }
+    } catch { setError('无法访问剪贴板，请使用下载功能保存 PNG 图片'); }
   }, [svgContent]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!svgContent) return;
-    const url = URL.createObjectURL(new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' }));
-    const anchor = document.createElement('a');
-    anchor.href = url; anchor.download = `汉语新解-${safeCardFilename(generatedWord)}`; anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    try {
+      const url = URL.createObjectURL(await svgToPngBlob(svgContent));
+      const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = `汉语新解-${safeCardFilename(generatedWord)}`; anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (reason) { setError(errorMessage(reason)); }
   }, [generatedWord, svgContent]);
 
   return (
@@ -175,12 +183,12 @@ export const HanyuJinjiePanel: React.FC = () => {
           </section>
 
           <section className="rounded-2xl border border-dashed bg-background/50 p-4 text-xs leading-5 text-muted-foreground">
-            <p className="font-medium text-foreground">生成说明</p><p className="mt-1">AI 会返回一张 400 × 600 的 SVG 卡片。</p>
+            <p className="font-medium text-foreground">生成说明</p><p className="mt-1">AI 会生成一张 400 × 600 卡片和 300 字以内的犀利详解，下载时自动转为高清 PNG。</p>
           </section>
 
           {executions.length > 0 && <section className="rounded-2xl border bg-card p-4">
             <div className="flex items-center gap-2"><History className="h-4 w-4 text-primary" /><h2 className="text-xs font-medium">最近执行</h2><span className="ml-auto text-[10px] text-muted-foreground">SQLite</span></div>
-            <div className="mt-3 space-y-1">{executions.slice(0, 10).map((execution) => <button key={execution.id} type="button" onClick={() => { setInput(execution.word); setGeneratedWord(execution.word); setSvgContent(execution.svgContent || null); setError(execution.error || null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent">
+            <div className="mt-3 space-y-1">{executions.slice(0, 10).map((execution) => <button key={execution.id} type="button" onClick={() => { setInput(execution.word); setGeneratedWord(execution.word); setSvgContent(execution.svgContent || null); setExplanation(execution.explanation || ''); setError(execution.error || null); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-accent">
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${execution.status === 'success' ? 'bg-success' : 'bg-destructive'}`} />
               <span className="min-w-0 flex-1 truncate text-xs font-medium">{execution.word}</span>
               <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(execution.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
@@ -193,18 +201,18 @@ export const HanyuJinjiePanel: React.FC = () => {
             <div className="min-w-0"><h2 className="truncate text-sm font-medium">{generatedWord ? `「${generatedWord}」的新解` : '卡片预览'}</h2></div>
             {svgContent && <div className="flex shrink-0 items-center gap-1">
               <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleCopy()}>{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? '已复制' : '复制 SVG'}</Button>
-              <Button variant="ghost" size="sm" disabled={loading} onClick={handleDownload}><Download className="h-3.5 w-3.5" />下载</Button>
+              <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleDownload()}><Download className="h-3.5 w-3.5" />下载 PNG</Button>
               <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleGenerate(generatedWord)}><RefreshCw className="h-3.5 w-3.5" />重新生成</Button>
             </div>}
           </div>
 
           {error && <div role="alert" className="mx-4 mt-4 flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><span>{error}</span>{input.trim() && <Button variant="ghost" size="sm" disabled={loading} onClick={() => void handleGenerate()}>重试</Button>}</div>}
 
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[radial-gradient(circle_at_center,hsl(var(--muted))_1px,transparent_1px)] bg-[size:18px_18px] p-6">
-            {svgContent ? <div className="h-full w-full [&>svg]:mx-auto [&>svg]:block [&>svg]:h-full [&>svg]:max-h-[720px] [&>svg]:w-auto [&>svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svgContent }} /> : !loading && <div className="max-w-sm text-center">
+          <div className="relative min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,hsl(var(--muted))_1px,transparent_1px)] bg-[size:18px_18px] p-6">
+            {svgContent ? <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center gap-5"><div className="flex w-full min-h-[28rem] justify-center [&>svg]:block [&>svg]:max-h-[720px] [&>svg]:w-auto [&>svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svgContent }} />{explanation && <article className="w-full rounded-2xl border bg-background/95 p-5 shadow-sm"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">一针见血</h3><span className="text-[10px] text-muted-foreground">{explanation.length}/300 字</span></div><p className="whitespace-pre-wrap text-sm leading-7 text-foreground/90">{explanation}</p></article>}</div> : !loading && <div className="flex min-h-full items-center justify-center"><div className="max-w-sm text-center">
               <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border bg-background text-primary shadow-sm"><HanyuJinjie className="h-11 w-11" /></div>
               <h2 className="mt-5 text-base font-medium">从一个词开始</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">输入一个当代词汇，生成包含中英日翻译、讽喻解释与抽象插图的 SVG 卡片。</p>
-            </div>}
+            </div></div>}
             {loading && <div className="absolute inset-0 grid place-items-center bg-background/75 backdrop-blur-sm"><div className="flex flex-col items-center gap-3"><Loader2 className="h-8 w-8 text-primary" /><p className="text-sm font-medium">正在解构「{input.trim()}」</p><p className="text-xs text-muted-foreground">组织隐喻、翻译与视觉构成…</p></div></div>}
           </div>
         </section>

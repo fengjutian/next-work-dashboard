@@ -112,6 +112,7 @@ export const hanyuJinjieExecutions = sqliteTable('hanyu_jinjie_executions', {
   word: text('word').notNull(),
   status: text('status').notNull(),
   svgContent: text('svg_content').notNull().default(''),
+  explanation: text('explanation').notNull().default(''),
   error: text('error').notNull().default(''),
   model: text('model').notNull().default(''),
   createdAt: integer('created_at').notNull(),

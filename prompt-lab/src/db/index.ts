@@ -282,6 +282,7 @@ function ensureSchema(): void {
       word TEXT NOT NULL,
       status TEXT NOT NULL,
       svg_content TEXT NOT NULL DEFAULT '',
+      explanation TEXT NOT NULL DEFAULT '',
       error TEXT NOT NULL DEFAULT '',
       model TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
@@ -356,6 +357,8 @@ function ensureSchema(): void {
   if (!chatColumns.has('bound_skill_ids')) _sqlDb.run("ALTER TABLE chat_sessions ADD COLUMN bound_skill_ids TEXT NOT NULL DEFAULT '[]'");
   const documentColumns = new Set((_sqlDb.exec('PRAGMA table_info(document_knowledge_records)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!documentColumns.has('cached_file_path')) _sqlDb.run('ALTER TABLE document_knowledge_records ADD COLUMN cached_file_path TEXT');
+  const hanyuColumns = new Set((_sqlDb.exec('PRAGMA table_info(hanyu_jinjie_executions)')[0]?.values ?? []).map((row) => String(row[1])));
+  if (!hanyuColumns.has('explanation')) _sqlDb.run("ALTER TABLE hanyu_jinjie_executions ADD COLUMN explanation TEXT NOT NULL DEFAULT ''");
 }
 
 // ═══════════════════════════════════════════
@@ -861,6 +864,7 @@ export interface HanyuJinjieExecution {
   word: string;
   status: 'success' | 'error';
   svgContent: string;
+  explanation: string;
   error: string;
   model: string;
   createdAt: number;

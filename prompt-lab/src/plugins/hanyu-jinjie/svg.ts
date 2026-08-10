@@ -45,5 +45,47 @@ export function sanitizeGeneratedSvg(raw: string): string {
 
 export function safeCardFilename(word: string): string {
   const printable = [...word].map((character) => character.charCodeAt(0) < 32 ? '_' : character).join('');
-  return (printable.replace(/[<>:"/\\|?*]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 40) || '未命名') + '.svg';
+  return (printable.replace(/[<>:"/\\|?*]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 40) || '未命名') + '.png';
+}
+
+const EXPLANATION_LIMIT = 300;
+
+export function extractExplanation(raw: string): string {
+  const tagged = raw.match(/<explanation>([\s\S]*?)<\/explanation>/i)?.[1] ?? '';
+  return tagged
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, EXPLANATION_LIMIT);
+}
+
+export async function svgToPngBlob(svg: string, scale = 2): Promise<Blob> {
+  const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = document.documentElement;
+  const viewBox = root.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+  const width = Number.parseFloat(root.getAttribute('width') || '') || (viewBox?.length === 4 ? viewBox[2] : 400);
+  const height = Number.parseFloat(root.getAttribute('height') || '') || (viewBox?.length === 4 ? viewBox[3] : 600);
+  const canvas = window.document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前环境无法将卡片转换为图片');
+
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('SVG 图片加载失败'));
+      image.src = url;
+    });
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error('PNG 图片生成失败')),
+      'image/png',
+    ));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

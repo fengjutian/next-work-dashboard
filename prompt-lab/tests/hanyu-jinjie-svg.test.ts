@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { extractSvgSource, safeCardFilename, sanitizeGeneratedSvg } from '../src/plugins/hanyu-jinjie/svg';
+import { extractExplanation, extractSvgSource, safeCardFilename, sanitizeGeneratedSvg } from '../src/plugins/hanyu-jinjie/svg';
 
 describe('汉语新解 SVG handling', () => {
   it('extracts SVG from a model code fence', () => {
@@ -27,5 +27,10 @@ describe('汉语新解 SVG handling', () => {
     expect(() => sanitizeGeneratedSvg('<svg><text></svg>')).toThrow('有效的 SVG');
   });
 
-  it('creates safe download names', () => expect(safeCardFilename('内卷/赋能:*?')).toBe('内卷_赋能___.svg'));
+  it('extracts and limits the detailed explanation', () => {
+    expect(extractExplanation('<svg></svg><explanation>  权力的包装术。 </explanation>')).toBe('权力的包装术。');
+    expect(extractExplanation(`<explanation>${'刺'.repeat(301)}</explanation>`)).toHaveLength(300);
+  });
+
+  it('creates safe PNG download names', () => expect(safeCardFilename('内卷/赋能:*?')).toBe('内卷_赋能___.png'));
 });
