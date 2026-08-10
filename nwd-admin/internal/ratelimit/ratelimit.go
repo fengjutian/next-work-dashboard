@@ -17,6 +17,7 @@
 package ratelimit
 
 import (
+	"math"
 	"net"
 	"net/http"
 	"strconv"

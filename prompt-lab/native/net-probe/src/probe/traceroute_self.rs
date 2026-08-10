@@ -158,7 +158,7 @@ fn resolve_target_v4(target: &str) -> Result<IpAddr, String> {
 
 fn open_raw_icmp_socket() -> std::io::Result<Socket> {
     // SOCK_RAW + IPPROTO_ICMP requires admin / CAP_NET_RAW.
-    let sock = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4))?;
+    let sock = Socket::new_raw(Domain::IPV4, Protocol::ICMPV4)?;
     // Non-blocking so we can manage the recv deadline ourselves.
     sock.set_nonblocking(true)?;
     Ok(sock)
@@ -193,7 +193,7 @@ fn trace_self(
         .map_err(|e| format!("open raw ICMP: {e} (admin / CAP_NET_RAW required)"))?;
 
     // UDP socket bound to an ephemeral port.
-    let udp = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+    let udp = Socket::new(Domain::IPV4, socket2::Type::DGRAM, Some(Protocol::UDP))
         .map_err(|e| format!("open UDP: {e}"))?;
     udp.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0).into())
         .map_err(|e| format!("bind UDP: {e}"))?;
