@@ -64,8 +64,10 @@ export async function svgToPngBlob(svg: string, scale = 2): Promise<Blob> {
   const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
   const root = document.documentElement;
   const viewBox = root.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
-  const width = Number.parseFloat(root.getAttribute('width') || '') || (viewBox?.length === 4 ? viewBox[2] : 400);
-  const height = Number.parseFloat(root.getAttribute('height') || '') || (viewBox?.length === 4 ? viewBox[3] : 600);
+  const parsedWidth = Number.parseFloat(root.getAttribute('width') || '') || (viewBox?.length === 4 ? viewBox[2] : 400);
+  const parsedHeight = Number.parseFloat(root.getAttribute('height') || '') || (viewBox?.length === 4 ? viewBox[3] : 600);
+  const width = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : 400;
+  const height = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : 600;
   const canvas = window.document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
