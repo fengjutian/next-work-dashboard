@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron';
+﻿import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron';
 import type { ElectronAPI, MemoryFile } from './types/electron';
 
 // ── 暴露给渲染进程的安全 API ──
@@ -343,6 +343,20 @@ const electronAPI: ElectronAPI = {
       const handler = (_event: Electron.IpcRendererEvent, scanId: string, result: { code: number | null; error?: string }) => callback(scanId, result);
       ipcRenderer.on('disk-space:exit', handler);
       return () => ipcRenderer.removeListener('disk-space:exit', handler);
+    },
+  },
+
+  netProbe: {
+    start: () => ipcRenderer.invoke('net-probe:start'),
+    state: () => ipcRenderer.invoke('net-probe:state'),
+    results: () => ipcRenderer.invoke('net-probe:results'),
+    addTarget: (target) => ipcRenderer.invoke('net-probe:add-target', target),
+    removeTarget: (id) => ipcRenderer.invoke('net-probe:remove-target', id),
+    systemInfo: () => ipcRenderer.invoke('net-probe:system-info'),
+    onEvent: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: import('./types/electron').NetProbeEvent) => callback(payload);
+      ipcRenderer.on('net-probe:event', handler);
+      return () => { ipcRenderer.removeListener('net-probe:event', handler); };
     },
   },
 

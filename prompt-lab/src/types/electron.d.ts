@@ -17,6 +17,8 @@ export type DiskScanEvent =
   | { type: 'directory'; path: string; size: number }
   | { type: 'duplicate-progress'; stage: 'hashing' }
   | { type: 'duplicate'; groupId: string; size: number; files: Array<{ path: string; size: number; modifiedAt: number }> }
+  | { type: 'scan-status'; currentPath: string; directories: number; files: number; bytes: number; elapsedMs: number }
+  | { type: 'scan-error'; path: string; message: string }
   | { type: 'progress' | 'done'; files: number; bytes: number; errors: number };
 
 export interface DiskSystemInfo {
@@ -45,6 +47,31 @@ export interface DiskFilePreview {
   modifiedAt: number;
   truncated?: boolean;
   message?: string;
+}
+
+// --- Network Observatory (nwd-net-probe) ---
+
+export type NetProbeEvent =
+  | { type: 'ready'; version: string; pid: number; startedAt: number }
+  | {
+      type: 'probe_result';
+      id: string;
+      probe: string;
+      timestampMs: number;
+      success: boolean;
+      latencyMs: number | null;
+      error: string | null;
+    }
+  | { type: 'error'; message: string; timestampMs: number }
+  | { type: 'exit'; code: number | null; error?: string; timestampMs: number };
+
+export interface NetProbeState {
+  ready: boolean;
+  version: string | null;
+  pid: number | null;
+  startedAt: number | null;
+  lastError: string | null;
+  lastExit: { code: number | null; error?: string; timestampMs: number } | null;
 }
 
 export interface ElectronAPI {
@@ -292,6 +319,21 @@ export interface ElectronAPI {
     open: (rootPath: string, filePath: string) => Promise<{ success: boolean }>;
     onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;
     onExit: (callback: (scanId: string, result: { code: number | null; error?: string }) => void) => () => void;
+  };
+  netProbe: {
+    start: () => Promise<{ ready: boolean; version: string | null }>;
+    state: () => Promise<NetProbeState>;
+    results: () => Promise<Array<Extract<NetProbeEvent, { type: 'probe_result' }>>>;
+    addTarget: (target: {
+      id?: string;
+      target: string;
+      probe?: string;
+      intervalMs?: number;
+      timeoutMs?: number;
+    }) => Promise<{ id: string }>;
+    removeTarget: (id: string) => Promise<{ removed: boolean }>;
+    systemInfo: () => Promise<{ hostname: string; platform: string; arch: string; cpus: number }>;
+    onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

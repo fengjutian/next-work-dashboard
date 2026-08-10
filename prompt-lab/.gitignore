@@ -94,6 +94,7 @@ out/
 dist/
 native/disk-scanner/target*/
 native/rag-worker/target*/
+native/net-probe/target*/
 resources/disk-scanner/
 resources/rag-worker/
 

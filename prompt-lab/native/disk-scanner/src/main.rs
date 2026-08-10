@@ -4,7 +4,7 @@ use std::{
     hash::{DefaultHasher, Hasher},
     io::{self, BufReader, Read, Write},
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    time::{Instant, UNIX_EPOCH},
 };
 
 #[cfg(windows)]
@@ -136,15 +136,26 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool) -> io:
     let mut files = 0_u64;
     let mut bytes = 0_u64;
     let mut errors = 0_u64;
+    let mut reported_errors = 0_u64;
+    let mut directories_scanned = 0_u64;
+    let started = Instant::now();
     let mut largest: Vec<FileResult> = Vec::with_capacity(50);
     let mut extensions: HashMap<String, u64> = HashMap::new();
     let mut by_size: HashMap<u64, Vec<FileResult>> = HashMap::new();
     let mut directory_bytes: HashMap<PathBuf, u64> = HashMap::new();
     while let Some(directory) = stack.pop() {
+        directories_scanned += 1;
+        if directories_scanned == 1 || directories_scanned % 25 == 0 {
+            emit(&format!(r#"{{"type":"scan-status","currentPath":"{}","directories":{directories_scanned},"files":{files},"bytes":{bytes},"elapsedMs":{}}}"#, escape_json(&directory.to_string_lossy()), started.elapsed().as_millis()));
+        }
         let entries = match fs::read_dir(&directory) {
             Ok(value) => value,
-            Err(_) => {
+            Err(error) => {
                 errors += 1;
+                if reported_errors < 100 {
+                    emit(&format!(r#"{{"type":"scan-error","path":"{}","message":"{}"}}"#, escape_json(&directory.to_string_lossy()), escape_json(&error.to_string())));
+                    reported_errors += 1;
+                }
                 continue;
             }
         };

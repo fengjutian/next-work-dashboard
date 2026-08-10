@@ -10,6 +10,7 @@ import { destroyAll } from './plugins/terminal/backend/terminal-manager';
 import { mcpManager } from './main/mcp/mcp-manager';
 import { disposeOfficeService } from './plugins/office-studio/backend/office-service';
 import { disposeDiskSpaceService, setupDiskSpaceIPC } from './plugins/disk-space/backend/disk-service';
+import { setupNetProbeIPC, shutdownDaemon } from './plugins/network-observatory/backend/net-probe-service';
 import { setupRagWorkerIPC } from './main/rag-worker-ipc';
 import { ragWorkerClient } from './main/rag-worker-client';
 import { startRagIndexCoordinator, stopRagIndexCoordinator } from './main/rag-index-coordinator';
@@ -106,6 +107,7 @@ if (started) {
     // setupIPC configures the existing window and observes future windows.
     setupIPC(webviewPreloadPath);
     setupDiskSpaceIPC();
+    setupNetProbeIPC();
     setupRagWorkerIPC();
     startRagIndexCoordinator();
     createTray();
