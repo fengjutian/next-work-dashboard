@@ -65,10 +65,17 @@ export function setupDiskSpaceIPC(): void {
       try { disks = (JSON.parse(result.stdout) as { disks?: typeof disks }).disks ?? []; } catch { /* use statfs fallback */ }
     }
     if (disks.length === 0) {
-      const diskPath = path.parse(app.getPath('home')).root || path.parse(process.cwd()).root || '/';
-      const disk = await fs.promises.statfs(diskPath);
-      const total = disk.blocks * disk.bsize; const free = disk.bavail * disk.bsize;
-      disks = [{ path: diskPath, total, free, used: Math.max(0, total - free) }];
+      const candidates = process.platform === 'win32'
+        ? Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
+        : [path.parse(app.getPath('home')).root || '/'];
+      const detected = await Promise.all(candidates.map(async (diskPath) => {
+        try {
+          const disk = await fs.promises.statfs(diskPath);
+          const total = disk.blocks * disk.bsize; const free = disk.bavail * disk.bsize;
+          return total > 0 ? { path: diskPath, total, free, used: Math.max(0, total - free) } : null;
+        } catch { return null; }
+      }));
+      disks = detected.filter((disk): disk is NonNullable<typeof disk> => disk !== null);
     }
     const memoryTotal = os.totalmem();
     const memoryFree = os.freemem();
