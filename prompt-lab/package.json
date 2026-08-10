@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "next-work-dashboard",
   "productName": "next-work-dashboard",
   "version": "0.2.0",
@@ -9,10 +9,11 @@
     "prepare:native": "node scripts/prepare-native-dependencies.mjs",
     "build:rag-worker": "node scripts/build-rag-worker.mjs",
     "build:disk-scanner": "node scripts/build-disk-scanner.mjs",
-    "start": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && electron-forge start",
-    "package": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && electron-forge package",
-    "make": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && electron-forge make",
-    "publish": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && electron-forge publish",
+    "build:net-probe": "node scripts/build-net-probe.mjs",
+    "start": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge start",
+    "package": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge package",
+    "make": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge make",
+    "publish": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
     "typecheck": "tsc --noEmit",
     "check:ipc": "node scripts/check-ipc-contract.mjs",

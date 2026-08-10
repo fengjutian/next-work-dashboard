@@ -2,8 +2,6 @@
 //!
 //! V1 supports only the `icmp` probe type. V2 will add tcp / dns / http.
 
-pub mod icmp;
-
 use std::time::Duration;
 
 use crate::platform;

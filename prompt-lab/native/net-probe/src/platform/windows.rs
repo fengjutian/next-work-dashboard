@@ -24,10 +24,13 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
     let dest = SocketAddrV4::new(ipv4, 0);
 
     unsafe {
-        let handle: HANDLE = IcmpCreateFile();
+        let handle: HANDLE = match IcmpCreateFile() {
+            Ok(h) => h,
+            Err(e) => return Err(format!("IcmpCreateFile failed: {e}")),
+        };
         if handle.is_invalid() {
             return Err(format!(
-                "IcmpCreateFile failed (err={})",
+                "IcmpCreateFile returned invalid handle (err={})",
                 std::io::Error::last_os_error()
             ));
         }
@@ -38,7 +41,7 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
         // Reply buffer must be large enough: ICMP_ECHO_REPLY + 8-byte ICMP header
         // + reply data. sizeof(ICMP_ECHO_REPLY) = 28 on x64; we add 32 for payload
         // + headroom for the ICMP header.
-        let mut reply_buffer = [0u8; 64 + send_data.len()];
+        let mut reply_buffer = vec![0u8; 64 + send_data.len()];
         let reply_size = std::mem::size_of::<ICMP_ECHO_REPLY>() as u32;
 
         // Timeout in ms; cast saturating since duration is bounded.

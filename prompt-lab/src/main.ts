@@ -119,6 +119,10 @@ if (started) {
     // 有托盘时不退出。
   });
 
+  app.on('before-quit', () => {
+    void shutdownDaemon();
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       openMainWindow();
