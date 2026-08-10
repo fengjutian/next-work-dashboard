@@ -7,6 +7,7 @@ pub mod icmp;
 pub mod tcp;
 pub mod dns;
 pub mod http;
+pub mod traceroute;
 
 use std::time::Duration;
 
@@ -49,6 +50,7 @@ pub fn probe_for(kind: &str) -> Option<Box<dyn Probe>> {
         "tcp" => Some(Box::new(tcp::TcpProbe::new())),
         "dns" => Some(Box::new(dns::DnsProbe::new())),
         "http" => Some(Box::new(http::HttpProbe::new())),
+        "traceroute" => Some(Box::new(traceroute::TracerouteProbe::new())),
         _ => None,
     }
 }

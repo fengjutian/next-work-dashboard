@@ -27,7 +27,6 @@ class DeviceProfile extends ChangeNotifier {
 
   static const _kId = 'mycast.deviceId';
   static const _kName = 'mycast.deviceName';
-  static const _kPlatform = 'mycast.platform';
   static const _kLastHost = 'mycast.lastHost';
   static const _kLastHttpPort = 'mycast.lastHttpPort';
   static const _kLastWsPort = 'mycast.lastWsPort';
@@ -48,7 +47,7 @@ class DeviceProfile extends ChangeNotifier {
     p._lastHost = prefs.getString(_kLastHost);
     p._lastHttpPort = prefs.getInt(_kLastHttpPort);
     p._lastWsPort = prefs.getInt(_kLastWsPort);
-    p._lastCode = prefs.getString(_kLastCode);
+    p._lastPairCode = prefs.getString(_kLastCode);
     return p;
   }
 

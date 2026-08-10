@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app/app.dart';
-import 'app/theme.dart';
 import 'pairing/pairing_service.dart';
 import 'pairing/device_profile.dart';
 import 'settings/settings_store.dart';
 import 'signaling/signaling_client.dart';
-import 'signaling/signaling_frames.dart';
 import 'casting/casting_service.dart';
 import 'transfer/transfer_service.dart';
 

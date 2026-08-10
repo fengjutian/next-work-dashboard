@@ -115,7 +115,7 @@ class _CastingPageState extends State<CastingPage> {
             )
           else
             FilledButton.icon(
-              onPressed: pairing == null ? null : _start,
+              onPressed: _start,
               icon: const Icon(Icons.play_arrow),
               label: const Text('开始投屏'),
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -53,6 +52,9 @@ enum UploadStatus { active, completed, failed, cancelled }
 class TransferService extends ChangeNotifier {
   TransferService(this._profile);
 
+  // Kept for symmetry with other services; transfer endpoints don't need the
+  // device id today but future "upload from" labels will.
+  // ignore: unused_field
   final DeviceProfile _profile;
   final http.Client _client = http.Client();
 
@@ -132,11 +134,6 @@ class TransferService extends ChangeNotifier {
     req.fields['filename'] = source.uri.pathSegments.last;
     req.fields['size'] = length.toString();
 
-    final stream = source.openRead();
-    final ticker = StreamTransformer.fromBind<void, void>((_) {
-      // Send periodic progress ticks by polling the stream's position.
-      return Stream<void>.periodic(const Duration(milliseconds: 200), (_) {});
-    });
     // For simplicity we read the file in one chunk and attach; for large
     // files (>1 GiB) a chunked upload should replace this.
     final bytes = await source.readAsBytes();
@@ -144,8 +141,10 @@ class TransferService extends ChangeNotifier {
 
     try {
       final streamed = await req.send();
-      final sent = req.contentLength ?? length;
-      _uploads[key] = _uploads[key]!.copyWith(sent: sent);
+      // http sets contentLength on the request after send(); if it's still
+      // null (older versions), fall back to the known file length.
+      final sent = req.contentLength;
+      _uploads[key] = _uploads[key]!.copyWith(sent: sent ?? length);
       notifyListeners();
       if (streamed.statusCode == 200) {
         _uploads[key] = _uploads[key]!.copyWith(status: UploadStatus.completed);

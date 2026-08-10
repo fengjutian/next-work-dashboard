@@ -116,6 +116,8 @@ export class VideoPlayerService {
   private windowMode: VideoWindowMode = 'mpv';
   private status: VideoPlayerStatus = this.makeIdleStatus();
   private autoNextTimer: NodeJS.Timeout | null = null;
+  private autoNextTarget: number | null = null;
+  private bootPromise: Promise<void> | null = null;
   private shuttingDown = false;
 
   // ───────────────────── 启动 / 关闭 ─────────────────────
@@ -194,7 +196,25 @@ export class VideoPlayerService {
   }
 
   private async ensureMpv(): Promise<void> {
-    if (this.client && this.child && !this.child.killed) return;
+    if (this.client && this.child && !this.child.killed) {
+      return;
+    }
+    if (this.bootPromise) {
+      return this.bootPromise;
+    }
+    this.bootPromise = this.bootMpv().catch((err) => {
+      // 启动失败时清掉 bootPromise，让下次重试
+      this.bootPromise = null;
+      throw err;
+    });
+    try {
+      await this.bootPromise;
+    } finally {
+      this.bootPromise = null;
+    }
+  }
+
+  private async bootMpv(): Promise<void> {
     const socketPath = this.makeSocketPath();
     this.socketPath = socketPath;
 
@@ -216,16 +236,13 @@ export class VideoPlayerService {
     ];
 
     if (this.windowMode === 'browser') {
-      // V2 嵌入基线：把视频渲染到我们创建的 BrowserWindow 的 HWND
       const videoWindow = this.ensureVideoWindow();
       if (process.platform === 'win32') {
         const hwnd = videoWindow.getNativeWindowHandle();
         args.push(`--wid=${hwnd.toString()}`);
       } else if (process.platform === 'darwin') {
-        // macOS 上 --wid=<NSView*> 需要在 cocoa 内部桥接，V2 暂走回退到 mpv 默认窗口
         args.push('--force-window=immediate');
       } else {
-        // Linux X11
         const wid = videoWindow.getNativeWindowHandle();
         args.push(`--wid=${wid.toString()}`);
       }
@@ -239,7 +256,7 @@ export class VideoPlayerService {
     });
 
     this.child.stderr?.on('data', () => {
-      // mpv 诊断日志，不转发避免噪音
+      // mpv 诊断日志
     });
 
     this.child.on('exit', (code, signal) => {
@@ -514,12 +531,13 @@ export class VideoPlayerService {
   // ───────────────────── 播放列表 ─────────────────────
 
   async addToPlaylist(sources: string[]): Promise<PlaylistState> {
+    const existing = new Set(this.status.playlist.items.map((it) => it.source));
     const items: PlaylistItem[] = [];
     for (const src of sources) {
       if (!src) continue;
+      if (existing.has(src)) continue; // 去重：source 已存在则跳过
       const isUrl = isLikelyUrl(src);
       if (!isUrl && !fs.existsSync(src)) {
-        // skip non-existing local file but still add a placeholder? V1: skip
         continue;
       }
       items.push({
@@ -528,6 +546,7 @@ export class VideoPlayerService {
         title: isUrl ? src : fileBaseName(src),
         type: isUrl ? 'url' : 'file',
       });
+      existing.add(src);
     }
     this.status.playlist = {
       ...this.status.playlist,
@@ -585,15 +604,23 @@ export class VideoPlayerService {
   }
 
   async playIndex(index: number): Promise<void> {
+    // 取消挂起的 auto-next timer（用户的主动选择优先）
+    if (this.autoNextTimer) {
+      clearTimeout(this.autoNextTimer);
+      this.autoNextTimer = null;
+      this.autoNextTarget = null;
+    }
     const { items } = this.status.playlist;
     if (index < 0 || index >= items.length) return;
     const item = items[index];
-    this.status.playlist = { ...this.status.playlist, currentIndex: index };
+    // 先 await open，成功才改 currentIndex（乐观更新失败回滚）
     if (isLikelyUrl(item.source)) {
       await this.openUrl(item.source);
     } else {
       await this.open(item.source);
     }
+    // open/openUrl 在内部已经把 filePath/state 改了
+    this.status.playlist = { ...this.status.playlist, currentIndex: index };
   }
 
   async playNext(): Promise<void> {
@@ -675,7 +702,13 @@ export class VideoPlayerService {
     this.child = null;
     // 从 'browser' 切回 'mpv' 时关闭旧 BrowserWindow（避免屏幕上两个窗口叠加）
     if (previousMode === 'browser' && mode === 'mpv' && this.videoWindow && !this.videoWindow.isDestroyed()) {
-      this.videoWindow.close();
+      // 临时屏蔽 'closed' 事件触发的 handleMpvExit——否则会把刚切好的状态标成 stopped
+      this.shuttingDown = true;
+      try {
+        this.videoWindow.close();
+      } finally {
+        this.shuttingDown = false;
+      }
     }
     this.videoWindow = null;
     if (mode === 'browser') this.ensureVideoWindow();
@@ -808,12 +841,23 @@ export class VideoPlayerService {
     // eof 自动播放下一首
     const next = this.computeNextIndex(1);
     if (next === null) return;
-    // 给 mpv 一点时间 settle
+    // 如果用户在 timer 期间已经手动 playIndex(other)，autoNextTarget 不等于 next，跳过
+    if (this.autoNextTarget !== null && this.autoNextTarget !== next) {
+      return;
+    }
     if (this.autoNextTimer) clearTimeout(this.autoNextTimer);
+    this.autoNextTarget = next;
     this.autoNextTimer = setTimeout(() => {
-      void this.playIndex(next).catch(() => {
-        // ignore
-      });
+      // timer 触发时再次校验（用户可能在这期间又切换了）
+      if (this.autoNextTarget === next) {
+        this.autoNextTarget = null;
+        this.autoNextTimer = null;
+        void this.playIndex(next).catch(() => {
+          // ignore
+        });
+      } else {
+        this.autoNextTimer = null;
+      }
     }, 200);
   }
 

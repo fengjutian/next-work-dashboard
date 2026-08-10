@@ -2,9 +2,9 @@ import 'dart:convert';
 
 /// All frames exchanged with the desktop sidecar's `/ws` endpoint.
 ///
-/// The frame is encoded as `{ "type": "...", ... }` JSON. The desktop emits
+/// Frames are encoded as `{ "type": "...", ... }` JSON. The desktop emits
 /// unsolicited events (phone.hello, session.created, etc.) and replies to
-/// our offer/answer/ice with a mirrored event back to us.
+/// our offer/answer/ice with mirrored events.
 sealed class SignalingFrame {
   const SignalingFrame();
 
@@ -32,7 +32,7 @@ sealed class SignalingFrame {
       ),
       'session_created' => SessionCreatedFrame(
         sessionId: json['session_id'] as String,
-        phoneDeviceId: json['phone_device_id'] as String,
+        phoneDeviceId: (json['phone_device_id'] as String?) ?? '',
         kind: (json['kind'] as String?) ?? 'screen',
       ),
       'offer' => OfferFrame(
@@ -52,11 +52,9 @@ sealed class SignalingFrame {
       ),
       'stream_start' => StreamStartFrame(
         sessionId: json['session_id'] as String,
-        phoneDeviceId: (json['phone_device_id'] as String?) ?? '',
       ),
       'stream_stop' => StreamStopFrame(
         sessionId: json['session_id'] as String,
-        phoneDeviceId: (json['phone_device_id'] as String?) ?? '',
       ),
       'session_error' => SessionErrorFrame(
         sessionId: (json['session_id'] as String?) ?? '',
@@ -165,14 +163,29 @@ class SessionCreatedFrame extends SignalingFrame {
   final String sessionId;
   final String phoneDeviceId;
   final String kind;
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'session_created',
+        'session_id': sessionId,
+        'phone_device_id': phoneDeviceId,
+        'kind': kind,
+      };
 }
 
 class SessionErrorFrame extends SignalingFrame {
   const SessionErrorFrame({required this.sessionId, required this.message});
   final String sessionId;
   final String message;
+  @override
+  Map<String, dynamic> toJson() => {
+        'type': 'session_error',
+        'session_id': sessionId,
+        'message': message,
+      };
 }
 
 class PongFrame extends SignalingFrame {
   const PongFrame();
+  @override
+  Map<String, dynamic> toJson() => {'type': 'pong'};
 }

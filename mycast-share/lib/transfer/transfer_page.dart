@@ -61,7 +61,7 @@ class _TransferPageState extends State<TransferPage> {
             const _SectionHeader('上传任务'),
             ...transfer.uploads.entries.map((e) {
               final p = e.value;
-              final pct = p.total > 0 ? (p.sent / p.total).clamp(0, 1) : 0.0;
+              final pct = p.total > 0 ? (p.sent / p.total).clamp(0.0, 1.0) : 0.0;
               return Card(
                 child: ListTile(
                   leading: const Icon(Icons.upload_file),

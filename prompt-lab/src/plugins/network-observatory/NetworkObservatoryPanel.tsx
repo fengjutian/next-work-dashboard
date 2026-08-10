@@ -68,6 +68,7 @@ const PROBE_KINDS: { value: NetProbeKind; label: string; placeholder: string }[]
   { value: 'tcp', label: 'TCP', placeholder: 'example.com:443' },
   { value: 'dns', label: 'DNS', placeholder: 'example.com' },
   { value: 'http', label: 'HTTP', placeholder: 'http://example.com' },
+  { value: 'traceroute', label: 'Trace', placeholder: 'github.com' },
 ];
 
 const ALERT_METRICS: { value: AlertMetric; label: string; unit: string }[] = [
@@ -134,6 +135,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [draftResolvers, setDraftResolvers] = useState<string>('1.1.1.1, 8.8.8.8, 9.9.9.9');
   const [draftUrl, setDraftUrl] = useState<string>('');
   const [draftPath, setDraftPath] = useState<string>('/');
+  const [draftMaxHops, setDraftMaxHops] = useState<number>(15);
 
   const targetMap = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
 
@@ -254,6 +256,9 @@ export const NetworkObservatoryPanel: React.FC = () => {
         if (draftUrl.trim()) options.url = draftUrl.trim();
         if (draftPath.trim()) options.path = draftPath.trim();
       }
+      if (draftKind === 'traceroute') {
+        options.max_hops = Math.max(1, Math.min(64, draftMaxHops));
+      }
       const created = await api.addTarget({
         target: t,
         probe: draftKind,
@@ -265,7 +270,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
     } catch (e) {
       setError(String((e as Error).message ?? e));
     }
-  }, [api, draftKind, draftTarget, draftInterval, draftPort, draftRecord, draftResolvers, draftUrl, draftPath, draftIpVersion]);
+  }, [api, draftKind, draftTarget, draftInterval, draftPort, draftRecord, draftResolvers, draftUrl, draftPath, draftIpVersion, draftMaxHops]);
 
   const removeTarget = useCallback(
     async (id: string) => {
@@ -495,6 +500,20 @@ export const NetworkObservatoryPanel: React.FC = () => {
                   placeholder="路径(可省略,默认 /)"
                   className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
                 />
+              </div>
+            )}
+            {draftKind === 'traceroute' && (
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">最大跳数</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={64}
+                  value={draftMaxHops}
+                  onChange={(e) => setDraftMaxHops(Number(e.target.value))}
+                  className="w-20 rounded border border-border bg-background px-2 py-1 text-xs"
+                />
+                <span className="text-xs text-muted-foreground">(调系统 tracert/traceroute)</span>
               </div>
             )}
             <div className="mt-2 flex items-center gap-2 text-xs">

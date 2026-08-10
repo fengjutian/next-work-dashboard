@@ -6,7 +6,7 @@
  * care about sql.js integer / text quirks.
  */
 
-export type NetProbeKind = 'icmp' | 'tcp' | 'dns' | 'http';
+export type NetProbeKind = 'icmp' | 'tcp' | 'dns' | 'http' | 'traceroute';
 
 export interface NetProbeTarget {
   id: string;

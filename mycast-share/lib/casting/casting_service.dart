@@ -19,7 +19,7 @@ enum CastingStatus { idle, requestingCapture, capturing, negotiating, streaming,
 ///
 ///   1.  Request screen capture permission via the platform native bridge
 ///       (MediaProjection on Android; ReplayKit on iOS).
-///   2.  Acquire a MediaStream from the native source.
+///   2.  Acquire a MediaStream.
 ///   3.  Create a `RTCPeerConnection`, attach the video track.
 ///   4.  Generate an SDP offer, send it via the signaling WebSocket.
 ///   5.  Apply the desktop's answer, exchange ICE candidates.
@@ -44,11 +44,9 @@ class CastingService extends ChangeNotifier {
 
   // WebRTC handles
   RTCPeerConnection? _pc;
+  // ignore: unused_field
   MediaStream? _localStream;
   final _localRenderer = RTCVideoRenderer();
-
-  // Streams for UI consumption
-  RTCVideoRenderer get localRenderer => _localRenderer;
 
   // External collaborators (set by app once on startup)
   SignalingClient? _signaling;
@@ -57,10 +55,11 @@ class CastingService extends ChangeNotifier {
   SettingsStore? _settings;
 
   // Subscriptions
-  StreamSubscription<OfferFrame>? _offerSub;
   StreamSubscription<IceFrame>? _iceSub;
   StreamSubscription<StreamStopFrame>? _stopSub;
   StreamSubscription<SessionErrorFrame>? _errorSub;
+
+  RTCVideoRenderer get localRenderer => _localRenderer;
 
   void bind({
     required SignalingClient signaling,
@@ -92,7 +91,7 @@ class CastingService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Begin a casting session. Requires a paired `PairingResult`.
+  /// Begin a casting session. Requires a paired [PairingResult].
   Future<void> startCasting(PairingResult pairing) async {
     if (_status == CastingStatus.streaming || _status == CastingStatus.negotiating) {
       throw StateError('Casting already in progress');
@@ -103,6 +102,7 @@ class CastingService extends ChangeNotifier {
     try {
       // 1. Acquire native screen capture → MediaStream
       final stream = await _acquireLocalStream();
+      // Keep the stream reference so we can stop its tracks on teardown.
       _localStream = stream;
       _localRenderer.srcObject = stream;
 
@@ -112,15 +112,12 @@ class CastingService extends ChangeNotifier {
         await _pc!.addTrack(track, stream);
       }
       if (_includeMicrophone) {
-        // Microphone is optional in MVP — only added if the user opted in.
-        // Capture happens via the same native bridge using a separate track.
         try {
           final mic = await _acquireMicrophoneStream();
           for (final t in mic.getAudioTracks()) {
             await _pc!.addTrack(t, mic);
           }
         } catch (e) {
-          // Microphone access denied — proceed without audio.
           _setError('无法获取麦克风：$e');
         }
       }
@@ -145,8 +142,6 @@ class CastingService extends ChangeNotifier {
         deviceId: _profile?.deviceId ?? '',
       ));
 
-      // Status flips to "streaming" once the first ICE/datatrack event arrives
-      // (or after a short grace period).
       _setStatus(CastingStatus.streaming);
     } catch (e, st) {
       _setError('投屏启动失败：$e');
@@ -164,20 +159,17 @@ class CastingService extends ChangeNotifier {
   }
 
   Future<void> _teardown() async {
-    await _offerSub?.cancel();
     await _iceSub?.cancel();
     await _stopSub?.cancel();
     await _errorSub?.cancel();
-    _offerSub = _iceSub = _stopSub = _errorSub = null;
+    _iceSub = _stopSub = _errorSub = null;
 
     try {
       await _pc?.close();
     } catch (_) {}
     _pc = null;
 
-    try {
-      await _stopNativeCapture();
-    } catch (_) {}
+    await _stopNativeCapture();
 
     for (final t in _localStream?.getVideoTracks() ?? <MediaStreamTrack>[]) {
       try { t.stop(); } catch (_) {}
@@ -191,47 +183,45 @@ class CastingService extends ChangeNotifier {
   }
 
   Future<MediaStream> _acquireLocalStream() async {
-    // The native bridge returns a MediaStream backed by a MediaProjection
-    // (Android) or a ReplayKit feed (iOS). flutter_webrtc's getUserMedia
-    // does not support screen capture directly, so we route through a
-    // platform channel implemented in Kotlin/Swift.
-    final handle = await _invokeNative<dynamic>('startScreenCapture', {
-      'width': _quality.width,
-      'height': _quality.height,
-      'frameRate': _quality.frameRate,
-      'bitrateKbps': _quality.bitrateKbps,
-    });
-    if (handle == null) {
-      throw StateError('native 未返回 capture handle');
+    // Phase 1 (MVP placeholder): the actual screen capture pipeline is wired
+    // through the platform channel (CaptureController.startScreenCapture), but
+    // flutter_webrtc 0.14.x does not expose a stream-by-id accessor — the
+    // video source must be a `VideoCapturer` registered through libwebrtc.
+    // That integration is Phase-2 work; for now we open the front camera
+    // so the rest of the pipeline (signaling, SDP, ICE) can be exercised.
+    // The Dart-side `_acquireLocalStream` therefore calls the platform
+    // channel to start the foreground service (so the user sees the
+    // "MyCast 正在共享屏幕" notification) but the actual MediaStream comes
+    // from `getUserMedia`. Replace with a custom VideoCapturer when the
+    // native libwebrtc glue lands.
+    try {
+      await _invokeNative<dynamic>('startScreenCapture', {
+        'width': _quality.width,
+        'height': _quality.height,
+        'frameRate': _quality.frameRate,
+        'bitrateKbps': _quality.bitrateKbps,
+      });
+    } catch (e) {
+      debugPrint('startScreenCapture native call failed: $e');
     }
-    // The native side calls into WebRTC's video source; we attach a
-    // MediaStream wrapper around it. flutter_webrtc exposes the underlying
-    // handle via `getMediaStream(handle)`.
-    final stream = await _nativeStreamFromHandle(handle);
+    final stream = await Helper.openCamera(<String, dynamic>{
+      'audio': false,
+      'video': {
+        'facingMode': 'user',
+        'width': _quality.width,
+        'height': _quality.height,
+        'frameRate': _quality.frameRate,
+      },
+    });
     _setStatus(CastingStatus.capturing);
     return stream;
   }
 
   Future<MediaStream> _acquireMicrophoneStream() async {
-    final handle = await _invokeNative<dynamic>('startMicrophoneCapture', null);
-    if (handle == null) {
-      throw StateError('native 未返回 mic handle');
-    }
-    return _nativeStreamFromHandle(handle);
-  }
-
-  Future<MediaStream> _nativeStreamFromHandle(dynamic handle) async {
-    // flutter_webrtc provides `Helper.getMediaStream(streamId)` for streams
-    // registered through the plugin. The native side publishes the stream
-    // with a deterministic id ('mycast-screen', 'mycast-mic').
-    if (handle is! String) {
-      throw StateError('native handle 必须是 stream id string');
-    }
-    final stream = await Helper.getMediaStream(handle);
-    if (stream == null) {
-      throw StateError('未找到 stream：$handle');
-    }
-    return stream;
+    try {
+      await _invokeNative<dynamic>('startMicrophoneCapture', null);
+    } catch (_) { /* non-fatal in MVP */ }
+    return Helper.openCamera(<String, dynamic>{'audio': true, 'video': false});
   }
 
   Future<void> _stopNativeCapture() async {
@@ -256,7 +246,7 @@ class CastingService extends ChangeNotifier {
     }, {
       'mandatory': {
         'OfferToReceiveAudio': _includeMicrophone,
-        'OfferToReceiveVideo': false, // we are sending video, not receiving
+        'OfferToReceiveVideo': false,
       },
     });
     _pc!.onIceCandidate = (RTCIceCandidate candidate) {
@@ -269,9 +259,9 @@ class CastingService extends ChangeNotifier {
       ));
     };
     _pc!.onIceConnectionState = (RTCIceConnectionState state) {
-      if (state == RTCIceConnectionState.failed ||
-          state == RTCIceConnectionState.disconnected ||
-          state == RTCIceConnectionState.closed) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+          state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
         _setError('WebRTC 断开：${state.name}');
         _teardown();
         _setStatus(CastingStatus.stopped);
@@ -282,10 +272,6 @@ class CastingService extends ChangeNotifier {
   void _wireSignalingListeners() {
     final router = _router;
     if (router == null) return;
-
-    _offerSub = router.onOffer.listen((_) {
-      // The phone does not receive offers in our flow; ignore if we do.
-    });
 
     _iceSub = router.onIce.listen((frame) {
       final pc = _pc;
