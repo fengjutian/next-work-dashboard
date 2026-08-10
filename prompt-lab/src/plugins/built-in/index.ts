@@ -40,6 +40,7 @@ const windy = preloadable(() => import('../windy').then((m) => ({ default: m.Win
 const terminal = preloadable(() => import('../terminal').then((m) => ({ default: m.TerminalPluginPanel })));
 const database = preloadable(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
 const codeEditor = preloadable(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
+const markdownEditor = preloadable(() => import('../markdown-editor').then((m) => ({ default: m.MarkdownEditorPanel })));
 const compare = preloadable(() => import('../compare').then((m) => ({ default: m.ComparePanel })));
 const documentKnowledge = preloadable(() => import('../document-knowledge').then((m) => ({ default: m.DocumentKnowledgePanel })));
 const hanyuJinjie = preloadable(() => import('../hanyu-jinjie').then((m) => ({ default: m.HanyuJinjiePanel })));
@@ -64,6 +65,7 @@ const WindyPanel = windy.component;
 const TerminalPluginPanel = terminal.component;
 const DatabaseBrowser = database.component;
 const CodeEditorPanel = codeEditor.component;
+const MarkdownEditorPanel = markdownEditor.component;
 const ComparePanel = compare.component;
 const DocumentKnowledgePanel = documentKnowledge.component;
 const HanyuJinjiePanel = hanyuJinjie.component;
@@ -289,9 +291,37 @@ const builtInPlugins: Plugin[] = [
         { id: 'code-editor.save', title: '保存代码文件', category: '代码编辑' },
       ],
       views: [{ id: 'code-editor.editor', title: '代码编辑器', component: CodeEditorPanel, location: 'main' }],
-      fileEditors: [{ id: 'code-editor.editor', extensions: ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.css', '.html'], viewId: 'code-editor.editor', priority: 10 }],
+      // 故意移除 .md / .markdown 扩展 — markdown-editor 插件独立管理这些扩展；
+      // 用户可在 markdown-editor 的设置里关闭接管以回退到这里。
+      fileEditors: [{ id: 'code-editor.editor', extensions: ['.ts', '.tsx', '.js', '.jsx', '.json', '.css', '.html'], viewId: 'code-editor.editor', priority: 10 }],
       menus: [{ id: 'code-editor.open.menu', label: '打开代码文件', command: 'code-editor.open', location: 'file', order: 20 }],
       settings: [{ key: 'code-editor.wordWrap', label: '自动换行', type: 'boolean', default: true }],
+    },
+  },
+  {
+    id: 'markdown-editor',
+    name: 'Markdown 编辑',
+    icon: FileText,
+    component: MarkdownEditorPanel,
+    enabled: false,
+    order: 17.5,
+    keepAlive: true,
+    preload: () => import('../markdown-editor'),
+    contributions: {
+      commands: [
+        { id: 'markdown-editor.open', title: '打开 Markdown 文件', category: 'Markdown 编辑' },
+        { id: 'markdown-editor.save', title: '保存 Markdown 文件', category: 'Markdown 编辑' },
+        { id: 'markdown-editor.toggleSourceMode', title: '切换源码 / 可视化模式', category: 'Markdown 编辑' },
+      ],
+      views: [{ id: 'markdown-editor.main', title: 'Markdown 编辑', component: MarkdownEditorPanel, location: 'main' }],
+      // 文件扩展声明在 src/plugins/markdown-editor/index.ts 启动时根据用户设置动态注入；
+      // 默认 handleMarkdownFiles=true 时拥有 .md/.markdown 优先级 100。
+      fileEditors: [],
+      menus: [{ id: 'markdown-editor.open.menu', label: '打开 Markdown 文件', command: 'markdown-editor.open', location: 'file', order: 21 }],
+      settings: [
+        { key: 'markdown-editor.handleMarkdownFiles', label: '默认接管 .md 文件（关闭则由代码编辑处理）', type: 'boolean', default: true },
+        { key: 'markdown-editor.autoSave', label: '自动保存（停止输入 1.5s 后触发）', type: 'boolean', default: false },
+      ],
     },
   },
   {
@@ -487,6 +517,7 @@ export function registerBuiltInPlugins(): void {
     terminal: terminal.preload,
     database: database.preload,
     'code-editor': codeEditor.preload,
+    'markdown-editor': markdownEditor.preload,
     compare: compare.preload,
     'document-knowledge': documentKnowledge.preload,
     'hanyu-jinjie': hanyuJinjie.preload,

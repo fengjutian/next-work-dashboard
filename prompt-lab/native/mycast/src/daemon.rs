@@ -7,7 +7,7 @@ use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::mpsc;
 
-use crate::config::Config;
+use crate::config::{Config, ConfigOverrides};
 use crate::http::{self, HttpState};
 use crate::mdns::MdnsAdvertiser;
 use crate::protocol::{DaemonInfo, Event, Request, Response};
@@ -39,8 +39,8 @@ fn build_daemon_info(cfg: &Config) -> DaemonInfo {
     }
 }
 
-pub async fn run() -> anyhow::Result<()> {
-    let cfg = Arc::new(Config::defaults());
+pub async fn run(overrides: ConfigOverrides) -> anyhow::Result<()> {
+    let cfg = Arc::new(Config::with_overrides(&overrides));
     let shared = Arc::new(SharedState::new());
 
     // Channel: HTTP / signaling -> parent.

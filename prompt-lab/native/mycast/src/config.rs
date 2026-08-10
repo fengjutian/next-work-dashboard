@@ -1,8 +1,18 @@
 //! Daemon configuration. All values can be overridden at startup via the
-//! `start` RPC command from the parent Electron process.
+//! `start` RPC command from the parent Electron process or CLI args.
 
 use std::net::IpAddr;
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Default)]
+pub struct ConfigOverrides {
+    pub http_port: Option<u16>,
+    pub ws_port: Option<u16>,
+    pub bind_addr: Option<IpAddr>,
+    pub mdns_enabled: Option<bool>,
+    pub storage_dir: Option<PathBuf>,
+    pub device_name: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -20,18 +30,25 @@ pub struct Config {
 
 impl Config {
     pub fn defaults() -> Self {
+        Self::with_overrides(&ConfigOverrides::default())
+    }
+
+    pub fn with_overrides(ovr: &ConfigOverrides) -> Self {
         let device_id = format!("nwd-{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        let device_name = hostname();
+        let device_name = ovr
+            .device_name
+            .clone()
+            .unwrap_or_else(hostname);
         let platform = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
         Self {
             device_id,
             device_name,
             platform,
-            bind_addr: "0.0.0.0".parse().expect("valid bind addr"),
-            http_port: 17890,
-            ws_port: 17891,
-            storage_dir: default_storage_dir(),
-            mdns_enabled: true,
+            bind_addr: ovr.bind_addr.unwrap_or_else(|| "0.0.0.0".parse().expect("valid bind addr")),
+            http_port: ovr.http_port.unwrap_or(17890),
+            ws_port: ovr.ws_port.unwrap_or(17891),
+            storage_dir: ovr.storage_dir.clone().unwrap_or_else(default_storage_dir),
+            mdns_enabled: ovr.mdns_enabled.unwrap_or(true),
             web_root: None,
         }
     }
