@@ -110,11 +110,12 @@
 
       <div class="card" id="pairCard">
         <h2>输入配对码</h2>
-        <p style="margin:0 0 10px;color:var(--muted);font-size:13px;">在桌面端 MyCast 插件的首页可以看到 6 位配对码。</p>
+        <p style="margin:0 0 10px;color:var(--muted);font-size:13px;">在桌面端 MyCast 插件的首页可以看到 6 位配对码。扫码后此处会自动填入。</p>
         <label>配对码</label>
         <input id="pairCode" type="text" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="6 位数字" autocomplete="off">
         <div style="height:10px"></div>
         <button id="pairBtn">连接</button>
+        <p id="pairError" style="margin:8px 0 0;color:var(--err);font-size:12px;display:none"></p>
       </div>
 
       <div class="card section-hidden" id="pairedCard">
@@ -237,7 +238,15 @@ async function boot() {
     // 兜底：尝试当前 origin
     state.pair.httpBase = location.origin;
   }
+  // If the URL carries ?pair=xxxxxx, pre-fill the code box.
+  const prefill = params.get('pair');
+  if (prefill && /^\d{6}$/.test(prefill)) {
+    state._prefilledCode = prefill;
+  }
   await fetchInfo();
+  if (prefill && /^\d{6}$/.test(prefill)) {
+    $('pairCode').value = prefill;
+  }
   if (state.sessionToken) {
     await validateExistingSession();
   }
@@ -279,18 +288,28 @@ $('pairCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') pair()
 
 async function pair() {
   const code = $('pairCode').value.trim();
-  if (!/^\d{6}$/.test(code)) { toast('请输入 6 位数字', 'err'); return; }
+  const errEl = $('pairError');
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+  if (!/^\d{6}$/.test(code)) {
+    errEl.textContent = '请输入 6 位数字配对码';
+    errEl.style.display = 'block';
+    return;
+  }
   $('pairBtn').disabled = true;
+  $('pairBtn').textContent = '连接中…';
   try {
-    // Issue a pairing request; the desktop returns a 6-digit pair_code for
-    // display and a long session_token we use for authenticated calls.
-    const r = await fetch(state.pair.httpBase + '/api/pair/request', {
+    // The phone knows only the 6-digit code displayed on the desktop. We
+    // POST it to /api/pair/complete, which looks up the active pairing
+    // entry on the server by code, consumes it (single-use), and returns a
+    // long session token.
+    const r = await fetch(state.pair.httpBase + '/api/pair/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         device_id: state.deviceId,
         device_name: state.deviceName,
-        platform: state.platform,
+        pairing_code: code,
       }),
     });
     if (!r.ok) {
@@ -298,19 +317,17 @@ async function pair() {
       throw new Error(err.error || ('HTTP ' + r.status));
     }
     const data = await r.json();
-    if (!data.pair_code || !data.session_token) throw new Error('配对响应缺少字段');
-    // Sanity check: the user-entered code must match the one displayed on
-    // the desktop (visual confirmation). If they don't match, reject.
-    if (data.pair_code !== code) {
-      throw new Error(`配对码不匹配：服务端返回 ${data.pair_code} ≠ 输入 ${code}`);
-    }
+    if (!data.ok || !data.session_token) throw new Error(data.error || '配对响应缺少 session_token');
     state.sessionToken = data.session_token;
+    if (data.ws_url) state.pair.wsUrl = data.ws_url;
     localStorage.setItem('mycast.sessionToken', state.sessionToken);
     onPaired(state.sessionToken);
   } catch (e) {
-    toast('配对失败：' + e.message, 'err');
+    errEl.textContent = '配对失败：' + e.message;
+    errEl.style.display = 'block';
   } finally {
     $('pairBtn').disabled = false;
+    $('pairBtn').textContent = '连接';
   }
 }
 

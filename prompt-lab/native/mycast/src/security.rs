@@ -78,7 +78,31 @@ impl TokenManager {
         if !constant_time_eq(entry.token.as_bytes(), presented.as_bytes()) {
             return None;
         }
-        // Promote to a long-lived session token.
+        Self::promote_to_session(&mut self.sessions.write().expect("session lock"), entry, device_id, device_name);
+        *guard = None;
+        Some(self.sessions.read().expect("session lock").last().cloned().expect("just promoted"))
+    }
+
+    /// Consume the active pairing entry by its 6-digit display code (not the
+    /// 32-byte secret). Used by the mobile web UI's "输入配对码" flow: the
+    /// phone knows only the code shown on the desktop, and posts it here to
+    /// claim the active pairing.
+    pub fn consume_pairing_by_code(&self, code: &str, device_id: &str, device_name: &str) -> Option<SessionToken> {
+        let mut guard = self.inner.write().expect("token lock");
+        let entry = guard.as_ref()?;
+        if Instant::now() > entry.expires_at {
+            *guard = None;
+            return None;
+        }
+        if !constant_time_eq(entry.pair_code.as_bytes(), code.as_bytes()) {
+            return None;
+        }
+        Self::promote_to_session(&mut self.sessions.write().expect("session lock"), entry, device_id, device_name);
+        *guard = None;
+        Some(self.sessions.read().expect("session lock").last().cloned().expect("just promoted"))
+    }
+
+    fn promote_to_session(sessions: &mut Vec<SessionToken>, _entry: &TokenEntry, device_id: &str, device_name: &str) {
         let mut rng = rand::thread_rng();
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
@@ -88,9 +112,7 @@ impl TokenManager {
             device_name: device_name.to_string(),
             issued_at: Instant::now(),
         };
-        self.sessions.write().expect("session lock").push(session.clone());
-        *guard = None;
-        Some(session)
+        sessions.push(session);
     }
 
     /// Validate a session bearer token. Returns the owning device_id if valid.

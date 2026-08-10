@@ -100,8 +100,20 @@ pub async fn run() -> anyhow::Result<()> {
 
     if started {
         tracing::info!(target: "mycast.daemon", "services booted");
+        // Auto-issue an initial pairing code so the desktop UI can render the
+        // QR / pair_code immediately on first paint, without the user having
+        // to click "生成配对码" first. The code auto-rotates on consume or
+        // expiry; the user can also force-rotate via the issue_pairing RPC.
+        let (token, code, ttl) = shared.tokens.issue_pairing(None);
+        tracing::info!(target: "mycast.daemon", "initial pair_code issued: {}", code);
+        let _ = token;
         let info = build_daemon_info(&cfg);
-        let _ = event_tx.send(Event::new("ready", serde_json::to_value(&info).unwrap_or_default()));
+        let mut info_value = serde_json::to_value(&info).unwrap_or_default();
+        if let Some(obj) = info_value.as_object_mut() {
+            obj.insert("pair_code".to_string(), serde_json::Value::String(code));
+            obj.insert("pair_expires_in_ms".to_string(), serde_json::Value::Number(serde_json::Number::from(ttl.as_millis() as u64)));
+        }
+        let _ = event_tx.send(Event::new("ready", info_value));
     } else {
         let _ = event_tx.send(Event::new("error", serde_json::json!({ "message": "boot failed" })));
     }

@@ -147,37 +147,27 @@ async fn post_pair_complete(
     AxState(state): AxState<HttpState>,
     Json(req): Json<PairComplete>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Pair-complete is now an alias path: the phone already holds the long
-    // session token from pair_request. To keep the desktop UI consistent
-    // (showing a 6-digit code), we also accept the 6-digit code here and look
-    // it up via the active pairing entry's secret. For simplicity, we accept
-    // EITHER the 32-byte token OR the 6-digit code (re-derived from the
-    // stored active pairing via a side channel — see lookup_token_by_code).
-    let presented = lookup_token_by_code(&state.shared.tokens, &req.pairing_code)
-        .ok_or_else(|| ApiError::unauthorized("配对码无效或已过期"))?;
+    // The mobile web UI's "输入配对码" flow: the user types the 6-digit code
+    // shown on the desktop, and the phone claims the active pairing by code.
+    // The pair entry is consumed (single-use) and promoted to a session token.
     let session = state
         .shared
         .tokens
-        .consume_pairing(&presented, &req.device_id, &req.device_name)
-        .ok_or_else(|| ApiError::unauthorized("配对已失效"))?;
+        .consume_pairing_by_code(&req.pairing_code, &req.device_id, &req.device_name)
+        .ok_or_else(|| ApiError::unauthorized("配对码无效或已过期，请确认桌面端最新显示的 6 位码"))?;
+    tracing::info!(target: "mycast.http", phone = %req.device_id, name = %req.device_name, "pair claim accepted");
+    let lan = crate::security::enumerate_lan_addrs()
+        .into_iter()
+        .find(|a| a.is_ipv4() && !a.is_loopback())
+        .map(|a| a.to_string())
+        .unwrap_or_else(|| state.cfg.bind_addr.to_string());
     Ok(Json(serde_json::json!({
         "ok": true,
         "session_token": session.token,
         "device_id": session.device_id,
-        "expires_in_ms": 0,
+        "ws_url": format!("ws://{lan}:{}", state.cfg.ws_port),
+        "http_url": format!("http://{lan}:{}", state.cfg.http_port),
     })))
-}
-
-fn lookup_token_by_code(tokens: &TokenManager, _code: &str) -> Option<String> {
-    // The 6-digit code is for human display only; the phone uses the long
-    // session_token returned by pair_request for authentication. We try to
-    // return the active pairing token if one is valid (single-use).
-    // In this implementation pair_complete is essentially deprecated in favor
-    // of the phone calling pair_request directly with a session token. We
-    // expose this path so the desktop UI's "manual code entry" flow can still
-    // work — the phone's web UI sends the same session token it received.
-    let _ = tokens;
-    None
 }
 
 async fn get_sessions(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
