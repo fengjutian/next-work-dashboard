@@ -340,6 +340,59 @@ function ensureSchema(): void {
       content TEXT NOT NULL DEFAULT ""
     );
     CREATE INDEX IF NOT EXISTS idx_skill_files_skill ON skill_files(skill_id);
+
+    -- ── Network Observatory (nwd-net-probe) ──
+    CREATE TABLE IF NOT EXISTS net_probe_targets (
+      id TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      probe TEXT NOT NULL DEFAULT 'icmp',
+      interval_ms INTEGER NOT NULL DEFAULT 5000,
+      timeout_ms INTEGER NOT NULL DEFAULT 3000,
+      options_json TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS net_probe_results (
+      id TEXT PRIMARY KEY,
+      target_id TEXT NOT NULL,
+      probe TEXT NOT NULL,
+      timestamp_ms INTEGER NOT NULL,
+      success INTEGER NOT NULL,
+      latency_ms INTEGER,
+      error TEXT,
+      payload_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_net_probe_results_target_ts
+      ON net_probe_results(target_id, timestamp_ms DESC);
+    CREATE INDEX IF NOT EXISTS idx_net_probe_results_ts
+      ON net_probe_results(timestamp_ms DESC);
+    CREATE TABLE IF NOT EXISTS net_probe_alert_rules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      target_id TEXT,
+      probe TEXT,
+      metric TEXT NOT NULL,
+      op TEXT NOT NULL,
+      threshold INTEGER NOT NULL,
+      duration_sec INTEGER NOT NULL DEFAULT 60,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      notify TEXT NOT NULL DEFAULT 'desktop',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS net_probe_incidents (
+      id TEXT PRIMARY KEY,
+      rule_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      peak_metric INTEGER NOT NULL,
+      trigger_message TEXT NOT NULL,
+      acknowledged INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_net_probe_incidents_open
+      ON net_probe_incidents(target_id, ended_at);
   `);
   try {
     _sqlDb.run(`CREATE VIRTUAL TABLE IF NOT EXISTS weread_notes_fts USING fts5(

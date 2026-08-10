@@ -7,7 +7,8 @@
  */
 
 import { useMemo } from 'react';
-import { Pause, Play, Square, Keyboard } from '@/components/icons';
+import { Pause, Play, Square } from '@/components/icons';
+import { Keyboard } from 'lucide-react';
 import type { VideoPlayerStatus } from './types';
 import { VolumeHigh, VolumeLow, VolumeMute, Captions, Gauge, Film, Speaker } from './icons';
 import { Button } from '@/components/ui/button';

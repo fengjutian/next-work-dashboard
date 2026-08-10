@@ -19,7 +19,55 @@ extern "system" {
         total: *mut u64,
         free_total: *mut u64,
     ) -> i32;
+    fn CreateFileW(name: *const u16, access: u32, share: u32, security: *mut std::ffi::c_void, creation: u32, flags: u32, template: isize) -> isize;
+    fn DeviceIoControl(handle: isize, code: u32, input: *const std::ffi::c_void, input_size: u32, output: *mut std::ffi::c_void, output_size: u32, returned: *mut u32, overlapped: *mut std::ffi::c_void) -> i32;
+    fn CloseHandle(handle: isize) -> i32;
 }
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct UsnJournalData {
+    journal_id: u64,
+    first_usn: i64,
+    next_usn: i64,
+    lowest_valid_usn: i64,
+    max_usn: i64,
+    maximum_size: u64,
+    allocation_delta: u64,
+}
+
+#[cfg(windows)]
+fn emit_usn_via_fsutil(drive: char) -> io::Result<()> {
+    let result = std::process::Command::new("fsutil.exe").args(["usn", "queryjournal", &format!("{}:", drive.to_ascii_uppercase())]).output()?;
+    if !result.status.success() { return Err(io::Error::new(io::ErrorKind::PermissionDenied, String::from_utf8_lossy(&result.stderr))); }
+    let text = String::from_utf8_lossy(&result.stdout);
+    let values = text.split_whitespace().filter_map(|token| token.strip_prefix("0x").and_then(|hex| u64::from_str_radix(hex, 16).ok())).collect::<Vec<_>>();
+    if values.len() < 7 { return Err(io::Error::new(io::ErrorKind::InvalidData, "unable to parse fsutil USN response")); }
+    emit(&format!(r#"{{"supported":true,"method":"fsutil","volume":"{}:\\","journalId":{},"firstUsn":{},"nextUsn":{},"lowestValidUsn":{},"maxUsn":{},"maximumSize":{},"allocationDelta":{}}}"#, drive.to_ascii_uppercase(), values[0], values[1], values[2], values[3], values[4], values[5], values[6]));
+    Ok(())
+}
+
+#[cfg(windows)]
+fn emit_usn_info(root: &Path) -> io::Result<()> {
+    let root_text = root.to_string_lossy();
+    let drive = root_text.chars().next().filter(|_| root_text.chars().nth(1) == Some(':')).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "USN requires a drive-letter path"))?;
+    let volume = format!(r"\\.\{}:", drive.to_ascii_uppercase());
+    let wide = volume.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+    let handle = unsafe { CreateFileW(wide.as_ptr(), 0x8000_0000, 0x0000_0007, std::ptr::null_mut(), 3, 0, 0) };
+    if handle == -1 { return emit_usn_via_fsutil(drive); }
+    let mut output = [0_u8; 128]; let mut returned = 0_u32;
+    let success = unsafe { DeviceIoControl(handle, 0x0009_00f4, std::ptr::null(), 0, output.as_mut_ptr() as *mut std::ffi::c_void, output.len() as u32, &mut returned, std::ptr::null_mut()) };
+    unsafe { CloseHandle(handle); }
+    if success == 0 { return emit_usn_via_fsutil(drive); }
+    if returned < std::mem::size_of::<UsnJournalData>() as u32 { return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "short USN journal response")); }
+    let data = unsafe { std::ptr::read_unaligned(output.as_ptr() as *const UsnJournalData) };
+    emit(&format!(r#"{{"supported":true,"method":"native","volume":"{}:\\","journalId":{},"firstUsn":{},"nextUsn":{},"lowestValidUsn":{},"maxUsn":{},"maximumSize":{},"allocationDelta":{}}}"#, drive.to_ascii_uppercase(), data.journal_id, data.first_usn, data.next_usn, data.lowest_valid_usn, data.max_usn, data.maximum_size, data.allocation_delta));
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn emit_usn_info(_root: &Path) -> io::Result<()> { emit(r#"{"supported":false}"#); Ok(()) }
 
 #[cfg(windows)]
 fn emit_disks() {
@@ -55,6 +103,13 @@ struct FileResult {
 struct DuplicateGroup {
     size: u64,
     files: Vec<FileResult>,
+}
+
+fn retain_largest(largest: &mut Vec<FileResult>, candidate: FileResult, limit: usize) {
+    if largest.len() < limit { largest.push(candidate); return; }
+    if let Some((index, smallest)) = largest.iter().enumerate().min_by_key(|(_, file)| file.size) {
+        if candidate.size > smallest.size { largest[index] = candidate; }
+    }
 }
 
 fn content_hash(path: &Path) -> io::Result<u64> {
@@ -135,7 +190,7 @@ fn error_category(error: &io::Error) -> &'static str {
     }
 }
 
-fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, paused: Arc<AtomicBool>) -> io::Result<()> {
+fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_duplicate_size: u64, paused: Arc<AtomicBool>) -> io::Result<()> {
     let root = fs::canonicalize(root)?;
     if !root.is_dir() {
         return Err(io::Error::new(
@@ -209,18 +264,7 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, paused
             };
             files += 1;
             bytes = bytes.saturating_add(metadata.len());
-            let mut parent = entry.path().parent().map(Path::to_path_buf);
-            while let Some(directory) = parent {
-                if !directory.starts_with(&root) {
-                    break;
-                }
-                let directory_total = directory_bytes.entry(directory.clone()).or_insert(0);
-                *directory_total = directory_total.saturating_add(metadata.len());
-                if directory == root {
-                    break;
-                }
-                parent = directory.parent().map(Path::to_path_buf);
-            }
+            if let Some(parent) = entry.path().parent() { let total = directory_bytes.entry(parent.to_path_buf()).or_insert(0); *total = total.saturating_add(metadata.len()); }
             let modified = metadata
                 .modified()
                 .ok()
@@ -241,19 +285,18 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, paused
                 modified,
                 extension,
             };
-            if result.size > 0 {
+            if !skip_duplicates && result.size >= min_duplicate_size {
                 by_size.entry(result.size).or_default().push(result.clone());
             }
-            largest.push(result);
-            largest.sort_unstable_by(|a, b| b.size.cmp(&a.size));
-            largest.truncate(50);
-            if files % 250 == 0 {
+            retain_largest(&mut largest, result, 50);
+            if files % 2_000 == 0 {
                 emit(&format!(
                     r#"{{"type":"progress","files":{files},"bytes":{bytes},"errors":{errors}}}"#
                 ));
             }
         }
     }
+    largest.sort_unstable_by(|a, b| b.size.cmp(&a.size));
     for file in largest {
         emit(&format!(
             r#"{{"type":"file","path":"{}","size":{},"modifiedAt":{},"extension":"{}"}}"#,
@@ -268,6 +311,23 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, paused
             r#"{{"type":"extension","extension":"{}","size":{size}}}"#,
             escape_json(&extension)
         ));
+    }
+    let direct_directories = directory_bytes.keys().cloned().collect::<Vec<_>>();
+    for directory in direct_directories {
+        let mut parent = directory.parent().map(Path::to_path_buf);
+        while let Some(ancestor) = parent {
+            if !ancestor.starts_with(&root) { break; }
+            directory_bytes.entry(ancestor.clone()).or_insert(0);
+            if ancestor == root { break; }
+            parent = ancestor.parent().map(Path::to_path_buf);
+        }
+    }
+    let mut rollup_order = directory_bytes.keys().cloned().collect::<Vec<_>>();
+    rollup_order.sort_unstable_by_key(|path| std::cmp::Reverse(path.components().count()));
+    for directory in rollup_order {
+        if directory == root { continue; }
+        let size = *directory_bytes.get(&directory).unwrap_or(&0);
+        if let Some(parent) = directory.parent() { if let Some(total) = directory_bytes.get_mut(parent) { *total = total.saturating_add(size); } }
     }
     let mut directories = directory_bytes.into_iter().collect::<Vec<_>>();
     directories.sort_unstable_by(|a, b| b.1.cmp(&a.1));
@@ -365,8 +425,12 @@ fn main() {
         return;
     }
     let root = args.next();
+    if command.as_deref() == Some(std::ffi::OsStr::new("usn-info")) {
+        if let Some(root) = root { if let Err(error) = emit_usn_info(Path::new(&root)) { eprintln!("{error}"); std::process::exit(1); } return; }
+    }
     let mut exclusions = HashSet::new();
     let mut skip_duplicates = false;
+    let mut min_duplicate_size = 4_096_u64;
     while let Some(argument) = args.next() {
         if argument == std::ffi::OsStr::new("--exclude") {
             if let Some(value) = args.next() {
@@ -374,6 +438,8 @@ fn main() {
             }
         } else if argument == std::ffi::OsStr::new("--skip-duplicates") {
             skip_duplicates = true;
+        } else if argument == std::ffi::OsStr::new("--min-duplicate-size") {
+            if let Some(value) = args.next() { min_duplicate_size = value.to_string_lossy().parse().unwrap_or(4_096); }
         }
     }
     if command.as_deref() != Some(std::ffi::OsStr::new("scan")) || root.is_none() {
@@ -391,7 +457,7 @@ fn main() {
             }
         }
     });
-    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions, skip_duplicates, paused) {
+    if let Err(error) = scan(Path::new(&root.unwrap()), &exclusions, skip_duplicates, min_duplicate_size, paused) {
         eprintln!("{error}");
         std::process::exit(1);
     }

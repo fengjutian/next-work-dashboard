@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+﻿import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
 // ── 提示词 ──
 export const prompts = sqliteTable('prompts', {
@@ -224,3 +224,60 @@ export const skillFiles = sqliteTable("skill_files", {
   path: text("path").notNull(),
   content: text("content").notNull().default(""),
 });
+
+// ── Network Observatory (nwd-net-probe) ──
+
+export const netProbeTargets = sqliteTable('net_probe_targets', {
+  id: text('id').primaryKey(),
+  target: text('target').notNull(),
+  probe: text('probe').notNull().default('icmp'),
+  intervalMs: integer('interval_ms').notNull().default(5000),
+  timeoutMs: integer('timeout_ms').notNull().default(3000),
+  optionsJson: text('options_json').notNull().default('{}'),
+  enabled: integer('enabled').notNull().default(1),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const netProbeResults = sqliteTable('net_probe_results', {
+  id: text('id').primaryKey(),
+  targetId: text('target_id').notNull(),
+  probe: text('probe').notNull(),
+  timestampMs: integer('timestamp_ms').notNull(),
+  success: integer('success').notNull(),
+  latencyMs: integer('latency_ms'),  // 0 = unknown; null = not measured
+  error: text('error'),
+  payloadJson: text('payload_json').notNull().default('{}'),
+});
+
+export const netProbeAlertRules = sqliteTable('net_probe_alert_rules', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  targetId: text('target_id'),  // null = applies to all targets
+  probe: text('probe'),  // null = applies to all probe kinds
+  metric: text('metric').notNull(),  // 'latency_p95' | 'loss_pct' | 'jitter' | 'status'
+  op: text('op').notNull(),  // '>' | '<' | '==' | '!='
+  threshold: integer('threshold').notNull(),  // ms (for latency/jitter) or 0-100 (for loss)
+  durationSec: integer('duration_sec').notNull().default(60),  // sustained for N seconds
+  enabled: integer('enabled').notNull().default(1),
+  notify: text('notify').notNull().default('desktop'),  // 'desktop' | 'silent'
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+import type { InferSelectModel } from 'drizzle-orm';
+export const netProbeIncidents = sqliteTable('net_probe_incidents', {
+  id: text('id').primaryKey(),
+  ruleId: text('rule_id').notNull(),
+  targetId: text('target_id').notNull(),
+  startedAt: integer('started_at').notNull(),
+  endedAt: integer('ended_at'),  // null = ongoing
+  peakMetric: integer('peak_metric').notNull(),
+  triggerMessage: text('trigger_message').notNull(),
+  acknowledged: integer('acknowledged').notNull().default(0),
+});
+// Row types for Network Observatory.
+export type NetProbeTargetRow = InferSelectModel<typeof netProbeTargets>;
+export type NetProbeResultRow = InferSelectModel<typeof netProbeResults>;
+export type NetProbeAlertRuleRow = InferSelectModel<typeof netProbeAlertRules>;
+export type NetProbeIncidentRow = InferSelectModel<typeof netProbeIncidents>;

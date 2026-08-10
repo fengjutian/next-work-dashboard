@@ -1,4 +1,4 @@
-export interface InjectPayload {
+﻿export interface InjectPayload {
   webviewId: number;
   text: string;
   inputSelector: string;
@@ -49,6 +49,7 @@ export interface DiskFilePreview {
   message?: string;
 }
 export interface DiskSpecialtyProbe { id: 'docker' | 'wsl' | 'ollama' | 'node' | 'rust' | 'java' | 'python' | 'android' | 'virtualization'; label: string; available: boolean; summary: string; details: string[]; }
+export interface DiskUsnInfo { supported: boolean; method?: 'native' | 'fsutil'; volume?: string; journalId?: number; firstUsn?: number; nextUsn?: number; lowestValidUsn?: number; maxUsn?: number; maximumSize?: number; allocationDelta?: number; error?: string; }
 
 // --- Network Observatory (nwd-net-probe) ---
 
@@ -316,8 +317,9 @@ export interface ElectronAPI {
     listDirectory: (rootPath: string, directoryPath?: string) => Promise<DiskDirectoryItem[]>;
     preview: (rootPath: string, filePath: string) => Promise<DiskFilePreview>;
     probeSpecialties: () => Promise<DiskSpecialtyProbe[]>;
+    usnInfo: (rootPath: string) => Promise<DiskUsnInfo>;
     runCleanup: (action: 'docker-build-cache' | 'npm-cache' | 'pnpm-store', rootPath?: string) => Promise<{ success: boolean; canceled?: boolean; output?: string }>;
-    start: (scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean }) => Promise<{ success: boolean }>;
+    start: (scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean; minDuplicateSize?: number }) => Promise<{ success: boolean }>;
     cancel: (scanId: string) => Promise<boolean>;
     pause: (scanId: string) => Promise<boolean>;
     resume: (scanId: string) => Promise<boolean>;
@@ -329,16 +331,19 @@ export interface ElectronAPI {
   netProbe: {
     start: () => Promise<{ ready: boolean; version: string | null }>;
     state: () => Promise<NetProbeState>;
-    results: () => Promise<Array<Extract<NetProbeEvent, { type: 'probe_result' }>>>;
-    addTarget: (target: {
-      id?: string;
-      target: string;
-      probe?: string;
-      intervalMs?: number;
-      timeoutMs?: number;
-    }) => Promise<{ id: string }>;
-    removeTarget: (id: string) => Promise<{ removed: boolean }>;
     systemInfo: () => Promise<{ hostname: string; platform: string; arch: string; cpus: number }>;
+    listTargets: () => Promise<import('./net-probe-schema').NetProbeTarget[]>;
+    addTarget: (input: import('./net-probe-schema').NetProbeTargetInput) => Promise<import('./net-probe-schema').NetProbeTarget>;
+    removeTarget: (id: string) => Promise<{ removed: boolean }>;
+    updateTarget: (id: string, patch: Partial<import('./net-probe-schema').NetProbeTargetInput>) => Promise<import('./net-probe-schema').NetProbeTarget | null>;
+    setTargetEnabled: (id: string, enabled: boolean) => Promise<import('./net-probe-schema').NetProbeTarget | null>;
+    listResults: (opts?: { targetId?: string; sinceMs?: number; untilMs?: number; limit?: number }) => Promise<import('./net-probe-schema').NetProbeResult[]>;
+    listAlertRules: () => Promise<import('./net-probe-schema').NetProbeAlertRule[]>;
+    addAlertRule: (input: Omit<import('./net-probe-schema').NetProbeAlertRule, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => Promise<import('./net-probe-schema').NetProbeAlertRule>;
+    removeAlertRule: (id: string) => Promise<boolean>;
+    listIncidents: (opts?: { openOnly?: boolean; limit?: number }) => Promise<import('./net-probe-schema').NetProbeIncident[]>;
+    closeIncident: (id: string) => Promise<boolean>;
+    openIncidentsSnapshot: () => Promise<import('./net-probe-schema').NetProbeIncident[]>;
     onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
   };
   shell: {

@@ -178,6 +178,12 @@ export function setupDiskSpaceIPC(): void {
     probes.find((probe) => probe.id === 'virtualization')?.details.push(...virtualBoxDisks, ...vmwareDisks);
     return probes;
   });
+  ipcMain.handle('disk-space:usn-info', (_event, rootPath: string) => {
+    if (typeof rootPath !== 'string' || !rootPath) return { supported: false, error: '未选择扫描目录' };
+    const result = spawnSync(scannerPath(), ['usn-info', rootPath], { windowsHide: true, encoding: 'utf8', timeout: 10_000 });
+    if (result.status !== 0) return { supported: false, error: result.stderr.trim() || '当前卷不支持 USN Journal' };
+    try { return JSON.parse(result.stdout); } catch { return { supported: false, error: 'USN 响应格式无效' }; }
+  });
   ipcMain.handle('disk-space:run-cleanup', async (_event, action: string) => {
     const allowlist: Record<string, { command: string; args: string[]; title: string; detail: string }> = {
       'docker-build-cache': { command: 'docker', args: ['builder', 'prune', '-f'], title: '清理 Docker Build Cache', detail: '将调用 docker builder prune，仅清理未使用的构建缓存。' },
@@ -189,7 +195,7 @@ export function setupDiskSpaceIPC(): void {
     const confirmation = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options); if (confirmation.response !== 1) return { success: false, canceled: true };
     const result = await commandOutput(config.command, config.args); if (!result.available) throw new Error(result.output || '官方清理命令执行失败'); return { success: true, output: result.output };
   });
-  ipcMain.handle('disk-space:start', (event, scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean }) => {
+  ipcMain.handle('disk-space:start', (event, scanId: string, rootPath: string, options?: { exclusions?: string[]; skipDuplicates?: boolean; minDuplicateSize?: number }) => {
     if (!scanId || typeof rootPath !== 'string' || scans.has(scanId)) throw new Error('无效或重复的扫描任务');
     const canonicalRoot = fs.realpathSync(rootPath);
     if (!authorizedRoots.has(canonicalRoot)) throw new Error('目录未经过用户授权，请重新选择');
@@ -197,7 +203,8 @@ export function setupDiskSpaceIPC(): void {
     if (exclusions.length > 20 || exclusions.some((value) => typeof value !== 'string' || value.length < 1 || value.length > 64 || value === '.' || value === '..' || /[\\/\0]/.test(value))) {
       throw new Error('排除目录规则无效');
     }
-    const scannerArguments = ['scan', canonicalRoot, ...exclusions.flatMap((value) => ['--exclude', value]), ...(options?.skipDuplicates ? ['--skip-duplicates'] : [])];
+    const minDuplicateSize = Math.max(4_096, Math.min(1024 ** 3, Math.trunc(options?.minDuplicateSize ?? 4_096)));
+    const scannerArguments = ['scan', canonicalRoot, ...exclusions.flatMap((value) => ['--exclude', value]), ...(options?.skipDuplicates ? ['--skip-duplicates'] : []), '--min-duplicate-size', String(minDuplicateSize)];
     const child = spawn(scannerPath(), scannerArguments, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     if (!child.stdout || !child.stderr) throw new Error('无法连接 Rust 扫描器输出');
     scans.set(scanId, child);
