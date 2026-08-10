@@ -96,7 +96,8 @@ export interface ElectronAPI {
     keywordSearch: (request: { query: string; topK?: number; documentIds?: string[] }) => Promise<{ hits: RagWorkerKeywordHit[] }>;
     vectorSearch: (request: { vector: number[]; modelId: string; topK?: number }) => Promise<Array<{ id: string; distance: number }>>;
     fuseResults: (request: { lists: Array<{ ids: string[]; weight?: number }>; topK?: number; rankConstant?: number }) => Promise<{ hits: Array<{ chunkId: string; score: number; rank: number }> }>;
-    indexStatus: () => Promise<{ documents: number; chunks: number; pendingOutbox: number }>;
+    indexStatus: () => Promise<RagWorkerIndexStatus>;
+    retryFailed: (documentId?: string) => Promise<{ requeued: number }>;
     pendingOutbox: (limit?: number) => Promise<{ operations: RagWorkerOutboxOperation[] }>;
     completeOutbox: (id: number) => Promise<{ completed: boolean }>;
     failOutbox: (id: number, error: string) => Promise<{ failed: boolean }>;
@@ -288,6 +289,7 @@ export interface RagWorkerDocumentInput {
   parserVersion: string;
   chunkerVersion: string;
   embeddingIdentity: string;
+  force?: boolean;
   chunks: RagWorkerChunkInput[];
 }
 
@@ -307,6 +309,15 @@ export interface RagWorkerOutboxOperation {
   documentId?: string;
   payload: { content?: string; sectionTitle?: string; page?: number };
   retryCount: number;
+}
+
+export interface RagWorkerIndexStatus {
+  documents: number;
+  chunks: number;
+  pendingOutbox: number;
+  failedOutbox: number;
+  indexingDocuments: number;
+  failedDocuments: number;
 }
 
 export interface ConversationFile {

@@ -71,3 +71,21 @@ export async function embedQuestion(question: string, memoryConfig: MemoryConfig
   if (!vector) throw new Error('问题向量化失败');
   return vector;
 }
+
+export async function reembedDocumentChunks(
+  chunks: DocumentChunk[],
+  memoryConfig: MemoryConfig,
+  requestedMode?: EmbeddingMode,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<{ chunks: DocumentChunk[]; embeddingMode: EmbeddingMode }> {
+  const rebuilt: DocumentChunk[] = [];
+  let embeddingMode = requestedMode;
+  for (let offset = 0; offset < chunks.length; offset += BATCH_SIZE) {
+    const batch = chunks.slice(offset, offset + BATCH_SIZE);
+    const embedded = await embed(batch.map((item) => `${item.sectionTitle}\n${item.content}`), memoryConfig, embeddingMode);
+    embeddingMode = embedded.mode;
+    batch.forEach((item, index) => rebuilt.push({ ...item, vector: embedded.vectors[index] }));
+    onProgress?.(Math.min(offset + batch.length, chunks.length), chunks.length);
+  }
+  return { chunks: rebuilt, embeddingMode: embeddingMode ?? 'hash-fallback' };
+}

@@ -59,6 +59,13 @@ export function setupRagWorkerIPC(): void {
     return ragWorkerClient.request('fuse_results', request);
   });
   ipcMain.handle('rag-worker:index-status', () => ragWorkerClient.request('get_status'));
+  ipcMain.handle('rag-worker:retry-failed', (_event, documentId?: string) => {
+    if (documentId !== undefined && (typeof documentId !== 'string' || !documentId || documentId.length > 1024)) throw new Error('INVALID_DOCUMENT_ID');
+    return ragWorkerClient.request('retry_failed', { documentId }).then((result) => {
+      triggerRagIndexSync();
+      return result;
+    });
+  });
   ipcMain.handle('rag-worker:pending-outbox', (_event, limit?: number) => ragWorkerClient.request('get_pending_outbox', { limit }));
   ipcMain.handle('rag-worker:complete-outbox', (_event, id: number) => ragWorkerClient.request('complete_outbox', { id }));
   ipcMain.handle('rag-worker:fail-outbox', (_event, id: number, error: string) => ragWorkerClient.request('fail_outbox', { id, error }));

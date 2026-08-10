@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Database, FileText, Loader2, PanelLeft, PanelRight, Send, Trash2, Upload } from '@/components/icons';
+import { Database, FileText, Loader2, PanelLeft, PanelRight, RefreshCw, Send, Trash2, Upload } from '@/components/icons';
+import type { RagWorkerIndexStatus } from '@/types/electron';
 import { dbDeleteDocumentKnowledge, dbLoadDocumentKnowledge, dbSaveDocumentKnowledge, dbTouchDocumentKnowledge, flushDbToDisk, isDbReady } from '@/db';
 import { createOpenAIProvider } from '@/core/llm';
 import { useStore } from '@/store';
 import { toast } from '@/components/Toast';
-import { indexDocument, embedQuestion } from './pipeline';
+import { indexDocument, embedQuestion, reembedDocumentChunks } from './pipeline';
 import type { EmbeddingMode } from './pipeline';
 import { buildRagContext, retrieve } from './retrieval';
 import { isSupportedDocument } from './parser';
@@ -24,10 +25,10 @@ function embeddingIdentity(mode: EmbeddingMode, memoryConfig: ReturnType<typeof 
   return 'hash-fallback:512:v1';
 }
 
-async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChunk[], modelId: string): Promise<void> {
+async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChunk[], modelId: string, force = false): Promise<boolean> {
   try {
     const status = await window.electronAPI.ragWorker.status();
-    if (!status.available) return;
+    if (!status.available) return false;
     await window.electronAPI.ragWorker.upsertDocument({
       id: document.id,
       name: document.name,
@@ -37,6 +38,7 @@ async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChu
       parserVersion: RAG_PARSER_VERSION,
       chunkerVersion: RAG_CHUNKER_VERSION,
       embeddingIdentity: modelId,
+      force,
       chunks: chunks.map((chunk, chunkIndex) => ({
         id: chunk.id,
         content: chunk.content,
@@ -46,8 +48,10 @@ async function syncRustRagDocument(document: ParsedDocument, chunks: DocumentChu
         vector: chunk.vector,
       })),
     });
+    return true;
   } catch (error) {
     console.warn('[DocumentKnowledge] Rust RAG shadow indexing unavailable; using legacy index.', error);
+    return false;
   }
 }
 
@@ -94,6 +98,8 @@ export const DocumentKnowledgePanel: React.FC = () => {
   const [status, setStatus] = useState('上传 PDF 或 Office 文件开始');
   const [progress, setProgress] = useState(0);
   const [embeddingMode, setEmbeddingMode] = useState<EmbeddingMode>();
+  const [indexStatus, setIndexStatus] = useState<RagWorkerIndexStatus>();
+  const [indexAction, setIndexAction] = useState<'retry' | 'rebuild'>();
   const [leftCollapsed, setLeftCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem(PANE_PREFS_KEY) || '{}').left === true; } catch { return false; } });
   const [rightCollapsed, setRightCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem(PANE_PREFS_KEY) || '{}').right === true; } catch { return false; } });
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,6 +109,15 @@ export const DocumentKnowledgePanel: React.FC = () => {
   useEffect(() => { documentsRef.current = documents; }, [documents]);
   useEffect(() => () => { documentsRef.current.forEach((item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl)); }, []);
   useEffect(() => { localStorage.setItem(PANE_PREFS_KEY, JSON.stringify({ left: leftCollapsed, right: rightCollapsed })); }, [leftCollapsed, rightCollapsed]);
+
+  const refreshIndexStatus = useCallback(async () => {
+    try { setIndexStatus(await window.electronAPI.ragWorker.indexStatus()); } catch { setIndexStatus(undefined); }
+  }, []);
+  useEffect(() => {
+    void refreshIndexStatus();
+    const timer = window.setInterval((): void => { void refreshIndexStatus(); }, 3_000);
+    return () => window.clearInterval(timer);
+  }, [refreshIndexStatus]);
 
   useEffect(() => {
     let attempts = 0;
@@ -171,6 +186,7 @@ export const DocumentKnowledgePanel: React.FC = () => {
           await flushDbToDisk();
         }
         await syncRustRagDocument(result.document, result.chunks, embeddingIdentity(result.embeddingMode, memoryConfig));
+        void refreshIndexStatus();
       }
       setStage('ready'); setStatus(`已建立索引：${accepted.length} 个文件`); setProgress(100);
     } catch (error) {
@@ -178,7 +194,51 @@ export const DocumentKnowledgePanel: React.FC = () => {
       setStage('error'); setStatus(message);
       toast.error(`文档处理失败：${message}`, { duration: 7000 });
     }
-  }, [embeddingMode, memoryConfig]);
+  }, [embeddingMode, memoryConfig, refreshIndexStatus]);
+
+  const retryFailedIndex = useCallback(async () => {
+    setIndexAction('retry');
+    try {
+      const result = await window.electronAPI.ragWorker.retryFailed();
+      toast.success(`已重新排队 ${result.requeued} 个索引操作`);
+      await refreshIndexStatus();
+    } catch (error) {
+      toast.error(`索引重试失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally { setIndexAction(undefined); }
+  }, [refreshIndexStatus]);
+
+  const rebuildAllIndexes = useCallback(async () => {
+    if (!embeddingMode || !documents.length) return;
+    setIndexAction('rebuild');
+    setStage('indexing'); setStatus('正在重建本地检索索引');
+    let completed = 0;
+    try {
+      let activeMode: EmbeddingMode | undefined;
+      const rebuiltChunks: DocumentChunk[] = [];
+      for (const document of documents) {
+        const documentChunks = chunks.filter((chunk) => chunk.documentId === document.id);
+        const rebuilt = await reembedDocumentChunks(documentChunks, memoryConfig, activeMode, (done, total) => {
+          setStatus(`${document.name} · 向量化 ${done}/${total}`);
+        });
+        activeMode = rebuilt.embeddingMode;
+        rebuiltChunks.push(...rebuilt.chunks);
+        if (isDbReady()) {
+          dbSaveDocumentKnowledge({ id: document.id, name: document.name, kind: document.kind, size: document.size,
+            sections: document.sections, plainText: document.plainText, chunks: rebuilt.chunks,
+            embeddingMode: rebuilt.embeddingMode, cachedFilePath: document.cachedFilePath,
+            createdAt: document.createdAt, lastViewedAt: Date.now() });
+        }
+        if (await syncRustRagDocument(document, rebuilt.chunks, embeddingIdentity(rebuilt.embeddingMode, memoryConfig), true)) completed += 1;
+      }
+      setChunks(rebuiltChunks);
+      if (activeMode) setEmbeddingMode(activeMode);
+      if (isDbReady()) await flushDbToDisk();
+      setStage('ready'); setStatus(`已提交 ${completed} 个文档重建`);
+      await refreshIndexStatus();
+    } catch (error) {
+      setStage('error'); setStatus(error instanceof Error ? error.message : String(error));
+    } finally { setIndexAction(undefined); }
+  }, [chunks, documents, embeddingMode, memoryConfig, refreshIndexStatus]);
 
   const ask = useCallback(async () => {
     const content = question.trim();
@@ -248,6 +308,14 @@ export const DocumentKnowledgePanel: React.FC = () => {
       </div>
       <div className="border-t p-3 text-[11px] text-muted-foreground"><div className="flex items-center gap-1"><Database className="h-3.5 w-3.5" />{status}</div>
         {embeddingMode && <div className="mt-1">索引模式：{embeddingMode === 'remote-semantic' ? '远程语义' : embeddingMode === 'local-semantic' ? '本地语义' : '关键词降级'}</div>}
+        {indexStatus && <div className="mt-2 rounded border bg-muted/30 p-2 space-y-1">
+          <div>{indexStatus.documents} 文档 · {indexStatus.chunks} 片段</div>
+          <div className={indexStatus.failedOutbox ? 'text-destructive' : ''}>待同步 {indexStatus.pendingOutbox} · 失败 {indexStatus.failedOutbox}</div>
+          <div className="flex gap-1 pt-1">
+            {indexStatus.failedOutbox > 0 && <button type="button" className="rounded border px-2 py-1 hover:bg-accent disabled:opacity-50" disabled={!!indexAction} onClick={() => void retryFailedIndex()}><RefreshCw className={`mr-1 inline h-3 w-3 ${indexAction === 'retry' ? 'animate-spin' : ''}`} />重试</button>}
+            <button type="button" className="rounded border px-2 py-1 hover:bg-accent disabled:opacity-50" disabled={!!indexAction || !documents.length} onClick={() => void rebuildAllIndexes()}><RefreshCw className={`mr-1 inline h-3 w-3 ${indexAction === 'rebuild' ? 'animate-spin' : ''}`} />重建</button>
+          </div>
+        </div>}
         {stage === 'indexing' && <div className="mt-2 h-1 bg-muted rounded"><div className="h-full bg-primary rounded" style={{ width: `${progress}%` }} /></div>}
       </div>
       </>}

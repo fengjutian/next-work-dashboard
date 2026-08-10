@@ -142,6 +142,7 @@ const electronAPI: ElectronAPI = {
     vectorSearch: (request) => ipcRenderer.invoke('rag-worker:vector-search', request),
     fuseResults: (request) => ipcRenderer.invoke('rag-worker:fuse-results', request),
     indexStatus: () => ipcRenderer.invoke('rag-worker:index-status'),
+    retryFailed: (documentId) => ipcRenderer.invoke('rag-worker:retry-failed', documentId),
     pendingOutbox: (limit) => ipcRenderer.invoke('rag-worker:pending-outbox', limit),
     completeOutbox: (id) => ipcRenderer.invoke('rag-worker:complete-outbox', id),
     failOutbox: (id, error) => ipcRenderer.invoke('rag-worker:fail-outbox', id, error),

@@ -46,6 +46,8 @@ struct DocumentInput {
     chunker_version: String,
     embedding_identity: String,
     #[serde(default)]
+    force: bool,
+    #[serde(default)]
     chunks: Vec<ChunkInput>,
 }
 
@@ -248,23 +250,25 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
         params![input.id, document_hash, input.parser_version, input.chunker_version, input.embedding_identity],
         |row| Ok((row.get::<_, bool>(0)?, row.get::<_, String>(1)?)),
     ).optional().map_err(|error| error.to_string())?;
-    if let Some((true, status)) = existing {
-        let requeued = status == "index_error";
-        if requeued {
-            tx.execute(
+    if !input.force {
+        if let Some((true, status)) = existing {
+            let requeued = status == "index_error";
+            if requeued {
+                tx.execute(
                 "UPDATE index_outbox SET status='pending', retry_count=0, error_message=NULL, updated_at=?2
                  WHERE document_id=?1 AND status='failed'",
                 params![input.id, now],
             ).map_err(|error| error.to_string())?;
-            tx.execute(
+                tx.execute(
                 "UPDATE documents SET status='indexing', error_message=NULL, updated_at=?2 WHERE id=?1",
                 params![input.id, now],
             ).map_err(|error| error.to_string())?;
+            }
+            tx.commit().map_err(|error| error.to_string())?;
+            return Ok(
+                json!({ "documentId": input.id, "unchanged": true, "requeued": requeued, "jobId": Value::Null }),
+            );
         }
-        tx.commit().map_err(|error| error.to_string())?;
-        return Ok(
-            json!({ "documentId": input.id, "unchanged": true, "requeued": requeued, "jobId": Value::Null }),
-        );
     }
 
     tx.execute(
@@ -343,7 +347,7 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
         .map_err(|error| error.to_string())?;
     }
     tx.execute(
-        "UPDATE index_jobs SET status='completed', stage='saved', completed=total, updated_at=?2 WHERE id=?1",
+        "UPDATE index_jobs SET status='running', stage='vector_sync', completed=0, updated_at=?2 WHERE id=?1",
         params![job_id, now_ms()],
     ).map_err(|error| error.to_string())?;
     tx.commit().map_err(|error| error.to_string())?;
@@ -484,10 +488,24 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
             if let Some(document_id) = document_id {
                 connection.execute(
                     "UPDATE documents SET status='ready', updated_at=?2 WHERE id=?1 AND NOT EXISTS (
-                       SELECT 1 FROM index_outbox WHERE document_id=?1 AND status='pending'
+                       SELECT 1 FROM index_outbox WHERE document_id=?1 AND status IN ('pending', 'failed')
                      )",
                     params![document_id, now_ms()],
                 ).map_err(|error| error.to_string())?;
+                let pending: i64 = connection.query_row(
+                    "SELECT count(*) FROM index_outbox WHERE document_id=?1 AND status='pending' AND operation='upsert_vector'",
+                    params![document_id],
+                    |row| row.get(0),
+                ).map_err(|error| error.to_string())?;
+                connection
+                    .execute(
+                        "UPDATE index_jobs SET completed=MAX(0, total-?2),
+                     status=CASE WHEN ?2=0 THEN 'completed' ELSE 'running' END,
+                     stage=CASE WHEN ?2=0 THEN 'ready' ELSE 'vector_sync' END, updated_at=?3
+                     WHERE document_id=?1 AND operation='upsert' AND status='running'",
+                        params![document_id, pending, now_ms()],
+                    )
+                    .map_err(|error| error.to_string())?;
             }
             Ok(json!({ "completed": true }))
         }
@@ -510,14 +528,53 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
                     params![id, error, now_ms()],
                 )
                 .map_err(|error| error.to_string())?;
-            connection
-                .execute(
-                    "UPDATE documents SET status='index_error', error_message=?2, updated_at=?3
-                 WHERE id=(SELECT document_id FROM index_outbox WHERE id=?1)",
-                    params![id, error, now_ms()],
+            let failed = connection
+                .query_row(
+                    "SELECT status='failed' FROM index_outbox WHERE id=?1",
+                    params![id],
+                    |row| row.get::<_, bool>(0),
                 )
-                .map_err(|error| error.to_string())?;
+                .optional()
+                .map_err(|error| error.to_string())?
+                .unwrap_or(false);
+            if failed {
+                connection
+                    .execute(
+                        "UPDATE documents SET status='index_error', error_message=?2, updated_at=?3
+                     WHERE id=(SELECT document_id FROM index_outbox WHERE id=?1)",
+                        params![id, error, now_ms()],
+                    )
+                    .map_err(|error| error.to_string())?;
+                connection.execute(
+                    "UPDATE index_jobs SET status='failed', stage='vector_sync', error_message=?2, updated_at=?3
+                     WHERE document_id=(SELECT document_id FROM index_outbox WHERE id=?1) AND status='running'",
+                    params![id, error, now_ms()],
+                ).map_err(|error| error.to_string())?;
+            }
             Ok(json!({ "failed": true }))
+        }
+        "retry_failed" => {
+            let document_id = request.params.get("documentId").and_then(Value::as_str);
+            let changed = if let Some(document_id) = document_id {
+                connection.execute(
+                    "UPDATE index_outbox SET status='pending', retry_count=0, error_message=NULL, updated_at=?2
+                     WHERE document_id=?1 AND status='failed'",
+                    params![document_id, now_ms()],
+                ).map_err(|error| error.to_string())?
+            } else {
+                connection.execute(
+                    "UPDATE index_outbox SET status='pending', retry_count=0, error_message=NULL, updated_at=?1 WHERE status='failed'",
+                    params![now_ms()],
+                ).map_err(|error| error.to_string())?
+            };
+            if let Some(document_id) = document_id {
+                connection.execute("UPDATE documents SET status='indexing', error_message=NULL, updated_at=?2 WHERE id=?1", params![document_id, now_ms()]).map_err(|error| error.to_string())?;
+                connection.execute("UPDATE index_jobs SET status='running', error_message=NULL, updated_at=?2 WHERE document_id=?1 AND status='failed'", params![document_id, now_ms()]).map_err(|error| error.to_string())?;
+            } else {
+                connection.execute("UPDATE documents SET status='indexing', error_message=NULL, updated_at=?1 WHERE status='index_error'", params![now_ms()]).map_err(|error| error.to_string())?;
+                connection.execute("UPDATE index_jobs SET status='running', error_message=NULL, updated_at=?1 WHERE status='failed'", params![now_ms()]).map_err(|error| error.to_string())?;
+            }
+            Ok(json!({ "requeued": changed }))
         }
         "get_status" => {
             let documents: i64 = connection
@@ -533,7 +590,32 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
                     |row| row.get(0),
                 )
                 .map_err(|error| error.to_string())?;
-            Ok(json!({ "documents": documents, "chunks": chunks, "pendingOutbox": pending }))
+            let failed_outbox: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM index_outbox WHERE status='failed'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let indexing_documents: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM documents WHERE status='indexing'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let failed_documents: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM documents WHERE status='index_error'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(
+                json!({ "documents": documents, "chunks": chunks, "pendingOutbox": pending,
+                "failedOutbox": failed_outbox, "indexingDocuments": indexing_documents,
+                "failedDocuments": failed_documents }),
+            )
         }
         "check_integrity" => {
             let result: String = connection
@@ -624,6 +706,7 @@ mod tests {
                 parser_version: "pdfjs-1".into(),
                 chunker_version: "char-1".into(),
                 embedding_identity: "local:test".into(),
+                force: false,
                 chunks: vec![ChunkInput {
                     id: "chunk-1".into(),
                     content: "refund policy and support".into(),
@@ -667,6 +750,29 @@ mod tests {
         let payload: Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(payload["modelId"], "local:test");
         assert_eq!(payload["vector"][0], 1.0);
+        dispatch(
+            &mut connection,
+            &Request {
+                id: json!(2),
+                method: "complete_outbox".into(),
+                params: json!({ "id": 1 }),
+            },
+        )
+        .unwrap();
+        let state: String = connection
+            .query_row("SELECT status FROM documents WHERE id='doc-1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let job: String = connection
+            .query_row(
+                "SELECT status FROM index_jobs WHERE document_id='doc-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "ready");
+        assert_eq!(job, "completed");
     }
 
     #[test]
