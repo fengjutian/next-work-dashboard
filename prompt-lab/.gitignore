@@ -93,7 +93,9 @@ out/
 
 dist/
 native/disk-scanner/target*/
+native/rag-worker/target*/
 resources/disk-scanner/
+resources/rag-worker/
 
 # Project analysis
 analysis/

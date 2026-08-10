@@ -98,6 +98,56 @@ fn hash_text(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }
 
+fn cjk_bigrams(value: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut run = Vec::new();
+    let flush = |run: &mut Vec<char>, result: &mut Vec<String>| {
+        if run.len() == 1 {
+            result.push(run[0].to_string());
+        } else {
+            result.extend(run.windows(2).map(|pair| pair.iter().collect()));
+        }
+        run.clear();
+    };
+    for character in value.chars() {
+        if matches!(character as u32, 0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff) {
+            run.push(character);
+        } else if !run.is_empty() {
+            flush(&mut run, &mut result);
+        }
+    }
+    if !run.is_empty() {
+        flush(&mut run, &mut result);
+    }
+    result
+}
+
+fn searchable_text(value: &str) -> String {
+    let bigrams = cjk_bigrams(value);
+    if bigrams.is_empty() {
+        value.to_owned()
+    } else {
+        format!("{value} {}", bigrams.join(" "))
+    }
+}
+
+fn fts_query(value: &str) -> String {
+    let mut terms = value
+        .split_whitespace()
+        .map(|term| term.trim_matches(|character: char| !character.is_alphanumeric()))
+        .filter(|term| !term.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    terms.extend(cjk_bigrams(value));
+    terms.sort();
+    terms.dedup();
+    terms
+        .into_iter()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
 fn migrate(connection: &Connection) -> rusqlite::Result<()> {
     connection.execute_batch(
         "PRAGMA foreign_keys = ON;
@@ -235,7 +285,12 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
         ).map_err(|error| error.to_string())?;
         tx.execute(
             "INSERT INTO chunks_fts(chunk_id, document_id, title, content) VALUES(?1, ?2, ?3, ?4)",
-            params![chunk.id, input.id, chunk.section_title, chunk.content],
+            params![
+                chunk.id,
+                input.id,
+                chunk.section_title,
+                searchable_text(&chunk.content)
+            ],
         )
         .map_err(|error| error.to_string())?;
         queue_outbox(&tx, "upsert_vector", Some(&chunk.id), &input.id,
@@ -253,7 +308,7 @@ fn upsert_document(connection: &mut Connection, input: DocumentInput) -> Result<
 }
 
 fn keyword_search(connection: &Connection, input: KeywordSearchInput) -> Result<Value, String> {
-    let query = input.query.trim();
+    let query = fts_query(input.query.trim());
     if query.is_empty() {
         return Ok(json!({ "hits": [] }));
     }
@@ -369,7 +424,24 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
                 .get("id")
                 .and_then(Value::as_i64)
                 .ok_or("id is required")?;
+            let document_id: Option<String> = connection
+                .query_row(
+                    "SELECT document_id FROM index_outbox WHERE id=?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+                .flatten();
             connection.execute("UPDATE index_outbox SET status='completed', error_message=NULL, updated_at=?2 WHERE id=?1", params![id, now_ms()]).map_err(|error| error.to_string())?;
+            if let Some(document_id) = document_id {
+                connection.execute(
+                    "UPDATE documents SET status='ready', updated_at=?2 WHERE id=?1 AND NOT EXISTS (
+                       SELECT 1 FROM index_outbox WHERE document_id=?1 AND status='pending'
+                     )",
+                    params![document_id, now_ms()],
+                ).map_err(|error| error.to_string())?;
+            }
             Ok(json!({ "completed": true }))
         }
         "fail_outbox" => {
@@ -384,6 +456,13 @@ fn dispatch(connection: &mut Connection, request: &Request) -> Result<Value, Str
                 .and_then(Value::as_str)
                 .unwrap_or("INDEX_OPERATION_FAILED");
             connection.execute("UPDATE index_outbox SET retry_count=retry_count+1, error_message=?2, updated_at=?3 WHERE id=?1", params![id, error, now_ms()]).map_err(|error| error.to_string())?;
+            connection
+                .execute(
+                    "UPDATE documents SET status='index_error', error_message=?2, updated_at=?3
+                 WHERE id=(SELECT document_id FROM index_outbox WHERE id=?1)",
+                    params![id, error, now_ms()],
+                )
+                .map_err(|error| error.to_string())?;
             Ok(json!({ "failed": true }))
         }
         "get_status" => {
@@ -541,5 +620,49 @@ mod tests {
             rank_constant: Some(60.0),
         });
         assert_eq!(result["hits"][0]["chunkId"], "b");
+    }
+
+    #[test]
+    fn creates_cjk_bigram_queries() {
+        let query = fts_query("如何申请退款？");
+        assert!(query.contains("\"退款\""));
+        let searchable = searchable_text("退款流程");
+        assert!(searchable.contains("退款"));
+        assert!(searchable.contains("流程"));
+    }
+
+    #[test]
+    fn searches_cjk_by_shared_bigrams() {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate(&connection).unwrap();
+        connection.execute(
+            "INSERT INTO chunks(id, document_id, chunk_index, content, content_hash, created_at)
+             VALUES('chunk-zh', 'doc-zh', 0, '退款流程与售后政策', 'hash', 1)",
+            [],
+        ).unwrap_err();
+        connection.execute(
+            "INSERT INTO documents(id, name, kind, file_size, content_hash, parser_version, chunker_version, status, created_at, updated_at)
+             VALUES('doc-zh', 'policy', 'md', 1, 'hash', 'v1', 'v1', 'ready', 1, 1)",
+            [],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO chunks(id, document_id, chunk_index, content, content_hash, created_at)
+             VALUES('chunk-zh', 'doc-zh', 0, '退款流程与售后政策', 'hash', 1)",
+            [],
+        ).unwrap();
+        connection.execute(
+            "INSERT INTO chunks_fts(chunk_id, document_id, title, content) VALUES('chunk-zh', 'doc-zh', '', ?1)",
+            params![searchable_text("退款流程与售后政策")],
+        ).unwrap();
+        let found = keyword_search(
+            &connection,
+            KeywordSearchInput {
+                query: "如何申请退款？".into(),
+                top_k: Some(5),
+                document_ids: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(found["hits"][0]["chunkId"], "chunk-zh");
     }
 }
