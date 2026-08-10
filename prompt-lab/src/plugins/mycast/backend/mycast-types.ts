@@ -9,6 +9,8 @@ export interface MyCastState {
   httpPort: number | null;
   wsPort: number | null;
   bindAddr: string | null;
+  lanAddr: string | null;
+  lanAddrs: string[] | null;
   mdnsEnabled: boolean | null;
   version: string | null;
   pid: number | null;
@@ -40,7 +42,7 @@ export interface TransferInfo {
 }
 
 export type MyCastEvent =
-  | { type: 'ready'; deviceId: string; deviceName: string; platform: string; httpPort: number; wsPort: number; mdnsEnabled: boolean; version: string; bindAddr: string }
+  | { type: 'ready'; deviceId: string; deviceName: string; platform: string; httpPort: number; wsPort: number; mdnsEnabled: boolean; version: string; bindAddr: string; lanAddr: string; lanAddrs: string[] }
   | { type: 'phone.hello'; deviceId: string; deviceName: string; platform: string }
   | { type: 'phone.pair'; deviceId: string; deviceName: string; platform: string; tokenPrefix: string }
   | { type: 'session.created'; sessionId: string; phoneDeviceId: string; kind: SessionKind }

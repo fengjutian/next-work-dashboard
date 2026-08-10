@@ -15,6 +15,30 @@ use crate::signaling::SignalingFrame;
 use crate::state::SharedState;
 // (Html / TransferStatus intentionally not imported here.)
 
+fn build_daemon_info(cfg: &Config) -> DaemonInfo {
+    let lan_addrs = crate::security::enumerate_lan_addrs();
+    // Pick the first non-loopback, non-unspecified IPv4 as the canonical
+    // mobile-visible address. Fall back to whatever's available.
+    let lan_addr = lan_addrs
+        .iter()
+        .find(|a| a.is_ipv4() && !a.is_loopback() && !a.is_unspecified())
+        .map(|a| a.to_string())
+        .or_else(|| lan_addrs.first().map(|a| a.to_string()))
+        .unwrap_or_else(|| cfg.bind_addr.to_string());
+    DaemonInfo {
+        device_id: cfg.device_id.clone(),
+        device_name: cfg.device_name.clone(),
+        platform: cfg.platform.clone(),
+        bind_addr: cfg.bind_addr.to_string(),
+        http_port: cfg.http_port,
+        ws_port: cfg.ws_port,
+        mdns_enabled: cfg.mdns_enabled,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        lan_addr,
+        lan_addrs: lan_addrs.iter().map(|a| a.to_string()).collect(),
+    }
+}
+
 pub async fn run() -> anyhow::Result<()> {
     let cfg = Arc::new(Config::defaults());
     let shared = Arc::new(SharedState::new());
@@ -76,16 +100,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     if started {
         tracing::info!(target: "mycast.daemon", "services booted");
-        let info = DaemonInfo {
-            device_id: cfg.device_id.clone(),
-            device_name: cfg.device_name.clone(),
-            platform: cfg.platform.clone(),
-            bind_addr: cfg.bind_addr.to_string(),
-            http_port: cfg.http_port,
-            ws_port: cfg.ws_port,
-            mdns_enabled: cfg.mdns_enabled,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-        };
+        let info = build_daemon_info(&cfg);
         let _ = event_tx.send(Event::new("ready", serde_json::to_value(&info).unwrap_or_default()));
     } else {
         let _ = event_tx.send(Event::new("error", serde_json::json!({ "message": "boot failed" })));
@@ -186,16 +201,7 @@ async fn dispatch_control(cfg: &Arc<Config>, shared: &Arc<SharedState>, cmd: ser
     let id = req.id;
     match req.kind.as_str() {
         "state" => {
-            let info = DaemonInfo {
-                device_id: cfg.device_id.clone(),
-                device_name: cfg.device_name.clone(),
-                platform: cfg.platform.clone(),
-                bind_addr: cfg.bind_addr.to_string(),
-                http_port: cfg.http_port,
-                ws_port: cfg.ws_port,
-                mdns_enabled: cfg.mdns_enabled,
-                version: env!("CARGO_PKG_VERSION").to_string(),
-            };
+            let info = build_daemon_info(cfg);
             let resp = Response::ok(id, "state", serde_json::to_value(&info).unwrap_or_default());
             write_response(stdout, &resp).await;
         }

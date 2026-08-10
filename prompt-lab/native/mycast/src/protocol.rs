@@ -74,4 +74,8 @@ pub struct DaemonInfo {
     pub ws_port: u16,
     pub mdns_enabled: bool,
     pub version: String,
+    /// Best routable LAN IPv4 address (or host's bind addr if none found).
+    pub lan_addr: String,
+    /// All discovered LAN addresses (IPv4 + IPv6, best-effort).
+    pub lan_addrs: Vec<String>,
 }

@@ -23,7 +23,7 @@ import readline from 'node:readline';
 const DAEMON_START_TIMEOUT_MS = 8_000;
 
 export type MyCastEvent =
-  | { type: 'ready'; deviceId: string; deviceName: string; platform: string; httpPort: number; wsPort: number; mdnsEnabled: boolean; version: string; bindAddr: string }
+  | { type: 'ready'; deviceId: string; deviceName: string; platform: string; httpPort: number; wsPort: number; mdnsEnabled: boolean; version: string; bindAddr: string; lanAddr: string; lanAddrs: string[] }
   | { type: 'phone.hello'; deviceId: string; deviceName: string; platform: string }
   | { type: 'phone.pair'; deviceId: string; deviceName: string; platform: string; tokenPrefix: string }
   | { type: 'session.created'; sessionId: string; phoneDeviceId: string; kind: 'screen' | 'file' | 'discovery' }
@@ -42,6 +42,8 @@ export interface MyCastState {
   httpPort: number | null;
   wsPort: number | null;
   bindAddr: string | null;
+  lanAddr: string | null;
+  lanAddrs: string[] | null;
   mdnsEnabled: boolean | null;
   version: string | null;
   pid: number | null;
@@ -57,6 +59,8 @@ const state: MyCastState = {
   httpPort: null,
   wsPort: null,
   bindAddr: null,
+  lanAddr: null,
+  lanAddrs: null,
   mdnsEnabled: null,
   version: null,
   pid: null,
@@ -198,6 +202,8 @@ export async function startDaemon(): Promise<MyCastState> {
         state.httpPort = Number(obj.http_port ?? 0);
         state.wsPort = Number(obj.ws_port ?? 0);
         state.bindAddr = String(obj.bind_addr ?? '');
+        state.lanAddr = String(obj.lan_addr ?? '');
+        state.lanAddrs = Array.isArray(obj.lan_addrs) ? (obj.lan_addrs as unknown[]).map((v) => String(v)) : null;
         state.mdnsEnabled = Boolean(obj.mdns_enabled);
         state.version = String(obj.version ?? '');
         restartAttempts = 0;
@@ -211,6 +217,8 @@ export async function startDaemon(): Promise<MyCastState> {
           mdnsEnabled: state.mdnsEnabled!,
           version: state.version!,
           bindAddr: state.bindAddr!,
+          lanAddr: state.lanAddr!,
+          lanAddrs: state.lanAddrs ?? [],
         };
         broadcast(event);
         if (pendingReady) {

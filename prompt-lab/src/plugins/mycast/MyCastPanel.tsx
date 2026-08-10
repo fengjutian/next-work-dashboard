@@ -107,8 +107,8 @@ export const MyCastPanel: React.FC = () => {
   const handleEvent = useCallback((ev: MyCastEvent) => {
     switch (ev.type) {
       case 'ready':
-        setState((s) => s ? { ...s, ready: true, deviceId: ev.deviceId, deviceName: ev.deviceName, platform: ev.platform, httpPort: ev.httpPort, wsPort: ev.wsPort, mdnsEnabled: ev.mdnsEnabled, version: ev.version, bindAddr: ev.bindAddr } : s);
-        notice.success({ message: 'MyCast 已就绪', description: `${ev.deviceName} · HTTP :${ev.httpPort}`, placement: 'bottomRight' });
+        setState((s) => s ? { ...s, ready: true, deviceId: ev.deviceId, deviceName: ev.deviceName, platform: ev.platform, httpPort: ev.httpPort, wsPort: ev.wsPort, mdnsEnabled: ev.mdnsEnabled, version: ev.version, bindAddr: ev.bindAddr, lanAddr: ev.lanAddr, lanAddrs: ev.lanAddrs } : s);
+        notice.success({ message: 'MyCast 已就绪', description: `${ev.deviceName} · LAN ${ev.lanAddr} · HTTP :${ev.httpPort}`, placement: 'bottomRight' });
         break;
       case 'phone.hello':
         setDevices((prev) => {
@@ -351,9 +351,8 @@ const HomeTab: React.FC<{
   starting: boolean;
 }> = ({ state, pairCode, pairRemaining, qrSvg, onIssue, starting }) => {
   const lanAddress = useMemo(() => {
-    // Prefer the device's hostname-resolved IP; fall back to whatever bindAddr has.
-    return state?.bindAddr && state.httpPort ? `${state.bindAddr}:${state.httpPort}` : '—';
-  }, [state?.bindAddr, state?.httpPort]);
+    return state?.lanAddr && state.httpPort ? `http://${state.lanAddr}:${state.httpPort}` : '—';
+  }, [state?.lanAddr, state?.httpPort]);
 
   const mobileUrl = state && pairCode ? buildMobileUrl(state, pairCode) : null;
 
@@ -365,10 +364,19 @@ const HomeTab: React.FC<{
           <dt className="text-muted-foreground">设备名</dt><dd className="font-medium">{state?.deviceName ?? '—'}</dd>
           <dt className="text-muted-foreground">设备 ID</dt><dd className="font-mono">{state?.deviceId ?? '—'}</dd>
           <dt className="text-muted-foreground">平台</dt><dd>{state?.platform ?? '—'}</dd>
+          <dt className="text-muted-foreground">LAN IP</dt><dd className="font-mono text-primary">{state?.lanAddr ?? '—'}{state?.lanAddrs && state.lanAddrs.length > 1 && <span className="ml-2 text-[10px] text-muted-foreground">（+{state.lanAddrs.length - 1} 个备选）</span>}</dd>
           <dt className="text-muted-foreground">HTTP</dt><dd className="font-mono">0.0.0.0:{state?.httpPort ?? '—'}</dd>
           <dt className="text-muted-foreground">WebSocket</dt><dd className="font-mono">0.0.0.0:{state?.wsPort ?? '—'}</dd>
           <dt className="text-muted-foreground">mDNS</dt><dd>{state?.mdnsEnabled ? <span className="text-[color:var(--ok)]">已开启 · _nwd-mycast._tcp.local</span> : '已关闭'}</dd>
         </dl>
+        {state?.lanAddrs && state.lanAddrs.length > 1 && (
+          <details className="mt-2 text-[11px] text-muted-foreground">
+            <summary className="cursor-pointer">所有 LAN 地址</summary>
+            <ul className="mt-1 space-y-0.5 font-mono">
+              {state.lanAddrs.map((a) => <li key={a}>{a}</li>)}
+            </ul>
+          </details>
+        )}
         <p className="mt-4 text-[11px] text-muted-foreground leading-relaxed">
           桌面端是 MyCast 服务的承载方，HTTP / WebSocket / mDNS 都通过 Rust sidecar (nwd-mycast.exe) 暴露。
           手机在同一局域网内可以通过 QR 码 / mDNS 名称 / 手动 IP 三种方式发现本机。
@@ -404,10 +412,11 @@ const HomeTab: React.FC<{
       <div className="rounded-lg border bg-card p-5 lg:col-span-2">
         <h3 className="mb-2 text-sm font-semibold">三种连接方式</h3>
         <ul className="space-y-2 text-xs text-muted-foreground">
-          <li><span className="font-medium text-foreground">1. QR 码（推荐）</span> · 在手机相机/微信扫描桌面端的 QR 码，手机浏览器自动打开配对页。</li>
-          <li><span className="font-medium text-foreground">2. mDNS 名称</span> · 在手机浏览器输入 <code className="font-mono text-foreground">{state?.deviceName ?? '<hostname>'}</code>，系统自动解析到本机。</li>
-          <li><span className="font-medium text-foreground">3. 手动 IP</span> · 确认手机和电脑在同一 WiFi，在手机浏览器输入 <code className="font-mono text-foreground">http://&lt;电脑IP&gt;:{state?.httpPort ?? 17890}</code>（电脑 IP 可以在系统网络设置中查看：{lanAddress}）。</li>
+          <li><span className="font-medium text-foreground">1. QR 码（推荐）</span> · 在手机相机/微信扫描桌面端的 QR 码，手机浏览器自动打开配对页（<code className="font-mono text-foreground">{lanAddress}</code>）。</li>
+          <li><span className="font-medium text-foreground">2. mDNS 名称</span> · 在手机浏览器输入 <code className="font-mono text-foreground">{state?.deviceName ?? '<hostname>'}.local</code>，系统自动解析到本机。</li>
+          <li><span className="font-medium text-foreground">3. 手动 IP</span> · 确认手机和电脑在同一 WiFi，在手机浏览器输入 <code className="font-mono text-foreground">{lanAddress}/</code>。</li>
         </ul>
+        <p className="mt-2 text-[10px] text-muted-foreground">提示：如果手机扫码后报"网络错误"，通常是 QR 码里的 IP 跟手机不在同一网段，或电脑防火墙未放行 17890/17891 端口。Windows 首次启动会弹防火墙授权，请允许"专用网络"。</p>
       </div>
     </div>
   );
@@ -588,22 +597,13 @@ const statusFg = (s: TransferInfo['status']) => {
  * ========================================================================= */
 
 function buildMobileUrl(state: MyCastState, pairCode: string): string {
-  // The phone browser will open the desktop's HTTP root with a host hint and
-  // a pre-filled pair code. The WebUI (web/index.html) is embedded in the
-  // sidecar binary, so we just need the host + port + pair code as query.
-  const host = state.bindAddr && state.bindAddr !== '0.0.0.0'
-    ? state.bindAddr
-    : (typeof window !== 'undefined' && window.location?.hostname) || '127.0.0.1';
+  // Prefer the daemon-discovered LAN IP. If for some reason we don't have one
+  // (e.g. daemon not yet ready), fall back to bindAddr (which is usually
+  // 0.0.0.0 and unroutable — better than nothing for a transient placeholder).
+  const host = state.lanAddr
+    || (state.bindAddr && state.bindAddr !== '0.0.0.0' ? state.bindAddr : null)
+    || (typeof window !== 'undefined' ? window.location.hostname : null)
+    || '127.0.0.1';
   const port = state.httpPort ?? 17890;
-  // bindAddr 0.0.0.0 is not routable; rewrite to a typical LAN address — the
-  // user can change this in settings later.
-  const routable = host === '0.0.0.0' ? (resolveLanHost() || '127.0.0.1') : host;
-  return `http://${routable}:${port}/?pair=${encodeURIComponent(pairCode)}`;
-}
-
-function resolveLanHost(): string | null {
-  if (typeof window === 'undefined') return null;
-  // The renderer doesn't know the LAN IP. As a best-effort, fall back to the
-  // current host (works when phone and desktop share a name-resolved LAN).
-  return window.location.hostname || null;
+  return `http://${host}:${port}/?pair=${encodeURIComponent(pairCode)}`;
 }
