@@ -158,6 +158,7 @@ export interface ElectronAPI {
     completeOutbox: (id: number) => Promise<{ completed: boolean }>;
     failOutbox: (id: number, error: string) => Promise<{ failed: boolean }>;
   };
+  videoPlayer: import('../plugins/video-player/types').VideoPlayerAPI;
   mcp: {
     listServers: () => Promise<McpServerStatus[]>;
     saveServer: (config: McpServerConfig) => Promise<McpOperationResult>;

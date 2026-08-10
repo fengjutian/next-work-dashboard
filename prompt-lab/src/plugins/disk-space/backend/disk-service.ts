@@ -69,6 +69,20 @@ async function commandOutput(command: string, args: string[]): Promise<{ availab
   });
 }
 
+async function findSpecialFiles(root: string, extensions: Set<string>, maxDepth = 3): Promise<string[]> {
+  const found: string[] = [];
+  async function walk(directory: string, depth: number): Promise<void> {
+    if (depth > maxDepth || found.length >= 100) return;
+    let entries: fs.Dirent[]; try { entries = await fs.promises.readdir(directory, { withFileTypes: true }); } catch { return; }
+    await Promise.all(entries.map(async (entry) => {
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(candidate, depth + 1);
+      else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) { try { const stat = await fs.promises.stat(candidate); found.push(`${candidate} · ${(stat.size / 1024 ** 3).toFixed(1)} GB`); } catch { /* ignore disappearing files */ } }
+    }));
+  }
+  await walk(root, 0); return found;
+}
+
 export function setupDiskSpaceIPC(): void {
   ipcMain.handle('disk-space:system-info', async () => {
     let disks: Array<{ path: string; total: number; free: number; used: number }> = [];
@@ -149,8 +163,20 @@ export function setupDiskSpaceIPC(): void {
       commandOutput('npm', ['config', 'get', 'cache']), commandOutput('pnpm', ['store', 'path']), commandOutput('cargo', ['--version']),
       commandOutput('gradle', ['--version']), commandOutput('mvn', ['--version']), commandOutput('conda', ['info']), commandOutput('adb', ['version']), commandOutput('VBoxManage', ['list', 'hdds']), commandOutput('vmrun', ['list']),
     ]);
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    const [wslDisks, dockerDisks, virtualBoxDisks, vmwareDisks] = await Promise.all([
+      findSpecialFiles(path.join(localAppData, 'Packages'), new Set(['.vhdx']), 3),
+      findSpecialFiles(path.join(localAppData, 'Docker'), new Set(['.vhdx']), 5),
+      findSpecialFiles(path.join(os.homedir(), 'VirtualBox VMs'), new Set(['.vdi']), 4),
+      findSpecialFiles(path.join(os.homedir(), 'Documents', 'Virtual Machines'), new Set(['.vmdk']), 4),
+    ]);
+    const ollamaModels = ollama.available ? ollama.output.split(/\r?\n/).slice(1, 11).map((line) => line.trim().split(/\s+/)[0]).filter(Boolean) : [];
+    const ollamaDetails = await Promise.all(ollamaModels.map((model) => commandOutput('ollama', ['show', model])));
     const make = (id: 'docker' | 'wsl' | 'ollama' | 'node' | 'rust' | 'java' | 'python' | 'android' | 'virtualization', label: string, values: Array<{ available: boolean; output: string }>) => ({ id, label, available: values.some((value) => value.available), summary: values.some((value) => value.available) ? '已检测到，可查看详细信息' : '当前环境未检测到', details: values.filter((value) => value.output).flatMap((value) => value.output.split(/\r?\n/).slice(0, 30)) });
-    return [make('docker', 'Docker', [docker]), make('wsl', 'WSL 与 ext4.vhdx', [wsl]), make('ollama', 'Ollama 模型', [ollama]), make('node', 'npm / pnpm 缓存', [npm, pnpm]), make('rust', 'Rust / Cargo', [cargo]), make('java', 'Gradle / Maven', [gradle, maven]), make('python', 'Conda / Python', [conda]), make('android', 'Android SDK', [adb]), make('virtualization', 'VMware / VirtualBox', [virtualBox, vmware])];
+    const probes = [make('docker', 'Docker', [docker]), make('wsl', 'WSL 与 ext4.vhdx', [wsl]), make('ollama', 'Ollama 模型与量化', [ollama, ...ollamaDetails]), make('node', 'npm / pnpm 缓存', [npm, pnpm]), make('rust', 'Rust / Cargo', [cargo]), make('java', 'Gradle / Maven', [gradle, maven]), make('python', 'Conda / Python', [conda]), make('android', 'Android SDK', [adb]), make('virtualization', 'VMware / VirtualBox', [virtualBox, vmware])];
+    probes.find((probe) => probe.id === 'wsl')?.details.push(...wslDisks, ...dockerDisks);
+    probes.find((probe) => probe.id === 'virtualization')?.details.push(...virtualBoxDisks, ...vmwareDisks);
+    return probes;
   });
   ipcMain.handle('disk-space:run-cleanup', async (_event, action: string) => {
     const allowlist: Record<string, { command: string; args: string[]; title: string; detail: string }> = {

@@ -1,10 +1,12 @@
 //! JSONL protocol for the nwd-net-probe daemon.
 //!
 //! Wire format: one JSON object per line, both directions.
-//! V1 supports: ready / error / probe_result (icmp only).
-//! V2 will add tcp / dns / http / traceroute events.
+//!
+//! V1.1 supports: icmp / tcp / dns / http probes.
+//! V2 will add: traceroute, mtr.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Outbound message (daemon → Node).
 #[derive(Debug, Clone, Serialize)]
@@ -13,6 +15,11 @@ pub enum Outbound {
     /// Sent once after startup. Node treats missing `ready` as a fatal error.
     Ready { version: String, pid: u32 },
     /// Probe sample for a target. Emitted on every completed probe.
+    ///
+    /// `latency_ms` carries a single overall latency (probe-specific semantics,
+    /// documented per probe kind). `payload` is an open object for type-specific
+    /// details (e.g. http waterfall). Keeping it open on the wire avoids the
+    /// "unified ProbeResult" anti-pattern.
     ProbeResult {
         id: String,
         probe: String,
@@ -20,6 +27,8 @@ pub enum Outbound {
         success: bool,
         latency_ms: Option<f64>,
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        payload: Option<Value>,
     },
     /// Non-fatal daemon-level error (e.g. failed to add a target).
     Error { message: String },
@@ -39,6 +48,8 @@ pub enum Inbound {
         interval_ms: u64,
         #[serde(default)]
         timeout_ms: Option<u64>,
+        #[serde(default)]
+        options: Option<Value>,
     },
     /// Remove a target. Missing id is a no-op.
     RemoveTarget { id: String },
@@ -56,7 +67,6 @@ fn default_interval() -> u64 {
 
 impl Outbound {
     pub fn to_jsonl(&self) -> String {
-        // serde_json never fails for our types; unwrap is safe.
         let mut line = serde_json::to_string(self).expect("serialize outbound");
         line.push('\n');
         line

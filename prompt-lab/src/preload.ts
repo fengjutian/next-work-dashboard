@@ -147,6 +147,34 @@ const electronAPI: ElectronAPI = {
     completeOutbox: (id) => ipcRenderer.invoke('rag-worker:complete-outbox', id),
     failOutbox: (id, error) => ipcRenderer.invoke('rag-worker:fail-outbox', id, error),
   },
+  videoPlayer: {
+    open: (filePath?: string) => ipcRenderer.invoke('video-player:open', filePath),
+    pickFile: () => ipcRenderer.invoke('video-player:pick-file'),
+    close: () => ipcRenderer.invoke('video-player:close'),
+    play: () => ipcRenderer.invoke('video-player:play'),
+    pause: () => ipcRenderer.invoke('video-player:pause'),
+    toggle: () => ipcRenderer.invoke('video-player:toggle'),
+    stop: () => ipcRenderer.invoke('video-player:stop'),
+    seek: (seconds: number, mode?: 'absolute' | 'relative') => ipcRenderer.invoke('video-player:seek', seconds, mode),
+    setVolume: (volume: number) => ipcRenderer.invoke('video-player:set-volume', volume),
+    setMute: (muted: boolean) => ipcRenderer.invoke('video-player:set-mute', muted),
+    setSpeed: (speed: number) => ipcRenderer.invoke('video-player:set-speed', speed),
+    selectAudio: (id: number | 'no') => ipcRenderer.invoke('video-player:select-audio', id),
+    selectSubtitle: (id: number | 'no') => ipcRenderer.invoke('video-player:select-subtitle', id),
+    addSubtitle: (filePath: string) => ipcRenderer.invoke('video-player:add-subtitle', filePath),
+    getTracks: () => ipcRenderer.invoke('video-player:get-tracks'),
+    getStatus: () => ipcRenderer.invoke('video-player:status'),
+    onStatus: (callback: (status: import('./plugins/video-player/types').VideoPlayerStatus) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: import('./plugins/video-player/types').VideoPlayerStatus) => callback(status);
+      ipcRenderer.on('video-player:status', handler);
+      return () => { ipcRenderer.removeListener('video-player:status', handler); };
+    },
+    onEvent: (callback: (event: import('./plugins/video-player/types').VideoPlayerEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, event: import('./plugins/video-player/types').VideoPlayerEvent) => callback(event);
+      ipcRenderer.on('video-player:event', handler);
+      return () => { ipcRenderer.removeListener('video-player:event', handler); };
+    },
+  },
   // 通用 HTTP fetch（主进程，绕过 CORS）
   fetchUrl: (url: string, options?: { headers?: Record<string, string> }) =>
     ipcRenderer.invoke('fetch-url', url, options),

@@ -1,8 +1,16 @@
-//! Cross-platform ICMP probe.
+//! Cross-platform probe implementations.
 //!
-//! V1 supports only the `icmp` probe type. V2 will add tcp / dns / http.
+//! V1.1 supports: icmp / tcp / dns / http.
+//! V2 will add: traceroute.
+
+pub mod icmp;
+pub mod tcp;
+pub mod dns;
+pub mod http;
 
 use std::time::Duration;
+
+use serde_json::Value;
 
 use crate::platform;
 
@@ -10,86 +18,53 @@ use crate::platform;
 #[derive(Debug, Clone)]
 pub struct ProbeSample {
     pub success: bool,
+    /// Overall latency for this probe in milliseconds. Probe-specific semantics:
+    /// - icmp: round-trip time of the echo
+    /// - tcp: time from connect() call to completion
+    /// - dns: time to resolve via primary resolver
+    /// - http: total time to first byte (TTFB)
     pub latency_ms: Option<f64>,
     pub error: Option<String>,
+    /// Type-specific structured details (e.g. http waterfall, dns per-resolver).
+    pub payload: Option<Value>,
 }
 
 /// Trait for a single probe attempt. Implementations must respect `timeout` and
 /// never block longer than `timeout + small grace` (currently +500ms for OS quirks).
+///
+/// `options` is the probe-specific configuration (e.g. port for tcp, resolvers
+/// for dns, url for http). Implementations should ignore unknown keys and use
+/// their own defaults.
 pub trait Probe: Send + Sync {
+    #[allow(dead_code)]
     fn name(&self) -> &'static str;
-    fn run(&self, target: &str, timeout: Duration) -> ProbeSample;
+    fn run(&self, target: &str, options: &Value, timeout: Duration) -> ProbeSample;
 }
 
 /// Factory: return the probe implementation for a given probe type string.
 /// Unknown types return None.
 pub fn probe_for(kind: &str) -> Option<Box<dyn Probe>> {
     match kind {
-        "icmp" => Some(Box::new(IcmpProbe::new())),
+        "icmp" => Some(Box::new(icmp::IcmpProbe::new())),
+        "tcp" => Some(Box::new(tcp::TcpProbe::new())),
+        "dns" => Some(Box::new(dns::DnsProbe::new())),
+        "http" => Some(Box::new(http::HttpProbe::new())),
         _ => None,
     }
 }
 
-pub struct IcmpProbe;
+// ── Shared helpers ──────────────────────────────────────────────────────
 
-impl IcmpProbe {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Probe for IcmpProbe {
-    fn name(&self) -> &'static str {
-        "icmp"
-    }
-
-    fn run(&self, target: &str, timeout: Duration) -> ProbeSample {
-        // Resolve hostname to socket address. We do this per-probe; DNS cache
-        // is a V2 concern (it's cheap and hostnames rarely change).
-        let addrs = match resolve(target) {
-            Ok(v) => v,
-            Err(e) => {
-                return ProbeSample {
-                    success: false,
-                    latency_ms: None,
-                    error: Some(format!("dns: {e}")),
-                };
-            }
-        };
-
-        // Try each resolved address until one succeeds. Most hostnames resolve
-        // to a single address, so this is a no-op in the common case.
-        let mut last_err: Option<String> = None;
-        for addr in &addrs {
-            match platform::icmp_echo(*addr, timeout) {
-                Ok(latency) => {
-                    return ProbeSample {
-                        success: true,
-                        latency_ms: Some(latency),
-                        error: None,
-                    };
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                }
-            }
-        }
-        ProbeSample {
-            success: false,
-            latency_ms: None,
-            error: last_err.or_else(|| Some("no address".to_string())),
-        }
-    }
-}
-
-fn resolve(target: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
+/// Resolve hostname to socket addresses. Adds ":0" if the target is a bare host
+/// (to_socket_addrs requires a port).
+pub(crate) fn resolve(target: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
     use std::net::ToSocketAddrs;
-    // V1: IPv4 only. IPv6 is V2; we intentionally avoid the bigger code path
-    // and the ToSocketAddrs dual-stack surprises for now.
-    //
-    // `to_socket_addrs` requires a port. If the caller passed a bare IP/host,
-    // append ":0" (port 0 = OS picks). This also handles IPv6 literals like
-    // `::1` correctly because we always carry a port suffix.
     let with_port = if target.contains(':') { target.to_string() } else { format!("{target}:0") };
     with_port.to_socket_addrs().map(|iter| iter.collect())
+}
+
+/// Re-export the platform ICMP helper (only used by icmp probe).
+#[allow(dead_code)]
+pub(crate) fn platform_icmp(addr: std::net::SocketAddr, timeout: Duration) -> Result<f64, String> {
+    platform::icmp_echo(addr, timeout)
 }

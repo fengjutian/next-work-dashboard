@@ -54,11 +54,12 @@ pub fn icmp_echo(addr: SocketAddr, timeout: Duration) -> Result<f64, String> {
         // 32-byte payload. Anything works; matches typical `ping -l 32` default.
         let send_data: [u8; 32] = [0u8; 32];
 
-        // Reply buffer must be large enough: ICMP_ECHO_REPLY + 8-byte ICMP header
-        // + reply data. sizeof(ICMP_ECHO_REPLY) = 28 on x64; we add 32 for payload
-        // + headroom for the ICMP header.
-        let mut reply_buffer: Vec<u8> = vec![0u8; 64 + send_data.len()];
-        let reply_size: u32 = std::mem::size_of::<ICMP_ECHO_REPLY>() as u32;
+        // Reply buffer must be large enough: ICMP_ECHO_REPLY + RequestSize.
+        // Per MSDN, ReplySize = sizeof(ICMP_ECHO_REPLY) + RequestSize.
+        // The buffer itself needs ICMP_ECHO_REPLY (28 on x64) + payload + headroom.
+        let mut reply_buffer: Vec<u8> =
+            vec![0u8; std::mem::size_of::<ICMP_ECHO_REPLY>() + send_data.len() + 32];
+        let reply_size: u32 = (std::mem::size_of::<ICMP_ECHO_REPLY>() + send_data.len()) as u32;
 
         // Timeout in ms; cast saturating since duration is bounded.
         let timeout_ms: u32 = u32::try_from(timeout.as_millis().min(u128::from(u32::MAX)))

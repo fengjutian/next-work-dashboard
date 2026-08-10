@@ -14,6 +14,7 @@ import { setupNetProbeIPC, shutdownDaemon } from './plugins/network-observatory/
 import { setupRagWorkerIPC } from './main/rag-worker-ipc';
 import { ragWorkerClient } from './main/rag-worker-client';
 import { startRagIndexCoordinator, stopRagIndexCoordinator } from './main/rag-index-coordinator';
+import { setupVideoPlayerIPC, videoPlayerService } from './plugins/video-player/backend/video-service';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -109,6 +110,7 @@ if (started) {
     setupDiskSpaceIPC();
     setupNetProbeIPC();
     setupRagWorkerIPC();
+    setupVideoPlayerIPC();
     startRagIndexCoordinator();
     createTray();
     configureWindowsJumpList();
@@ -139,5 +141,6 @@ if (started) {
     disposeDiskSpaceService();
     stopRagIndexCoordinator();
     ragWorkerClient.dispose();
+    void videoPlayerService.shutdown();
   });
 }
