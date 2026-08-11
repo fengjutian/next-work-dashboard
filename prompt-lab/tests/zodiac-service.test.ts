@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  allSettledWithConcurrency,
   extractJson,
   isValidPerspectiveArray,
   isValidSynthesis,
@@ -9,6 +10,31 @@ import {
 import { ZODIAC_SIGNS } from '../src/plugins/zodiac-perspectives/zodiac-types';
 
 describe('zodiac-service JSON parsing', () => {
+  it('limits concurrent generation tasks and preserves result order', async () => {
+    let active = 0;
+    let peak = 0;
+    const tasks = Array.from({ length: 9 }, (_, index) => async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return index;
+    });
+    const results = await allSettledWithConcurrency(tasks, 3);
+    expect(peak).toBeLessThanOrEqual(3);
+    expect(results.map((result) => result.status === 'fulfilled' ? result.value : -1))
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('keeps rejected tasks without stopping the remaining queue', async () => {
+    const results = await allSettledWithConcurrency([
+      async () => 'first',
+      async () => { throw new Error('broken'); },
+      async () => 'third',
+    ], 2);
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'fulfilled']);
+  });
+
   it('extractJson unwraps fenced ```json``` blocks', () => {
     const raw = '噪音```json\n{"interpretation":"X","focus":["a"],"advice":["b"]}\n```尾部';
     const parsed = extractJson(raw) as Record<string, unknown>;

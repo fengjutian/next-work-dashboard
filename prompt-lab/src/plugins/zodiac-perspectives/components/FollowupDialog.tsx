@@ -11,6 +11,7 @@ import { ZODIAC_META } from '../zodiac-data';
 import { copyText } from '../zodiac-copy';
 import type { ZodiacFollowupMessage, ZodiacRun, ZodiacSign } from '../zodiac-types';
 import { generateFollowup, type FollowupTurn } from '../zodiac-service';
+import { detectHighRisk } from '../zodiac-prompts';
 import {
   appendFollowupMessage,
   loadFollowupMessages,
@@ -73,7 +74,8 @@ export function FollowupDialog({
     const text = input.trim();
     if (!text) return;
     setError(null);
-    setHighRisk(null);
+    const risk = detectHighRisk(text);
+    setHighRisk(risk ? `${risk.category}类问题：${risk.guidance}` : null);
 
     const userMsg: ZodiacFollowupMessage = {
       id: crypto.randomUUID(),

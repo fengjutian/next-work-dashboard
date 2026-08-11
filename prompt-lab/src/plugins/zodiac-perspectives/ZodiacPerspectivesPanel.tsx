@@ -204,11 +204,7 @@ export function ZodiacPerspectivesPanel() {
 
       const callbacks: GenerateCallbacks = {
         onCardStart: (sign) => updateCard(sign, { status: 'streaming', streamedInterpretation: '', error: undefined }),
-        onCardStream: ({ sign, streamedInterpretation }) => {
-          setCards((prev) => prev.map((c) => (c.sign === sign
-            ? { ...c, status: 'streaming', streamedInterpretation: (c.streamedInterpretation ?? '') + streamedInterpretation }
-            : c)));
-        },
+        // 模型流里是尚未闭合的 JSON；卡片只展示生成占位，解析成功后再呈现正文。
         onCardDone: (sign, perspective) => updateCard(sign, { status: 'done', perspective, streamedInterpretation: undefined, error: undefined }),
         onCardFailed: (sign, error) => updateCard(sign, { status: 'failed', error, streamedInterpretation: undefined }),
         onSynthesisStart: () => setSynthesisStatus('running'),
@@ -296,21 +292,22 @@ export function ZodiacPerspectivesPanel() {
         )) {
           if (chunk.delta) {
             raw += chunk.delta;
-            setCards((prev) => prev.map((c) => (c.sign === sign
-              ? { ...c, status: 'streaming', streamedInterpretation: (c.streamedInterpretation ?? '') + chunk.delta }
-              : c)));
+            // 继续收集原始 JSON，但不要把未解析 JSON 直接渲染给用户。
           }
         }
         const perspective = parsePerspective(raw, sign);
+        // 只有新答案成功后才让旧总结失效；失败重试仍保留原有一致结果。
+        setSynthesisStatus('idle');
+        updateRunSynthesis(run.id, null);
         updateCard({ status: 'done', perspective, streamedInterpretation: undefined });
         const nextPerspectives = [...run.perspectives.filter((p) => p.sign !== sign), perspective]
           .sort((a, b) => ZODIAC_ORDER.indexOf(a.sign) - ZODIAC_ORDER.indexOf(b.sign));
         updateRunPerspectives(run.id, nextPerspectives);
         if (nextPerspectives.length === 12) {
           setPartial(run.id, false);
-          setRun((prev) => (prev ? { ...prev, partial: false, perspectives: nextPerspectives } : prev));
+          setRun((prev) => (prev ? { ...prev, partial: false, perspectives: nextPerspectives, synthesis: null, updatedAt: Date.now() } : prev));
         } else {
-          setRun((prev) => (prev ? { ...prev, perspectives: nextPerspectives } : prev));
+          setRun((prev) => (prev ? { ...prev, perspectives: nextPerspectives, synthesis: null, updatedAt: Date.now() } : prev));
         }
         toast.success(`${ZODIAC_META[sign].name} 已重新生成。`);
       } catch (error) {

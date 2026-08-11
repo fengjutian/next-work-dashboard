@@ -57,6 +57,15 @@ export function SynthesisPanel({ run, status, synthesis, error, onCopy, onRetry 
         <p className="text-sm text-muted-foreground">需要至少 4 个成功视角才能生成总结。</p>
       )}
 
+      {status === 'idle' && run.perspectives.length >= 4 && !synthesis && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+          <span>{run.perspectives.length === 12 ? '视角内容已更新，原总结已失效。' : '等待更多视角完成后生成总结。'}</span>
+          {run.perspectives.length === 12 && onRetry && (
+            <Button variant="outline" size="sm" onClick={onRetry}>重新生成整轮与总结</Button>
+          )}
+        </div>
+      )}
+
       {status === 'skipped' && (
         <p className="text-sm text-muted-foreground">已跳过（成功视角不足 4 个）。</p>
       )}

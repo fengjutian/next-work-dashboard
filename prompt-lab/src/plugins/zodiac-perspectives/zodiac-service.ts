@@ -87,6 +87,33 @@ export interface GenerateResult {
   warnings: string[];
 }
 
+/** 默认最多同时占用 4 个模型请求，避免常见兼容服务触发限流。 */
+export const DEFAULT_GENERATION_CONCURRENCY = 4;
+
+export async function allSettledWithConcurrency<T>(
+  tasks: Array<() => Promise<T>>,
+  concurrency = DEFAULT_GENERATION_CONCURRENCY,
+): Promise<PromiseSettledResult<T>[]> {
+  const limit = Math.max(1, Math.min(Math.floor(concurrency), tasks.length || 1));
+  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < tasks.length) {
+      const index = cursor;
+      cursor += 1;
+      try {
+        results[index] = { status: 'fulfilled', value: await tasks[index]() };
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason };
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+  return results;
+}
+
 // ── JSON 抽取与解析 ──────────────────────────────────────────────
 
 /** 抽取模型输出里的 JSON 片段（兼容 ```json``` 围栏、裸 JSON、带噪声） */
@@ -331,7 +358,12 @@ export async function generateAllPerspectives(
     }
   });
 
-  const settled = await Promise.allSettled(tasks.map((task) => task()));
+  const settled = await allSettledWithConcurrency(tasks);
+
+  // allSettled 会吸收 AbortError；必须在汇总失败项前恢复取消语义。
+  if (signal?.aborted) {
+    throw new DOMException('生成已取消', 'AbortError');
+  }
 
   const perspectives: ZodiacPerspective[] = [];
   const partialSigns: ZodiacSign[] = [];

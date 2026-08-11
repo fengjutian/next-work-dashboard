@@ -29,7 +29,6 @@ export function PerspectiveCard({
   sign,
   status,
   perspective,
-  streamedInterpretation,
   error,
   isOutlier,
   run,
@@ -109,10 +108,15 @@ export function PerspectiveCard({
         <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
           <div>
             <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">如何理解</h4>
-            <p className="mt-1 whitespace-pre-wrap">
-              {perspective?.interpretation || streamedInterpretation || '…'}
-              {status === 'streaming' && <span className="ml-1 inline-block h-3 w-1 animate-pulse bg-current align-middle" />}
-            </p>
+            {status === 'streaming' && !perspective ? (
+              <div className="mt-2 space-y-2" role="status" aria-label={`${meta.name}正在生成`}>
+                <div className="h-3 w-full animate-pulse rounded bg-muted" />
+                <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
+                <span className="sr-only">正在生成结构化回答</span>
+              </div>
+            ) : (
+              <p className="mt-1 whitespace-pre-wrap">{perspective?.interpretation}</p>
+            )}
           </div>
 
           {perspective && expanded && (
