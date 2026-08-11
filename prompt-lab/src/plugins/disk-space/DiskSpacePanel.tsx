@@ -177,6 +177,7 @@ export function DiskSpacePanel() {
     error, setError, refreshSystem, choose, start, cancelScan, togglePause,
     loadDirectory, openPreview, restoreSavedResult, removeSavedResult,
     removeDirectorySnapshot, clearHistory, setRunning, setPaused, setScanErrors,
+    setBrowserLoading, setEntries, setDuplicates,
   } = scan;
 
   // 切 tab 清空 error
@@ -194,12 +195,13 @@ export function DiskSpacePanel() {
   }, [activeTab, probing, specialtyProbes.length, setError]);
 
   // cleanup 完成后自动重扫：替换 error 字符串匹配
+  const isFocusedTab = activeTab === 'developer' || activeTab === 'cleanup';
   useEffect(() => {
     if (activeTab !== 'cleanup' || !/清理完成$/.test(error)) return;
     setSpecialtyProbes([]);
     void refreshSystem();
-    if (root && !running) void start(activeTab === 'developer' || activeTab === 'cleanup');
-  }, [error, activeTab, root, running, refreshSystem, start, setError]);
+    if (root && !running) void start(isFocusedTab);
+  }, [error, activeTab, root, running, refreshSystem, start, isFocusedTab]);
 
   // treemap 点击 → 跳到目录浏览
   useEffect(() => {
@@ -735,7 +737,7 @@ export function DiskSpacePanel() {
                 <h2 className="text-lg font-semibold">{activeTab === 'developer' ? '开发环境占用' : '可清理候选项'}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">{activeTab === 'developer' ? '根据 Rust 扫描结果识别常见开发工具、缓存和构建产物。' : '仅提供检查建议，不会自动删除任何文件。'}</p>
               </div>
-              <button className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50" disabled={!root || running} onClick={() => void start(activeTab === 'developer' || activeTab === 'cleanup')}>{stats.files ? '重新扫描' : '开始扫描'}</button>
+              <button className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50" disabled={!root || running} onClick={() => void start(isFocusedTab)}>{stats.files ? '重新扫描' : '开始扫描'}</button>
             </div>
             {!root && <button className="mt-5 flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent" onClick={() => void choose()}><FolderOpen className="h-4 w-4" />选择分析目录</button>}
             <div className="mt-5 space-y-2">
@@ -770,7 +772,7 @@ export function DiskSpacePanel() {
               {activeTab === 'analysis' && (running ? (
                 <button className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm" onClick={() => void cancelScan()}><Square className="h-4 w-4" />停止</button>
               ) : (
-                <button className="rounded-md bg-primary px-5 py-2 text-sm text-primary-foreground disabled:opacity-50" disabled={!root} onClick={() => void start(activeTab === 'developer' || activeTab === 'cleanup')}>分析占用</button>
+                <button className="rounded-md bg-primary px-5 py-2 text-sm text-primary-foreground disabled:opacity-50" disabled={!root} onClick={() => void start(isFocusedTab)}>分析占用</button>
               ))}
             </div>
             {activeTab === 'analysis' && (

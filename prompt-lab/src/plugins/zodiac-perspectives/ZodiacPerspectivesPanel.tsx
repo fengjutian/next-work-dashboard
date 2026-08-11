@@ -133,6 +133,7 @@ export function ZodiacPerspectivesPanel() {
 
   const generationAbortRef = useRef<AbortController | null>(null);
   const synthesisAbortRef = useRef<AbortController | null>(null);
+  const retryAbortRefs = useRef<Map<ZodiacSign, AbortController>>(new Map());
   const runIdRef = useRef<string | null>(null);
 
   // 计算差异
@@ -169,6 +170,8 @@ export function ZodiacPerspectivesPanel() {
   useEffect(() => () => {
     generationAbortRef.current?.abort();
     synthesisAbortRef.current?.abort();
+    for (const controller of retryAbortRefs.current.values()) controller.abort();
+    retryAbortRefs.current.clear();
     generationAbortRef.current = null;
     synthesisAbortRef.current = null;
   }, []);
@@ -293,6 +296,8 @@ export function ZodiacPerspectivesPanel() {
       };
       updateCard({ status: 'streaming', error: undefined, streamedInterpretation: '' });
       const controller = new AbortController();
+      retryAbortRefs.current.get(sign)?.abort();
+      retryAbortRefs.current.set(sign, controller);
       try {
         const perspective = await generatePerspective(
           sign,
@@ -320,6 +325,8 @@ export function ZodiacPerspectivesPanel() {
         const message = describeLlmError(error);
         updateCard({ status: 'failed', error: message, streamedInterpretation: undefined });
         toast.error(`重试失败：${message}`);
+      } finally {
+        if (retryAbortRefs.current.get(sign) === controller) retryAbortRefs.current.delete(sign);
       }
     },
     [aiApi, aiConfigured, run],
