@@ -6,6 +6,10 @@ import { aggregateSearch } from '../../core/work-browser/search/aggregator';
 import { BUILTIN_PROVIDERS } from '../../core/work-browser/search/providers';
 import type { SearchProvider, SearchQuery, AggregatedSearchResponse } from '../../core/work-browser/types';
 import { summarizeResults, loadAIConfig } from '../../core/work-browser/ai/summarizer';
+import { buildRagContext } from '../../core/work-browser/ai/rag';
+import { embed } from '../../core/work-browser/embedding/embedder';
+import { searchLanceDocuments } from '../lancedb-memory';
+import { DEFAULT_MODEL_ID } from '../../core/work-browser/embedding/embedder';
 import type { WorkspaceStore } from './workspace-store';
 
 export class SearchRouter {
@@ -73,5 +77,26 @@ export class SearchRouter {
       clearTimeout(timer);
     }
     return [];
+  }
+
+  /**
+   * RAG 检索：双路召回 → context bundle
+   * 不调 LLM，由调用方拿到 systemPrompt + citations 后自己组装
+   */
+  async runRag(input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) {
+    const modelId = (await this.store.getSetting('workBrowser.ai.embeddingModel')) || DEFAULT_MODEL_ID;
+    const bundle = await buildRagContext({
+      query: input.query,
+      db: this.db,
+      vectorSearch: (vec, mid, limit) => searchLanceDocuments(vec, mid, limit).then((rows) => rows.map((r) => ({
+        id: r.id, distance: r.distance, content: '', sectionTitle: '', page: -1,
+      }))),
+      embedder: (text) => embed(text, modelId),
+      workspaceId: input.workspaceId,
+      modelId,
+      topK: input.topK,
+      scope: input.scope,
+    });
+    return bundle;
   }
 }

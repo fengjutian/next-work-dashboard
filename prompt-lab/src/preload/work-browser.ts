@@ -58,8 +58,13 @@ export const workBrowserBridge = {
   },
   annotation: {
     list: (documentId: string) => ipcRenderer.invoke('work-browser:annotation:list', documentId),
+    listByUrl: (url: string) => ipcRenderer.invoke('work-browser:annotation:list-by-url', url),
     create: (input: { documentId: string; selector: string; rangeText: string; note: string; color: string }) => ipcRenderer.invoke('work-browser:annotation:create', input),
     remove: (id: string) => ipcRenderer.invoke('work-browser:annotation:delete', id),
+  },
+  rag: {
+    query: (input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) =>
+      ipcRenderer.invoke('work-browser:rag:query', input),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),

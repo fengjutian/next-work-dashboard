@@ -5,10 +5,10 @@
 //! plus updated hidden + cell state. We keep the state across calls so
 //! the model can run as a streaming classifier.
 //!
-//! ONNX schema (silero_vad.onnx v5):
-//!   inputs : input [1, N] (N=512 for 16 kHz), sr (int64, scalar),
-//!            h [2, 1, 64] (LSTM hidden state), c [2, 1, 64]
-//!   outputs: output (scalar prob), hn, cn
+//! ONNX schema (the `silero_vad.onnx` shipped with sherpa-onnx, v4-style):
+//!   inputs : x [1, 512] (f32, 32 ms @ 16 kHz), h [2, 1, 64] (LSTM hidden),
+//!            c [2, 1, 64] (LSTM cell)
+//!   outputs: prob [1, 1] (f32), new_h [2, 1, 64], new_c [2, 1, 64]
 //!
 //! Thresholding and start/end decisions are the caller's job. This module
 //! only does the per-window inference and state bookkeeping.
@@ -39,6 +39,20 @@ impl SileroVad {
             .context("failed to build ort session")?
             .commit_from_file(model_path)
             .with_context(|| format!("failed to load ONNX model from {}", model_path.display()))?;
+        for input in &session.inputs {
+            tracing::info!(
+                name = %input.name,
+                ty = ?input.input_type,
+                "VAD input"
+            );
+        }
+        for output in &session.outputs {
+            tracing::info!(
+                name = %output.name,
+                ty = ?output.output_type,
+                "VAD output"
+            );
+        }
         Ok(Self {
             session: Mutex::new(session),
             h: Array3::zeros([2, 1, 64]),
@@ -57,17 +71,12 @@ impl SileroVad {
     /// Run inference on a 512-sample window. Returns the speech
     /// probability in [0, 1].
     pub fn predict_window(&mut self, window: &[f32; WINDOW_SAMPLES]) -> Result<f32> {
-        // Input window: 1xN f32 tensor. Use the raw (shape, data) form
-        // to avoid copying the array twice. Ndarray is also fine, but
-        // this is the simplest portable shape across ort feature flags.
-        let input_tensor = Tensor::from_array(([1_i64, WINDOW_SAMPLES as i64], window.to_vec().into_boxed_slice()))
-            .context("create VAD input tensor")?;
-        // Sample-rate scalar (ort wants a 0-D i64 tensor).
-        let sr_tensor = Tensor::from_array(((), vec![16_000_i64]))
-            .context("create VAD sr tensor")?;
+        // Input window: 1xN f32 tensor.
+        let x_tensor = Tensor::from_array(([1_i64, WINDOW_SAMPLES as i64], window.to_vec().into_boxed_slice()))
+            .context("create VAD x tensor")?;
         // Hidden / cell state: 2x1x64 f32 tensors. We carry the previous
         // state inside `self.h` / `self.c` and feed it in; the model
-        // returns the updated `hn` / `cn` for the next call.
+        // returns the updated `new_h` / `new_c` for the next call.
         let h_data: Box<[f32]> = self
             .h
             .as_slice()
@@ -88,41 +97,43 @@ impl SileroVad {
         let session = self.session.lock().expect("VAD session poisoned");
         let outputs = session
             .run(ort::inputs![
-                "input" => input_tensor,
-                "sr" => sr_tensor,
+                "x" => x_tensor,
                 "h" => h_tensor,
                 "c" => c_tensor,
             ]?)
             .context("VAD inference failed")?;
 
-        // output: scalar f32 probability. The model declares it as a
-        // 0-D tensor; `try_extract_scalar` handles that explicitly.
-        let prob: f32 = outputs["output"]
-            .try_extract_scalar::<f32>()
-            .context("VAD output is not a scalar f32")?;
-
-        // hn / cn: 2x1x64 f32. `try_extract_raw_tensor` gives us
-        // `(&[i64], &[f32])` so we can both sanity-check the shape and
-        // copy the data back into the ndarray state.
-        let (hn_shape, hn_data) = outputs["hn"]
+        // prob: [1, 1] f32. The shape is (1,1) — we read the only element.
+        let (prob_shape, prob_data) = outputs["prob"]
             .try_extract_raw_tensor::<f32>()
-            .context("VAD hn not a raw f32 tensor")?;
-        if shape_matches(hn_shape, &HC_SHAPE) {
-            self.h = Array3::from_shape_vec([2, 1, 64], hn_data.to_vec())
-                .context("VAD hn shape mismatch on copy")?;
+            .context("VAD prob not a raw f32 tensor")?;
+        let prob = *prob_data
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("VAD prob tensor empty: shape={:?}", prob_shape))?;
+        // The model returns prob in [0, 1]; clamp defensively against
+        // any tiny numerical drift.
+        let prob = prob.clamp(0.0, 1.0);
+
+        // new_h / new_c: 2x1x64 f32.
+        let (nh_shape, nh_data) = outputs["new_h"]
+            .try_extract_raw_tensor::<f32>()
+            .context("VAD new_h not a raw f32 tensor")?;
+        if shape_matches(nh_shape, &HC_SHAPE) {
+            self.h = Array3::from_shape_vec([2, 1, 64], nh_data.to_vec())
+                .context("VAD new_h shape mismatch on copy")?;
         } else {
-            warn_shape_mismatch("hn", hn_shape, &HC_SHAPE);
+            warn_shape_mismatch("new_h", nh_shape, &HC_SHAPE);
             self.h = Array3::zeros([2, 1, 64]);
         }
 
-        let (cn_shape, cn_data) = outputs["cn"]
+        let (nc_shape, nc_data) = outputs["new_c"]
             .try_extract_raw_tensor::<f32>()
-            .context("VAD cn not a raw f32 tensor")?;
-        if shape_matches(cn_shape, &HC_SHAPE) {
-            self.c = Array3::from_shape_vec([2, 1, 64], cn_data.to_vec())
-                .context("VAD cn shape mismatch on copy")?;
+            .context("VAD new_c not a raw f32 tensor")?;
+        if shape_matches(nc_shape, &HC_SHAPE) {
+            self.c = Array3::from_shape_vec([2, 1, 64], nc_data.to_vec())
+                .context("VAD new_c shape mismatch on copy")?;
         } else {
-            warn_shape_mismatch("cn", cn_shape, &HC_SHAPE);
+            warn_shape_mismatch("new_c", nc_shape, &HC_SHAPE);
             self.c = Array3::zeros([2, 1, 64]);
         }
 

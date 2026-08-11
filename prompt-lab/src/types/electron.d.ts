@@ -470,8 +470,12 @@ export interface ElectronAPI {
     };
     annotation: {
       list: (documentId: string) => Promise<unknown[]>;
+      listByUrl: (url: string) => Promise<unknown[]>;
       create: (input: { documentId: string; selector: string; rangeText: string; note: string; color: string }) => Promise<unknown>;
       remove: (id: string) => Promise<void>;
+    };
+    rag: {
+      query: (input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) => Promise<{ systemPrompt: string; citations: any[]; chunks: any[]; context: any }>;
     };
     settings: {
       get: (key: string) => Promise<string | null>;

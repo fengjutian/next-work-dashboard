@@ -15,6 +15,10 @@ import { savePageAsMarkdown } from './save';
 import { getCleanerPayload, getWebviewCleanerPreloadPath, setupWorkBrowserSession } from './cleaner';
 import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
 import { instantiateTask, ALL_TEMPLATES, type TaskTemplate } from '../../core/work-browser/task/template';
+import { buildRagContext } from '../../core/work-browser/ai/rag';
+import { embed } from '../../core/work-browser/embedding/embedder';
+import { searchLanceDocuments } from '../lancedb-memory';
+import { DEFAULT_MODEL_ID } from '../../core/work-browser/embedding/embedder';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
@@ -99,8 +103,43 @@ export function setupWorkBrowserIPC(): void {
   // ── Annotation ──
 
   ipcMain.handle('work-browser:annotation:list', (_e, documentId: DocumentId) => documents.listAnnotations(documentId));
+  // 按 url 查 annotation（高亮回放用）
+  ipcMain.handle('work-browser:annotation:list-by-url', (_e, url: string) => {
+    // 先按 url 找 document
+    const doc = db.prepare('SELECT id FROM documents WHERE url = ? ORDER BY updated_at DESC LIMIT 1').get(url) as { id: string } | undefined;
+    if (!doc) return [];
+    return documents.listAnnotations(doc.id as DocumentId);
+  });
   ipcMain.handle('work-browser:annotation:create', (_e, input: { documentId: DocumentId; selector: string; rangeText: string; note: string; color: 'yellow' | 'green' | 'red' | 'blue' }) => documents.createAnnotation(input));
   ipcMain.handle('work-browser:annotation:delete', (_e, id: AnnotationId) => documents.deleteAnnotation(id));
+
+  // ── RAG ──
+
+  ipcMain.handle('work-browser:rag:query', async (_e, input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) => {
+    const modelId = (await workspaces.getSetting('workBrowser.ai.embeddingModel')) || DEFAULT_MODEL_ID;
+    const bundle = await buildRagContext({
+      query: input.query,
+      db,
+      vectorSearch: (vec, mid, limit) => searchLanceDocuments(vec, mid, limit).then((rows) => rows.map((r) => ({
+        id: r.id,
+        distance: r.distance,
+        content: '',
+        sectionTitle: '',
+        page: -1,
+      }))),
+      embedder: (text) => embed(text, modelId),
+      workspaceId: input.workspaceId,
+      modelId,
+      topK: input.topK,
+      scope: input.scope,
+    });
+    return {
+      systemPrompt: bundle.systemPrompt,
+      citations: bundle.citations,
+      chunks: bundle.chunks,
+      context: bundle.context,
+    };
+  });
 
   // ── Settings ──
 

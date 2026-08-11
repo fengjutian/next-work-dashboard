@@ -115,6 +115,17 @@ export async function savePageAsMarkdown(
   await fs.writeFile(rawPath, html, 'utf8');
   documentStore.upsertDocument({ ...doc, contentPath, rawPath, updatedAt: t, plainText: readability.contentText } as any);
 
+  // 6. 异步入向量索引（不阻塞主流程）
+  // 动态 import 避免循环依赖 + 减少启动期
+  const { enqueueIndexDocument } = await import('./embedding');
+  enqueueIndexDocument({
+    documentId: doc.id,
+    title,
+    plainText: readability.contentText,
+    workspaceId: input.workspaceId,
+    url: input.url,
+  });
+
   // 6. 追加版本
   let diffSummary: string | null = null;
   if (existing && isNewVersion) {

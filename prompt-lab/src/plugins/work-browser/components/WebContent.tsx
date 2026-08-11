@@ -7,7 +7,8 @@
  *  - 选中文字后弹出 Annotation 浮动菜单
  *  - 净化走"网络层 session.webRequest" + "webview preload 注入 CSS/JS"双层
  */
-import { Empty, Alert, Tag, Tooltip } from 'antd';
+import { Empty, Alert, Tag, Tooltip, Button, Space, Typography } from 'antd';
+import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
 import { AnnotationPopover } from './AnnotationPopover';
@@ -31,6 +32,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const [preloadPath, setPreloadPath] = useState<string>('');
   const [selection, setSelection] = useState<{ text: string; selector: string; x: number; y: number } | null>(null);
+  const [annotationPanel, setAnnotationPanel] = useState<{ id: string; note: string; rangeText: string; color: string; url: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   // 取 webview-cleaner-preload 路径
@@ -59,9 +61,28 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
         }
       } else if (e.channel === 'work-browser:selection-cleared') {
         setSelection(null);
+      } else if (e.channel === 'work-browser:annotation-clicked') {
+        const data = e.args?.[0] as any;
+        setAnnotationPanel({
+          id: String(data?.id || ''),
+          note: String(data?.note || ''),
+          rangeText: String(data?.rangeText || ''),
+          color: (data?.color as any) || 'yellow',
+          url: String(data?.url || ''),
+        });
+      } else if (e.channel === 'work-browser:annotations-rendered') {
+        const total = (e.args?.[0] as any)?.total ?? 0;
+        const hit = (e.args?.[0] as any)?.hit ?? 0;
+        if (total > 0) {
+          console.info(`[work-browser] rendered ${hit}/${total} annotations`);
+        }
       }
     };
-    const onDidFinishLoad = () => setLoaded(true);
+    const onDidFinishLoad = () => {
+      setLoaded(true);
+      // 主动触发 webview 内部重读 annotations
+      void wv.executeJavaScript(`window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`).catch(() => undefined);
+    };
     const onDidStartLoading = () => setLoaded(false);
 
     wv.addEventListener('ipc-message', onIpcMessage);
@@ -143,6 +164,51 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
           onSave={handleAnnotation}
           onCancel={() => setSelection(null)}
         />
+      )}
+      {annotationPanel && (
+        <AnnotationSidePanel
+          annotation={annotationPanel}
+          onClose={() => setAnnotationPanel(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AnnotationSidePanel({ annotation, onClose }: { annotation: { id: string; note: string; rangeText: string; color: string; url: string }; onClose: () => void }) {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        width: 360,
+        height: '100vh',
+        background: '#fff',
+        borderLeft: '1px solid #e0e0e0',
+        boxShadow: '-4px 0 16px rgba(0,0,0,0.1)',
+        zIndex: 1100,
+        padding: 16,
+        overflow: 'auto',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Space>
+          <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: 4, background: { yellow: '#fff59d', green: '#a5d6a7', red: '#ef9a9a', blue: '#90caf9', purple: '#ce93d8' }[annotation.color as 'yellow' | 'green' | 'red' | 'blue' | 'purple'] || '#fff59d' }} />
+          <Typography.Text strong>笔记</Typography.Text>
+        </Space>
+        <Button size="small" type="text" icon={<X size={14} />} onClick={onClose} />
+      </div>
+      <Typography.Paragraph style={{ padding: 8, background: '#fafafa', borderRadius: 4, fontSize: 13 }}>
+        "{annotation.rangeText}"
+      </Typography.Paragraph>
+      <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+        {annotation.note || <Typography.Text type="secondary">（无笔记内容）</Typography.Text>}
+      </Typography.Paragraph>
+      {annotation.url && (
+        <Typography.Text type="secondary" style={{ fontSize: 11, wordBreak: 'break-all' }}>
+          来源：{annotation.url}
+        </Typography.Text>
       )}
     </div>
   );

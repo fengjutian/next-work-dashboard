@@ -9,12 +9,13 @@
  *      │  spawn nwd-voice-engine (stdin/stdout JSONL)
  *      ▼
  *   Rust sidecar
- *      │  cpal microphone + WAV recorder
+ *      │  cpal microphone + Silero VAD + WAV recorder
  *      ▼
- *   resources/voice-engine/*.wav
+ *   resources/voice-engine/*.wav (per-segment, captured by VAD)
  *
- * W1 only: cpal capture + WAV persistence + audio level events. VAD/ASR
- * will be added in W2/W3 without changing the IPC surface.
+ * W2 surface: `models`, `speech.start`, `speech.end`, plus the
+ * `audio.level` shape now includes `speech_prob` and `in_speech`.
+ * The W1 `recording.raw` request stays for debug.
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -26,15 +27,20 @@ import readline from 'node:readline';
 import type {
   AudioLevelEvent,
   DaemonInfo,
+  ModelsEvent,
   RecordingFinishedEvent,
   RecordingProgressEvent,
   RecordingStartedEvent,
+  SpeechEndEvent,
+  SpeechStartEvent,
+  VadModelInfo,
   VoiceErrorEvent,
   VoiceEvent,
   VoiceState,
 } from './voice-types';
 
 const DAEMON_START_TIMEOUT_MS = 8_000;
+const MAX_SEGMENTS_KEPT = 20;
 
 const state: VoiceState = {
   ready: false,
@@ -42,10 +48,14 @@ const state: VoiceState = {
   startedAt: null,
   lastError: null,
   recording: false,
+  inSpeech: false,
   level: 0,
+  speechProb: 0,
   levelProgress: 0,
   lastRecordingPath: null,
+  segments: [],
   info: null,
+  models: null,
 };
 
 let processHandle: ChildProcess | null = null;
@@ -184,6 +194,7 @@ export async function startDaemon(): Promise<VoiceState> {
     switch (kind) {
       case 'ready': {
         state.ready = true;
+        const vadModelPath = (obj as Record<string, unknown>).vad_model_path;
         state.info = {
           version: String(obj.version ?? ''),
           platform: String(obj.platform ?? ''),
@@ -192,6 +203,7 @@ export async function startDaemon(): Promise<VoiceState> {
           storage_dir: state.info?.storage_dir ?? defaultStorageDir(),
           input_device: null,
           recording: false,
+          vad_model_path: typeof vadModelPath === 'string' ? vadModelPath : null,
         };
         restartAttempts = 0;
         broadcast({
@@ -200,6 +212,7 @@ export async function startDaemon(): Promise<VoiceState> {
           platform: state.info.platform,
           sample_rate: state.info.sample_rate,
           channels: state.info.channels,
+          vad_model_path: state.info.vad_model_path,
         });
         if (pendingReady) {
           const p = pendingReady;
@@ -216,8 +229,19 @@ export async function startDaemon(): Promise<VoiceState> {
         broadcast({ type: 'state', info });
         return;
       }
+      case 'models': {
+        const payload = obj as unknown as ModelsEvent;
+        state.models = payload;
+        if (payload?.vad) {
+          // Mirror onto info so the renderer can read it in one place.
+          if (state.info) state.info = { ...state.info, vad_model_path: payload.vad.path };
+        }
+        broadcast({ type: 'models', payload });
+        return;
+      }
       case 'recording.started': {
         state.recording = true;
+        state.inSpeech = false;
         const payload = obj as unknown as RecordingStartedEvent;
         broadcast({ type: 'recording.started', payload });
         return;
@@ -232,7 +256,9 @@ export async function startDaemon(): Promise<VoiceState> {
       case 'recording.finished': {
         state.recording = false;
         state.level = 0;
+        state.speechProb = 0;
         state.levelProgress = 0;
+        state.inSpeech = false;
         const payload = obj as unknown as RecordingFinishedEvent;
         state.lastRecordingPath = payload.path;
         broadcast({ type: 'recording.finished', payload });
@@ -241,9 +267,27 @@ export async function startDaemon(): Promise<VoiceState> {
       case 'audio.level': {
         const payload = obj as unknown as AudioLevelEvent;
         state.level = clampUnit(payload.rms);
-        state.levelProgress =
-          payload.total_frames > 0 ? payload.written_frames / payload.total_frames : 0;
+        state.speechProb = clampUnit(payload.speech_prob);
+        state.inSpeech = Boolean(payload.in_speech);
+        // `written_frames` is monotonic for the lifetime of the recording;
+        // we don't have a hard cap here, so we surface 0..1 as a soft
+        // progress based on a generous 30 s budget.
+        state.levelProgress = clampUnit(payload.written_frames / (16_000 * 30));
         broadcast({ type: 'audio.level', payload });
+        return;
+      }
+      case 'speech.start': {
+        const payload = obj as unknown as SpeechStartEvent;
+        state.inSpeech = true;
+        broadcast({ type: 'speech.start', payload });
+        return;
+      }
+      case 'speech.end': {
+        const payload = obj as unknown as SpeechEndEvent;
+        state.inSpeech = false;
+        state.lastRecordingPath = payload.path;
+        state.segments = [payload, ...state.segments].slice(0, MAX_SEGMENTS_KEPT);
+        broadcast({ type: 'speech.end', payload });
         return;
       }
       case 'error': {
@@ -371,6 +415,9 @@ export function setupVoiceIPC(): void {
   });
   ipcMain.handle('voice:request-state', async () => {
     return sendRequest({ type: 'state' });
+  });
+  ipcMain.handle('voice:request-models', async () => {
+    return sendRequest({ type: 'models' });
   });
   ipcMain.handle('voice:start-recording', async (_event, durationSecs: number) => {
     const safe = Math.max(1, Math.min(60, Math.floor(Number(durationSecs) || 5)));
