@@ -321,6 +321,12 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('workspace:fileChanged', handler);
       return () => ipcRenderer.removeListener('workspace:fileChanged', handler);
     },
+    writeBinaryFile: (
+      rootPath: string,
+      relativePath: string,
+      content: string,
+      options?: { expectedModifiedAt?: number; force?: boolean },
+    ) => ipcRenderer.invoke('workspace:writeBinaryFile', rootPath, relativePath, content, options),
   },
   knowledge: {
     scanWorkspace: (rootPath: string) => ipcRenderer.invoke('knowledge:scanWorkspace', rootPath),
@@ -433,6 +439,9 @@ const electronAPI: ElectronAPI = {
     listIncidents: (opts) => ipcRenderer.invoke('net-probe:list-incidents', opts),
     closeIncident: (id) => ipcRenderer.invoke('net-probe:close-incident', id),
     openIncidentsSnapshot: () => ipcRenderer.invoke('net-probe:open-incidents-snapshot'),
+    listLanHosts: (opts) => ipcRenderer.invoke('net-probe:list-lan-hosts', opts),
+    deleteLanHost: (id) => ipcRenderer.invoke('net-probe:delete-lan-host', id),
+    scanLan: (opts) => ipcRenderer.invoke('net-probe:scan-lan', opts),
     testChannel: (args: { notify: string; notifyConfig?: string }) => ipcRenderer.invoke('net-probe:test-channel', args),
     onEvent: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: import('./types/electron').NetProbeEvent) => callback(payload);

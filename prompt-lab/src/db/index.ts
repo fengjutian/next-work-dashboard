@@ -393,6 +393,20 @@ function ensureSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_net_probe_incidents_open
       ON net_probe_incidents(target_id, ended_at);
+    CREATE TABLE IF NOT EXISTS net_probe_lan_hosts (
+      id TEXT PRIMARY KEY,                 -- e.g. "lan-192.168.1.1"
+      ip TEXT NOT NULL UNIQUE,
+      mac TEXT,                            -- null if SendARP / proc/net/arp not available
+      hostname TEXT,                       -- reverse DNS
+      vendor TEXT,                         -- OUI lookup, deferred (always null in V2.5)
+      open_ports TEXT NOT NULL DEFAULT '[]',  -- JSON array of numbers
+      first_seen INTEGER NOT NULL,
+      last_seen INTEGER NOT NULL,
+      source TEXT NOT NULL DEFAULT 'tcp',  -- 'tcp' | 'arp' | 'mdns'
+      scan_id TEXT                         -- groups hosts from the same scan run
+    );
+    CREATE INDEX IF NOT EXISTS idx_net_probe_lan_hosts_last_seen
+      ON net_probe_lan_hosts(last_seen DESC);
   `);
   try {
     _sqlDb.run(`CREATE VIRTUAL TABLE IF NOT EXISTS weread_notes_fts USING fts5(

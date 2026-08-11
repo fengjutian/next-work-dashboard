@@ -41,6 +41,7 @@ import type {
   AlertNotify,
   NotifyChannelConfig,
   NetProbeIncident,
+  NetProbeLanHost,
 } from '@/types/net-probe-schema';
 import type { NetProbeEvent, NetProbeState } from '@/types/electron';
 import { computeStats } from './backend/net-probe-stats';
@@ -71,6 +72,9 @@ interface NetProbeAPI {
   testChannel: (args: { notify: string; notifyConfig?: string }) => Promise<{ ok: boolean; channel: string; detail?: string; durationMs: number }>;
   listIncidents: (opts?: { openOnly?: boolean; limit?: number }) => Promise<NetProbeIncident[]>;
   closeIncident: (id: string) => Promise<boolean>;
+  listLanHosts: (opts?: { scanId?: string; sinceMs?: number; limit?: number }) => Promise<NetProbeLanHost[]>;
+  deleteLanHost: (id: string) => Promise<boolean>;
+  scanLan: (opts?: { subnet?: string; maxHosts?: number; perPortTimeoutMs?: number }) => Promise<{ scanId: string; subnet: string | null; found: number; hosts: NetProbeLanHost[]; totalMs: number | null }>;
   onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
 }
 
@@ -150,6 +154,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [autoStart, setAutoStart] = useState<boolean>(true);
   const [showRules, setShowRules] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [showLan, setShowLan] = useState<boolean>(false);
 
   // Add-target form state
   const [draftKind, setDraftKind] = useState<NetProbeKind>('icmp');
@@ -686,13 +691,21 @@ export const NetworkObservatoryPanel: React.FC = () => {
               ))
             )}
           </div>
-          <div className="border-t border-border p-2">
+          <div className="border-t border-border p-2 space-y-1">
             <button
               type="button"
               onClick={() => setShowRules((v) => !v)}
               className="w-full rounded border border-border px-2 py-1.5 text-xs hover:bg-muted"
             >
               告警规则 ({rules.length}) {showRules ? '▾' : '▸'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLan(v => !v)}
+              className="w-full rounded border border-border px-2 py-1.5 text-xs hover:bg-muted"
+              title="LAN 扫描 + 拓扑"
+            >
+              LAN 拓扑 {showLan ? '▾' : '▸'}
             </button>
           </div>
         </aside>
@@ -722,6 +735,20 @@ export const NetworkObservatoryPanel: React.FC = () => {
                 await refreshAll();
               }}
             />
+          ) : showRules ? (
+            <RulesPanel
+              rules={rules}
+              incidents={incidents}
+              targets={targets}
+              onRefresh={refreshAll}
+              onCloseIncident={async (id) => {
+                if (!api) return;
+                await api.closeIncident(id);
+                await refreshAll();
+              }}
+            />
+          ) : showLan ? (
+            <LanPanel api={api} systemInfo={systemInfo} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
               <Network className="h-10 w-10 opacity-30" />
@@ -1616,6 +1643,393 @@ const ExportReportModal: React.FC<ExportReportModalProps> = ({ api, targets, sys
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ── LAN scan + topology panel ──
+
+interface LanPanelProps {
+  api: NetProbeAPI;
+  systemInfo: { hostname: string; platform: string } | null;
+}
+
+interface LanHostUI extends NetProbeLanHost {
+  ports: number[];
+  ageMin: number;
+}
+
+function parseOpenPorts(s: string): number[] {
+  try {
+    const v = JSON.parse(s);
+    return Array.isArray(v) ? v.filter((n) => typeof n === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
+  const [hosts, setHosts] = useState<LanHostUI[]>([]);
+  const [busy, setBusy] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const [subnet, setSubnet] = useState<string>('');
+  const [lastScan, setLastScan] = useState<{ scanId: string; found: number; totalMs: number | null; ts: number } | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const rows = await api.listLanHosts({ limit: 500 });
+      const now = Date.now();
+      setHosts(
+        rows.map((r) => ({
+          ...r,
+          ports: parseOpenPorts(r.openPorts),
+          ageMin: Math.max(0, Math.round((now - r.lastSeen) / 60_000)),
+        })),
+      );
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const handleScan = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const opts: { subnet?: string; maxHosts?: number; perPortTimeoutMs?: number } = { maxHosts: 254, perPortTimeoutMs: 250 };
+      if (subnet.trim()) opts.subnet = subnet.trim();
+      const r = await api.scanLan(opts);
+      setLastScan({ scanId: r.scanId, found: r.found, totalMs: r.totalMs, ts: Date.now() });
+      await refresh();
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  }, [api, subnet, refresh]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      await api.deleteLanHost(id);
+      await refresh();
+      if (selectedIp === id) setSelectedIp(null);
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
+    }
+  }, [api, refresh, selectedIp]);
+
+  // Layout: local host at the center, discovered hosts around the perimeter.
+  // Sort by last-seen desc so freshly seen hosts are on top.
+  const sortedHosts = useMemo(() => {
+    return [...hosts].sort((a, b) => b.lastSeen - a.lastSeen);
+  }, [hosts]);
+
+  const layout = useMemo(() => {
+    const W = 640;
+    const H = 420;
+    const cx = W / 2;
+    const cy = H / 2;
+    const r = Math.min(W, H) / 2 - 60;
+    const n = sortedHosts.length;
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (let i = 0; i < n; i++) {
+      const angle = (i / Math.max(1, n)) * Math.PI * 2 - Math.PI / 2;
+      positions[sortedHosts[i].ip] = {
+        x: cx + r * Math.cos(angle),
+        y: cy + r * Math.sin(angle),
+      };
+    }
+    return { W, H, cx, cy, positions };
+  }, [sortedHosts]);
+
+  const selected = useMemo(
+    () => (selectedIp ? sortedHosts.find((h) => h.ip === selectedIp) ?? null : null),
+    [selectedIp, sortedHosts],
+  );
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+        <div className="flex flex-1 items-center gap-2">
+          <input
+            value={subnet}
+            onChange={(e) => setSubnet(e.target.value)}
+            placeholder="auto-detect /24 (留空)"
+            className="w-64 rounded border border-border bg-background px-2 py-1 text-xs font-mono"
+          />
+          <button
+            type="button"
+            onClick={handleScan}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />
+            {busy ? '扫描中…' : '扫描 LAN'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+            title="刷新 (用存储里已扫到的主机)"
+          >
+            刷新
+          </button>
+          {lastScan && (
+            <span className="text-[11px] text-muted-foreground">
+              上次: {lastScan.found} 主机 / {lastScan.totalMs?.toFixed(0) ?? '?'}ms
+              {' · '}
+              {new Date(lastScan.ts).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+        <span className="text-[11px] text-muted-foreground">
+          已知 {hosts.length} 主机
+          {systemInfo ? ` · ${systemInfo.hostname}` : ''}
+        </span>
+      </div>
+
+      {error && (
+        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+          {error}
+        </div>
+      )}
+
+      <div className="grid flex-1 grid-cols-[1fr_280px] overflow-hidden">
+        {/* Topology */}
+        <div className="relative flex items-center justify-center overflow-hidden bg-muted/20">
+          {sortedHosts.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+              <Network className="h-10 w-10 opacity-30" />
+              <p>还没有扫描过 LAN</p>
+              <p className="text-xs opacity-70">点上面的「扫描 LAN」开始 TCP 扫描本地 /24</p>
+              {hosts.length === 0 && busy === false && (
+                <p className="text-[10px] opacity-50">
+                  (Windows 上 loopback /24 会扫到 32 个虚拟主机;实际部署可以填真实子网如 192.168.1.0)
+                </p>
+              )}
+            </div>
+          ) : (
+            <svg
+              viewBox={`0 0 ${layout.W} ${layout.H}`}
+              className="h-full w-full"
+              preserveAspectRatio="xMidYMid meet"
+            >
+              {/* Center node (this machine) */}
+              <g>
+                <circle cx={layout.cx} cy={layout.cy} r={36} fill="#6366f1" stroke="#a5b4fc" strokeWidth={2} />
+                <text
+                  x={layout.cx}
+                  y={layout.cy + 4}
+                  textAnchor="middle"
+                  fontSize={11}
+                  fontFamily="ui-monospace, monospace"
+                  fill="#fff"
+                  fontWeight={600}
+                >
+                  {systemInfo?.hostname ?? '本机'}
+                </text>
+              </g>
+              {/* Edges (center → host) */}
+              {sortedHosts.map((h) => {
+                const p = layout.positions[h.ip];
+                if (!p) return null;
+                const isSel = selectedIp === h.ip;
+                return (
+                  <line
+                    key={`e-${h.id}`}
+                    x1={layout.cx}
+                    y1={layout.cy}
+                    x2={p.x}
+                    y2={p.y}
+                    stroke={isSel ? '#6366f1' : '#cbd5e1'}
+                    strokeWidth={isSel ? 2 : 1}
+                    strokeDasharray={isSel ? '0' : '3 3'}
+                  />
+                );
+              })}
+              {/* Host nodes */}
+              {sortedHosts.map((h) => {
+                const p = layout.positions[h.ip];
+                if (!p) return null;
+                const isSel = selectedIp === h.ip;
+                const r = isSel ? 22 : 18;
+                const color = h.ports.includes(443) || h.ports.includes(80)
+                  ? '#10b981'
+                  : h.ports.length > 0
+                    ? '#f59e0b'
+                    : '#94a3b8';
+                return (
+                  <g
+                    key={h.id}
+                    onClick={() => setSelectedIp(h.ip)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <circle
+                      cx={p.x}
+                      cy={p.y}
+                      r={r}
+                      fill={color}
+                      stroke={isSel ? '#0f172a' : '#fff'}
+                      strokeWidth={isSel ? 2 : 1.5}
+                      opacity={0.95}
+                    />
+                    <text
+                      x={p.x}
+                      y={p.y + 3}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fontFamily="ui-monospace, monospace"
+                      fill="#fff"
+                      fontWeight={600}
+                      pointerEvents="none"
+                    >
+                      {h.ip.split('.').slice(-1)[0]}
+                    </text>
+                    <text
+                      x={p.x}
+                      y={p.y + r + 12}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fontFamily="ui-monospace, monospace"
+                      fill="#475569"
+                      pointerEvents="none"
+                    >
+                      {h.ip}
+                    </text>
+                    {h.hostname && (
+                      <text
+                        x={p.x}
+                        y={p.y + r + 22}
+                        textAnchor="middle"
+                        fontSize={8}
+                        fontFamily="ui-monospace, monospace"
+                        fill="#94a3b8"
+                        pointerEvents="none"
+                      >
+                        {(h.hostname.length > 18 ? h.hostname.slice(0, 18) + '…' : h.hostname)}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          )}
+          <div className="pointer-events-none absolute right-2 top-2 rounded bg-background/80 px-2 py-1 text-[10px] text-muted-foreground shadow">
+            <span className="mr-2"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle" /> Web (80/443)</span>
+            <span className="mr-2"><span className="inline-block h-2 w-2 rounded-full bg-amber-500 align-middle" /> Other TCP</span>
+            <span><span className="inline-block h-2 w-2 rounded-full bg-slate-400 align-middle" /> No ports</span>
+          </div>
+        </div>
+
+        {/* Sidebar: details / list */}
+        <aside className="border-l border-border overflow-auto bg-background">
+          {selected ? (
+            <div className="space-y-3 p-3 text-sm">
+              <div>
+                <div className="text-[10px] uppercase text-muted-foreground">IP</div>
+                <div className="font-mono text-base">{selected.ip}</div>
+              </div>
+              {selected.hostname && (
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground">Hostname</div>
+                  <div className="font-mono text-xs break-all">{selected.hostname}</div>
+                </div>
+              )}
+              {selected.mac && (
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground">MAC</div>
+                  <div className="font-mono text-xs">{selected.mac}</div>
+                </div>
+              )}
+              <div>
+                <div className="text-[10px] uppercase text-muted-foreground">开放端口 ({selected.ports.length})</div>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {selected.ports.length === 0 ? (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  ) : (
+                    selected.ports.map((p) => (
+                      <span key={p} className="rounded bg-muted px-2 py-0.5 font-mono text-[11px]">
+                        {p}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground">首次发现</div>
+                  <div className="font-mono">{new Date(selected.firstSeen).toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-muted-foreground">最近</div>
+                  <div className="font-mono">{selected.ageMin < 1 ? '刚刚' : `${selected.ageMin} 分钟前`}</div>
+                </div>
+              </div>
+              <div className="text-[10px] uppercase text-muted-foreground">来源</div>
+              <div className="font-mono text-xs">{selected.source}</div>
+              <div className="flex items-center justify-between gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedIp(null)}
+                  className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                >
+                  返回列表
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(selected.id)}
+                  className="rounded border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 className="mr-1 inline h-3 w-3" />
+                  删除
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs">
+              <div className="border-b border-border bg-muted/40 px-3 py-1.5 text-[10px] uppercase text-muted-foreground">
+                主机列表 ({sortedHosts.length})
+              </div>
+              {sortedHosts.length === 0 ? (
+                <div className="px-3 py-4 text-center text-muted-foreground">无</div>
+              ) : (
+                sortedHosts.map((h) => (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => setSelectedIp(h.ip)}
+                    className="flex w-full items-center gap-2 border-b border-border/40 px-3 py-1.5 text-left hover:bg-muted/40"
+                  >
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{
+                        background: h.ports.includes(443) || h.ports.includes(80)
+                          ? '#10b981'
+                          : h.ports.length > 0
+                            ? '#f59e0b'
+                            : '#94a3b8',
+                      }}
+                    />
+                    <span className="flex-1 min-w-0">
+                      <div className="truncate font-mono text-[11px]">{h.ip}</div>
+                      {h.hostname && (
+                        <div className="truncate text-[10px] text-muted-foreground">{h.hostname}</div>
+                      )}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {h.ports.length > 0 ? `${h.ports.length}p` : '—'}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );

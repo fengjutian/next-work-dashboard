@@ -283,3 +283,17 @@ export type NetProbeTargetRow = InferSelectModel<typeof netProbeTargets>;
 export type NetProbeResultRow = InferSelectModel<typeof netProbeResults>;
 export type NetProbeAlertRuleRow = InferSelectModel<typeof netProbeAlertRules>;
 export type NetProbeIncidentRow = InferSelectModel<typeof netProbeIncidents>;
+
+export const netProbeLanHosts = sqliteTable('net_probe_lan_hosts', {
+  id: text('id').primaryKey(),
+  ip: text('ip').notNull().unique(),
+  mac: text('mac'),
+  hostname: text('hostname'),
+  vendor: text('vendor'),
+  openPorts: text('open_ports').notNull().default('[]'),
+  firstSeen: integer('first_seen').notNull(),
+  lastSeen: integer('last_seen').notNull(),
+  source: text('source').notNull().default('tcp'),
+  scanId: text('scan_id'),
+});
+export type NetProbeLanHostRow = InferSelectModel<typeof netProbeLanHosts>;

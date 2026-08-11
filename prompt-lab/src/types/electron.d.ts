@@ -282,6 +282,7 @@ export interface ElectronAPI {
     watch: (rootPath: string) => Promise<WorkspaceResult<void>>;
     unwatch: () => Promise<void>;
     onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;
+    writeBinaryFile: (rootPath: string, relativePath: string, content: string, options?: { expectedModifiedAt?: number; force?: boolean }) => Promise<WorkspaceResult<{ size: number; modifiedAt: number }>>;
   };
   knowledge: {
     scanWorkspace: (rootPath: string) => Promise<WorkspaceResult<import('../core/knowledge').KnowledgeIndex & {
@@ -370,6 +371,9 @@ export interface ElectronAPI {
     listIncidents: (opts?: { openOnly?: boolean; limit?: number }) => Promise<import('./net-probe-schema').NetProbeIncident[]>;
     closeIncident: (id: string) => Promise<boolean>;
     openIncidentsSnapshot: () => Promise<import('./net-probe-schema').NetProbeIncident[]>;
+    listLanHosts: (opts?: { scanId?: string; sinceMs?: number; limit?: number }) => Promise<NetProbeLanHost[]>;
+    deleteLanHost: (id: string) => Promise<boolean>;
+    scanLan: (opts?: { subnet?: string; maxHosts?: number; perPortTimeoutMs?: number }) => Promise<{ scanId: string; subnet: string | null; found: number; hosts: NetProbeLanHost[]; totalMs: number | null }>;
     testChannel: (args: { notify: string; notifyConfig?: string }) => Promise<{ ok: boolean; channel: string; detail?: string; durationMs: number }>;
     onEvent: (callback: (event: NetProbeEvent) => void) => () => void;
   };

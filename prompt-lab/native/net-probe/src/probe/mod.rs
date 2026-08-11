@@ -2,12 +2,14 @@
 //!
 //! V1.1 supports: icmp / tcp / dns / http.
 //! V2: traceroute (self-built with system-call fallback).
+//! V2.5: lan_scan (TCP connect sweep on local /24).
 
 pub mod icmp;
 pub mod tcp;
 pub mod dns;
 pub mod http;
 pub mod traceroute_self;
+pub mod lan_scan;
 
 use std::time::Duration;
 
@@ -51,6 +53,7 @@ pub fn probe_for(kind: &str) -> Option<Box<dyn Probe>> {
         "dns" => Some(Box::new(dns::DnsProbe::new())),
         "http" => Some(Box::new(http::HttpProbe::new())),
         "traceroute" => Some(Box::new(traceroute_self::TracerouteProbe::new())),
+        "lan_scan" => Some(Box::new(lan_scan::LanScanProbe::new())),
         _ => None,
     }
 }

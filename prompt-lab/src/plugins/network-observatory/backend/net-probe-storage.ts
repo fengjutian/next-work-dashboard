@@ -14,10 +14,12 @@ import {
   netProbeResults,
   netProbeAlertRules,
   netProbeIncidents,
+  netProbeLanHosts,
   type NetProbeTargetRow,
   type NetProbeResultRow,
   type NetProbeAlertRuleRow,
   type NetProbeIncidentRow,
+  type NetProbeLanHostRow,
 } from '@/db/schema';
 
 // Public-facing types: `enabled` and `success` and `acknowledged` are booleans
@@ -425,4 +427,140 @@ export function dbCloseIncident(id: string, endedAt: number): boolean {
     .where(eq(netProbeIncidents.id, id))
     .run();
   return true;
+}
+
+// ── LAN scan hosts ──────────────────────────────────────────────────
+
+export interface NetProbeLanHost {
+  id: string;
+  ip: string;
+  mac: string | null;
+  hostname: string | null;
+  vendor: string | null;
+  /** JSON-encoded array of open port numbers. */
+  openPorts: string;
+  firstSeen: number;
+  lastSeen: number;
+  source: 'tcp' | 'arp' | 'mdns';
+  scanId: string | null;
+}
+
+export interface UpsertLanHostInput {
+  id?: string;
+  ip: string;
+  mac?: string | null;
+  hostname?: string | null;
+  vendor?: string | null;
+  openPorts?: number[];
+  firstSeen?: number;
+  lastSeen?: number;
+  source?: 'tcp' | 'arp' | 'mdns';
+  scanId?: string | null;
+}
+
+export function dbListLanHosts(opts?: { scanId?: string; sinceMs?: number; limit?: number }): NetProbeLanHost[] {
+  if (!isDbReady()) return [];
+  const conds = [];
+  if (opts?.scanId) conds.push(eq(netProbeLanHosts.scanId, opts.scanId));
+  if (opts?.sinceMs != null) conds.push(gte(netProbeLanHosts.lastSeen, opts.sinceMs));
+  const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
+  const rows = getDb()
+    .select()
+    .from(netProbeLanHosts)
+    .where(where)
+    .orderBy(desc(netProbeLanHosts.lastSeen))
+    .limit(opts?.limit ?? 500)
+    .all();
+  return rows.map(toLanHost);
+}
+
+export function dbGetLanHost(id: string): NetProbeLanHost | null {
+  if (!isDbReady()) return null;
+  const row = getDb().select().from(netProbeLanHosts).where(eq(netProbeLanHosts.id, id)).get();
+  return row ? toLanHost(row) : null;
+}
+
+export function dbUpsertLanHost(input: UpsertLanHostInput): NetProbeLanHost {
+  const now = Date.now();
+  const id = input.id ?? `lan-${input.ip}`;
+  const existing = dbGetLanHost(id);
+  const row = {
+    id,
+    ip: input.ip,
+    mac: input.mac ?? existing?.mac ?? null,
+    hostname: input.hostname ?? existing?.hostname ?? null,
+    vendor: input.vendor ?? existing?.vendor ?? null,
+    openPorts: JSON.stringify(input.openPorts ?? (existing ? safeJsonArray(existing.openPorts) : [])),
+    firstSeen: existing?.firstSeen ?? input.firstSeen ?? now,
+    lastSeen: input.lastSeen ?? now,
+    source: input.source ?? existing?.source ?? 'tcp',
+    scanId: input.scanId ?? existing?.scanId ?? null,
+  };
+  if (isDbReady()) {
+    getDb()
+      .insert(netProbeLanHosts)
+      .values(row)
+      .onConflictDoUpdate({
+        target: netProbeLanHosts.id,
+        set: {
+          ip: row.ip,
+          mac: row.mac,
+          hostname: row.hostname,
+          vendor: row.vendor,
+          openPorts: row.openPorts,
+          lastSeen: row.lastSeen,
+          source: row.source,
+          scanId: row.scanId,
+        },
+      })
+      .run();
+  }
+  return toLanHost(row as NetProbeLanHostRow);
+}
+
+export function dbDeleteLanHost(id: string): boolean {
+  if (!isDbReady()) return false;
+  getDb().delete(netProbeLanHosts).where(eq(netProbeLanHosts.id, id)).run();
+  return true;
+}
+
+export function dbDeleteLanHostsOlderThan(cutoffMs: number): number {
+  if (!isDbReady()) return 0;
+  const countRow = getDb()
+    .select({ n: sql<number>`count(*)` })
+    .from(netProbeLanHosts)
+    .where(sql`${netProbeLanHosts.lastSeen} < ${cutoffMs}`)
+    .get();
+  const n = Number(countRow?.n ?? 0);
+  if (n > 0) {
+    getDb()
+      .delete(netProbeLanHosts)
+      .where(sql`${netProbeLanHosts.lastSeen} < ${cutoffMs}`)
+      .run();
+  }
+  return n;
+}
+
+function safeJsonArray(s: string): number[] {
+  try {
+    const v = JSON.parse(s);
+    return Array.isArray(v) ? v.filter((n) => typeof n === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+function toLanHost(r: NetProbeLanHostRow): NetProbeLanHost {
+  return {
+    id: r.id,
+    ip: r.ip,
+    mac: r.mac,
+    hostname: r.hostname,
+    vendor: r.vendor,
+    openPorts: r.openPorts,
+    firstSeen: r.firstSeen,
+    lastSeen: r.lastSeen,
+    source: r.source as NetProbeLanHost['source'],
+    scanId: r.scanId,
+  };
 }

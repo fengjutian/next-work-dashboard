@@ -95,3 +95,19 @@ export interface NetProbeIncident {
   triggerMessage: string;
   acknowledged: boolean;
 }
+
+export type LanHostSource = 'tcp' | 'arp' | 'mdns';
+
+export interface NetProbeLanHost {
+  id: string;
+  ip: string;
+  mac: string | null;
+  hostname: string | null;
+  vendor: string | null;
+  /** JSON-encoded array of port numbers. Parse on the renderer side. */
+  openPorts: string;
+  firstSeen: number;
+  lastSeen: number;
+  source: LanHostSource;
+  scanId: string | null;
+}

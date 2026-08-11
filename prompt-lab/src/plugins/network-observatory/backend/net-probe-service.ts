@@ -28,11 +28,15 @@ import {
   dbListIncidents,
   dbCloseIncident,
   dbAggregateHeatmap,
+  dbListLanHosts,
+  dbUpsertLanHost,
+  dbDeleteLanHost,
   type NetProbeTarget,
   type NetProbeResult,
   type NetProbeAlertRule,
   type NetProbeIncident,
   type HeatmapCell,
+  type NetProbeLanHost,
 } from './net-probe-storage';
 import { evaluateAlerts, maintenanceTick, getOpenIncidentsSnapshot, resetAlertState } from './net-probe-alerts';
 import { testChannel } from './net-probe-notify';
@@ -68,7 +72,7 @@ export interface NetProbeState {
 export interface NetProbeTargetInput {
   id?: string;
   target: string;
-  probe?: 'icmp' | 'tcp' | 'dns' | 'http';
+  probe?: 'icmp' | 'tcp' | 'dns' | 'http' | 'traceroute' | 'lan_scan';
   intervalMs?: number;
   timeoutMs?: number;
   options?: Record<string, unknown>;
@@ -94,6 +98,7 @@ let nextTargetId = 1;
 const recentResults: Array<Extract<NetProbeEvent, { type: 'probe_result' }>> = [];
 const targetHistoryCache = new Map<string, NetProbeResult[]>();
 const windowListeners = new Set<BrowserWindow>();
+const broadcastSubscribers = new Set<(ev: NetProbeEvent) => void>();
 
 function probePath(): string {
   const executable = process.platform === 'win32' ? 'nwd-net-probe.exe' : 'nwd-net-probe';
@@ -114,6 +119,9 @@ function probePath(): string {
 }
 
 function broadcast(event: NetProbeEvent): void {
+  for (const sub of broadcastSubscribers) {
+    try { sub(event); } catch { /* ignore */ }
+  }
   for (const win of windowListeners) {
     if (!win.isDestroyed()) {
       win.webContents.send('net-probe:event', event);
@@ -417,6 +425,57 @@ export function trackWindow(win: BrowserWindow): () => void {
   };
 }
 
+/**
+ * Helper for `scan-lan` etc.: collects the next `probe_result` event whose
+ * `id` matches `targetId`. Resolves with the event payload (or null on
+ * timeout). Cancelling via `cancel()` releases any pending waiters.
+ */
+class OneShotCollector {
+  private resolve: ((value: Extract<NetProbeEvent, { type: 'probe_result' }> | null) => void) | null = null;
+  private cancelled = false;
+  constructor(
+    private readonly targetId: string,
+    private readonly timeoutMs: number,
+  ) {}
+  handle(ev: NetProbeEvent): void {
+    if (ev.type !== 'probe_result' || ev.id !== this.targetId) return;
+    if (this.resolve && !this.cancelled) {
+      this.resolve(ev as Extract<NetProbeEvent, { type: 'probe_result' }>);
+      this.resolve = null;
+    }
+  }
+  wait(): Promise<Extract<NetProbeEvent, { type: 'probe_result' }> | null> {
+    if (this.cancelled) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      setTimeout(() => {
+        if (this.resolve) {
+          this.resolve(null);
+          this.resolve = null;
+        }
+      }, this.timeoutMs);
+    });
+  }
+  cancel(): void {
+    this.cancelled = true;
+    if (this.resolve) {
+      this.resolve(null);
+      this.resolve = null;
+    }
+  }
+}
+
+/**
+ * Subscribe to broadcasted net-probe events from the main process side.
+ * Returns an unsubscribe function. Used by handlers that need to wait for
+ * the next event matching a predicate.
+ */
+function broadcastListeners(handler: (ev: NetProbeEvent) => void): () => void {
+  const wrapped = (ev: NetProbeEvent) => handler(ev);
+  broadcastSubscribers.add(wrapped);
+  return () => broadcastSubscribers.delete(wrapped);
+}
+
 export async function shutdownDaemon(): Promise<void> {
   shuttingDown = true;
   if (restartTimer) {
@@ -487,6 +546,66 @@ export function setupNetProbeIPC(): void {
     }
   });
   ipcMain.handle('net-probe:on-event', () => true); // no-op marker
+  ipcMain.handle('net-probe:list-lan-hosts', (_event, opts?: { scanId?: string; sinceMs?: number; limit?: number }) => dbListLanHosts(opts ?? {}));
+  ipcMain.handle('net-probe:delete-lan-host', (_event, id: string) => dbDeleteLanHost(id));
+  // scan-lan: spawn a one-shot lan_scan via the daemon, collect the result,
+  // merge the discovered hosts into storage, return the raw payload. We use
+  // a fresh target id so it doesn't collide with user-added targets.
+  ipcMain.handle('net-probe:scan-lan', async (_event, opts: { subnet?: string; maxHosts?: number; perPortTimeoutMs?: number } = {}) => {
+    const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const targetId = `lanscan-${scanId}`;
+    const scanOptions: Record<string, unknown> = {
+      max_hosts: opts.maxHosts ?? 254,
+      per_port_timeout_ms: opts.perPortTimeoutMs ?? 300,
+    };
+    if (opts.subnet) scanOptions.subnet = opts.subnet;
+
+    const collector = new OneShotCollector(targetId, 30_000);
+    const off = broadcastListeners((ev) => collector.handle(ev));
+    try {
+      await startDaemon();
+      await addTarget({
+        id: targetId,
+        target: opts.subnet ? `lan:${opts.subnet}` : 'lan:auto',
+        probe: 'lan_scan',
+        intervalMs: 600_000, // effectively one-shot
+        timeoutMs: 30_000,
+        options: scanOptions,
+        enabled: true,
+      });
+      const result = await collector.wait();
+      if (!result) throw new Error('lan scan timed out (30s)');
+      const payload = (result.payload ?? {}) as {
+        hosts?: Array<{ ip: string; hostname?: string; open_ports?: number[] }>;
+        subnet?: string;
+      };
+      const hosts = payload.hosts ?? [];
+      const merged: NetProbeLanHost[] = [];
+      for (const h of hosts) {
+        const upserted = dbUpsertLanHost({
+          ip: h.ip,
+          hostname: h.hostname ?? null,
+          openPorts: h.open_ports ?? [],
+          source: 'tcp',
+          scanId,
+        });
+        merged.push(upserted);
+      }
+      return {
+        scanId,
+        subnet: payload.subnet ?? null,
+        found: hosts.length,
+        hosts: merged,
+        totalMs: result.latencyMs,
+      };
+    } finally {
+      // Best-effort cleanup of the one-shot target so it doesn't sit in the
+      // targets table forever.
+      try { await removeTarget(targetId); } catch { /* ignore */ }
+      off();
+      collector.cancel();
+    }
+  });
   ipcMain.on('net-probe:event', (event, payload: NetProbeEvent) => {
     // not used: actual broadcast goes through trackWindow + window.webContents.send
     void event;
