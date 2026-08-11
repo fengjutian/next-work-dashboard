@@ -1,17 +1,14 @@
 /**
- * Voice Input panel — W2 VAD preview.
+ * Voice Input panel — W3 cloud STT preview.
  *
- * Talks to the nwd-voice-engine sidecar via the `voice.*` preload bridge.
- * What the user sees here is the VAD in action:
- *   - A live audio level meter + speech-probability bar.
- *   - A "speech" badge that turns green while we're inside a detected
- *     segment.
- *   - A list of segments captured so far, each with the per-segment WAV
- *     path, start time, and duration.
+ * Talks to the nwd-voice-engine sidecar via the `voice.*` preload bridge
+ * for the audio pipeline (cpal + Silero VAD + per-segment WAV). The
+ * voice-to-text step itself is a cloud STT call (OpenAI Whisper API,
+ * Aliyun DashScope Paraformer, or any OpenAI-compatible endpoint) that
+ * the renderer fires from this panel right after each `speech.end` event.
  *
- * The actual recording is driven by `recording.start`, which kicks off
- * the cpal stream + the VAD state machine. Each `speech.end` event from
- * the sidecar pushes a new row into the segment list.
+ * The user-visible feature is now complete end-to-end:
+ *   mic → VAD segment → WAV on disk → cloud STT → transcript in UI
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,11 +20,17 @@ import {
   ShieldAlert,
   ShieldCheck,
   AudioWaveform,
+  Settings,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { useVoiceStore } from './voice-store';
+import { useVoiceStore, type SttConfig } from './voice-store';
 
 const RECORD_DURATIONS = [2, 5, 10] as const;
+
+const PRESET_BASE_URLS: Array<{ label: string; baseUrl: string; model: string }> = [
+  { label: 'OpenAI Whisper', baseUrl: 'https://api.openai.com/v1', model: 'whisper-1' },
+  { label: '阿里云 DashScope (兼容)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'paraformer-v2' },
+];
 
 const VoiceInputPanel: React.FC = () => {
   const {
@@ -43,6 +46,8 @@ const VoiceInputPanel: React.FC = () => {
     models,
     segments,
     recordings,
+    sttConfig,
+    setSttConfig,
     startSidecar,
     refreshState,
     refreshRecordings,
@@ -52,6 +57,7 @@ const VoiceInputPanel: React.FC = () => {
 
   const [busy, setBusy] = useState(false);
   const [duration, setDuration] = useState<number>(RECORD_DURATIONS[1]);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Subscribe to the preload bridge event stream.
   useEffect(() => {
@@ -95,6 +101,8 @@ const VoiceInputPanel: React.FC = () => {
   const speechPct = Math.round(speechProb * 100);
   const progressPct = Math.round(levelProgress * 100);
 
+  const sttConfigured = Boolean(sttConfig.apiKey && sttConfig.baseUrl && sttConfig.model);
+
   const status = useMemo(() => {
     if (lastError && !ready) {
       return { tone: 'error' as const, label: `未连接:${lastError}` };
@@ -117,7 +125,7 @@ const VoiceInputPanel: React.FC = () => {
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <AudioLines className="h-4 w-4 text-primary" />
-          <h1 className="text-sm font-semibold">语音输入 · W2 VAD 预览</h1>
+          <h1 className="text-sm font-semibold">语音输入 · W3 语音转文字</h1>
         </div>
         <StatusBadge tone={status.tone} label={status.label} />
       </header>
@@ -127,9 +135,7 @@ const VoiceInputPanel: React.FC = () => {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Info className="h-3.5 w-3.5" />
             <span>
-              W2 范围:Silero VAD 实时切片,每段说话独立存为{' '}
-              <code className="font-mono text-foreground/80">speech-*.wav</code>。
-              最大录音时长作为兜底,实际由 VAD 决定何时停。
+              链路:麦克风 → Silero VAD 切段 → 每段 WAV → 云端 ASR(Whisper / Paraformer / 兼容)→ 文字。
             </span>
           </div>
 
@@ -157,17 +163,52 @@ const VoiceInputPanel: React.FC = () => {
               <span
                 className={`h-1.5 w-1.5 rounded-full ${vadReady ? 'bg-emerald-500' : 'bg-amber-500'}`}
               />
-              {vadReady ? 'VAD 模型就绪' : 'VAD 模型缺失'}
+              {vadReady ? 'VAD 就绪' : 'VAD 模型缺失'}
             </span>
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                sttConfigured
+                  ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                  : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+              }`}
+              title={sttConfigured ? `${sttConfig.baseUrl} · ${sttConfig.model}` : '未配置 STT'}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${sttConfigured ? 'bg-sky-500' : 'bg-amber-500'}`}
+              />
+              {sttConfigured ? `STT: ${sttConfig.model}` : 'STT 未配置'}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowSettings((v) => !v)}
+              className="ml-auto"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              {showSettings ? '收起设置' : 'STT 设置'}
+            </Button>
           </div>
+
+          {showSettings ? (
+            <SttSettings
+              value={sttConfig}
+              onChange={setSttConfig}
+            />
+          ) : null}
 
           <div className="flex items-center gap-3">
             <Button
               size="lg"
               onClick={handleStart}
-              disabled={busy || recording || !vadReady}
+              disabled={busy || recording || !vadReady || !sttConfigured}
               className="min-w-[160px]"
-              title={!vadReady ? '需要先放置 silero_vad.onnx 到模型目录' : undefined}
+              title={
+                !vadReady
+                  ? '需要先放置 silero_vad.onnx 到模型目录'
+                  : !sttConfigured
+                    ? '需要先在 STT 设置里填入 API Key'
+                    : undefined
+              }
             >
               {recording ? (
                 <>
@@ -229,30 +270,46 @@ const VoiceInputPanel: React.FC = () => {
         </section>
 
         <section className="rounded-md border border-border bg-background p-4 space-y-2">
-          <h2 className="text-sm font-semibold">VAD 切出的语音段</h2>
+          <h2 className="text-sm font-semibold">语音段 + 转写</h2>
           {segments.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               还没有。开启录音后,检测到一段说话就会出现在这里。
             </p>
           ) : (
-            <ul className="space-y-1.5">
+            <ul className="space-y-2">
               {segments.map((seg) => (
                 <li
                   key={`${seg.path}-${seg.start_ms}`}
-                  className="flex items-center justify-between rounded border border-border bg-card px-3 py-2 text-xs"
+                  className="rounded border border-border bg-card p-3 text-xs space-y-1.5"
                 >
-                  <div className="flex items-center gap-2">
-                    <AudioWaveform className="h-3.5 w-3.5 text-emerald-500" />
-                    <code
-                      className="truncate font-mono text-foreground/80"
-                      title={seg.path}
-                    >
-                      {shortPath(seg.path)}
-                    </code>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AudioWaveform className="h-3.5 w-3.5 text-emerald-500" />
+                      <code
+                        className="truncate font-mono text-foreground/80"
+                        title={seg.path}
+                      >
+                        {shortPath(seg.path)}
+                      </code>
+                    </div>
+                    <span className="text-muted-foreground">
+                      {seg.start_ms}ms · {seg.duration_ms}ms · {seg.sample_rate}Hz
+                    </span>
                   </div>
-                  <span className="text-muted-foreground">
-                    {seg.start_ms}ms · {seg.duration_ms}ms · {seg.sample_rate}Hz
-                  </span>
+                  {seg.transcript ? (
+                    <p className="rounded bg-emerald-500/5 px-2 py-1.5 text-foreground/90">
+                      {seg.transcript.text}
+                    </p>
+                  ) : seg.transcriptError ? (
+                    <p className="rounded bg-destructive/5 px-2 py-1.5 text-destructive">
+                      转写失败:{seg.transcriptError}
+                    </p>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
+                      转写中…
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>
@@ -306,6 +363,72 @@ const VoiceInputPanel: React.FC = () => {
   );
 };
 
+const SttSettings: React.FC<{
+  value: SttConfig;
+  onChange: (patch: Partial<SttConfig>) => void;
+}> = ({ value, onChange }) => {
+  return (
+    <div className="grid gap-2 rounded border border-border bg-muted/30 p-3 text-xs">
+      <div className="flex flex-wrap gap-1.5">
+        {PRESET_BASE_URLS.map((preset) => (
+          <Button
+            key={preset.label}
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              onChange({ baseUrl: preset.baseUrl, model: preset.model })
+            }
+          >
+            {preset.label}
+          </Button>
+        ))}
+      </div>
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">Base URL</span>
+        <input
+          className="rounded border border-border bg-background px-2 py-1 font-mono text-foreground"
+          value={value.baseUrl}
+          onChange={(e) => onChange({ baseUrl: e.target.value })}
+          placeholder="https://api.openai.com/v1"
+        />
+      </label>
+      <label className="grid gap-1">
+        <span className="text-muted-foreground">API Key</span>
+        <input
+          type="password"
+          className="rounded border border-border bg-background px-2 py-1 font-mono text-foreground"
+          value={value.apiKey}
+          onChange={(e) => onChange({ apiKey: e.target.value })}
+          placeholder="sk-..."
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="grid gap-1">
+          <span className="text-muted-foreground">Model</span>
+          <input
+            className="rounded border border-border bg-background px-2 py-1 font-mono text-foreground"
+            value={value.model}
+            onChange={(e) => onChange({ model: e.target.value })}
+            placeholder="whisper-1"
+          />
+        </label>
+        <label className="grid gap-1">
+          <span className="text-muted-foreground">Language (可选, ISO-639-1)</span>
+          <input
+            className="rounded border border-border bg-background px-2 py-1 font-mono text-foreground"
+            value={value.language}
+            onChange={(e) => onChange({ language: e.target.value })}
+            placeholder="auto"
+            maxLength={8}
+          />
+        </label>
+      </div>
+    </div>
+  );
+};
+
 const Row: React.FC<{ label: string; value: string | null | undefined }> = ({ label, value }) => (
   <>
     <dt className="text-muted-foreground">{label}</dt>
@@ -342,4 +465,4 @@ function shortPath(p: string): string {
 
 export default VoiceInputPanel;
 // re-export so the icon import is not tree-shaken
-export { AudioWaveform };
+export { AudioWaveform, Settings };

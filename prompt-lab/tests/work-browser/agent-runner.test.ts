@@ -132,7 +132,6 @@ describe('runAgent', () => {
       { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'searchWeb', arguments: '{"query":"a"}' } }] } }] },
       { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'c2', type: 'function', function: { name: 'searchWeb', arguments: '{"query":"b"}' } }] } }] },
       { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'c3', type: 'function', function: { name: 'searchWeb', arguments: '{"query":"c"}' } }] } }] },
-      { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'c4', type: 'function', function: { name: 'searchWeb', arguments: '{"query":"d"}' } }] }] }] },
     ]);
     const result = await runAgent({
       userMessage: 'x',

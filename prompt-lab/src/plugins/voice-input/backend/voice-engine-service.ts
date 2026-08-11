@@ -12,10 +12,13 @@
  *      │  cpal microphone + Silero VAD + WAV recorder
  *      ▼
  *   resources/voice-engine/*.wav (per-segment, captured by VAD)
+ *      │  renderer watches `speech.end` and calls `voice:transcribe`
+ *      ▼
+ *   Cloud STT (OpenAI Whisper / Aliyun Paraformer / compatible)
  *
- * W2 surface: `models`, `speech.start`, `speech.end`, plus the
- * `audio.level` shape now includes `speech_prob` and `in_speech`.
- * The W1 `recording.raw` request stays for debug.
+ * W3 surface: cloud STT for each captured segment. The Rust sidecar stays
+ * dumb (mic + VAD + WAV); the ASR call lives here so the user API key
+ * never has to leave the privileged side.
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -393,6 +396,120 @@ function defaultStorageDir(): string {
   return path.join(os.tmpdir(), 'nwd-voice-engine');
 }
 
+export interface TranscribeRequest {
+  audioPath: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language?: string;
+}
+
+export interface TranscribeResult {
+  ok: true;
+  text: string;
+  language?: string;
+}
+
+export interface TranscribeError {
+  ok: false;
+  status: number;
+  error: string;
+}
+
+/**
+ * Send a captured per-segment WAV to an OpenAI-compatible speech-to-text
+ * endpoint (e.g. OpenAI `/audio/transcriptions`, Aliyun DashScope
+ * `compatible-mode/v1/audio/transcriptions`). The user is expected to
+ * pass any baseUrl; we only enforce HTTPS so this IPC can't be abused
+ * as a generic HTTP proxy.
+ */
+async function transcribeSegment(
+  payload: TranscribeRequest,
+): Promise<TranscribeResult | TranscribeError> {
+  const audioPath = String(payload?.audioPath ?? '').trim();
+  const baseUrl = String(payload?.baseUrl ?? '').replace(/\/+$/, '').trim();
+  const apiKey = String(payload?.apiKey ?? '').trim();
+  const model = String(payload?.model ?? '').trim();
+  const language = String(payload?.language ?? '').trim() || undefined;
+
+  if (!audioPath) return { ok: false, status: 400, error: 'MISSING_AUDIO_PATH' };
+  if (!fs.existsSync(audioPath)) {
+    return { ok: false, status: 404, error: 'AUDIO_FILE_NOT_FOUND' };
+  }
+  if (!baseUrl) return { ok: false, status: 400, error: 'MISSING_BASE_URL' };
+  if (!/^https:\/\//i.test(baseUrl)) {
+    return { ok: false, status: 400, error: 'UNSUPPORTED_LLM_PROXY_HOST' };
+  }
+  if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
+  if (!model) return { ok: false, status: 400, error: 'MISSING_MODEL' };
+
+  let url: URL;
+  try {
+    url = new URL(`${baseUrl}/audio/transcriptions`);
+  } catch {
+    return { ok: false, status: 400, error: 'INVALID_BASE_URL' };
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = fs.readFileSync(audioPath);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      error: `READ_FAILED: ${(err as Error).message}`,
+    };
+  }
+
+  const fileName = path.basename(audioPath) || 'segment.wav';
+  // Node 18+ ships native FormData / Blob / fetch — no extra deps.
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type: 'audio/wav' }), fileName);
+  form.append('model', model);
+  form.append('response_format', 'json');
+  if (language) form.append('language', language);
+
+  const controller = new AbortController();
+  const timeoutMs = 60_000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: text ? text.slice(0, 512) : `HTTP ${response.status}`,
+      };
+    }
+    let data: { text?: string; language?: string } = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      return { ok: false, status: 502, error: 'NON_JSON_RESPONSE' };
+    }
+    const recognized = typeof data.text === 'string' ? data.text.trim() : '';
+    if (!recognized) {
+      return { ok: false, status: 502, error: 'EMPTY_TRANSCRIPT' };
+    }
+    return {
+      ok: true,
+      text: recognized,
+      language: typeof data.language === 'string' ? data.language : language,
+    };
+  } catch (err) {
+    const msg = (err as Error).name === 'AbortError' ? 'TIMEOUT' : (err as Error).message;
+    return { ok: false, status: 504, error: `STT_REQUEST_FAILED: ${msg}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function clampUnit(v: number): number {
   if (!Number.isFinite(v)) return 0;
   // RMS of typical speech is in [0.01, 0.3]; map roughly to [0, 1] for UI.
@@ -429,6 +546,25 @@ export function setupVoiceIPC(): void {
   });
   ipcMain.handle('voice:list-recordings', () => listStorageRecordings());
   ipcMain.handle('voice:on-event', () => true);
+
+  // Cloud STT — runs in main process so the user API key never leaves
+  // the privileged side. Renderer fires this after a `speech.end` event
+  // with the per-segment WAV path and the STT config from settings.
+  ipcMain.handle(
+    'voice:transcribe',
+    async (
+      _event,
+      payload: {
+        audioPath: string;
+        baseUrl: string;
+        apiKey: string;
+        model: string;
+        language?: string;
+      },
+    ) => {
+      return transcribeSegment(payload);
+    },
+  );
 
   app.on('browser-window-created', (_event, win) => {
     const dispose = trackWindow(win);

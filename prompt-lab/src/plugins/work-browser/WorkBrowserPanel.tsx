@@ -27,6 +27,7 @@ import { LibraryList } from './components/LibraryList';
 import { TaskList } from './components/TaskList';
 import { SearchResults } from './components/SearchResults';
 import { SavePageDialog } from './components/SavePageDialog';
+import { ResearchDrawer } from './components/ResearchDrawer';
 import { useWorkspaces } from './hooks/useWorkspace';
 import { useSearch } from './hooks/useSearch';
 import { STORAGE_KEYS } from './constants';
@@ -42,6 +43,8 @@ export function WorkBrowserPanel() {
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [researchTopic, setResearchTopic] = useState('');
   const [cleanerEnabled, setCleanerEnabled] = useState(true);
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(undefined);
@@ -152,6 +155,7 @@ export function WorkBrowserPanel() {
           <SearchBar
             onSearch={handleSearch}
             onSave={activeTab ? () => setSaveOpen(true) : undefined}
+            onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
             cleanerEnabled={cleanerEnabled}
             onToggleCleaner={toggleCleaner}
             loading={searchLoading}
@@ -245,6 +249,14 @@ export function WorkBrowserPanel() {
         defaultWorkspaceId={activeWorkspace?.id}
         initialUrl={activeTab?.url}
         initialTitle={activeTab?.title}
+      />
+      <ResearchDrawer
+        open={researchOpen}
+        onClose={() => setResearchOpen(false)}
+        workspaces={workspaces}
+        defaultWorkspaceId={activeWorkspace?.id}
+        defaultTopic={researchTopic}
+        onCompleted={() => { if (activeWorkspace) void refreshDocuments(activeWorkspace.id); }}
       />
     </Layout>
   );

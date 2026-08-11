@@ -11,17 +11,14 @@ tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "tim
 cpal = "0.15"
 # Ring buffer for producer (cpal callback) -> consumer (VAD/ASR worker).
 ringbuf = "0.4"
-# ONNX Runtime — drives both VAD and (in a later phase) ASR.
+# ONNX Runtime — drives the VAD. (W3 ASR is in the Electron main process
+# against an OpenAI-compatible HTTP endpoint, not a local model.)
 # We pin to rc.9 because rc.13's build script has a ureq TLS regression
 # that breaks the native-lib download. Bump deliberately.
 ort = { version = "=2.0.0-rc.9", default-features = false, features = ["download-binaries", "copy-dylibs", "ndarray"] }
 ort-sys = "=2.0.0-rc.9"
 # ndarray is what ort 1.x uses for tensor IO.
 ndarray = "0.15"
-# ASR — sherpa-onnx streaming-zipformer-bilingual-zh-en-2023-02-20.
-# sherpa-rs is a thin safe wrapper around sherpa-rs-sys which downloads
-# prebuilt sherpa-onnx C-libraries (no local C++ compile).
-sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries"] }
 # HTTP client for first-run VAD model download.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 # WAV writer so we can persist a smoke-test recording to disk.

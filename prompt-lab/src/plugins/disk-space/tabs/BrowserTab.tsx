@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
-import { Select } from 'antd';
-import { ChevronDown, ExternalLink, FileText, FolderOpen, Image, Loader2, Square } from '@/components/icons';
+import { notification, Select, Tooltip } from 'antd';
+import { ChevronDown, Copy, ExternalLink, FileText, FolderOpen, Image, Loader2, Square } from '@/components/icons';
 import type { DiskDirectoryItem, DiskFilePreview } from '@/types/electron';
 import { displayPath, type UseDiskScanResult } from '../hooks/useDiskScan';
 import { EmptyState } from './components';
@@ -31,6 +31,7 @@ export interface BrowserTabProps {
 }
 
 export function BrowserTab(props: BrowserTabProps) {
+  const [notice, noticeHolder] = notification.useNotification();
   const { scan, preview, setPreview, openPreview, parentDirectory, loadDirectory, showAnalysisControls, isFocusedTab, start, cancelScan, choose } = props;
   const { root, currentDirectory, entries, browserLoading, scanIdRef, running, exclusionsText, setExclusionsText, system } = scan;
 
@@ -44,6 +45,26 @@ export function BrowserTab(props: BrowserTabProps) {
     [system.disks],
   );
 
+  const copyCurrentPath = async () => {
+    try {
+      await navigator.clipboard.writeText(currentDirectory);
+      notice.success({ message: '路径已复制', description: currentDirectory, placement: 'bottomRight' });
+    } catch (error) {
+      notice.error({ message: '复制失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+    }
+  };
+
+  const revealPath = async (entry: DiskDirectoryItem) => {
+    try {
+      // Reuse the already-registered system open handler. For files, open the
+      // containing directory; for directories, open that directory directly.
+      const sourcePath = entry.type === 'file' ? currentDirectory : entry.path;
+      await window.electronAPI.diskSpace.open(root, sourcePath);
+    } catch (error) {
+      notice.error({ message: '无法打开源文件路径', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+    }
+  };
+
   // 默认 C 盘：盘符列表加载好但 root 还没选时自动选第一个（通常是 C:）
   useEffect(() => {
     if (!root && driveOptions.length > 0) {
@@ -56,6 +77,7 @@ export function BrowserTab(props: BrowserTabProps) {
 
   return (
     <>
+      {noticeHolder}
       <section className="rounded-2xl border bg-card p-4 shadow-sm">
         <div className="flex gap-2">
           <Select
@@ -104,6 +126,11 @@ export function BrowserTab(props: BrowserTabProps) {
               <span className="min-w-0 flex-1 truncate font-mono text-xs" title={currentDirectory}>
                 {displayPath(currentDirectory)}
               </span>
+              <Tooltip title="复制当前路径">
+                <button className="rounded p-1.5 hover:bg-accent" onClick={() => void copyCurrentPath()} aria-label="复制当前路径">
+                  <Copy className="h-4 w-4" />
+                </button>
+              </Tooltip>
               <span className="text-xs text-muted-foreground">{entries.length} 项</span>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
@@ -113,24 +140,21 @@ export function BrowserTab(props: BrowserTabProps) {
                 </EmptyState>
               ) : (
                 entries.map((entry: DiskDirectoryItem) => (
-                  <button
+                  <div
                     key={entry.path}
-                    className={`grid w-full grid-cols-[24px_minmax(0,1fr)_90px] items-center gap-2 border-b px-3 py-2.5 text-left text-sm hover:bg-muted/40 ${preview?.path === entry.path ? 'bg-primary/5' : ''}`}
-                    onDoubleClick={() => void openPreview(entry)}
-                    onClick={() => entry.type === 'file' && void openPreview(entry)}
+                    className={`grid w-full grid-cols-[minmax(0,1fr)_36px] items-center border-b text-sm hover:bg-muted/40 ${preview?.path === entry.path ? 'bg-primary/5' : ''}`}
                   >
-                    {entry.type === 'directory' ? (
-                      <FolderOpen className="h-4 w-4 text-amber-500" />
-                    ) : entry.extension.match(/png|jpg|jpeg|gif|webp|svg/) ? (
-                      <Image className="h-4 w-4 text-sky-500" />
-                    ) : (
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                    )}
-                    <span className="truncate">{entry.name}</span>
-                    <span className="text-right text-xs tabular-nums text-muted-foreground">
-                      {entry.type === 'directory' ? '文件夹' : formatBytes(entry.size)}
-                    </span>
-                  </button>
+                    <button className="grid min-w-0 grid-cols-[24px_minmax(0,1fr)_90px] items-center gap-2 px-3 py-2.5 text-left" onDoubleClick={() => void openPreview(entry)} onClick={() => entry.type === 'file' && void openPreview(entry)}>
+                      {entry.type === 'directory' ? <FolderOpen className="h-4 w-4 text-amber-500" /> : entry.extension.match(/png|jpg|jpeg|gif|webp|svg/) ? <Image className="h-4 w-4 text-sky-500" /> : <FileText className="h-4 w-4 text-muted-foreground" />}
+                      <span className="truncate">{entry.name}</span>
+                      <span className="text-right text-xs tabular-nums text-muted-foreground">{entry.type === 'directory' ? '文件夹' : formatBytes(entry.size)}</span>
+                    </button>
+                    <Tooltip title={entry.type === 'directory' ? '在资源管理器中打开' : '打开源文件路径'}>
+                      <button className="rounded p-2 hover:bg-accent" onClick={() => void revealPath(entry)} aria-label="打开源文件路径">
+                        <ExternalLink className="h-4 w-4" />
+                      </button>
+                    </Tooltip>
+                  </div>
                 ))
               )}
             </div>

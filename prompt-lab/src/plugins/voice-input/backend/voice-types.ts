@@ -55,6 +55,38 @@ export interface SpeechEndEvent {
   sample_rate: number;
 }
 
+/**
+ * Renderer-side view of a captured segment. Mirrors `SpeechEndEvent` and
+ * adds optional STT fields that the cloud ASR step fills in later. We
+ * keep this distinct from the IPC event so the sidecar protocol stays
+ * minimal.
+ */
+export interface VoiceSegment extends SpeechEndEvent {
+  transcript?: TranscriptFinalEvent;
+  transcriptError?: string;
+}
+
+/**
+ * Emitted by the voice engine service after a successful cloud STT call
+ * for a captured segment. The `path` is the per-segment WAV path from
+ * `speech.end` and the join key for `transcripts`.
+ */
+export interface TranscriptFinalEvent {
+  path: string;
+  text: string;
+  language?: string;
+  /** Wall-clock time the transcript was finalized. */
+  finished_at: number;
+  /** STT model used (e.g. `whisper-1`, `paraformer-v2`). */
+  model: string;
+}
+
+/** Emitted when the cloud STT call failed for a segment. */
+export interface TranscriptErrorEvent {
+  path: string;
+  message: string;
+}
+
 /** Fired when `recording.start` accepts and the cpal stream is open. */
 export interface RecordingStartedEvent {
   mode: 'raw' | 'vad';
@@ -93,6 +125,8 @@ export type VoiceEvent =
   | { type: 'audio.level'; payload: AudioLevelEvent }
   | { type: 'speech.start'; payload: SpeechStartEvent }
   | { type: 'speech.end'; payload: SpeechEndEvent }
+  | { type: 'transcript.final'; payload: TranscriptFinalEvent }
+  | { type: 'transcript.error'; payload: TranscriptErrorEvent }
   | { type: 'error'; payload: VoiceErrorEvent };
 
 export interface VoiceState {
@@ -113,7 +147,7 @@ export interface VoiceState {
   /** Most recent finished recording path (or null). */
   lastRecordingPath: string | null;
   /** Per-segment capture list — newest first. */
-  segments: SpeechEndEvent[];
+  segments: VoiceSegment[];
   /** Latest DaemonInfo snapshot we received. */
   info: DaemonInfo | null;
   /** Latest models snapshot (vad model path/exists/ready). */
@@ -126,6 +160,18 @@ export interface VoiceRecording {
   size: number;
 }
 
+export interface TranscribeRequest {
+  audioPath: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language?: string;
+}
+
+export type TranscribeResult =
+  | { ok: true; text: string; language?: string }
+  | { ok: false; status: number; error: string };
+
 export interface VoiceApi {
   start: () => Promise<VoiceState>;
   state: () => Promise<VoiceState>;
@@ -134,5 +180,6 @@ export interface VoiceApi {
   requestModels: () => Promise<ModelsEvent>;
   startRecording: (durationSecs: number) => Promise<{ duration_secs: number }>;
   listRecordings: () => Promise<VoiceRecording[]>;
+  transcribe: (payload: TranscribeRequest) => Promise<TranscribeResult>;
   onEvent: (handler: (event: VoiceEvent) => void) => () => void;
 }

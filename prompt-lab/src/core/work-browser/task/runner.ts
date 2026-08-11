@@ -41,6 +41,10 @@ export function runTask(task: Task, options: RunTaskOptions): TaskRunHandle {
 
   const emit = (e: TaskRunEvent) => { options.onEvent?.(e); };
 
+  // 内部引用：让外部能实时拿 task 状态（必须在 promise IIFE 之前定义）
+  let currentRef: Task = task;
+  const syncCurrent = (t: Task) => { currentRef = t; };
+
   const promise = (async (): Promise<Task> => {
     const updated: Task = { ...task, status: 'investigating', updatedAt: Date.now() };
     syncCurrent(updated);
@@ -87,10 +91,6 @@ export function runTask(task: Task, options: RunTaskOptions): TaskRunHandle {
     emit({ kind: 'task-done', taskId: updated.id, task: updated });
     return updated;
   })();
-
-  // 内部引用：让外部能实时拿 task 状态
-  let currentRef: Task = task;
-  function syncCurrent(t: Task) { currentRef = t; }
 
   return {
     cancel() { cancelled = true; ac.abort(); },

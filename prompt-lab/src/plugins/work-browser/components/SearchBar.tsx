@@ -1,21 +1,22 @@
 /**
- * SearchBar — 顶部统一搜索（含 scope 切换）
+ * SearchBar — 顶部统一搜索（含 scope 切换 + Research 入口）
  */
 import { Input, Button, Space, Tooltip, Segmented } from 'antd';
-import { Search, Save, Shield } from 'lucide-react';
+import { Search, Save, Shield, FlaskConical } from 'lucide-react';
 import { useState } from 'react';
 import type { SearchScope } from '../hooks/useSearch';
 
 export interface SearchBarProps {
   onSearch: (text: string, scope: SearchScope) => void;
   onSave?: () => void;
+  onResearch?: (topic: string) => void;
   cleanerEnabled?: boolean;
   onToggleCleaner?: () => void;
   loading?: boolean;
   defaultScope?: SearchScope;
 }
 
-export function SearchBar({ onSearch, onSave, cleanerEnabled, onToggleCleaner, loading, defaultScope = 'workspace' }: SearchBarProps) {
+export function SearchBar({ onSearch, onSave, onResearch, cleanerEnabled, onToggleCleaner, loading, defaultScope = 'workspace' }: SearchBarProps) {
   const [text, setText] = useState('');
   const [scope, setScope] = useState<SearchScope>(defaultScope);
   const submit = () => { if (text.trim()) onSearch(text.trim(), scope); };
@@ -39,7 +40,20 @@ export function SearchBar({ onSearch, onSave, cleanerEnabled, onToggleCleaner, l
             <Button size="large" icon={<Save size={16} />} onClick={onSave}>保存</Button>
           </Tooltip>
         )}
-        <Button size="large" type="primary" onClick={submit} loading={loading}>搜索</Button>
+        {onResearch && (
+          <Tooltip title="Research Mode：基于多引擎 + 本地知识库生成结构化报告">
+            <Button
+              size="large"
+              type="primary"
+              ghost
+              icon={<FlaskConical size={16} />}
+              onClick={() => onResearch(text.trim() || '什么是 RAG？')}
+            >
+              Research
+            </Button>
+          </Tooltip>
+        )}
+        <Button size="large" onClick={submit} loading={loading}>搜索</Button>
       </Space.Compact>
       <Segmented
         size="small"
@@ -54,3 +68,4 @@ export function SearchBar({ onSearch, onSave, cleanerEnabled, onToggleCleaner, l
     </Space>
   );
 }
+

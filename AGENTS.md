@@ -77,18 +77,20 @@ npx vitest run tests/work-browser/  # 32 / 32 必须全过
 4. **新 UI** → 组件放 `src/plugins/work-browser/components/`，主面板 `WorkBrowserPanel.tsx` 引入
 5. **新领域逻辑** → core 层加纯函数 + 单测（`tests/work-browser/`）
 
-### 已知限制（Phase 1 + 1.5 + 2 已交付；Phase 3-4 在路线图）
+### 已知限制（Phase 1 + 1.5 + 2 + 3 已交付骨架；UI 完善 + Sync 在 Phase 3.5 / 4）
 
 | 限制 | 原因 | 何时解决 |
 |---|---|---|
 | Save Page 不能保存鉴权页 | main 端 fetch 无登录态 | 未知（看用户） |
-| AI 摘要需手动配 baseUrl/apiKey | 独立 core，未集成 ai 模块 | Phase 3 |
-| Note 富文本 / Wiki-link | 未接入 markdown-editor | Phase 3 |
-| PDF / Docling 解析 | 未集成 document-knowledge | Phase 3 |
-| AI Context 切换 | 仅 workspace/library，缺 current-page / specific-documents | Phase 3 |
-| Embedding 升级的 Workspace auto-group | 当前还是 Jaccard | Phase 3 |
-| Task Runner 编排器 | UI 已可改状态，但缺多步自动串联 + AI 自动填证据 | Phase 3 |
-| Web Diff 增强 / Web Replay | 在路线图 | Phase 3 |
+| AI 摘要 / Agent 需手动配 baseUrl/apiKey | 独立 core，未集成 ai 模块 | Phase 3.5 |
+| Agent 危险动作 confirm | 本轮默认拒绝；Phase 3.5 接 Electron dialog | Phase 3.5 |
+| Note 富文本 / Wiki-link | 未接入 markdown-editor | Phase 3.5 |
+| PDF / Docling 解析 | 未集成 document-knowledge | Phase 3.5 |
+| AI Context 切换 | 仅 workspace/library，缺 current-page / specific-documents | Phase 3.5 |
+| Research Graph 可视化 | 骨架 + 数据就位，cytoscape 面板待补 | Phase 3.5 |
+| Research Mode 报告 UI | 命令行 OK，UI 入口待补 | Phase 3.5 |
+| Task Runner 自动编排 UI | 入口按钮 + 进度展示待补 | Phase 3.5 |
+| Web Diff 增强 / Web Replay | 在路线图 | Phase 3.5 |
 | Sync / NAS / WebDAV / S3 | 在路线图 | Phase 4 |
 
 ## 已知全局遗留（不是 bug，按项目节奏处理）

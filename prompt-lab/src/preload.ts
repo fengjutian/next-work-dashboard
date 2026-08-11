@@ -180,6 +180,13 @@ const electronAPI: ElectronAPI = {
     requestModels: () => ipcRenderer.invoke('voice:request-models'),
     startRecording: (durationSecs: number) => ipcRenderer.invoke('voice:start-recording', durationSecs),
     listRecordings: () => ipcRenderer.invoke('voice:list-recordings'),
+    transcribe: (payload: {
+      audioPath: string;
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      language?: string;
+    }) => ipcRenderer.invoke('voice:transcribe', payload),
     onEvent: (handler: (event: import('./plugins/voice-input/backend/voice-types').VoiceEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: import('./plugins/voice-input/backend/voice-types').VoiceEvent) => handler(payload);
       ipcRenderer.on('voice:event', listener);

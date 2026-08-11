@@ -148,6 +148,35 @@ Phase 2 已交付 Embedding 集成：Save Document 时异步入 lance 索引；h
 
 调用方拿到 bundle 后自己拼 messages 调 LLM，确保引用清晰可追溯。
 
+### 11. Task Runner 自动编排（Phase 3 已交付）
+
+`core/work-browser/task/auto-handlers.ts` 把模板 step 映射到 work-browser 内部 API：
+- INVESTIGATION 模板：记录症状 → 搜索错误码 → 列假设 → 收集证据 → 给出方案
+- RESEARCH 模板：构造查询 → 多引擎搜索 → 正文提取 → AI 聚合 → 输出报告
+- 每个 handler 调 `search.run` / `rag.run` / `summarize`（OpenAI-compatible）
+- IPC `work-browser:task:run-auto` 一键跑完整个 task，每 step 状态实时同步 SQLite
+
+### 12. AI Agent 框架（Phase 3 已交付）
+
+`core/work-browser/agent/runner.ts` 实现 OpenAI-compatible tool calling：
+- 5 个内置 tool：searchWeb / ragQuery / savePage / openTab / createAnnotation
+- 每个 tool 可声明 `requiresConfirm`（危险）+ `rateLimit`（限流）
+- LLM 选 tool → 执行 → 反馈 → 多轮循环（maxSteps 默认 5）
+- IPC `work-browser:agent:run`
+- **Phase 3.5**：接 Electron dialog 做真实人类确认；接 MCP SDK 跨插件共享 tool
+
+### 13. Research Graph（Phase 3 已交付骨架）
+
+`core/work-browser/graph/edges.ts` 5 类 page-level 边：
+- `cited-by`（搜索/RAG 引用了某 document）
+- `similar-to`（cosine 相似度 ≥ 0.85）
+- `searched-from`（从某次 search 结果打开）
+- `opened-from`（从 search/annotation/tab 跳转）
+- `saved-with`（同一 workspace 同时保存）
+- v3 migration 加 `page_edges` 表 + 3 索引
+- 自动 weight 累加（同 from/to 不重复插入）
+- **可视化（cytoscape 面板）Phase 3.5**
+
 ## 已知限制
 
 | 项 | 限制 | 解决 |

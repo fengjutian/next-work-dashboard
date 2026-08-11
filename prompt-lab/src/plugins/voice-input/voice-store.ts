@@ -6,12 +6,23 @@
  * The store intentionally keeps a small, self-contained shape so the panel
  * can render before the renderer-side store slices are ready.
  *
- * W2 surface: tracks `speechProb` and `inSpeech` from the streaming
- * `audio.level` events, plus a per-segment list sourced from `speech.end`.
+ * W3 surface: STT config (baseUrl / apiKey / model) and a transcripts map
+ * keyed by per-segment WAV path. When a `speech.end` event arrives with
+ * a valid STT config, the store fires a transcribe request against the
+ * user's OpenAI-compatible STT endpoint and stores the result.
  */
 import { create } from 'zustand';
+import { dbGetSetting, dbSetSetting, flushDbToDisk, isDbReady } from '@/db';
 
-import type { DaemonInfo, VoiceEvent, VoiceState } from './backend/voice-types';
+import type {
+  DaemonInfo,
+  TranscriptFinalEvent,
+  TranscribeRequest,
+  TranscribeResult,
+  VoiceEvent,
+  VoiceSegment,
+  VoiceState,
+} from './backend/voice-types';
 
 interface RecordingSummary {
   path: string;
@@ -19,12 +30,60 @@ interface RecordingSummary {
   size: number;
 }
 
+/** STT config — kept separate from the chat LLM config because the model
+ * names rarely overlap (`whisper-1` vs `gpt-4` etc.). */
+export interface SttConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  /** ISO-639-1 code (`zh`, `en`, ...) — leave empty for auto-detect. */
+  language: string;
+}
+
+const STT_CONFIG_KEY = 'voice.sttConfig';
+const DEFAULT_STT_CONFIG: SttConfig = {
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: '',
+  model: 'whisper-1',
+  language: '',
+};
+
+function loadSttConfig(): SttConfig {
+  if (!isDbReady()) return { ...DEFAULT_STT_CONFIG };
+  try {
+    const raw = dbGetSetting(STT_CONFIG_KEY);
+    if (!raw) return { ...DEFAULT_STT_CONFIG };
+    const parsed = JSON.parse(raw) as Partial<SttConfig>;
+    return {
+      baseUrl: typeof parsed.baseUrl === 'string' && parsed.baseUrl ? parsed.baseUrl : DEFAULT_STT_CONFIG.baseUrl,
+      apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
+      model: typeof parsed.model === 'string' && parsed.model ? parsed.model : DEFAULT_STT_CONFIG.model,
+      language: typeof parsed.language === 'string' ? parsed.language : '',
+    };
+  } catch {
+    return { ...DEFAULT_STT_CONFIG };
+  }
+}
+
+function saveSttConfig(config: SttConfig): void {
+  if (!isDbReady()) return;
+  try {
+    dbSetSetting(STT_CONFIG_KEY, JSON.stringify(config));
+    flushDbToDisk();
+  } catch {
+    /* ignore — settings are best-effort */
+  }
+}
+
 interface VoiceStore extends VoiceState {
   recordings: RecordingSummary[];
+  sttConfig: SttConfig;
+  setSttConfig: (patch: Partial<SttConfig>) => void;
   startSidecar: () => Promise<void>;
   refreshState: () => Promise<void>;
   refreshRecordings: () => Promise<void>;
   startRecording: (durationSecs: number) => Promise<void>;
+  transcribe: (audioPath: string) => Promise<void>;
   applyEvent: (event: VoiceEvent) => void;
   reset: () => void;
 }
@@ -52,6 +111,7 @@ interface NwdVoice {
   requestModels: () => Promise<unknown>;
   startRecording: (durationSecs: number) => Promise<{ duration_secs: number }>;
   listRecordings: () => Promise<RecordingSummary[]>;
+  transcribe: (payload: TranscribeRequest) => Promise<TranscribeResult>;
   onEvent: (handler: (event: VoiceEvent) => void) => () => void;
 }
 
@@ -71,9 +131,20 @@ function getNwdVoice(): NwdVoice {
   return v;
 }
 
+/** Module-level cache of in-flight transcribe requests keyed by audio path
+ * so a rapid burst of `speech.end` events doesn't double-fire. */
+const inFlightTranscribes = new Map<string, Promise<void>>();
+
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
   ...empty,
   recordings: [],
+  sttConfig: loadSttConfig(),
+
+  setSttConfig: (patch) => {
+    const next: SttConfig = { ...get().sttConfig, ...patch };
+    saveSttConfig(next);
+    set({ sttConfig: next });
+  },
 
   startSidecar: async () => {
     const bridge = getNwdVoice();
@@ -96,6 +167,54 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   startRecording: async (durationSecs) => {
     const bridge = getNwdVoice();
     await bridge.startRecording(durationSecs);
+  },
+
+  transcribe: async (audioPath: string) => {
+    const bridge = getNwdVoice();
+    const { sttConfig } = get();
+    if (!sttConfig.apiKey || !sttConfig.baseUrl || !sttConfig.model) {
+      // Silently skip — the panel will surface the missing-config state.
+      return;
+    }
+    if (inFlightTranscribes.has(audioPath)) {
+      return inFlightTranscribes.get(audioPath);
+    }
+    const promise = (async () => {
+      const req: TranscribeRequest = {
+        audioPath,
+        baseUrl: sttConfig.baseUrl,
+        apiKey: sttConfig.apiKey,
+        model: sttConfig.model,
+        language: sttConfig.language || undefined,
+      };
+      try {
+        const result = await bridge.transcribe(req);
+        if (result.ok === true) {
+          const finalEvent: TranscriptFinalEvent = {
+            path: audioPath,
+            text: result.text,
+            language: result.language,
+            finished_at: Date.now(),
+            model: sttConfig.model,
+          };
+          get().applyEvent({ type: 'transcript.final', payload: finalEvent });
+        } else {
+          get().applyEvent({
+            type: 'transcript.error',
+            payload: { path: audioPath, message: `[${result.status}] ${result.error}` },
+          });
+        }
+      } catch (err) {
+        get().applyEvent({
+          type: 'transcript.error',
+          payload: { path: audioPath, message: (err as Error).message ?? 'transcribe failed' },
+        });
+      } finally {
+        inFlightTranscribes.delete(audioPath);
+      }
+    })();
+    inFlightTranscribes.set(audioPath, promise);
+    return promise;
   },
 
   applyEvent: (event) => {
@@ -141,7 +260,6 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
           inSpeech: false,
           lastRecordingPath: event.payload.path,
         }));
-        // Refresh the recordings list shortly after the file is finalized.
         queueMicrotask(() => {
           get().refreshRecordings().catch(() => undefined);
         });
@@ -157,8 +275,6 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
         return;
       case 'audio.level': {
         const { rms, speech_prob, in_speech, written_frames } = event.payload;
-        // 30 s soft budget for the level meter progress. The recorder
-        // doesn't tell us the hard cap here — that's fine for a meter.
         const levelProgress = clampUnit(written_frames / (16_000 * 30));
         set((s) => ({
           ...s,
@@ -179,10 +295,33 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
           lastRecordingPath: event.payload.path,
           segments: [event.payload, ...s.segments].slice(0, 20),
         }));
-        // Refresh the recordings list so the file appears in the
-        // W1-style recordings list as well as the segment stream.
         queueMicrotask(() => {
           get().refreshRecordings().catch(() => undefined);
+        });
+        // Fire-and-forget: the actual transcript arrives as a
+        // `transcript.final` or `transcript.error` event.
+        queueMicrotask(() => {
+          get().transcribe(event.payload.path).catch(() => undefined);
+        });
+        return;
+      case 'transcript.final':
+        set((s) => {
+          const segments = s.segments.map((seg) =>
+            seg.path === event.payload.path
+              ? { ...seg, transcript: event.payload }
+              : seg,
+          );
+          return { ...s, segments };
+        });
+        return;
+      case 'transcript.error':
+        set((s) => {
+          const segments = s.segments.map((seg) =>
+            seg.path === event.payload.path
+              ? { ...seg, transcriptError: event.payload.message }
+              : seg,
+          );
+          return { ...s, segments };
         });
         return;
       case 'error':
@@ -196,7 +335,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   },
 
   reset: () => {
-    set({ ...empty, recordings: get().recordings });
+    set({ ...empty, recordings: get().recordings, sttConfig: get().sttConfig });
   },
 }));
 

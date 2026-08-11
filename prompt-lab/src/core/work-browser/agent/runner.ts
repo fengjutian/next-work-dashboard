@@ -226,6 +226,7 @@ export async function runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
           req.onStep?.({ kind: 'tool-call', iteration: i, toolName: tool.name, args, requiresConfirm: !!tool.requiresConfirm, confirmed });
           if (!confirmed) {
             messages.push({ role: 'tool', tool_call_id: call.id, content: 'error: user denied this action' });
+            toolCalls.push({ tool: tool.name, args, result: { denied: true }, iteration: i });
             continue;
           }
           try {
