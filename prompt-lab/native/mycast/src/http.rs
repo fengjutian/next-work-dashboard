@@ -47,7 +47,6 @@ pub fn build_router(state: HttpState) -> Router {
         .route("/", get(serve_mobile_ui))
         .route("/index.html", get(serve_mobile_ui))
         .route("/api/info", get(get_info))
-        .route("/api/pair/request", post(post_pair_request))
         .route("/api/pair/complete", post(post_pair_complete))
         .route("/api/sessions", get(get_sessions))
         .route("/api/files", get(get_files))
@@ -66,9 +65,6 @@ async fn serve_mobile_ui() -> impl IntoResponse {
 }
 
 async fn get_info(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
-    let pair_code = state.shared.tokens.active_pair_code();
-    let sessions = state.shared.signaling.list_sessions();
-    let transfers = state.shared.transfers.list();
     let lan_addrs = crate::security::enumerate_lan_addrs();
     Json(serde_json::json!({
         "device_id": state.cfg.device_id,
@@ -79,59 +75,6 @@ async fn get_info(AxState(state): AxState<HttpState>) -> Json<serde_json::Value>
         "mdns_enabled": state.cfg.mdns_enabled,
         "version": env!("CARGO_PKG_VERSION"),
         "lan_addrs": lan_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>(),
-        "pair_code": pair_code,
-        "sessions": sessions,
-        "transfers": transfers.iter().take(20).collect::<Vec<_>>(),
-    }))
-}
-
-#[derive(Debug, Deserialize)]
-struct PairRequest {
-    device_id: String,
-    device_name: String,
-    #[serde(default)]
-    platform: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct PairResponse {
-    pair_code: String,
-    expires_in_ms: u64,
-    session_token: String,
-    ws_url: String,
-    http_url: String,
-}
-
-async fn post_pair_request(
-    AxState(state): AxState<HttpState>,
-    Json(req): Json<PairRequest>,
-) -> Result<Json<PairResponse>, ApiError> {
-    if req.device_id.is_empty() || req.device_name.is_empty() {
-        return Err(ApiError::bad_request("device_id 与 device_name 必填"));
-    }
-    // Issue a fresh 6-digit code without consuming the existing active
-    // pairing. The phone still needs to call /api/pair/complete with the
-    // code (and its own device identity) to claim the session token.
-    let (_pair_token, pair_code, ttl) = state.shared.tokens.issue_pairing(None);
-    tracing::info!(
-        target: "mycast.http",
-        phone = %req.device_id,
-        name = %req.device_name,
-        platform = req.platform.as_deref().unwrap_or("unknown"),
-        "pair request issued (code-only)"
-    );
-    let lan = crate::security::enumerate_lan_addrs()
-        .into_iter()
-        .find(|a| a.is_ipv4() && !a.is_loopback())
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| state.cfg.bind_addr.to_string());
-    Ok(Json(PairResponse {
-        pair_code,
-        expires_in_ms: ttl.as_millis() as u64,
-        // Sentinel: phone must call /api/pair/complete to get the real token.
-        session_token: String::new(),
-        ws_url: format!("ws://{lan}:{}", state.cfg.ws_port),
-        http_url: format!("http://{lan}:{}", state.cfg.http_port),
     }))
 }
 
@@ -169,8 +112,9 @@ async fn post_pair_complete(
     })))
 }
 
-async fn get_sessions(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "sessions": state.shared.signaling.list_sessions() }))
+async fn get_sessions(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers)?;
+    Ok(Json(serde_json::json!({ "sessions": state.shared.signaling.list_sessions() })))
 }
 
 async fn get_files(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
@@ -422,16 +366,14 @@ async fn ws_upgrade(
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
         .and_then(|p| p.split(',').nth(1).map(|s| s.trim().to_string()));
-    let token = auth_token.or(proto_token);
-    if let Some(t) = token.as_deref() {
-        if !t.is_empty() && state.shared.tokens.validate_session(t).is_none() {
-            return Err(ApiError::unauthorized("session token 无效"));
-        }
-    }
-    Ok(ws.on_upgrade(move |socket| ws_connection(socket, state, token)))
+    let token = auth_token.or(proto_token).filter(|token| !token.is_empty())
+        .ok_or_else(|| ApiError::unauthorized("缺少 session token"))?;
+    let authenticated_device = state.shared.tokens.validate_session(&token)
+        .ok_or_else(|| ApiError::unauthorized("session token 无效"))?;
+    Ok(ws.on_upgrade(move |socket| ws_connection(socket, state, authenticated_device)))
 }
 
-async fn ws_connection(socket: WebSocket, state: HttpState, _auth_token: Option<String>) {
+async fn ws_connection(socket: WebSocket, state: HttpState, authenticated_device: String) {
     let (mut tx, mut rx) = socket.split();
     let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<SignalingFrame>();
     let mut phone_device: Option<String> = None;
@@ -457,6 +399,10 @@ async fn ws_connection(socket: WebSocket, state: HttpState, _auth_token: Option<
                         // First frame must be a Hello to identify the phone.
                         if phone_device.is_none() {
                             if let SignalingFrame::Hello { ref device_id, .. } = frame {
+                                if device_id != &authenticated_device {
+                                    tracing::warn!(target: "mycast.ws", claimed = %device_id, authenticated = %authenticated_device, "device id does not match session token");
+                                    break;
+                                }
                                 phone_device = Some(device_id.clone());
                                 state.shared.signaling.register_phone(device_id, frame_tx.clone());
                             } else {

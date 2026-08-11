@@ -6,6 +6,8 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 const DEFAULT_TOKEN_TTL: Duration = Duration::from_secs(300);
+const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+const MAX_PAIR_ATTEMPTS: u8 = 5;
 
 pub struct TokenManager {
     /// The currently valid one-time pairing token. None means "no active pairing".
@@ -17,12 +19,14 @@ pub struct TokenManager {
 struct TokenEntry {
     pair_code: String,
     expires_at: Instant,
+    failed_attempts: u8,
 }
 
 #[derive(Clone)]
 pub struct SessionToken {
     pub token: String,
     pub device_id: String,
+    expires_at: Instant,
 }
 
 impl Default for TokenManager {
@@ -54,6 +58,7 @@ impl TokenManager {
         let entry = TokenEntry {
             pair_code: pair_code.clone(),
             expires_at: now + ttl,
+            failed_attempts: 0,
         };
         *self.inner.write().expect("token lock") = Some(entry);
         (token, pair_code, ttl)
@@ -71,6 +76,12 @@ impl TokenManager {
             return None;
         }
         if !constant_time_eq(entry.pair_code.as_bytes(), code.as_bytes()) {
+            let attempts = entry.failed_attempts.saturating_add(1);
+            if attempts >= MAX_PAIR_ATTEMPTS {
+                *guard = None;
+            } else if let Some(active) = guard.as_mut() {
+                active.failed_attempts = attempts;
+            }
             return None;
         }
         Self::promote_to_session(&mut self.sessions.write().expect("session lock"), entry, device_id, device_name);
@@ -85,6 +96,7 @@ impl TokenManager {
         let session = SessionToken {
             token: hex::encode(bytes),
             device_id: device_id.to_string(),
+            expires_at: Instant::now() + DEFAULT_SESSION_TTL,
         };
         sessions.push(session);
     }
@@ -92,7 +104,15 @@ impl TokenManager {
     /// Validate a session bearer token. Returns the owning device_id if valid.
     pub fn validate_session(&self, presented: &str) -> Option<String> {
         let guard = self.sessions.read().expect("session lock");
-        guard.iter().find(|s| constant_time_eq(s.token.as_bytes(), presented.as_bytes())).map(|s| s.device_id.clone())
+        let now = Instant::now();
+        guard.iter().find(|s| now < s.expires_at && constant_time_eq(s.token.as_bytes(), presented.as_bytes())).map(|s| s.device_id.clone())
+    }
+
+    pub fn revoke_device(&self, device_id: &str) -> usize {
+        let mut guard = self.sessions.write().expect("session lock");
+        let before = guard.len();
+        guard.retain(|session| session.device_id != device_id);
+        before - guard.len()
     }
 
     pub fn active_pair_code(&self) -> Option<String> {
