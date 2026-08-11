@@ -13,8 +13,8 @@ import { ChevronDown, ExternalLink, FileText, FolderOpen, HardDrive, Image, Load
 
 echarts.use([LineChart, PieChart, TreemapChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
-type FileEntry = Extract<DiskScanEvent, { type: 'file' }>;
-type DirectoryEntry = Extract<DiskScanEvent, { type: 'directory' }>;
+type FileEntry = Extract<DiskScanEvent, { type: 'files' }>['items'][number];
+type DirectoryEntry = Extract<DiskScanEvent, { type: 'directories' }>['items'][number];
 type DuplicateGroup = Extract<DiskScanEvent, { type: 'duplicate' }>;
 type DiskHistoryPoint = { timestamp: number; disks: Array<{ path: string; used: number }> };
 type DirectorySnapshot = { timestamp: number; root: string; directories: Array<{ path: string; size: number }> };
@@ -205,14 +205,20 @@ export function DiskSpacePanel() {
   useEffect((): (() => void) => { void refreshSystem(); const timer = window.setInterval((): void => { void refreshSystem(); }, 30_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => window.electronAPI.diskSpace.onEvent((id, event) => {
     if (id !== scanId.current) return;
-    if (event.type === 'file') {
-      largestTopRef.current.push(event);
+    if (event.type === 'files') {
+      // 攒批：每批次最多 256 个文件。一次 IPC 一次 setState。
+      for (const item of event.items) largestTopRef.current.push(item);
       if (!largestDirtyRef.current) {
         largestDirtyRef.current = true;
         requestAnimationFrame(flushLargest);
       }
     }
-    else if (event.type === 'directory') { const next = [...scannedDirectoriesRef.current, event].sort((a, b) => b.size - a.size).slice(0, 500); scannedDirectoriesRef.current = next; setDirectories(next); }
+    else if (event.type === 'directories') {
+      // 目录事件也是批次，截断保留 top 500 后直接替换（数量有限，不需要 sort）。
+      const next = event.items.slice(0, 500);
+      scannedDirectoriesRef.current = next;
+      setDirectories(next);
+    }
     else if (event.type === 'duplicate-progress') setPhase('hashing');
     else if (event.type === 'scan-status') setScanTelemetry(event);
     else if (event.type === 'scan-error') { const labels = { 'permission-denied': '拒绝访问', 'not-found': '路径失效', busy: '文件占用', io: 'I/O 错误' } as const; setScanErrors((value) => [...value, { path: event.path, category: event.category, message: `【${labels[event.category]}】${event.message}` }].slice(-100)); }

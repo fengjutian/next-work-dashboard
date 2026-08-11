@@ -12,9 +12,9 @@ export interface InjectResult {
 }
 
 export type DiskScanEvent =
-  | { type: 'file'; path: string; size: number; modifiedAt: number; extension: string }
+  | { type: 'files'; items: Array<{ path: string; size: number; modifiedAt: number; extension: string }> }
   | { type: 'extension'; extension: string; size: number }
-  | { type: 'directory'; path: string; size: number }
+  | { type: 'directories'; items: Array<{ path: string; size: number }> }
   | { type: 'duplicate-progress'; stage: 'hashing' }
   | { type: 'duplicate'; groupId: string; size: number; files: Array<{ path: string; size: number; modifiedAt: number }> }
   | { type: 'scan-status'; currentPath: string; directories: number; files: number; bytes: number; elapsedMs: number }

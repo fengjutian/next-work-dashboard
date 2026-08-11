@@ -218,10 +218,14 @@ export function setupDiskSpaceIPC(): void {
     const lines = readline.createInterface({ input: child.stdout });
     lines.on('line', (line) => {
       try {
-        const payload = JSON.parse(line) as { type?: string; path?: string; groupId?: string; files?: AuthorizedFile[] };
+        const payload = JSON.parse(line) as { type?: string; path?: string; groupId?: string; files?: AuthorizedFile[]; items?: Array<{ path?: string }> };
         const result = scanResults.get(scanId);
-        if ((payload.type === 'file' || payload.type === 'directory') && typeof payload.path === 'string') {
-          result?.entries.set(payload.path, payload.type);
+        // 攒批事件：files / directories 在 items 数组里展开记录到 entries，便于 trash 校验。
+        if ((payload.type === 'files' || payload.type === 'directories') && Array.isArray(payload.items)) {
+          const kind = payload.type === 'files' ? 'file' : 'directory';
+          for (const item of payload.items) {
+            if (item && typeof item.path === 'string') result?.entries.set(item.path, kind);
+          }
         }
         if (payload.type === 'duplicate' && Array.isArray(payload.files)) {
           payload.files.forEach((file) => {

@@ -17,6 +17,7 @@ import type {
   GenerationScene,
   GenerationTone,
   ZodiacPerspective,
+  QuestionContext,
   ZodiacSign,
 } from './zodiac-types';
 import { getZodiacMeta, ZODIAC_META_LIST } from './zodiac-data';
@@ -140,12 +141,15 @@ export function buildSingleSignUserPrompt(
   question: string,
   options: GenerationOptions,
   sign: ZodiacSign,
+  context?: QuestionContext,
 ): string {
   const meta = getZodiacMeta(sign);
   const length = LENGTH_HINT[options.length];
   return `
 # 当前问题
 ${question.trim()}
+
+${context ? `# 共享事实与假设（十二个视角必须保持一致）\n${JSON.stringify(context, null, 2)}` : ''}
 
 # 场景
 ${SCENE_HINT[options.scene]}
@@ -166,6 +170,13 @@ ${meta.seed}
 ${SINGLE_SIGN_JSON_SCHEMA_DESC.replace('${LENGTH_HINT.standard.charBudget}', length.charBudget)}
 - 不要输出除了这个 JSON 之外的任何内容。
 `.trim();
+}
+
+export function buildQuestionContextPrompt(question: string): string {
+  return `分析下面的问题，只提取用户明确提供的信息，并把推断单独列为 assumptions。严格输出 JSON：
+{"knownFacts":[],"goals":[],"constraints":[],"assumptions":[],"missingInformation":[]}
+每个数组最多 5 项；不得补造个人经历、财务状况或关系背景。
+问题：${question.trim()}`;
 }
 
 export function buildFastBatchUserPrompt(question: string, options: GenerationOptions): string {

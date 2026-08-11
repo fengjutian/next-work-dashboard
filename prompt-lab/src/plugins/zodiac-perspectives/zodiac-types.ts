@@ -70,6 +70,14 @@ export interface ZodiacPerspectiveResult {
   synthesis?: ZodiacSynthesis;
 }
 
+export interface QuestionContext {
+  knownFacts: string[];
+  goals: string[];
+  constraints: string[];
+  assumptions: string[];
+  missingInformation: string[];
+}
+
 // ── 持久化形态 ──────────────────────────────────────────────────
 
 /** 数据库中保存的"一轮"运行 */

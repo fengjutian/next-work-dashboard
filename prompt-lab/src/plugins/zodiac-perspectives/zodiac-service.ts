@@ -22,12 +22,14 @@ import {
   type ZodiacPerspectiveResult,
   type ZodiacSign,
   type ZodiacSynthesis,
+  type QuestionContext,
 } from './zodiac-types';
 import { ZODIAC_META } from './zodiac-data';
 import {
   COMMON_SYSTEM_PROMPT,
   buildFollowupSystemPrompt,
   buildFastBatchUserPrompt,
+  buildQuestionContextPrompt,
   buildSingleSignUserPrompt,
   buildSynthesisUserPrompt,
   detectHighRisk,
@@ -262,10 +264,35 @@ export function parseFastBatch(raw: string): ZodiacPerspective[] {
     if (!item || typeof item !== 'object') continue;
     const sign = (item as Record<string, unknown>).sign;
     if (typeof sign !== 'string' || !(ZODIAC_SIGNS as readonly string[]).includes(sign)) continue;
-    if (!bySign.has(sign as ZodiacSign)) bySign.set(sign as ZodiacSign, parsePerspective(JSON.stringify(item), sign as ZodiacSign));
+    if (!bySign.has(sign as ZodiacSign)) {
+      try {
+        bySign.set(sign as ZodiacSign, parsePerspective(JSON.stringify(item), sign as ZodiacSign));
+      } catch {
+        // 保留其他合法项，缺失项稍后走单星座补全。
+      }
+    }
   }
-  if (bySign.size !== ZODIAC_SIGNS.length) throw new Error(`快速模式仅返回 ${bySign.size} / 12 个有效视角`);
-  return ZODIAC_SIGNS.map((sign) => bySign.get(sign)!);
+  if (bySign.size === 0) throw new Error('快速模式没有返回有效视角');
+  return ZODIAC_SIGNS.flatMap((sign) => bySign.has(sign) ? [bySign.get(sign)!] : []);
+}
+
+function parseQuestionContext(raw: string): QuestionContext {
+  const parsed = extractJson(raw) as Record<string, unknown>;
+  return {
+    knownFacts: toStringArray(parsed.knownFacts, 5, 160),
+    goals: toStringArray(parsed.goals, 5, 160),
+    constraints: toStringArray(parsed.constraints, 5, 160),
+    assumptions: toStringArray(parsed.assumptions, 5, 160),
+    missingInformation: toStringArray(parsed.missingInformation, 5, 160),
+  };
+}
+
+async function generateQuestionContext(question: string, ctx: GenerateContext, signal?: AbortSignal): Promise<QuestionContext> {
+  const raw = await collectStream([
+    { role: 'system', content: '你是事实整理器。区分用户明确事实、目标、约束、假设和缺失信息，只输出 JSON。' },
+    { role: 'user', content: buildQuestionContextPrompt(question) },
+  ], { model: ctx.model, temperature: 0.1, maxTokens: 700, signal }, ctx);
+  return parseQuestionContext(raw);
 }
 
 async function generateFastBatch(
@@ -327,10 +354,11 @@ export async function generatePerspective(
   ctx: GenerateContext,
   signal: AbortSignal | undefined,
   onDelta?: (delta: string) => void,
+  context?: QuestionContext,
 ): Promise<ZodiacPerspective> {
   const messages: ChatMessage[] = [
     { role: 'system', content: COMMON_SYSTEM_PROMPT },
-    { role: 'user', content: buildSingleSignUserPrompt(question, options, sign) },
+    { role: 'user', content: buildSingleSignUserPrompt(question, options, sign, context) },
   ];
   const baseOpts = {
     model: ctx.model,
@@ -424,15 +452,37 @@ export async function generateAllPerspectives(
   if (options.mode === 'fast') {
     for (const sign of ZODIAC_SIGNS) callbacks.onCardStart?.(sign);
     try {
-      const perspectives = await generateFastBatch(question, options, ctx, signal);
-      for (const perspective of perspectives) callbacks.onCardDone?.(perspective.sign, perspective);
-      return { perspectives, synthesis: null, partialSigns: [], warnings };
+      const batch = await generateFastBatch(question, options, ctx, signal);
+      const completed = new Map(batch.map((item) => [item.sign, item]));
+      for (const perspective of batch) callbacks.onCardDone?.(perspective.sign, perspective);
+      const missing = ZODIAC_SIGNS.filter((sign) => !completed.has(sign));
+      if (missing.length) warnings.push(`快速模式缺少 ${missing.length} 个视角，已自动逐项补全`);
+      const supplemental = await allSettledWithConcurrency(missing.map((sign) => async () => {
+        const perspective = await generatePerspective(sign, question, options, ctx, signal);
+        callbacks.onCardDone?.(sign, perspective);
+        return perspective;
+      }));
+      supplemental.forEach((result, index) => {
+        if (result.status === 'fulfilled') completed.set(result.value.sign, result.value);
+        else callbacks.onCardFailed?.(missing[index], describeLlmError(result.reason));
+      });
+      const perspectives = ZODIAC_SIGNS.flatMap((sign) => completed.has(sign) ? [completed.get(sign)!] : []);
+      const partialSigns = ZODIAC_SIGNS.filter((sign) => !completed.has(sign));
+      return { perspectives, synthesis: null, partialSigns, warnings };
     } catch (error) {
       if (signal?.aborted) throw error;
       const message = error instanceof Error ? error.message : String(error);
       for (const sign of ZODIAC_SIGNS) callbacks.onCardFailed?.(sign, message);
       throw error;
     }
+  }
+
+  let sharedContext: QuestionContext | undefined;
+  try {
+    sharedContext = await generateQuestionContext(question, ctx, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    warnings.push('共享事实摘要生成失败，已使用原问题继续生成');
   }
 
   const tasks = ZODIAC_SIGNS.map((sign) => async (): Promise<{ sign: ZodiacSign; perspective: ZodiacPerspective }> => {
@@ -446,6 +496,7 @@ export async function generateAllPerspectives(
         ctx,
         signal,
         (delta) => callbacks.onCardStream?.({ sign, streamedInterpretation: delta }),
+        sharedContext,
       );
       callbacks.onCardDone?.(sign, perspective);
       return { sign, perspective };

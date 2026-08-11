@@ -162,6 +162,12 @@ export function ZodiacPerspectivesPanel() {
     pruneOldRuns();
   }, []);
 
+  // 插件切换或组件卸载时终止仍在进行的生成/汇总，避免卸载后更新状态。
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
   // ── 操作：开始生成 ────────────────────────────────────────────
 
   const startGeneration = useCallback(

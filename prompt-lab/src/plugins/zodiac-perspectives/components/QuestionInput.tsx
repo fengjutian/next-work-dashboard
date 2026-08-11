@@ -37,6 +37,8 @@ export function QuestionInput({
   aiConfigured,
 }: QuestionInputProps) {
   const [question, setQuestion] = useState('');
+  const [showGuide, setShowGuide] = useState(false);
+  const [background, setBackground] = useState('');
   const lengthId = useId();
   const sceneId = useId();
   const toneId = useId();
@@ -49,8 +51,13 @@ export function QuestionInput({
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
-    onSubmit(trimmed);
-  }, [canSubmit, onSubmit, trimmed]);
+    const enriched = background.trim()
+      ? `${trimmed}\n\n补充背景：\n${background.trim()}`
+      : trimmed;
+    onSubmit(enriched);
+  }, [background, canSubmit, onSubmit, trimmed]);
+
+  const guideQuestions = GUIDE_QUESTIONS[options.scene];
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -107,6 +114,31 @@ export function QuestionInput({
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="text-xs font-medium text-primary hover:underline"
+          onClick={() => setShowGuide((value) => !value)}
+          disabled={disabled}
+        >
+          {showGuide ? '收起补充向导' : '先补充背景，让回答更准确'}
+        </button>
+        {showGuide && (
+          <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
+            <p className="text-xs font-medium text-foreground">可参考以下问题补充，不必全部回答：</p>
+            <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              {guideQuestions.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+            <textarea
+              value={background}
+              onChange={(event) => setBackground(event.target.value)}
+              rows={3}
+              maxLength={1000}
+              placeholder="填写目标、约束、已尝试的方法，以及你最担心的事情……"
+              className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+              disabled={disabled}
+            />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -179,7 +211,7 @@ export function QuestionInput({
             <span className="text-destructive">⚠ 请先在工作台设置中配置 AI 服务（API Key、Base URL、模型）</span>
           )}
           {aiConfigured && (
-            <span>预计 {options.mode === 'fast' ? '1' : options.includeSynthesis ? '13' : '12'} 次模型请求 · Ctrl/⌘ + Enter 提交</span>
+            <span>预计 {options.mode === 'fast' ? '1' : options.includeSynthesis ? '14' : '13'} 次基础请求，失败补全/重试时可能增加 · Ctrl/⌘ + Enter 提交</span>
           )}
         </div>
         <Button onClick={handleSubmit} disabled={!canSubmit} className="gap-2">
@@ -190,6 +222,15 @@ export function QuestionInput({
     </div>
   );
 }
+
+const GUIDE_QUESTIONS: Record<GenerationOptions['scene'], readonly string[]> = {
+  general: ['你最希望得到什么结果？', '有哪些不能改变的约束？', '你已经尝试过什么？'],
+  work: ['当前岗位或协作中最具体的问题是什么？', '你的时间、收入或责任约束是什么？', '理想结果和可接受底线分别是什么？'],
+  relationship: ['双方目前的关系和沟通状态如何？', '哪些事实是确定的，哪些只是你的猜测？', '你希望修复关系、明确边界还是结束关系？'],
+  decision: ['有哪些备选方案？', '决定的截止时间和可逆性如何？', '你最重视什么，又最担心失去什么？'],
+  creative: ['目标受众是谁？', '必须传达的信息和限制是什么？', '已有方案为什么不满意？'],
+  entertainment: ['希望偏幽默还是偏认真？', '有没有不希望触碰的话题？', '结果用于自己阅读还是分享？'],
+};
 
 interface OptionGroupProps<T extends string> {
   inputId: string;

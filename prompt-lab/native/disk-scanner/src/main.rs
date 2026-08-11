@@ -104,6 +104,7 @@ struct FileResult {
 /// 只按 size 排序的 wrapper —— BinaryHeap 不能直接对 FileResult 排序（会落到 path
 /// 等无关字段）。Reverse<BySize> 配合 BinaryHeap 形成 size 最小在堆顶的 min-heap，
 /// 便于在 O(log n) 内维护 TopN。
+#[allow(dead_code)]
 struct BySize(pub FileResult);
 
 impl PartialEq for BySize {
@@ -128,6 +129,7 @@ struct DuplicateGroup {
     files: Vec<FileResult>,
 }
 
+#[allow(dead_code)]
 fn retain_largest(heap: &mut BinaryHeap<Reverse<BySize>>, candidate: FileResult, limit: usize) {
     let item = Reverse(BySize(candidate));
     if heap.len() < limit {
@@ -373,26 +375,20 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
             if !skip_duplicates && result.size >= min_duplicate_size {
                 by_size.entry(result.size).or_default().push(result.clone());
             }
-            retain_largest(&mut largest, result, 50);
+            file_buffer.push(result);
+            if file_buffer.len() >= FILE_BATCH_SIZE {
+                emit_files_batch(&mut file_buffer);
+            }
             if files % 2_000 == 0 {
+                emit_files_batch(&mut file_buffer);
                 emit(&format!(
                     r#"{{"type":"progress","files":{files},"bytes":{bytes},"errors":{errors}}}"#
                 ));
             }
         }
     }
-    // BinaryHeap::into_sorted_vec 升序输出；UI 期望最大在前，reverse 一次。
-    let mut sorted = largest.into_sorted_vec();
-    sorted.reverse();
-    for Reverse(BySize(file)) in sorted {
-        emit(&format!(
-            r#"{{"type":"file","path":"{}","size":{},"modifiedAt":{},"extension":"{}"}}"#,
-            escape_json(&file.path),
-            file.size,
-            file.modified,
-            escape_json(&file.extension)
-        ));
-    }
+    // 主循环结束，flush 剩余的 files 批次。
+    emit_files_batch(&mut file_buffer);
     for (extension, size) in extensions {
         emit(&format!(
             r#"{{"type":"extension","extension":"{}","size":{size}}}"#,
@@ -419,12 +415,12 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
     let mut directories = directory_bytes.into_iter().collect::<Vec<_>>();
     directories.sort_unstable_by(|a, b| b.1.cmp(&a.1));
     directories.truncate(500);
-    for (directory, size) in directories {
-        emit(&format!(
-            r#"{{"type":"directory","path":"{}","size":{size}}}"#,
-            escape_json(&directory.to_string_lossy())
-        ));
-    }
+    // 目录也攒批发：渲染端一次性接收 top 500 目录。
+    let mut directory_buffer: Vec<(String, u64)> = directories
+        .into_iter()
+        .map(|(path, size)| (path.to_string_lossy().into_owned(), size))
+        .collect();
+    emit_directories_batch(&mut directory_buffer);
     if skip_duplicates {
         emit(&format!(
             r#"{{"type":"done","files":{files},"bytes":{bytes},"errors":{errors}}}"#
@@ -607,7 +603,10 @@ mod tests {
         let mut sorted = largest.into_sorted_vec();
         sorted.reverse();
         assert_eq!(sorted.len(), 50);
-        assert_eq!(sorted[0].0.size, 999_999);
-        assert_eq!(sorted[49].0.size, 999_950);
+        // sorted[i] 是 Reverse<BySize<FileResult>>，解构出 FileResult
+        let Reverse(BySize(top)) = &sorted[0];
+        let Reverse(BySize(bottom)) = &sorted[49];
+        assert_eq!(top.size, 999_999);
+        assert_eq!(bottom.size, 999_950);
     }
 }
