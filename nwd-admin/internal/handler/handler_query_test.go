@@ -1,9 +1,16 @@
 package handler
 
 import (
+	"bytes"
+	"context"
+	"encoding/csv"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/fjutian/nwd-admin/internal/audit"
 )
 
 func TestParseAuditQueryEmpty(t *testing.T) {
@@ -154,4 +161,158 @@ func TestKnownActionsList(t *testing.T) {
 			t.Errorf("knownActions missing %q", want)
 		}
 	}
+}
+
+// ── CSV export ──────────────────────────────────────────────────────
+
+// csvRepo is a minimal in-memory audit.Repository used to feed
+// the export handler without dragging SQLite + CGO into the
+// handler unit tests.
+type csvRepo struct {
+	mu      sync.Mutex
+	entries []audit.Entry
+}
+
+func (r *csvRepo) Insert(_ context.Context, e audit.Entry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, e)
+	return nil
+}
+
+func (r *csvRepo) List(_ context.Context, q audit.Query, limit, offset int) ([]audit.Entry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	matched := make([]audit.Entry, 0, len(r.entries))
+	for _, e := range r.entries {
+		if q.Action != "" && e.Action != q.Action {
+			continue
+		}
+		if q.Actor != "" && !strings.Contains(strings.ToLower(e.Actor), strings.ToLower(q.Actor)) {
+			continue
+		}
+		matched = append(matched, e)
+	}
+	// Mirror the GORM implementation: newest first by id.
+	for i := 0; i < len(matched); i++ {
+		for j := i + 1; j < len(matched); j++ {
+			if matched[j].ID > matched[i].ID {
+				matched[i], matched[j] = matched[j], matched[i]
+			}
+		}
+	}
+	if offset >= len(matched) {
+		return nil, nil
+	}
+	matched = matched[offset:]
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	return matched, nil
+}
+
+func (r *csvRepo) Count(_ context.Context, _ audit.Query) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return int64(len(r.entries)), nil
+}
+
+func (r *csvRepo) Prune(_ context.Context, _ time.Time) (int64, error) { return 0, nil }
+
+func newHandlerWithAudit(t *testing.T, repo audit.Repository) *Handler {
+	t.Helper()
+	return &Handler{audits: repo}
+}
+
+func TestExportAuditCSVFormatDetection(t *testing.T) {
+	repo := &csvRepo{}
+	h := newHandlerWithAudit(t, repo)
+	req := httptest.NewRequest("GET", "/api/audit-logs?format=csv", nil)
+	rr := httptest.NewRecorder()
+	h.ListAuditLogs(rr, req)
+	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/csv") {
+		t.Errorf("Content-Type = %q, want text/csv...", got)
+	}
+	if got := rr.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment") {
+		t.Errorf("Content-Disposition = %q, want attachment", got)
+	}
+	if !strings.Contains(rr.Header().Get("Content-Disposition"), "audit-logs-") {
+		t.Errorf("Content-Disposition should include filename, got %q", rr.Header().Get("Content-Disposition"))
+	}
+}
+
+func TestExportAuditCSVHeaderAndRows(t *testing.T) {
+	repo := &csvRepo{}
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	for i, e := range []audit.Entry{
+		{CreatedAt: now, Actor: "admin", ActorIP: "127.0.0.1", Action: audit.ActionUploadPlugin, Target: "hello", HTTPStatus: 303, HTTPMethod: "POST", HTTPPath: "/api/plugins", UserAgent: "curl/8", DurationMS: 12, Message: ""},
+		{CreatedAt: now.Add(time.Second), Actor: "anonymous", ActorIP: "1.1.1.1", Action: audit.ActionAuthFailure, Target: "", HTTPStatus: 401, HTTPMethod: "POST", HTTPPath: "/api/plugins", UserAgent: "curl/8", DurationMS: 5, Message: "bad"},
+	} {
+		e.ID = uint64(i + 1)
+		if err := repo.Insert(context.Background(), e); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+
+	h := newHandlerWithAudit(t, repo)
+	req := httptest.NewRequest("GET", "/api/audit-logs?format=csv", nil)
+	rr := httptest.NewRecorder()
+	h.ListAuditLogs(rr, req)
+
+	reader := csv.NewReader(bytes.NewReader(rr.Body.Bytes()))
+	rows, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if len(rows) < 3 {
+		t.Fatalf("rows = %d, want >=3 (header + 2 entries)", len(rows))
+	}
+	wantHeader := []string{"id", "created_at", "actor", "actor_ip", "action", "target", "http_method", "http_path", "http_status", "user_agent", "duration_ms", "message"}
+	if !equalStringSlice(rows[0], wantHeader) {
+		t.Errorf("header row = %v, want %v", rows[0], wantHeader)
+	}
+	// First data row is the most recent (DESC order from
+	// audit.List). The auth failure is newer, so check that.
+	authRow := rows[1]
+	if authRow[2] != "anonymous" || authRow[4] != audit.ActionAuthFailure || authRow[8] != "401" {
+		t.Errorf("first data row = %v, expected anonymous+auth_failure+401", authRow)
+	}
+}
+
+func TestExportAuditCSVRespectsFilter(t *testing.T) {
+	repo := &csvRepo{}
+	for i, e := range []audit.Entry{
+		{Actor: "admin", Action: audit.ActionUploadPlugin, HTTPStatus: 200},
+		{Actor: "admin", Action: audit.ActionDeletePlugin, HTTPStatus: 200},
+		{Actor: "anonymous", Action: audit.ActionAuthFailure, HTTPStatus: 401},
+	} {
+		e.ID = uint64(i + 1)
+		if err := repo.Insert(context.Background(), e); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+
+	h := newHandlerWithAudit(t, repo)
+	req := httptest.NewRequest("GET", "/api/audit-logs?format=csv&action=auth_failure", nil)
+	rr := httptest.NewRecorder()
+	h.ListAuditLogs(rr, req)
+
+	reader := csv.NewReader(bytes.NewReader(rr.Body.Bytes()))
+	rows, _ := reader.ReadAll()
+	// header + 1 matching row.
+	if len(rows) != 2 {
+		t.Errorf("rows = %d, want 2 (header + 1 auth_failure)", len(rows))
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

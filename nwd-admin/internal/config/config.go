@@ -23,6 +23,12 @@ type ServerConfig struct {
 	IdleTimeout  int        `mapstructure:"idle_timeout"`
 	TLS          TLSConfig  `mapstructure:"tls"`
 	CSRF         CSRFConfig `mapstructure:"csrf"`
+	// MaxPluginSizeMB caps the size of an uploaded .nwd
+	// bundle. Default 50 MB. The 2 MB legacy limit was too
+	// tight for most real-world plugins; raising it lets
+	// operators ship asset-heavy plugins (e.g. a code-editor
+	// plugin with a Monaco bundle) without per-deploy hacks.
+	MaxPluginSizeMB int `mapstructure:"max_plugin_size_mb"`
 }
 
 // CSRFConfig controls the cross-site request forgery guard for
@@ -256,6 +262,11 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("server.csrf.allowed_origins", []string{})
 	// require_custom_header is *bool: leave it unset so the
 	// internal/csrf package's default (true) takes effect.
+
+	// Plugin upload size. Raised from the 2 MB hard limit that
+	// shipped in the first release; modern plugins with
+	// embedded assets routinely exceed that.
+	v.SetDefault("server.max_plugin_size_mb", 50)
 
 	// Config file
 	if configPath != "" {

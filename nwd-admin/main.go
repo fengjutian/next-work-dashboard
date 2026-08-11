@@ -327,14 +327,25 @@ func runServe(args []string) error {
 	}
 	defer sqlDB.Close()
 
-	hdlr := handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)), audit.NewGormRepository(gormDB))
+	maxPluginSize := int64(cfg.Server.MaxPluginSizeMB) << 20
+	if cfg.Server.MaxPluginSizeMB <= 0 {
+		maxPluginSize = 50 << 20
+	}
+	hdlr := handler.New(
+		service.NewPluginService(repository.NewPluginRepository(gormDB)),
+		audit.NewGormRepository(gormDB),
+		maxPluginSize,
+	)
 	recorder := audit.NewRecorder(hdlr.AuditRepo(), cfg.Audit.Disable)
 	csrfCfg := buildCSRFConfig(cfg)
 	opts := server.Options{
-		Verifier:    verifier,
-		ReadLimit:   ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Read.Rate, Burst: cfg.RateLimit.Read.Burst}),
-		WriteLimit:  ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Write.Rate, Burst: cfg.RateLimit.Write.Burst}),
-		AdminLimit:  ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Admin.Rate, Burst: cfg.RateLimit.Admin.Burst}),
+		Verifier: verifier,
+		ReadLimit: ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Read.Rate, Burst: cfg.RateLimit.Read.Burst}),
+		// Write endpoints: throttle by authenticated username
+		// (falling back to IP for anonymous traffic) so two
+		// admins behind the same NAT don't block each other.
+		WriteLimit: ratelimit.NewWithKey(ratelimit.Policy{Rate: cfg.RateLimit.Write.Rate, Burst: cfg.RateLimit.Write.Burst}, ratelimit.ActorKey),
+		AdminLimit: ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Admin.Rate, Burst: cfg.RateLimit.Admin.Burst}),
 		Recorder:    recorder,
 		CSRF:        csrfCfg,
 		CSRFEnabled: !cfg.Server.CSRF.Disable,

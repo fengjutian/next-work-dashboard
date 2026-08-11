@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fjutian/nwd-admin/internal/audit"
 	"golang.org/x/time/rate"
 )
 
@@ -41,6 +42,21 @@ type KeyFunc func(*http.Request) string
 // the per-actor keying was added, so existing deployments that
 // only ever care about IPs see no change.
 func IPKey(r *http.Request) string { return clientIP(r) }
+
+// ActorKey throttles by the authenticated username, falling back
+// to the client IP for anonymous traffic. The actor name is read
+// from the request context (where auth.Middleware stamps it after
+// a successful Basic Auth exchange), so a per-actor key only
+// becomes meaningful on routes mounted behind the auth
+// middleware — for unauthenticated endpoints the result is the
+// same as IPKey.
+func ActorKey(r *http.Request) string {
+	actor := audit.ActorFromContext(r.Context())
+	if actor == "" || actor == "anonymous" {
+		return "ip:" + clientIP(r)
+	}
+	return "actor:" + actor
+}
 
 // Policy describes the allowed traffic for a single traffic class.
 //

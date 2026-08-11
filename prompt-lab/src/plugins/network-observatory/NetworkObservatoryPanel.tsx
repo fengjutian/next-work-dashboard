@@ -16,7 +16,7 @@ import cytoscape, { type Core, type ElementDefinition } from 'cytoscape';
 // `cytoscape-fcose` doesn't ship .d.ts files. Type as `any` to satisfy
 // strict TS without bringing in a `@types/cytoscape-fcose` (none exists).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const fcose: any = require('cytoscape-fcose');
+import fcose from 'cytoscape-fcose';
 import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
@@ -60,17 +60,12 @@ import {
 
 echarts.use([BarChart, HeatmapChart, LineChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 
-// Register the fcose force-directed layout exactly once. cytoscape.use() is
-// idempotent for the same name, so this is safe even with React StrictMode.
-let fcoseRegistered = false;
-if (!fcoseRegistered) {
-  try {
-    cytoscape.use(fcose as Parameters<typeof cytoscape.use>[0]);
-    fcoseRegistered = true;
-  } catch {
-    // fcose unavailable — fall back to cytoscape's built-in `cose` at use time
-  }
-}
+// Register the fcose force-directed layout. cytoscape.use() is idempotent
+// for layouts of the same name, so calling this at module load is safe even
+// under React StrictMode's double-invoke.
+// `cytoscape-fcose` ships no .d.ts; we silence the type error inline.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+try { cytoscape.use(fcose as any); } catch { /* fcose unavailable */ }
 
 interface NetProbeAPI {
   start: () => Promise<{ ready: boolean; version: string | null }>;
@@ -739,18 +734,6 @@ export const NetworkObservatoryPanel: React.FC = () => {
               traceroutePath={traceroutePath}
               heatmapOption={heatmapOption}
               heatmapCellCount={heatmapCellCount}
-            />
-          ) : showRules ? (
-            <RulesPanel
-              rules={rules}
-              incidents={incidents}
-              targets={targets}
-              onRefresh={refreshAll}
-              onCloseIncident={async (id) => {
-                if (!api) return;
-                await api.closeIncident(id);
-                await refreshAll();
-              }}
             />
           ) : showRules ? (
             <RulesPanel
@@ -1696,6 +1679,10 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
 
   const cyRef = useRef<HTMLDivElement | null>(null);
   const cyCoreRef = useRef<Core | null>(null);
+  // Track the last rendered set of (ip, e-id) so we only re-run the expensive
+  // fcose layout when the topology actually changed. Pure re-renders (e.g. user
+  // clicks "refresh" and we re-list the same hosts) won't cause node-jitter.
+  const lastRenderedIdsRef = useRef<string>('');
 
   const refresh = useCallback(async () => {
     try {
@@ -1735,13 +1722,17 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
 
   const handleDelete = useCallback(async (id: string) => {
     try {
+      // `id` is NetProbeLanHost.id (e.g. `lan-192.168.1.1`); `selectedIp` is
+      // the raw IP used as the cytoscape node id. Look up the host by id
+      // before deleting so we can match against the right value.
+      const target = hosts.find((h) => h.id === id);
       await api.deleteLanHost(id);
       await refresh();
-      if (selectedIp === id) setSelectedIp(null);
+      if (target && selectedIp === target.ip) setSelectedIp(null);
     } catch (e) {
       setError(String((e as Error).message ?? e));
     }
-  }, [api, refresh, selectedIp]);
+  }, [api, refresh, hosts, selectedIp]);
 
   // Sort by last-seen desc so freshly seen hosts are on top.
   const sortedHosts = useMemo(() => {
@@ -1871,7 +1862,12 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
       ...sortedHosts.map((h) => ({
         data: {
           id: h.ip,
-          label: `${h.ip.split('.').slice(-1)[0]}\n${h.ip}${h.hostname ? `\n${h.hostname.length > 14 ? h.hostname.slice(0, 14) + '…' : h.hostname}` : ''}`,
+          // Two-line label: top is the short octet, bottom is the IP/hostname
+          // pair. cytoscape's `text-wrap: wrap` does the wrapping for us, so
+          // we just give it a string with the host's last octet and let the
+          // CSS line-break on whitespace. Keeping the IP on a separate visual
+          // row matters for hover/identification even when wrap is off.
+          label: `${h.ip.split('.').slice(-1)[0]} ${h.ip}${h.hostname ? ` · ${h.hostname.length > 16 ? h.hostname.slice(0, 16) + '…' : h.hostname}` : ''}`,
           color: colorForHost(h),
           ports: h.ports,
         },
@@ -1881,11 +1877,25 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
       })),
     ];
 
-    // Diff: remove old non-self nodes/edges, then add new ones. Cheaper than
-    // re-running layout on every refresh.
-    const desiredIds = new Set(elements.map((e) => e.data.id).filter((id) => id !== 'self'));
-    cy.elements('node[ip]').forEach((n) => { if (!desiredIds.has(n.id())) n.remove(); });
-    cy.elements('edge').forEach((e) => { if (e.id() && !desiredIds.has(e.id().slice(2))) e.remove(); });
+    // Compute the desired host+edge identity set. We exclude 'self' from
+    // removal candidates (it's the root, never goes away) and use plain
+    // `cy.nodes()` / `cy.edges()` iteration — the previous `cy.elements(
+    // 'node[ip]')` selector matched nothing because we never set a `data.ip`
+    // attribute, so stale hosts lingered in the graph after delete.
+    const desiredHostIds = sortedHosts.map((h) => h.ip);
+    const desiredEdgeIds = sortedHosts.map((h) => `e-${h.ip}`);
+
+    // Remove nodes that are no longer present.
+    cy.nodes().forEach((n) => {
+      const id = n.id();
+      if (id === 'self') return;
+      if (!desiredHostIds.includes(id)) n.remove();
+    });
+    // Remove edges that are no longer present.
+    cy.edges().forEach((e) => {
+      const id = e.id();
+      if (id && !desiredEdgeIds.includes(id)) e.remove();
+    });
     // Add missing nodes / edges.
     const existingNodeIds = new Set(cy.nodes().map((n) => n.id()));
     const existingEdgeIds = new Set(cy.edges().map((e) => e.id()));
@@ -1905,28 +1915,33 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
       if (n.nonempty()) n.data('ports', String(h.ports.length));
     });
 
-    // Run the force-directed layout. We run it once on first render of
-    // nodes, and again whenever the node set size changes significantly.
-    const hasNodes = cy.nodes().length > 1;
-    if (hasNodes) {
-      const layoutName = (cy as unknown as { _private: { layoutName?: string } })._private?.layoutName;
-      void layoutName;
-      const hasFcose = (cy as unknown as { layout: (n: string) => unknown }).layout;
-      void hasFcose;
-      cy.layout({
-        name: 'fcose',
-        quality: 'default',
-        randomize: true,
-        animate: false,
-        nodeSeparation: 80,
-        idealEdgeLength: () => 90,
-        nodeRepulsion: () => 8000,
-        gravity: 0.25,
-        numIter: 2500,
-        fit: true,
-        padding: 30,
-      } as cytoscape.LayoutOptions).run();
-    } else if (cy.nodes().length === 1) {
+    // Only re-run the expensive fcose layout when the topology actually
+    // changed. Same hosts re-listed (e.g. user clicks "refresh" or scan
+    // completes with identical results) won't cause node jitter.
+    const topologyKey = [...desiredHostIds].sort().join(',');
+    if (topologyKey !== lastRenderedIdsRef.current) {
+      lastRenderedIdsRef.current = topologyKey;
+      const hasNodes = cy.nodes().length > 1;
+      if (hasNodes) {
+        cy.layout({
+          name: 'fcose',
+          quality: 'default',
+          randomize: true,
+          animate: false,
+          nodeSeparation: 80,
+          idealEdgeLength: () => 90,
+          nodeRepulsion: () => 8000,
+          gravity: 0.25,
+          numIter: 2500,
+          fit: true,
+          padding: 30,
+        } as cytoscape.LayoutOptions).run();
+      } else if (cy.nodes().length === 1) {
+        cy.fit(undefined, 30);
+      }
+    } else {
+      // Same host set — keep current layout but make sure everything is
+      // visible (e.g. after the panel was resized).
       cy.fit(undefined, 30);
     }
   }, [sortedHosts, systemInfo, colorForHost]);

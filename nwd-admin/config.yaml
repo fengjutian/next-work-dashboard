@@ -4,6 +4,10 @@ server:
   read_timeout: 5
   write_timeout: 10
   idle_timeout: 120
+  # Maximum size of a single .nwd upload, in megabytes.
+  # Default 50 MB; raise for asset-heavy plugins (Monaco,
+  # Mermaid renderers, etc.). The legacy hard cap was 2 MB.
+  max_plugin_size_mb: 50
 
   # Optional TLS termination. Leave enabled=false to serve plain
   # HTTP. Two mutually exclusive modes are supported:

@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// requestFromIP is a small builder so tests that want to
+// exercise the per-IP path don't have to repeat the same six
+// lines of httptest setup.
+func requestFromIP(ip string) *http.Request {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = ip + ":1234"
+	return r
+}
+
 func TestPolicyEnabled(t *testing.T) {
 	cases := []struct {
 		p    Policy
@@ -38,27 +47,28 @@ func TestPolicyWithDefaultsFillsBurst(t *testing.T) {
 
 func TestLimiterAllowsBurstThenRejects(t *testing.T) {
 	l := New(Policy{Rate: 1, Burst: 2})
+	req := requestFromIP("1.2.3.4")
 	// 2 calls in a row should pass.
 	for i := 0; i < 2; i++ {
-		if !l.allow("1.2.3.4") {
+		if !l.allow(req) {
 			t.Fatalf("call %d should have been allowed", i+1)
 		}
 	}
 	// 3rd call (no time elapsed) should be rejected.
-	if l.allow("1.2.3.4") {
+	if l.allow(req) {
 		t.Fatal("3rd call should have been rejected")
 	}
 }
 
 func TestLimiterPerIPIsolation(t *testing.T) {
 	l := New(Policy{Rate: 1, Burst: 1})
-	if !l.allow("1.1.1.1") {
+	if !l.allow(requestFromIP("1.1.1.1")) {
 		t.Fatal("first IP should pass")
 	}
-	if !l.allow("2.2.2.2") {
+	if !l.allow(requestFromIP("2.2.2.2")) {
 		t.Fatal("second IP should pass (separate bucket)")
 	}
-	if l.allow("1.1.1.1") {
+	if l.allow(requestFromIP("1.1.1.1")) {
 		t.Fatal("first IP second call should fail")
 	}
 }
@@ -68,7 +78,7 @@ func TestLimiterReapsIdleBuckets(t *testing.T) {
 	l := New(Policy{Rate: 1, Burst: 1, IdleTTL: time.Minute})
 	l.now = func() time.Time { return now }
 
-	l.allow("1.1.1.1")
+	l.allow(requestFromIP("1.1.1.1"))
 	if got := len(l.buckets); got != 1 {
 		t.Fatalf("buckets after first call = %d, want 1", got)
 	}
@@ -176,5 +186,34 @@ func TestRetryAfterIsAtLeastOne(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if ra, _ := strconv.Atoi(rr.Header().Get("Retry-After")); ra < 1 {
 		t.Errorf("Retry-After must be >= 1, got %d", ra)
+	}
+}
+
+// ── Custom KeyFunc ────────────────────────────────────────────────
+
+func TestCustomKeySeparatesBuckets(t *testing.T) {
+	constantKey := "tenant-1"
+	l := NewWithKey(Policy{Rate: 1, Burst: 1}, func(*http.Request) string { return constantKey })
+
+	// Two requests with different IPs but the same key should
+	// share a single bucket.
+	if !l.allow(requestFromIP("1.1.1.1")) {
+		t.Fatal("first call should pass")
+	}
+	if l.allow(requestFromIP("2.2.2.2")) {
+		t.Fatal("second call from different IP but same key should hit the same bucket")
+	}
+}
+
+func TestNilKeyFallsBackToIP(t *testing.T) {
+	l := NewWithKey(Policy{Rate: 1, Burst: 1}, nil)
+	if !l.allow(requestFromIP("1.1.1.1")) {
+		t.Fatal("first IP should pass with default IP key")
+	}
+	if l.allow(requestFromIP("1.1.1.1")) {
+		t.Fatal("same IP should hit the same default bucket")
+	}
+	if !l.allow(requestFromIP("2.2.2.2")) {
+		t.Fatal("different IP should hit its own bucket (with its own fresh burst)")
 	}
 }

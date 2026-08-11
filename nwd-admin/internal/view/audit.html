@@ -6,7 +6,7 @@
             <p class="section-copy">所有写操作、认证失败和限流事件，按时间倒序展示。</p>
         </div>
         <div class="page-head-actions">
-            <a href="/api/audit-logs?{{.Query.Encode}}" class="btn">导出当前 JSON</a>
+            <a href="/api/audit-logs?{{.Query.Encode}}&format=csv" class="btn btn-primary">导出 CSV</a>
         </div>
     </div>
 

@@ -52,11 +52,14 @@ export interface UseImageDropReturn {
   isDragging: boolean;
   /** 上一条状态消息（uploading/success/error）。null 表示无。 */
   status: { kind: 'uploading' | 'success' | 'error'; detail: string } | null;
+  /** 当前拖入的图片预览：name -> dataUrl。 */
+  previews: Array<{ name: string; dataUrl: string }>;
 }
 
 export function useImageDrop({ editor, rootPath, documentRelativePath, onStatus }: UseImageDropOptions): UseImageDropReturn {
   const [isDragging, setIsDragging] = useState(false);
   const [status, setStatus] = useState<UseImageDropReturn['status']>(null);
+  const [previews, setPreviews] = useState<Array<{ name: string; dataUrl: string }>>([]);
 
   const handleFiles = useCallback(
     async (files: File[]) => {
@@ -120,19 +123,27 @@ export function useImageDrop({ editor, rootPath, documentRelativePath, onStatus 
       if (files.length === 0) return;
       event.preventDefault();
       setIsDragging(false);
+      setPreviews([]);
       void handleFiles(files);
     };
     const onDragOver = (event: DragEvent) => {
       if (event.dataTransfer?.types.includes('Files')) {
         event.preventDefault();
         setIsDragging(true);
+        // 异步读取图片预览
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        if (files.length > 0) {
+          void loadPreviews(files).then((items) => {
+            if (items.length > 0) setPreviews(items);
+          });
+        }
       }
     };
     const onDragLeave = (event: DragEvent) => {
-      // 离开元素时取消（用 relatedTarget 排除子元素）
       const related = event.relatedTarget as Node | null;
       if (!related || !parent.contains(related)) {
         setIsDragging(false);
+        setPreviews([]);
       }
     };
     const onPaste = (event: ClipboardEvent) => {
@@ -162,7 +173,49 @@ export function useImageDrop({ editor, rootPath, documentRelativePath, onStatus 
     };
   }, [editor, handleFiles]);
 
-  return { isDragging, status };
+  return { isDragging, status, previews };
+}
+
+/** 读取拖入的图片文件，生成 dataUrl 用于预览。最大 8 张，每张最大 200KB。 */
+async function loadPreviews(files: File[]): Promise<Array<{ name: string; dataUrl: string }>> {
+  const images = files.filter(isImageFile).slice(0, 8);
+  const out: Array<{ name: string; dataUrl: string }> = [];
+  for (const file of images) {
+    try {
+      const utils = (window as unknown as { webUtils?: { getPathForFile: (f: File) => string } }).webUtils;
+      let base64: string;
+      if (utils?.getPathForFile) {
+        const filePath = utils.getPathForFile(file);
+        if (filePath) {
+          const result = await window.electronAPI.readFileBuffer(filePath);
+          if (result.success && result.data) {
+            base64 = result.data;
+          } else {
+            base64 = await readAsBase64(file);
+          }
+        } else {
+          base64 = await readAsBase64(file);
+        }
+      } else {
+        base64 = await readAsBase64(file);
+      }
+      const dataUrl = `data:${file.type || 'image/png'};base64,${base64}`;
+      out.push({ name: file.name, dataUrl });
+    } catch {
+      // 忽略单个文件预览失败
+    }
+  }
+  return out;
+}
+
+async function readAsBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.byteLength; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return typeof btoa === 'function' ? btoa(binary) : Buffer.from(binary, 'binary').toString('base64');
 }
 
 export { IMAGE_INLINE_LIMIT_BYTES };

@@ -180,7 +180,7 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
     rootPath: document.rootPath,
     documentRelativePath: document.relativePath,
   });
-  const { isDragging: isImageDragging, status: imageStatus } = imageDrop;
+  const { isDragging: isImageDragging, status: imageStatus, previews: imagePreviews } = imageDrop;
 
   // 通过文件选择对话框插入图片
   const imagePicker = useImagePicker({
@@ -232,14 +232,28 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
         }
       `}</style>
       <div ref={containerRef} className="prose prose-sm max-w-none px-8 py-6 focus:outline-none dark:prose-invert" style={{ fontSize: `${preferences.fontSize}rem` }} />
-      {/* Drop zone overlay — 拖入文件时高亮显示 */}
+      {/* Drop zone overlay — 拖入文件时高亮显示 + 缩略图 */}
       {isImageDragging && (
-        <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/60 bg-primary/5 transition-colors">
-          <div className="flex flex-col items-center gap-2 text-primary">
-            <ImageIcon className="h-10 w-10" />
+        <div className="pointer-events-none absolute inset-2 flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-primary/60 bg-primary/5 p-6 transition-colors">
+          <div className="flex flex-col items-center gap-1 text-primary">
+            <ImageIcon className="h-8 w-8" />
             <div className="text-sm font-medium">放开以插入图片</div>
             <div className="text-xs text-muted-foreground">支持 PNG / JPG / GIF / WebP / SVG</div>
           </div>
+          {imagePreviews.length > 0 && (
+            <div className="grid max-h-48 max-w-md grid-cols-4 gap-2 overflow-auto">
+              {imagePreviews.map((item) => (
+                <div key={item.name} className="flex flex-col items-center gap-1">
+                  <div className="h-16 w-16 overflow-hidden rounded border border-primary/30 bg-background/80">
+                    <img src={item.dataUrl} alt={item.name} className="h-full w-full object-cover" />
+                  </div>
+                  <span className="max-w-[64px] truncate text-[9px] text-muted-foreground" title={item.name}>
+                    {item.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {/* Image status toast */}

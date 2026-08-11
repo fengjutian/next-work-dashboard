@@ -17,9 +17,9 @@
 - 页面模板与样式嵌入 Go 二进制，不依赖前端 CDN
 - 写接口 Basic Auth 保护，bcrypt 密码哈希
 - 通用安全响应头（CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy）
-- 每 IP token-bucket 限流（read / write / admin 三档可配）
+- 每 IP token-bucket 限流（read / write / admin 三档可配），写接口按认证用户分桶避免共享 NAT 互相干扰
 - 审计日志：所有写操作、认证失败、限流事件全部落表，可视化查看 + JSON 导出
-- 审计日志自动按保留天数清理（默认 90 天）
+- 审计日志自动按保留天数清理（默认 90 天）；支持 CSV 导出（含当前筛选条件）
 - 可选 TLS：自签证书一键生成 + 静态 cert/key 模式 + Let's Encrypt 自动签发（autocert）
 
 ## 环境要求
@@ -266,6 +266,9 @@ rate_limit:
   read:  { rate: 60.0, burst: 30 }
   write: { rate: 5.0,  burst: 5  }
   admin: { rate: 30.0, burst: 10 }
+```
+
+写接口（`POST /api/plugins`、`DELETE /api/plugins/{id}`）按**认证用户**分桶——不同管理员之间互不干扰；同一管理员的 IP 变化也无所谓。匿名流量（认证失败前）按 IP 兜底。读接口和审计接口仍按 IP。
 
 audit:
   disable: false
@@ -440,9 +443,23 @@ curl -u admin:mypassword 'http://localhost:8090/api/audit-logs?target=hello-'
 
 `/audit` 页面提供对应的表单筛选（操作者、操作下拉、状态、目标、起止日期），分页链接会自动保留所有当前筛选条件。
 
+### 导出审计日志为 CSV
+
+`/api/audit-logs?format=csv` 触发 CSV 导出：忽略分页参数，导出所有匹配当前筛选条件的行；浏览器会保存为 `audit-logs-YYYYMMDD-HHMMSS.csv`。导出流式分页拉取（每次 1000 行），控制内存占用。
+
+```bash
+# 导出所有 4xx 行
+curl -u admin:pass "http://localhost:8090/api/audit-logs?format=csv&status=4xx" -o auth-failures.csv
+
+# 导出某 IP 一周内所有动作
+curl -u admin:pass "http://localhost:8090/api/audit-logs?format=csv&from=$(date -I -d '7 days ago')" -o weekly.csv
+```
+
+CSV 列顺序固定：`id, created_at, actor, actor_ip, action, target, http_method, http_path, http_status, user_agent, duration_ms, message`。
+
 ## `.nwd` 格式
 
-`.nwd` 是 UTF-8 JSON 文件，最大为 2 MB。最小可用示例：
+`.nwd` 是 UTF-8 JSON 文件，默认最大 50 MB（可配置 `server.max_plugin_size_mb`）。最小可用示例：
 
 ```json
 {
@@ -513,12 +530,11 @@ go build ./...
 
 - 插件包存入 SQLite，不适合大规模下载或 CDN 分发
 - 下载计数会受到爬虫、重试和预取影响
-- 限流粒度只到 IP；同 NAT 后多用户会互相干扰
+- 写接口已按 actor 限流；读 / 审计接口仍只按 IP
 - 标签是简单 JSON 数组，无层级或别名
 - ACME 模式只支持 http-01 challenge；需要 DNS 指向且 :80 可达
 - CSRF 防护依赖 Origin + 自定义 header；XSS 场景下不防护（需 CSP 等协同）
-
-公网部署前仍需加入按用户限流。
+- 不支持 HTTP Range 断点续传（重传整文件即可，插件一般 < 50 MB）
 
 ## 相关文档
 

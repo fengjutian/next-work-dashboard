@@ -428,10 +428,12 @@ export function trackWindow(win: BrowserWindow): () => void {
 /**
  * Helper for `scan-lan` etc.: collects the next `probe_result` event whose
  * `id` matches `targetId`. Resolves with the event payload (or null on
- * timeout). Cancelling via `cancel()` releases any pending waiters.
+ * timeout). Cancelling via `cancel()` releases any pending waiters and
+ * clears the timeout so we don't keep a live timer in memory.
  */
 class OneShotCollector {
   private resolve: ((value: Extract<NetProbeEvent, { type: 'probe_result' }> | null) => void) | null = null;
+  private timer: NodeJS.Timeout | null = null;
   private cancelled = false;
   constructor(
     private readonly targetId: string,
@@ -440,27 +442,33 @@ class OneShotCollector {
   handle(ev: NetProbeEvent): void {
     if (ev.type !== 'probe_result' || ev.id !== this.targetId) return;
     if (this.resolve && !this.cancelled) {
-      this.resolve(ev as Extract<NetProbeEvent, { type: 'probe_result' }>);
+      const r = this.resolve;
       this.resolve = null;
+      if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+      r(ev as Extract<NetProbeEvent, { type: 'probe_result' }>);
     }
   }
   wait(): Promise<Extract<NetProbeEvent, { type: 'probe_result' }> | null> {
     if (this.cancelled) return Promise.resolve(null);
     return new Promise((resolve) => {
       this.resolve = resolve;
-      setTimeout(() => {
+      this.timer = setTimeout(() => {
         if (this.resolve) {
-          this.resolve(null);
+          const r = this.resolve;
           this.resolve = null;
+          this.timer = null;
+          r(null);
         }
       }, this.timeoutMs);
     });
   }
   cancel(): void {
     this.cancelled = true;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     if (this.resolve) {
-      this.resolve(null);
+      const r = this.resolve;
       this.resolve = null;
+      r(null);
     }
   }
 }

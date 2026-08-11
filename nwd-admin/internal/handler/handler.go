@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,7 @@ var (
 	baseLayout    *template.Template
 )
 
-const maxPluginFileSize int64 = 2 << 20
+const defaultMaxPluginFileSize int64 = 50 << 20
 
 var allowedPermissions = map[string]struct{}{
 	"store.read": {}, "clipboard": {}, "inject": {}, "external.open": {},
@@ -88,14 +89,21 @@ func init() {
 type Handler struct {
 	plugins *service.PluginService
 	audits  audit.Repository
+	maxSize int64
 }
 
 // New builds a Handler. The audit repository is optional; when nil
 // the audit log endpoints return 503 so the UI degrades gracefully
-// instead of crashing.
-func New(pluginSvc *service.PluginService, auditRepo audit.Repository) *Handler {
-	return &Handler{plugins: pluginSvc, audits: auditRepo}
+// instead of crashing. maxSizeBytes caps the size of an uploaded
+// .nwd bundle; 0 or negative means no limit (the caller is
+// expected to pass a sensible positive value in production).
+func New(pluginSvc *service.PluginService, auditRepo audit.Repository, maxSizeBytes int64) *Handler {
+	return &Handler{plugins: pluginSvc, audits: auditRepo, maxSize: maxSizeBytes}
 }
+
+// MaxUploadSize returns the configured upload limit. Exposed so
+// templates and JS can render a matching file-size hint.
+func (h *Handler) MaxUploadSize() int64 { return h.maxSize }
 
 // AuditRepo returns the audit repository, which is also the right
 // handle to give to the audit.Recorder middleware and to the
@@ -185,10 +193,16 @@ func (h *Handler) ListPluginVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
-	// Multipart adds a small amount of framing data around the file itself.
-	r.Body = http.MaxBytesReader(w, r.Body, maxPluginFileSize+(64<<10))
-	if err := r.ParseMultipartForm(maxPluginFileSize); err != nil {
-		http.Error(w, "请求无效或文件过大（插件最大 2 MB）", http.StatusBadRequest)
+	limit := h.maxSize
+	if limit <= 0 {
+		limit = defaultMaxPluginFileSize
+	}
+	// Multipart adds a small amount of framing data around the
+	// file itself, so the body cap is slightly larger than the
+	// file cap.
+	r.Body = http.MaxBytesReader(w, r.Body, limit+(64<<10))
+	if err := r.ParseMultipartForm(limit); err != nil {
+		http.Error(w, fmt.Sprintf("请求无效或文件过大（插件最大 %d MB）", limit>>20), http.StatusBadRequest)
 		return
 	}
 	file, header, err := r.FormFile("bundle")
@@ -203,13 +217,13 @@ func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundle, err := io.ReadAll(io.LimitReader(file, maxPluginFileSize+1))
+	bundle, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		http.Error(w, "读取文件失败", 500)
 		return
 	}
-	if len(bundle) > int(maxPluginFileSize) {
-		http.Error(w, "插件文件不能超过 2 MB", http.StatusRequestEntityTooLarge)
+	if int64(len(bundle)) > limit {
+		http.Error(w, fmt.Sprintf("插件文件不能超过 %d MB", limit>>20), http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -331,15 +345,26 @@ func (h *Handler) AuditPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListAuditLogs returns the audit log as JSON, paginated.
+//
+// When ?format=csv is set, the same endpoint streams a CSV
+// export of every row matching the current filter (pagination
+// is ignored — exports are always complete). A
+// Content-Disposition: attachment header makes browsers save
+// the file with a timestamped name.
 func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	if h.audits == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "审计日志未启用"})
 		return
 	}
-	page, size := parseAuditPagination(r)
-	offset := (page - 1) * size
 	q := parseAuditQuery(r)
 
+	if strings.EqualFold(r.URL.Query().Get("format"), "csv") {
+		h.exportAuditCSV(w, r, q)
+		return
+	}
+
+	page, size := parseAuditPagination(r)
+	offset := (page - 1) * size
 	entries, err := h.audits.List(r.Context(), q, size, offset)
 	if err != nil {
 		slog.Error("list audit logs json", "err", err)
@@ -353,8 +378,69 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 		"size":      size,
 		"total":     total,
 		"pageCount": pageCount(total, size),
-		"query":      q,
+		"query":     q,
 	})
+}
+
+// exportAuditCSV streams every audit row matching q to the
+// response in CSV form. The query result is paginated in chunks
+// to bound memory use; the loop terminates either when the
+// repo returns fewer rows than the page size or when the
+// caller disconnects.
+func (h *Handler) exportAuditCSV(w http.ResponseWriter, r *http.Request, q audit.Query) {
+	const pageSize = 1000
+	filename := fmt.Sprintf("audit-logs-%s.csv", time.Now().UTC().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+	// Header row first so spreadsheet apps import the file
+	// with named columns.
+	_ = cw.Write([]string{
+		"id", "created_at", "actor", "actor_ip", "action",
+		"target", "http_method", "http_path", "http_status",
+		"user_agent", "duration_ms", "message",
+	})
+
+	for offset := 0; ; offset += pageSize {
+		entries, err := h.audits.List(r.Context(), q, pageSize, offset)
+		if err != nil {
+			slog.Error("export audit csv", "err", err)
+			return
+		}
+		if len(entries) == 0 {
+			return
+		}
+		for _, e := range entries {
+			row := []string{
+				strconv.FormatUint(e.ID, 10),
+				e.CreatedAt.UTC().Format(time.RFC3339),
+				e.Actor,
+				e.ActorIP,
+				e.Action,
+				e.Target,
+				e.HTTPMethod,
+				e.HTTPPath,
+				strconv.Itoa(e.HTTPStatus),
+				e.UserAgent,
+				strconv.FormatInt(e.DurationMS, 10),
+				e.Message,
+			}
+			if err := cw.Write(row); err != nil {
+				slog.Warn("export audit csv write", "err", err)
+				return
+			}
+		}
+		if len(entries) < pageSize {
+			return
+		}
+		// Flush every page so the client sees incremental
+		// progress on very large exports instead of waiting
+		// for the full download to complete.
+		cw.Flush()
+	}
 }
 
 func parseAuditPagination(r *http.Request) (page, size int) {

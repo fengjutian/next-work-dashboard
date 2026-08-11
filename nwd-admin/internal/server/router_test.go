@@ -63,7 +63,7 @@ func newTestHandler(t *testing.T) *handler.Handler {
 			_ = sqlDB.Close()
 		}
 	})
-	return handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)), nil)
+	return handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)), nil, 50<<20)
 }
 
 func newTestVerifier(t *testing.T, password string) *auth.Verifier {
