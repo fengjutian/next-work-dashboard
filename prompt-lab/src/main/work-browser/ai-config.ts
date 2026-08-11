@@ -18,8 +18,8 @@ export function setRuntimeAIConfig(input: AIProviderConfig): void {
 }
 
 export async function resolveWorkBrowserAIConfig(
-  getter: (key: string) => Promise<string | null>,
+  getter: (key: string) => string | null | Promise<string | null>,
 ): Promise<AIProviderConfig> {
   if (runtimeConfig?.baseUrl && runtimeConfig.model) return { ...runtimeConfig };
-  return loadAIConfig(getter);
+  return loadAIConfig((key) => Promise.resolve(getter(key)));
 }

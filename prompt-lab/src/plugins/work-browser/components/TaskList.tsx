@@ -179,8 +179,7 @@ function TaskCard({ task, onOpen, onRunAuto, running }: {
           <Popconfirm
             title="AI 自动编排此任务？"
             description="会用 LLM 总结 + 搜索引擎 + RAG 跑完所有 step（可能 30s~1min）"
-            onConfirm={(e) => { e?.stopPropagation(); onRunAuto(); }}
-            onCancel={(e) => e?.stopPropagation()}
+            onConfirm={onRunAuto}
             okText="开始"
             cancelText="取消"
             disabled={running || task.status === 'resolved'}

@@ -38,7 +38,7 @@ export class SearchRouter {
     };
     const config = this.getAIConfig
       ? await this.getAIConfig()
-      : await loadAIConfig((key) => this.store.getSetting(key));
+      : await loadAIConfig((key) => Promise.resolve(this.store.getSetting(key)));
 
     const scope = input.scope || 'workspace';
     const useLocal = scope === 'workspace' || scope === 'library' || scope === 'all';
