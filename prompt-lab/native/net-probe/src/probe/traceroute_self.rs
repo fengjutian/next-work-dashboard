@@ -27,6 +27,16 @@
 //! - If the raw socket can't be opened, we fall back to the V2.1 system
 //!   call so the feature still works on locked-down machines.
 //!
+//! Known issue (Windows)
+//! ---------------------
+//! `tracert.exe` is a console-subsystem binary. When its stdout is a pipe
+//! (which is the case here), the Windows console API bypasses the pipe and
+//! writes nothing — a long-standing Rust-on-Windows gotcha. The fallback
+//! therefore returns 0 hops on Windows in this build. macOS/Linux are
+//! unaffected. To work around: spawn via `cmd /c` with `> tempfile.txt`
+//! redirection, then read the temp file. Implemented in a follow-up if
+//! needed; the self-built path is the recommended one anyway.
+//!
 //! Options:
 //! - `max_hops` (u8, default 15): maximum number of hops
 //! - `queries` (u8, default 3): probes per hop
@@ -36,6 +46,7 @@
 use std::io::Read;
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::os::raw::c_int;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -43,7 +54,6 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use socket2::{Domain, Protocol, Socket, Type};
-use std::os::raw::c_int;
 
 use super::{Probe, ProbeSample};
 
@@ -151,21 +161,56 @@ impl Probe for TracerouteProbe {
 
 fn resolve_target_v4(target: &str) -> Result<IpAddr, String> {
     use std::net::ToSocketAddrs;
-    let addrs = target
-        .to_socket_addrs()
-        .map_err(|e| format!("to_socket_addrs: {e}"))?;
-    for a in addrs {
-        if let IpAddr::V4(_) = a.ip() {
-            return Ok(a.ip());
+    // Try the target as-is. `&str::to_socket_addrs` accepts bare IPs and
+    // hostnames both, with the caveat that some forms require a port.
+    let mut first_err: Option<String> = None;
+    match target.to_socket_addrs() {
+        Ok(it) => {
+            for a in it {
+                if let IpAddr::V4(_) = a.ip() {
+                    return Ok(a.ip());
+                }
+            }
+        }
+        Err(e) => {
+            first_err = Some(format!("{e}"));
+        }
+    }
+    // Fallback: parse as bare IP literal.
+    if let Ok(ip) = target.parse::<IpAddr>() {
+        if let IpAddr::V4(v4) = ip {
+            return Ok(IpAddr::V4(v4));
+        }
+    }
+    // Last resort: append a port and retry (handles bare hostnames and bare
+    // IPv6 literals which need `[...]` wrapping).
+    let with_port: String = if target.starts_with('[') {
+        format!("{target}:0")
+    } else if target.contains(':') {
+        format!("[{target}]:0")
+    } else {
+        format!("{target}:0")
+    };
+    match with_port.to_socket_addrs() {
+        Ok(it) => {
+            for a in it {
+                if let IpAddr::V4(_) = a.ip() {
+                    return Ok(a.ip());
+                }
+            }
+        }
+        Err(e) => {
+            return Err(format!(
+                "{}; retry with port: {e}",
+                first_err.unwrap_or_else(|| "no v4 addr".to_string())
+            ));
         }
     }
     Err("no IPv4 address found".to_string())
 }
 
 fn open_raw_icmp_socket() -> std::io::Result<Socket> {
-    // SOCK_RAW + IPPROTO_ICMP requires admin / CAP_NET_RAW.
     let sock = Socket::new(Domain::IPV4, Type::from(SOCK_RAW), Some(Protocol::ICMPV4))?;
-    // Non-blocking so we can manage the recv deadline ourselves.
     sock.set_nonblocking(true)?;
     Ok(sock)
 }
@@ -226,7 +271,7 @@ fn trace_self(
             let payload: [u8; 4] = [ttl, q, ttl.wrapping_mul(7), q.wrapping_mul(13)];
             let send_t = Instant::now();
             if std_udp.send_to(&payload, dest).is_err() {
-                continue; // skip this probe; pad with * at the end
+                continue;
             }
             sends.push(ProbeSend { send_t });
         }
@@ -234,7 +279,7 @@ fn trace_self(
         // Read ICMP replies until either we've matched `queries` replies
         // for this hop, or the per-hop deadline passes.
         let hop_deadline = Instant::now() + Duration::from_millis(per_probe_timeout_ms);
-        let mut probes: Vec<ProbeResult> = Vec::with_capacity(queries as usize);
+        let mut probes: Vec<f64> = Vec::with_capacity(queries as usize);
         let mut hop_host: Option<IpAddr> = None;
 
         while probes.len() < queries as usize && Instant::now() < hop_deadline {
@@ -254,15 +299,6 @@ fn trace_self(
                         .map(|s| s.ip())
                         .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
-                    // We need to identify which TTL this reply is for.
-                    // ICMP Time Exceeded (type 11) embeds the original IP
-                    // header at offset 8; the embedded TTL field is at
-                    // offset 8 of that header → offset 8+8 = 16 in our
-                    // buffer. The embedded TTL is `our_ttl - 1` (the
-                    // router decremented it before sending back).
-                    // ICMP Port Unreachable (type 3, code 3) from the
-                    // destination → we reached the target; bind it to the
-                    // current TTL.
                     let matched_ttl: u8 = match icmp_type {
                         11 => {
                             if len < 8 + 20 {
@@ -272,25 +308,15 @@ fn trace_self(
                             embedded_ttl.saturating_add(1)
                         }
                         3 if icmp_code == 3 => {
-                            // Reached destination. The reply came from the
-                            // target (or a router on the way with port
-                            // filtering) — assume the current TTL.
                             reached = true;
                             ttl
                         }
                         _ => continue,
                     };
                     if matched_ttl != ttl {
-                        // A late reply for a previous hop, or a future
-                        // hop. Discard.
                         continue;
                     }
 
-                    // RTT: from the most recent matching send to now. This
-                    // is approximate (we don't track which specific send
-                    // each reply belongs to without per-send correlation
-                    // on the IP identification field), but it's well-
-                    // within-1ms accurate for typical RTTs.
                     let earliest_send = sends.first().map(|s| s.send_t).unwrap_or(recv_t);
                     let rtt_ms = recv_t
                         .saturating_duration_since(earliest_send)
@@ -300,17 +326,13 @@ fn trace_self(
                     if hop_host.is_none() && !src_ip.is_unspecified() {
                         hop_host = Some(src_ip);
                     }
-                    probes.push(ProbeResult {
-                        rtt_ms: rtt_ms.max(0.0),
-                        from_ip: Some(src_ip),
-                    });
+                    probes.push(rtt_ms.max(0.0));
 
                     if reached {
                         break;
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // Short sleep to avoid busy-waiting.
                     let now = Instant::now();
                     let remaining = hop_deadline.saturating_duration_since(now);
                     if remaining.is_zero() {
@@ -323,12 +345,8 @@ fn trace_self(
             }
         }
 
-        // Pad with * for missing probes.
         while probes.len() < queries as usize {
-            probes.push(ProbeResult {
-                rtt_ms: -1.0,
-                from_ip: None,
-            });
+            probes.push(-1.0);
         }
 
         let host_str = match hop_host {
@@ -339,7 +357,7 @@ fn trace_self(
 
         all_hops.push(HopResult {
             hop: ttl,
-            rtts_ms: probes.iter().map(|p| p.rtt_ms).collect(),
+            rtts_ms: probes,
             host: host_str,
         });
 
@@ -380,26 +398,25 @@ fn trace_self(
     })
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct ProbeResult {
-    rtt_ms: f64, // -1.0 == *
-    from_ip: Option<IpAddr>,
-}
-
 // ── System-call fallback (V2.1 behavior) ──────────────────────────────
+//
+// On Windows, `tracert.exe` is a console-subsystem binary and the console
+// API bypasses the stdout pipe — we get 0 bytes back. On macOS/Linux the
+// system call works correctly. Use the self-built path on Windows.
 
 fn system_traceroute(target: &str, max_hops: u8, queries: u8, timeout: Duration) -> ProbeSample {
     let max_hops_u32 = max_hops as u32;
     let queries_u32 = queries as u32;
-    let timeout_sec: u32 = timeout.as_secs().max(1) as u32;
+    // Windows `tracert -w` is in **milliseconds**; Unix `traceroute -w` is
+    // in **seconds**. Convert from the canonical seconds input.
+    let timeout_secs = timeout.as_secs().max(1) as u32;
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("tracert.exe");
         c.arg("-d")
             .arg("-h")
             .arg(max_hops_u32.to_string())
             .arg("-w")
-            .arg(timeout_sec.to_string());
+            .arg((timeout_secs * 1000).to_string());
         c.arg(target);
         c
     } else {
@@ -410,7 +427,7 @@ fn system_traceroute(target: &str, max_hops: u8, queries: u8, timeout: Duration)
             .arg("-q")
             .arg(queries_u32.to_string())
             .arg("-w")
-            .arg(timeout_sec.to_string());
+            .arg(timeout_secs.to_string());
         c.arg(target);
         c
     };
@@ -457,10 +474,19 @@ fn system_traceroute(target: &str, max_hops: u8, queries: u8, timeout: Duration)
     let _ = child.wait();
     let (hops, complete) = parse_system_hops(&output);
     let success = !hops.is_empty();
+    let note = if output.is_empty() && cfg!(windows) {
+        Some("tracert.exe is a console-subsystem binary; its output is not captured via Rust std pipes on Windows. Use mode=self.")
+    } else {
+        None
+    };
     ProbeSample {
         success,
         latency_ms: Some(total_ms),
-        error: if success { None } else { Some("no hops parsed".to_string()) },
+        error: if success {
+            None
+        } else {
+            Some(note.unwrap_or("no hops parsed").to_string())
+        },
         payload: Some(json!({
             "target": target,
             "max_hops": max_hops,
