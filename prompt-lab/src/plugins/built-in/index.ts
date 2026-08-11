@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -52,6 +52,7 @@ const networkObservatory = preloadable(() => import('../network-observatory').th
 const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ default: m.LyricStudioPanel })));
 const videoPlayer = preloadable(() => import('../video-player').then((m) => ({ default: m.VideoPlayerPanel })));
 const mycast = preloadable(() => import('../mycast').then((m) => ({ default: m.MyCastPanel })));
+const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ default: m.VoiceInputPanel })));
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
 const WordPreviewPanel = wordPreview.component;
@@ -79,6 +80,7 @@ const NetworkObservatoryPanel = networkObservatory.component;
 const LyricStudioPanel = lyricStudio.component;
 const VideoPlayerPanel = videoPlayer.component;
 const MyCastPanel = mycast.component;
+const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const WorkBrowserPanel = workBrowser.component;
 
@@ -523,6 +525,29 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'voice-input',
+    name: '语音输入',
+    icon: AudioLines,
+    component: VoiceInputPanel,
+    enabled: true,
+    order: 28,
+    keepAlive: true,
+    contributions: {
+      commands: [
+        { id: 'voice-input.start', title: '开始录音', category: '语音输入' },
+        { id: 'voice-input.refresh', title: '刷新状态', category: '语音输入' },
+      ],
+    },
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('voice-input.start', () => {
+        window.dispatchEvent(new CustomEvent('voice-input:command', { detail: { command: 'start' } }));
+      }));
+      context.subscriptions.add(context.commands.register('voice-input.refresh', () => {
+        window.dispatchEvent(new CustomEvent('voice-input:command', { detail: { command: 'refresh' } }));
+      }));
+    },
+  },
+  {
     id: 'plugin-manager',
     name: '插件管理',
     icon: Puzzle,
@@ -607,6 +632,7 @@ export function registerBuiltInPlugins(): void {
     'lyric-studio': lyricStudio.preload,
     'video-player': videoPlayer.preload,
     mycast: mycast.preload,
+    'voice-input': voiceInput.preload,
     'zodiac-perspectives': zodiacPerspectives.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({

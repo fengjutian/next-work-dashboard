@@ -215,6 +215,7 @@ export interface ElectronAPI {
   };
   videoPlayer: import('../plugins/video-player/types').VideoPlayerAPI;
   mycast: import('../plugins/mycast/backend/mycast-types').MyCastApi;
+  voice: import('../plugins/voice-input/backend/voice-types').VoiceApi;
   mcp: {
     listServers: () => Promise<McpServerStatus[]>;
     saveServer: (config: McpServerConfig) => Promise<McpOperationResult>;

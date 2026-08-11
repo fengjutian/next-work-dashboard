@@ -61,7 +61,10 @@ pub fn build_router(state: HttpState) -> Router {
 }
 
 async fn serve_mobile_ui() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], MOBILE_HTML)
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        MOBILE_HTML,
+    )
 }
 
 async fn get_info(AxState(state): AxState<HttpState>) -> Json<serde_json::Value> {
@@ -96,7 +99,9 @@ async fn post_pair_complete(
         .shared
         .tokens
         .consume_pairing_by_code(&req.pairing_code, &req.device_id, &req.device_name)
-        .ok_or_else(|| ApiError::unauthorized("配对码无效或已过期，请确认桌面端最新显示的 6 位码"))?;
+        .ok_or_else(|| {
+            ApiError::unauthorized("配对码无效或已过期，请确认桌面端最新显示的 6 位码")
+        })?;
     tracing::info!(target: "mycast.http", phone = %req.device_id, name = %req.device_name, "pair claim accepted");
     let lan = crate::security::enumerate_lan_addrs()
         .into_iter()
@@ -112,12 +117,20 @@ async fn post_pair_complete(
     })))
 }
 
-async fn get_sessions(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+async fn get_sessions(
+    AxState(state): AxState<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
     let _ = require_session(&state, &headers)?;
-    Ok(Json(serde_json::json!({ "sessions": state.shared.signaling.list_sessions() })))
+    Ok(Json(
+        serde_json::json!({ "sessions": state.shared.signaling.list_sessions() }),
+    ))
 }
 
-async fn get_files(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+async fn get_files(
+    AxState(state): AxState<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
     let _ = require_session(&state, &headers)?;
     let mut entries: Vec<serde_json::Value> = Vec::new();
     let _ = tokio::fs::create_dir_all(&state.cfg.storage_dir).await;
@@ -146,20 +159,42 @@ async fn get_files(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Re
         }
     }
     entries.sort_by(|a, b| {
-        let ma = a.get("modified_at_ms").and_then(|v| v.as_i64()).unwrap_or(0);
-        let mb = b.get("modified_at_ms").and_then(|v| v.as_i64()).unwrap_or(0);
+        let ma = a
+            .get("modified_at_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let mb = b
+            .get("modified_at_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         mb.cmp(&ma)
     });
-    Ok(Json(serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() })))
+    Ok(Json(
+        serde_json::json!({ "files": entries, "root": state.cfg.storage_dir.display().to_string() }),
+    ))
 }
 
 fn kind_from_name(name: &str) -> &'static str {
     let lower = name.to_ascii_lowercase();
-    if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") || lower.ends_with(".webp") || lower.ends_with(".gif") || lower.ends_with(".svg") {
+    if lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".svg")
+    {
         "image"
-    } else if lower.ends_with(".mp4") || lower.ends_with(".mov") || lower.ends_with(".webm") || lower.ends_with(".mkv") {
+    } else if lower.ends_with(".mp4")
+        || lower.ends_with(".mov")
+        || lower.ends_with(".webm")
+        || lower.ends_with(".mkv")
+    {
         "video"
-    } else if lower.ends_with(".mp3") || lower.ends_with(".wav") || lower.ends_with(".m4a") || lower.ends_with(".flac") {
+    } else if lower.ends_with(".mp3")
+        || lower.ends_with(".wav")
+        || lower.ends_with(".m4a")
+        || lower.ends_with(".flac")
+    {
         "audio"
     } else if lower.ends_with(".pdf") {
         "pdf"
@@ -170,9 +205,14 @@ fn kind_from_name(name: &str) -> &'static str {
     }
 }
 
-async fn get_transfers(AxState(state): AxState<HttpState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+async fn get_transfers(
+    AxState(state): AxState<HttpState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
     let _ = require_session(&state, &headers)?;
-    Ok(Json(serde_json::json!({ "transfers": state.shared.transfers.list() })))
+    Ok(Json(
+        serde_json::json!({ "transfers": state.shared.transfers.list() }),
+    ))
 }
 
 async fn post_upload(
@@ -198,12 +238,18 @@ async fn post_upload(
     {
         let field_name = field.name().unwrap_or("file").to_string();
         if field_name == "size" {
-            let text = field.text().await.map_err(|e| ApiError::bad_request(e.to_string()))?;
+            let text = field
+                .text()
+                .await
+                .map_err(|e| ApiError::bad_request(e.to_string()))?;
             declared_size = text.parse().unwrap_or(0);
             continue;
         }
         if field_name == "filename" {
-            let text = field.text().await.map_err(|e| ApiError::bad_request(e.to_string()))?;
+            let text = field
+                .text()
+                .await
+                .map_err(|e| ApiError::bad_request(e.to_string()))?;
             target_name = Some(sanitize_filename(&text));
             continue;
         }
@@ -234,7 +280,10 @@ async fn post_upload(
                 hasher.update(&chunk);
                 bytes_written += chunk.len() as u64;
                 if bytes_written % (256 * 1024) < chunk.len() as u64 {
-                    state.shared.transfers.update_progress(&upload_id, bytes_written);
+                    state
+                        .shared
+                        .transfers
+                        .update_progress(&upload_id, bytes_written);
                 }
             }
             writer.flush().await.ok();
@@ -242,7 +291,11 @@ async fn post_upload(
         }
     }
     let final_path = target_path.ok_or_else(|| ApiError::bad_request("未找到 file 字段"))?;
-    let final_name = final_path.file_name().and_then(|s| s.to_str()).unwrap_or("upload").to_string();
+    let final_name = final_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("upload")
+        .to_string();
     let sha = hasher.finalize_hex();
     let rec = state
         .shared
@@ -304,13 +357,25 @@ async fn get_download(
     let mut resp_headers = HeaderMap::new();
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
     resp_headers.insert(header::CONTENT_TYPE, mime.essence_str().parse().unwrap());
-    let disposition = if q.inline.unwrap_or(false) { "inline" } else { "attachment" };
-    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("download");
+    let disposition = if q.inline.unwrap_or(false) {
+        "inline"
+    } else {
+        "attachment"
+    };
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("download");
     resp_headers.insert(
         header::CONTENT_DISPOSITION,
-        format!("{disposition}; filename=\"{}\"", name.replace('"', "_")).parse().unwrap(),
+        format!("{disposition}; filename=\"{}\"", name.replace('"', "_"))
+            .parse()
+            .unwrap(),
     );
-    resp_headers.insert(header::CONTENT_LENGTH, metadata.len().to_string().parse().unwrap());
+    resp_headers.insert(
+        header::CONTENT_LENGTH,
+        metadata.len().to_string().parse().unwrap(),
+    );
     Ok((resp_headers, bytes).into_response())
 }
 
@@ -319,7 +384,9 @@ fn require_session(state: &HttpState, headers: &HeaderMap) -> Result<String, Api
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| ApiError::unauthorized("缺少 Authorization 头"))?;
-    let bearer = auth.strip_prefix("Bearer ").ok_or_else(|| ApiError::unauthorized("需要 Bearer token"))?;
+    let bearer = auth
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| ApiError::unauthorized("需要 Bearer token"))?;
     state
         .shared
         .tokens
@@ -366,9 +433,14 @@ async fn ws_upgrade(
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
         .and_then(|p| p.split(',').nth(1).map(|s| s.trim().to_string()));
-    let token = auth_token.or(proto_token).filter(|token| !token.is_empty())
+    let token = auth_token
+        .or(proto_token)
+        .filter(|token| !token.is_empty())
         .ok_or_else(|| ApiError::unauthorized("缺少 session token"))?;
-    let authenticated_device = state.shared.tokens.validate_session(&token)
+    let authenticated_device = state
+        .shared
+        .tokens
+        .validate_session(&token)
         .ok_or_else(|| ApiError::unauthorized("session token 无效"))?;
     Ok(ws.on_upgrade(move |socket| ws_connection(socket, state, authenticated_device)))
 }
@@ -404,7 +476,10 @@ async fn ws_connection(socket: WebSocket, state: HttpState, authenticated_device
                                     break;
                                 }
                                 phone_device = Some(device_id.clone());
-                                state.shared.signaling.register_phone(device_id, frame_tx.clone());
+                                state
+                                    .shared
+                                    .signaling
+                                    .register_phone(device_id, frame_tx.clone());
                             } else {
                                 tracing::warn!(target: "mycast.ws", "received frame before Hello");
                                 continue;
@@ -434,10 +509,30 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    pub fn bad_request(msg: impl Into<String>) -> Self { Self { status: StatusCode::BAD_REQUEST, message: msg.into() } }
-    pub fn unauthorized(msg: impl Into<String>) -> Self { Self { status: StatusCode::UNAUTHORIZED, message: msg.into() } }
-    pub fn not_found(msg: impl Into<String>) -> Self { Self { status: StatusCode::NOT_FOUND, message: msg.into() } }
-    pub fn internal(msg: impl Into<String>) -> Self { Self { status: StatusCode::INTERNAL_SERVER_ERROR, message: msg.into() } }
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: msg.into(),
+        }
+    }
+    pub fn unauthorized(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: msg.into(),
+        }
+    }
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: msg.into(),
+        }
+    }
+    pub fn internal(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: msg.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {

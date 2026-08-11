@@ -7,6 +7,8 @@
 //! This mirrors the nwd-mycast protocol so future Electron-side helpers can be
 //! shared if needed.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 /// RPC request: parent -> sidecar.

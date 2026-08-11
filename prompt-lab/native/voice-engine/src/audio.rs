@@ -9,10 +9,13 @@
 //! samples to the ring buffer, so consumers (VAD / ASR in later phases) can
 //! rely on it.
 
+#![allow(dead_code)]
+
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use ringbuf::HeapProd;
+use ringbuf::traits::Producer;
 use tracing::{info, warn};
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -20,7 +23,9 @@ pub const TARGET_CHANNELS: u16 = 1;
 
 pub struct AudioCapture {
     pub input_device: String,
+    /// Sample rate of the actual input stream (used by VAD/ASR in W2+).
     pub actual_sample_rate: u32,
+    /// Channel count of the actual input stream.
     pub actual_channels: u16,
     stream: cpal::Stream,
 }

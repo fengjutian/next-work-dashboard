@@ -68,7 +68,12 @@ impl TokenManager {
     /// 32-byte secret). Used by the mobile web UI's "输入配对码" flow: the
     /// phone knows only the code shown on the desktop, and posts it here to
     /// claim the active pairing.
-    pub fn consume_pairing_by_code(&self, code: &str, device_id: &str, device_name: &str) -> Option<SessionToken> {
+    pub fn consume_pairing_by_code(
+        &self,
+        code: &str,
+        device_id: &str,
+        device_name: &str,
+    ) -> Option<SessionToken> {
         let mut guard = self.inner.write().expect("token lock");
         let entry = guard.as_ref()?;
         if Instant::now() > entry.expires_at {
@@ -84,12 +89,29 @@ impl TokenManager {
             }
             return None;
         }
-        Self::promote_to_session(&mut self.sessions.write().expect("session lock"), entry, device_id, device_name);
+        Self::promote_to_session(
+            &mut self.sessions.write().expect("session lock"),
+            entry,
+            device_id,
+            device_name,
+        );
         *guard = None;
-        Some(self.sessions.read().expect("session lock").last().cloned().expect("just promoted"))
+        Some(
+            self.sessions
+                .read()
+                .expect("session lock")
+                .last()
+                .cloned()
+                .expect("just promoted"),
+        )
     }
 
-    fn promote_to_session(sessions: &mut Vec<SessionToken>, _entry: &TokenEntry, device_id: &str, _device_name: &str) {
+    fn promote_to_session(
+        sessions: &mut Vec<SessionToken>,
+        _entry: &TokenEntry,
+        device_id: &str,
+        _device_name: &str,
+    ) {
         let mut rng = rand::thread_rng();
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
@@ -105,16 +127,21 @@ impl TokenManager {
     pub fn validate_session(&self, presented: &str) -> Option<String> {
         let guard = self.sessions.read().expect("session lock");
         let now = Instant::now();
-        guard.iter().find(|s| now < s.expires_at && constant_time_eq(s.token.as_bytes(), presented.as_bytes())).map(|s| s.device_id.clone())
+        guard
+            .iter()
+            .find(|s| {
+                now < s.expires_at && constant_time_eq(s.token.as_bytes(), presented.as_bytes())
+            })
+            .map(|s| s.device_id.clone())
     }
 
+    #[allow(dead_code)] // Wired to the desktop "forget device" action in the next UI phase.
     pub fn revoke_device(&self, device_id: &str) -> usize {
         let mut guard = self.sessions.write().expect("session lock");
         let before = guard.len();
         guard.retain(|session| session.device_id != device_id);
         before - guard.len()
     }
-
 }
 
 pub fn sha256_hex(input: &str) -> String {
@@ -146,14 +173,19 @@ pub fn enumerate_lan_addrs() -> Vec<std::net::IpAddr> {
     }
     // Sanity probe: try a quick TCP connect to a public DNS to confirm routability
     // (this also forces a non-loopback source). The result itself isn't needed.
-    let _ = TcpStream::connect_timeout(&SocketAddr::new("1.1.1.1".parse().unwrap(), 80), Duration::from_millis(50));
+    let _ = TcpStream::connect_timeout(
+        &SocketAddr::new("1.1.1.1".parse().unwrap(), 80),
+        Duration::from_millis(50),
+    );
     addrs
 }
 
 fn local_ip_for_outbound() -> Option<std::net::IpAddr> {
     use std::net::{IpAddr, SocketAddr, UdpSocket};
     let socket = UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)).ok()?;
-    socket.connect(SocketAddr::new("1.1.1.1".parse().ok()?, 80)).ok()?;
+    socket
+        .connect(SocketAddr::new("1.1.1.1".parse().ok()?, 80))
+        .ok()?;
     match socket.local_addr().ok()?.ip() {
         IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() => Some(IpAddr::V4(v4)),
         other => Some(other),
@@ -168,9 +200,16 @@ mod tests {
     fn pairing_code_is_single_use_and_session_can_be_revoked() {
         let manager = TokenManager::new();
         let (_, code, _) = manager.issue_pairing(None);
-        let session = manager.consume_pairing_by_code(&code, "phone-1", "Phone").expect("pairing succeeds");
-        assert_eq!(manager.validate_session(&session.token).as_deref(), Some("phone-1"));
-        assert!(manager.consume_pairing_by_code(&code, "phone-2", "Other").is_none());
+        let session = manager
+            .consume_pairing_by_code(&code, "phone-1", "Phone")
+            .expect("pairing succeeds");
+        assert_eq!(
+            manager.validate_session(&session.token).as_deref(),
+            Some("phone-1")
+        );
+        assert!(manager
+            .consume_pairing_by_code(&code, "phone-2", "Other")
+            .is_none());
         assert_eq!(manager.revoke_device("phone-1"), 1);
         assert!(manager.validate_session(&session.token).is_none());
     }
@@ -180,8 +219,12 @@ mod tests {
         let manager = TokenManager::new();
         let (_, code, _) = manager.issue_pairing(None);
         for _ in 0..MAX_PAIR_ATTEMPTS {
-            assert!(manager.consume_pairing_by_code("999999", "attacker", "Attacker").is_none());
+            assert!(manager
+                .consume_pairing_by_code("999999", "attacker", "Attacker")
+                .is_none());
         }
-        assert!(manager.consume_pairing_by_code(&code, "phone-1", "Phone").is_none());
+        assert!(manager
+            .consume_pairing_by_code(&code, "phone-1", "Phone")
+            .is_none());
     }
 }

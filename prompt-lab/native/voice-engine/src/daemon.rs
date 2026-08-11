@@ -1,17 +1,27 @@
 //! Daemon entry: read JSONL requests from stdin, write events to stdout,
 //! coordinate cpal + recorder. This is the W1 smoke-test loop. W2+ will
 //! swap the recorder for VAD + ASR workers but keep the same shape.
+//!
+//! cpal::Stream is `!Send` on every platform we target, so the recorder
+//! runs synchronously on the same task that opened the stream. While a
+//! recording is in progress, additional JSONL requests are buffered by
+//! tokio and processed after `recording.finished` fires. That's fine for
+//! W1 (a 5-second smoke test) and easy to upgrade in W2 by moving the
+//! audio worker into a dedicated tokio task and bridging back via channel.
+
+#![allow(dead_code)]
 
 use anyhow::{Context, Result};
+use ringbuf::traits::Split;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::{mpsc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::audio::{AudioCapture, TARGET_CHANNELS, TARGET_SAMPLE_RATE};
-use crate::protocol::{DaemonInfo, Event, Request, Response};
+use crate::protocol::{DaemonInfo, Event, Request};
 use crate::recorder::{default_output_path, Recorder};
 
 const RING_BUFFER_FRAMES: usize = 16_000 * 6; // 6 seconds at 16 kHz.
@@ -21,13 +31,12 @@ pub struct State {
     pub storage_dir: PathBuf,
     pub input_device: Option<String>,
     pub recording: bool,
-    pub last_result: Option<serde_json::Value>,
 }
 
 impl State {
-    fn snapshot(&self, version: String) -> DaemonInfo {
+    fn snapshot(&self, version: &'static str) -> DaemonInfo {
         DaemonInfo {
-            version,
+            version: version.to_string(),
             platform: std::env::consts::OS.to_string(),
             sample_rate: TARGET_SAMPLE_RATE,
             channels: TARGET_CHANNELS,
@@ -49,24 +58,23 @@ pub async fn run() -> Result<()> {
         storage_dir,
         input_device: None,
         recording: false,
-        last_result: None,
     }));
 
+    // Event bus: requests handled in-line, plus an mpsc that any task can
+    // post events to. The stdout writer task owns the write half so we
+    // never interleave JSON lines.
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Event>();
-    // Spawn the stdout writer so request handling and event emission never
-    // interleave on stdout (each line is one JSON object).
-    let writer = tokio::spawn(async move {
-        use tokio::io::{AsyncWriteExt, BufWriter};
+    tokio::spawn(async move {
         let stdout = tokio::io::stdout();
         let mut out = BufWriter::new(stdout);
         while let Some(event) = event_rx.recv().await {
             if let Ok(line) = serde_json::to_string(&event) {
                 if let Err(e) = out.write_all(line.as_bytes()).await {
-                    error!("write event to stdout: {e:#}");
+                    error!("write event to stdout: {e}");
                     break;
                 }
                 if let Err(e) = out.write_all(b"\n").await {
-                    error!("write newline: {e:#}");
+                    error!("write newline: {e}");
                     break;
                 }
                 let _ = out.flush().await;
@@ -74,18 +82,16 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    // Emit a synthetic `ready` so the parent can drive startup.
-    event_tx
-        .send(Event::new(
-            "ready",
-            serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "platform": std::env::consts::OS,
-                "sample_rate": TARGET_SAMPLE_RATE,
-                "channels": TARGET_CHANNELS,
-            }),
-        ))
-        .ok();
+    // Emit `ready` so the parent knows we're alive.
+    let _ = event_tx.send(Event::new(
+        "ready",
+        serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "platform": std::env::consts::OS,
+            "sample_rate": TARGET_SAMPLE_RATE,
+            "channels": TARGET_CHANNELS,
+        }),
+    ));
 
     let stdin = tokio::io::stdin();
     let mut lines = BufReader::new(stdin).lines();
@@ -101,54 +107,52 @@ pub async fn run() -> Result<()> {
                 continue;
             }
         };
-        let tx = event_tx.clone();
-        let state = state.clone();
-        // We process the request inline (still on the same task) so the
-        // recorder lives as long as the audio capture guard. Spawning a new
-        // task per request would also work, but for W1 we keep the flow
-        // simple and easy to follow.
-        if let Err(e) = handle_request(req, &tx, &state).await {
+        // Recording runs synchronously, so each request is fully processed
+        // before we read the next stdin line.
+        if let Err(e) = handle_request(req, &event_tx, &state) {
             error!("request handler failed: {e:#}");
+            let _ = event_tx.send(Event::new(
+                "error",
+                serde_json::json!({
+                    "kind": "request",
+                    "message": format!("{e:#}"),
+                }),
+            ));
         }
     }
 
-    drop(event_tx);
-    let _ = writer.await;
     Ok(())
 }
 
-async fn handle_request(
+fn handle_request(
     req: Request,
-    tx: &mpsc::UnboundedSender<Event>,
+    event_tx: &mpsc::UnboundedSender<Event>,
     state: &Arc<Mutex<State>>,
 ) -> Result<()> {
     match req.kind.as_str() {
         "ping" => {
-            let _ = tx.send(Event::new(
+            let _ = event_tx.send(Event::new(
                 "pong",
                 serde_json::json!({ "id": req.id.unwrap_or(0) }),
             ));
         }
         "state" => {
-            let snap = state.lock().await.snapshot(env!("CARGO_PKG_VERSION"));
+            let snap = state.lock().unwrap().snapshot(env!("CARGO_PKG_VERSION"));
             let payload = serde_json::to_value(&snap).unwrap_or(serde_json::Value::Null);
-            // Use a synthetic response-shaped event so the parent can
-            // match on `type = state` without an `id` correlation.
-            let _ = tx.send(Event::new("state", payload));
+            let _ = event_tx.send(Event::new("state", payload));
         }
         "recording.start" => {
-            // Optional duration override (seconds), default 5.
             let duration_secs = req
                 .payload
                 .get("duration_secs")
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32)
                 .unwrap_or(5);
-            start_recording(duration_secs, tx, state.clone()).await?;
+            run_recording(duration_secs, event_tx, state.clone())?;
         }
         _ => {
             warn!("unknown request type: {}", req.kind);
-            let _ = tx.send(Event::new(
+            let _ = event_tx.send(Event::new(
                 "error",
                 serde_json::json!({
                     "request_id": req.id,
@@ -158,42 +162,32 @@ async fn handle_request(
             ));
         }
     }
-    // Reference `Response` to keep the symbol exported for future phases.
-    let _ = Response::ok::<&str>;
     Ok(())
 }
 
-async fn start_recording(
+fn run_recording(
     duration_secs: u32,
-    tx: &mpsc::UnboundedSender<Event>,
+    event_tx: &mpsc::UnboundedSender<Event>,
     state: Arc<Mutex<State>>,
 ) -> Result<()> {
     {
-        let mut g = state.lock().await;
+        let g = state.lock().unwrap();
         if g.recording {
             anyhow::bail!("recording already in progress");
         }
-        g.recording = true;
     }
 
     let (producer, consumer) = ringbuf::HeapRb::<f32>::new(RING_BUFFER_FRAMES).split();
 
-    let capture = match AudioCapture::start(producer) {
-        Ok(c) => c,
-        Err(e) => {
-            let mut g = state.lock().await;
-            g.recording = false;
-            return Err(e);
-        }
-    };
-
+    let capture = AudioCapture::start(producer).context("open microphone")?;
     {
-        let mut g = state.lock().await;
+        let mut g = state.lock().unwrap();
+        g.recording = true;
         g.input_device = Some(capture.input_device.clone());
     }
 
     let output_path = {
-        let g = state.lock().await;
+        let g = state.lock().unwrap();
         default_output_path(&g.storage_dir)
     };
 
@@ -201,45 +195,50 @@ async fn start_recording(
         output_path,
         duration_secs,
         sample_rate: TARGET_SAMPLE_RATE,
-        tx: tx.clone(),
+        tx: event_tx.clone(),
         consumer,
         started_at: Instant::now(),
     };
 
-    // Run the recorder on a dedicated OS thread because the ring buffer
-    // pop path is CPU-bound and we want to keep the tokio runtime free
-    // for stdin handling.
-    let state_for_finish = state.clone();
-    let capture_for_stop = Arc::new(parking_lot_mutex(capture));
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build recorder runtime");
-        let result = rt.block_on(recorder.run());
-        if let Err(e) = result {
-            error!("recorder failed: {e:#}");
-            let _ = tx.send(Event::new(
-                "error",
-                serde_json::json!({
-                    "kind": "recorder",
-                    "message": format!("{e:#}"),
-                }),
-            ));
-        }
-        // Stop capture: take the guard out of the mutex and drop it.
-        if let Some(cap) = capture_for_stop.lock().take() {
-            cap.stop();
-        }
-        let mut g = state_for_finish.blocking_lock();
-        g.recording = false;
-    });
+    // Runs synchronously on the calling task. cpal::Stream is `!Send`, so
+    // the AudioCapture guard must stay on this task — that's why we can't
+    // ship it to a worker thread.
+    let result = recorder.run();
+    capture.stop();
+    state.lock().unwrap().recording = false;
 
+    if let Err(e) = result {
+        return Err(e);
+    }
     Ok(())
 }
 
-/// Wrap `AudioCapture` in a parking_lot mutex so we can hand the guard
-/// across threads. parking_lot is not in our deps, so just use std Mutex.
-fn parking_lot_mutex<T>(inner: T) -> std::sync::Mutex<Option<T>> {
-    std::sync::Mutex::new(Some(inner))
+fn resolve_storage_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("NWD_VOICE_STORAGE_DIR") {
+        return PathBuf::from(p);
+    }
+    if let Some(base) = dirs_fallback() {
+        return base.join("voice-engine");
+    }
+    PathBuf::from(".")
+}
+
+/// Tiny `dirs` stand-in so we don't pull another dependency. We only need
+/// a writable per-user directory; fall back to the current directory if we
+/// can't find one.
+fn dirs_fallback() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+    }
 }

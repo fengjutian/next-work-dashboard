@@ -57,6 +57,7 @@ async function main() {
     '--http-port', '27890',
     '--ws-port',   '27891',
     '--no-mdns',
+    '--storage-dir', tmpDir,
     '--device-name', 'E2E Sidecar',
   ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   proc.stderr.on('data', (d) => writeFileSync(stderrLog, d, { flag: 'a' }));
@@ -148,10 +149,11 @@ async function main() {
   // ── 5. File upload + listing + download ────────────────────────────────
   console.log('\n[5] File upload + list + download');
   const uploadContent = randomBytes(1024 * 32);
+  const uploadName = `e2e-upload-${Date.now()}.bin`;
   const upForm = new FormData();
-  upForm.set('filename', 'e2e-upload.bin');
+  upForm.set('filename', uploadName);
   upForm.set('size', String(uploadContent.length));
-  upForm.set('file', new Blob([uploadContent]), 'e2e-upload.bin');
+  upForm.set('file', new Blob([uploadContent]), uploadName);
   const upRes = await fetch(`${baseUrl(host, port)}/api/files/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -166,10 +168,10 @@ async function main() {
 
   const listRes = await get(`${baseUrl(host, port)}/api/files`, { Authorization: `Bearer ${token}` });
   check('list contains uploaded file', Array.isArray(listRes.json.files) &&
-        listRes.json.files.some((f) => f.name === 'e2e-upload.bin' && f.size === uploadContent.length),
+        listRes.json.files.some((f) => f.name === uploadName && f.size === uploadContent.length),
         `count=${listRes.json.files?.length}`);
 
-  const fileEntry = listRes.json.files.find((f) => f.name === 'e2e-upload.bin');
+  const fileEntry = listRes.json.files.find((f) => f.name === uploadName);
   if (fileEntry) {
     const dlRes = await fetch(`${baseUrl(host, port)}/api/files/download/${fileEntry.id}`, {
       headers: { Authorization: `Bearer ${token}` },

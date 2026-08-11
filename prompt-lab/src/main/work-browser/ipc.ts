@@ -13,6 +13,7 @@ import { DocumentStore } from './document-store';
 import { SearchRouter } from './search-router';
 import { savePageAsMarkdown } from './save';
 import { getCleanerPayload } from './cleaner';
+import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus,
 } from '../../core/work-browser/types';
@@ -92,9 +93,6 @@ export function setupWorkBrowserIPC(): void {
     const all = workspaces.listWorkspaces(false);
     return all
       .map((ws) => ({ workspace: ws, tabs: workspaces.listTabs(ws.id) }))
-      .flatMap((entry) => {
-        const { suggestWorkspacesForDocument } = require('../../core/work-browser/workspace/auto-group') as typeof import('../../core/work-browser/workspace/auto-group');
-        return suggestWorkspacesForDocument(docSummary, [entry]).map((c) => ({ workspaceId: c.workspaceId, score: c.score, reasons: c.reasons }));
-      });
+      .flatMap((entry) => suggestWorkspacesForDocument(docSummary, [entry]).map((c) => ({ workspaceId: c.workspaceId, score: c.score, reasons: c.reasons })));
   });
 }

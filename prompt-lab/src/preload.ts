@@ -171,6 +171,19 @@ const electronAPI: ElectronAPI = {
       return () => { ipcRenderer.removeListener('mycast:event', listener); };
     },
   },
+  voice: {
+    start: () => ipcRenderer.invoke('voice:start'),
+    state: () => ipcRenderer.invoke('voice:state'),
+    ping: () => ipcRenderer.invoke('voice:ping'),
+    requestState: () => ipcRenderer.invoke('voice:request-state'),
+    startRecording: (durationSecs: number) => ipcRenderer.invoke('voice:start-recording', durationSecs),
+    listRecordings: () => ipcRenderer.invoke('voice:list-recordings'),
+    onEvent: (handler: (event: import('./plugins/voice-input/backend/voice-types').VoiceEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: import('./plugins/voice-input/backend/voice-types').VoiceEvent) => handler(payload);
+      ipcRenderer.on('voice:event', listener);
+      return () => { ipcRenderer.removeListener('voice:event', listener); };
+    },
+  },
   videoPlayer: {
     open: (filePath?: string) => ipcRenderer.invoke('video-player:open', filePath),
     openUrl: (url: string) => ipcRenderer.invoke('video-player:open-url', url),
