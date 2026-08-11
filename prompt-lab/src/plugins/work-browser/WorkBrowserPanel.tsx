@@ -58,6 +58,7 @@ export function WorkBrowserPanel() {
 
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
+  const aiConfigBridgeAvailableRef = useRef(true);
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
@@ -88,12 +89,20 @@ export function WorkBrowserPanel() {
   }, [setActiveActivity]);
 
   useEffect(() => {
+    if (!aiConfigBridgeAvailableRef.current) return;
     void window.electronAPI.workBrowser.config.setAI({
       baseUrl: aiApi.baseUrl,
       apiKey: aiApi.apiKey,
       model: aiApi.model,
       local: /(?:localhost|127\.0\.0\.1)/i.test(aiApi.baseUrl),
-    }).catch((error) => console.warn('[work-browser] unable to sync application AI config', error));
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("No handler registered for 'work-browser:config:set-ai'")) {
+        aiConfigBridgeAvailableRef.current = false;
+        return;
+      }
+      console.warn('[work-browser] unable to sync application AI config', error);
+    });
   }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model]);
 
   // 默认选第一个 workspace

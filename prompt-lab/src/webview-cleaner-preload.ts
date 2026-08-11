@@ -87,14 +87,18 @@ function reportSelection() {
   ipcRenderer.sendToHost('work-browser:selection-changed', { text, selector });
 }
 
-function interceptNewWindowLinks(event: MouseEvent) {
+function interceptBrowserLinks(event: MouseEvent) {
   if (event.defaultPrevented || event.button !== 0) return;
-  const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
+  const target = event.composedPath()
+    .find((node): node is HTMLAnchorElement => node instanceof HTMLAnchorElement && node.hasAttribute('href'))
+    ?? (event.target instanceof Element ? event.target.closest('a[href]') : null);
   if (!(target instanceof HTMLAnchorElement)) return;
-  const opensNewWindow = target.target.toLowerCase() === '_blank' || event.ctrlKey || event.metaKey;
-  if (!opensNewWindow) return;
+  if (target.hasAttribute('download')) return;
   const url = target.href;
   if (!/^https?:\/\//i.test(url)) return;
+  const currentWithoutHash = location.href.split('#')[0];
+  const targetWithoutHash = url.split('#')[0];
+  if (currentWithoutHash === targetWithoutHash && url.includes('#')) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   ipcRenderer.sendToHost('work-browser:open-url', { url });
@@ -118,6 +122,10 @@ function buildSelector(el: Element): string {
 
 async function main() {
   injectBrowserChromeStyle();
+  // Host interaction cannot depend on the optional cleaner payload.
+  document.addEventListener('selectionchange', reportSelection, true);
+  document.addEventListener('click', interceptBrowserLinks, true);
+
   const payload = await getPayload();
   if (!payload) return;
 
@@ -142,9 +150,7 @@ async function main() {
   window.addEventListener('hashchange', reapply);
 
   // 选区监听
-  document.addEventListener('selectionchange', reportSelection, true);
   // 网站的 target=_blank / Ctrl+Click 统一交给宿主创建内部 Tab，禁止弹独立窗口。
-  document.addEventListener('click', interceptNewWindowLinks, true);
 
   // Annotation 高亮回放：等首屏稳定后拉取
   window.addEventListener('load', () => {
