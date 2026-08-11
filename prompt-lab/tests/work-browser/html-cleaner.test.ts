@@ -18,7 +18,7 @@ describe('htmlClean', () => {
   it('关闭 removeAds 时不再输出广告选择器', () => {
     const opts: CleanOptions = { ...DEFAULT_CLEAN_OPTIONS, removeAds: false };
     const out = htmlClean(opts);
-    expect(out.blockedSelectors.every((s) => !/^[\.\[]/.test(s) || s.includes('ad') === false)).toBe(true);
+    expect(out.blockedSelectors.every((s) => !/^[.[]/.test(s) || s.includes('ad') === false)).toBe(true);
     // cookie banner 仍存在
     expect(out.blockedSelectors.some((s) => s.includes('cookie'))).toBe(true);
   });

@@ -28,6 +28,7 @@ import { CleanupTab } from './tabs/CleanupTab';
 import { DeveloperTab } from './tabs/DeveloperTab';
 import { DoctorTab } from './tabs/DoctorTab';
 import { OverviewTab } from './tabs/OverviewTab';
+import { VirtualList } from './tabs/VirtualList';
 import type { ActiveTab, DirectoryChange, ScanSummary } from './tabs/shared';
 
 // ---------------- Panel ----------------
@@ -555,27 +556,31 @@ export function DiskSpacePanel() {
                 {directoryData.length ? <Chart option={summary.directoryOption} className="h-[280px] w-full" /> : <EmptyState>等待扫描数据</EmptyState>}
               </article>
             </section>
-            <section className="max-h-[420px] overflow-auto rounded-xl border bg-card">
-              <h2 className="sticky top-0 border-b bg-card px-4 py-3 font-medium">最大文件 <span className="text-xs text-muted-foreground">前 50</span></h2>
-              {largest.map((file) => (
-                <button
-                  key={file.path}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_100px] gap-3 border-b px-4 py-2 text-left text-sm hover:bg-muted/40"
-                  onClick={() =>
-                    void openPreview({
-                      name: displayPath(file.path).split(/[\\/]/).at(-1) || file.path,
-                      path: file.path,
-                      type: 'file',
-                      size: file.size,
-                      modifiedAt: file.modifiedAt,
-                      extension: file.extension,
-                    })
-                  }
-                >
-                  <span className="truncate font-mono text-xs">{displayPath(file.path)}</span>
-                  <span className="text-right text-muted-foreground">{formatBytes(file.size)}</span>
-                </button>
-              ))}
+            <section className="h-[420px] rounded-xl border bg-card">
+              <h2 className="border-b bg-card px-4 py-3 font-medium">最大文件 <span className="text-xs text-muted-foreground">前 50</span></h2>
+              <VirtualList
+                items={largest}
+                itemSize={38}
+                height={380}
+                renderItem={(file) => (
+                  <button
+                    className="grid h-[38px] w-full grid-cols-[minmax(0,1fr)_100px] items-center gap-3 border-b px-4 text-left text-sm hover:bg-muted/40"
+                    onClick={() =>
+                      void openPreview({
+                        name: displayPath(file.path).split(/[\\/]/).at(-1) || file.path,
+                        path: file.path,
+                        type: 'file',
+                        size: file.size,
+                        modifiedAt: file.modifiedAt,
+                        extension: file.extension,
+                      })
+                    }
+                  >
+                    <span className="truncate font-mono text-xs">{displayPath(file.path)}</span>
+                    <span className="text-right text-muted-foreground">{formatBytes(file.size)}</span>
+                  </button>
+                )}
+              />
             </section>
           </>
         )}

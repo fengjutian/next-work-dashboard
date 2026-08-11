@@ -16,7 +16,7 @@ export { dedupeResults } from './search/dedup';
 export { rankResults } from './search/rank';
 export { aggregateSearch } from './search/aggregator';
 export type { AggregateOptions } from './search/aggregator';
-export type { SearchProvider } from './search/provider';
+// 注意：SearchProvider 类型在 ./types 中已 re-export（来自 provider.ts），避免双重导出。
 export { canonicalizeUrl, contentFingerprint, decodeHtmlEntities } from './search/provider';
 export { BUILTIN_PROVIDERS, duckduckgoProvider, braveProvider, githubProvider, stackoverflowProvider } from './search/providers';
 

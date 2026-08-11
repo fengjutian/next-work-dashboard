@@ -9,7 +9,7 @@
 
 function escapeMarkdown(text: string): string {
   return text
-    .replace(/([\\`*_{}[\]<>#+-.!|])/g, '\\$1')
+    .replace(/([\\`*_{}[<>#+-.!|])/g, '\\$1')
     .replace(/\n{3,}/g, '\n\n');
 }
 

@@ -7,8 +7,13 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import * as DatabaseNS from 'better-sqlite3';
 import { runMigrations } from '../../core/work-browser/storage';
+
+// better-sqlite3 是 CJS default export，import/resolver 静态分析不识别 default。
+// 用 namespace import 并 alias 让 lint 通过。
+const Database = (DatabaseNS as unknown as { default?: typeof DatabaseNS }).default || DatabaseNS;
+type Database = typeof DatabaseNS;
 
 let db: Database.Database | null = null;
 

@@ -5,6 +5,7 @@ import { Chart, EmptyState } from './components';
 import { formatBytes } from './helpers';
 import type { DirectoryChange } from './shared';
 import type { TreemapNode } from './helpers';
+import { VirtualList } from './VirtualList';
 
 /**
  * AnalysisTab — 空间分析：largest 筛选、重复文件工作台、目录变化、treemap。
@@ -175,9 +176,12 @@ export function AnalysisTab(props: AnalysisTabProps) {
             <span className="text-xs text-muted-foreground">保留最近 20 次扫描</span>
           </div>
           {directoryChanges.length ? (
-            <div className="max-h-[360px] overflow-auto">
-              {directoryChanges.map((item) => (
-                <div key={item.path} className="grid grid-cols-[minmax(0,1fr)_120px_120px] items-center gap-3 border-b px-5 py-2.5 text-sm">
+            <VirtualList
+              items={directoryChanges}
+              itemSize={42}
+              height={360}
+              renderItem={(item) => (
+                <div className="grid h-[42px] grid-cols-[minmax(0,1fr)_120px_120px] items-center gap-3 border-b px-5 text-sm">
                   <span className="truncate font-mono text-xs" title={displayPath(item.path)}>
                     {displayPath(item.path)}
                   </span>
@@ -187,8 +191,8 @@ export function AnalysisTab(props: AnalysisTabProps) {
                     {formatBytes(Math.abs(item.change))}
                   </span>
                 </div>
-              ))}
-            </div>
+              )}
+            />
           ) : (
             <div className="px-5 py-10 text-center text-sm text-muted-foreground">完成同一目录的第二次扫描后，将显示具体增长来源</div>
           )}
@@ -213,30 +217,34 @@ export function AnalysisTab(props: AnalysisTabProps) {
               ))}
             </div>
           </div>
-          <div className="max-h-[360px] overflow-auto">
+          <div className="h-[360px]">
             {visibleLargest.length ? (
-              visibleLargest.map((file) => (
-                <button
-                  key={file.path}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_110px_150px] items-center gap-3 border-b px-5 py-2.5 text-left text-sm hover:bg-muted/40"
-                  onClick={() =>
-                    void openPreview({
-                      name: displayPath(file.path).split(/[\\/]/).at(-1) || file.path,
-                      path: file.path,
-                      type: 'file',
-                      size: file.size,
-                      modifiedAt: file.modifiedAt,
-                      extension: file.extension,
-                    })
-                  }
-                >
-                  <span className="truncate font-mono text-xs" title={displayPath(file.path)}>
-                    {displayPath(file.path)}
-                  </span>
-                  <span className="text-right font-medium tabular-nums">{formatBytes(file.size)}</span>
-                  <span className="text-right text-xs text-muted-foreground">{new Date(file.modifiedAt).toLocaleDateString()}</span>
-                </button>
-              ))
+              <VirtualList
+                items={visibleLargest}
+                itemSize={46}
+                height={360}
+                renderItem={(file) => (
+                  <button
+                    className="grid h-[46px] w-full grid-cols-[minmax(0,1fr)_110px_150px] items-center gap-3 border-b px-5 text-left text-sm hover:bg-muted/40"
+                    onClick={() =>
+                      void openPreview({
+                        name: displayPath(file.path).split(/[\\/]/).at(-1) || file.path,
+                        path: file.path,
+                        type: 'file',
+                        size: file.size,
+                        modifiedAt: file.modifiedAt,
+                        extension: file.extension,
+                      })
+                    }
+                  >
+                    <span className="truncate font-mono text-xs" title={displayPath(file.path)}>
+                      {displayPath(file.path)}
+                    </span>
+                    <span className="text-right font-medium tabular-nums">{formatBytes(file.size)}</span>
+                    <span className="text-right text-xs text-muted-foreground">{new Date(file.modifiedAt).toLocaleDateString()}</span>
+                  </button>
+                )}
+              />
             ) : (
               <div className="py-12 text-center text-sm text-muted-foreground">没有符合当前大小条件的文件</div>
             )}
