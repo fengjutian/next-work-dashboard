@@ -16,7 +16,6 @@ import {
   type DirectoryEntry,
   type DiskHistoryPoint,
   type FileEntry,
-  type PersistedScanResult,
   type ScanErrorItem,
   type ScanTelemetry,
 } from './hooks/useDiskScan';
@@ -179,6 +178,7 @@ export function DiskSpacePanel() {
     removeDirectorySnapshot, clearHistory, setRunning, setPaused, setScanErrors,
     setBrowserLoading, setEntries, setDuplicates,
     cleanupStatus, runCleanup, clearCleanupStatus,
+    directorySnapshotData,
   } = scan;
 
   // 切 tab 清空 error
@@ -325,7 +325,7 @@ export function DiskSpacePanel() {
     .filter((file) => selectedDuplicates.includes(file.path))
     .reduce((sum, file) => sum + file.size, 0);
   const directoryChanges = useMemo(() => {
-    const matching = directorySnapshots
+    const matching = directorySnapshotData
       .filter((snapshot) => displayPath(snapshot.root).toLowerCase() === displayPath(root).toLowerCase())
       .slice(-2);
     if (matching.length < 2) return [];
@@ -380,9 +380,10 @@ export function DiskSpacePanel() {
     await window.electronAPI.saveFile(content, `磁盘扫描报告-${new Date().toISOString().slice(0, 10)}.md`);
   };
 
-  // restoreSavedResult 包装：恢复后切到 analysis tab 并关闭 modal
-  const handleRestore = (saved: PersistedScanResult) => {
-    restoreSavedResult(saved);
+  // restoreSavedResult 包装：恢复后切到 analysis tab 并关闭 modal。
+  // 现在 restoreSavedResult 是 async（要从 userData 文件加载完整数据）。
+  const handleRestore = async (id: string) => {
+    await restoreSavedResult(id);
     setResultsOpen(false);
     setActiveTab('analysis');
   };
@@ -453,13 +454,13 @@ export function DiskSpacePanel() {
         <Modal open={snapshotsOpen} title="扫描快照管理" footer={null} width="min(900px, 90vw)" onCancel={() => setSnapshotsOpen(false)}>
           <div className="max-h-[65vh] overflow-auto">
             {directorySnapshots.map((snapshot) => (
-              <div key={`${snapshot.root}-${snapshot.timestamp}`} className="grid grid-cols-[minmax(0,1fr)_170px_80px] items-center gap-3 border-b py-3">
+              <div key={snapshot.id} className="grid grid-cols-[minmax(0,1fr)_170px_80px] items-center gap-3 border-b py-3">
                 <div className="min-w-0">
                   <p className="truncate font-mono text-xs">{displayPath(snapshot.root)}</p>
-                  <p className="text-xs text-muted-foreground">记录 {snapshot.directories.length} 个主要目录</p>
+                  <p className="text-xs text-muted-foreground">记录 {snapshot.directoryCount} 个主要目录</p>
                 </div>
                 <span className="text-xs text-muted-foreground">{new Date(snapshot.timestamp).toLocaleString()}</span>
-                <button className="text-xs text-destructive hover:underline" onClick={() => removeDirectorySnapshot(snapshot.timestamp, snapshot.root)}>删除</button>
+                <button className="text-xs text-destructive hover:underline" onClick={() => void removeDirectorySnapshot(snapshot.id)}>删除</button>
               </div>
             ))}
           </div>
@@ -472,11 +473,11 @@ export function DiskSpacePanel() {
                   <p className="truncate font-mono text-xs">{displayPath(saved.root)}</p>
                   <p className="text-xs text-muted-foreground">{saved.stats.files.toLocaleString()} 个文件 · {formatBytes(saved.stats.bytes)}</p>
                 </div>
-                <span className="text-right text-xs">{saved.duplicates.length} 组重复</span>
+                <span className="text-right text-xs">{saved.duplicates} 组重复</span>
                 <span className="text-xs text-muted-foreground">{new Date(saved.savedAt).toLocaleString()}</span>
                 <div className="flex justify-end gap-2">
-                  <button className="text-xs text-primary hover:underline" onClick={() => handleRestore(saved)}>恢复</button>
-                  <button className="text-xs text-destructive hover:underline" onClick={() => removeSavedResult(saved.id)}>删除</button>
+                  <button className="text-xs text-primary hover:underline" onClick={() => void handleRestore(saved.id)}>恢复</button>
+                  <button className="text-xs text-destructive hover:underline" onClick={() => void removeSavedResult(saved.id)}>删除</button>
                 </div>
               </div>
             )) : <EmptyState>暂无扫描结果存档</EmptyState>}
@@ -875,4 +876,4 @@ export function DiskSpacePanel() {
 }
 
 // 避免未使用变量警告
-export type { DiskHistoryPoint, FileEntry, PersistedScanResult, ScanTelemetry, DirectoryEntry };
+export type { DiskHistoryPoint, FileEntry, ScanTelemetry, DirectoryEntry };

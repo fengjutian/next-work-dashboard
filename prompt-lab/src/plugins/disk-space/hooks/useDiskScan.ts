@@ -205,8 +205,11 @@ export interface UseDiskScanResult {
   directories: DirectoryEntry[];
 
   // history / archive
-  directorySnapshots: DirectorySnapshot[];
-  savedResults: PersistedScanResult[];
+  directorySnapshots: DiskSnapshotEntry[];
+  // snapshot 完整数据：与 directorySnapshots 一一对应；directoryChanges 派生用。
+  // 启动时异步从 userData 加载，done 时直接 push 新数据。
+  directorySnapshotData: DirectorySnapshot[];
+  savedResults: DiskArchiveEntry[];
 
   // USN
   usnInfo: DiskUsnInfo | null;
@@ -228,10 +231,11 @@ export interface UseDiskScanResult {
   togglePause: () => Promise<void>;
   loadDirectory: (path: string) => Promise<void>;
   openPreview: (entry: DiskDirectoryItem) => Promise<void>;
-  restoreSavedResult: (saved: PersistedScanResult) => void;
-  removeSavedResult: (id: string) => void;
-  removeDirectorySnapshot: (timestamp: number, snapshotRoot: string) => void;
-  clearHistory: () => void;
+  // archive 操作改成 async：内部从 userData 文件加载完整数据
+  restoreSavedResult: (id: string) => Promise<void>;
+  removeSavedResult: (id: string) => Promise<void>;
+  removeDirectorySnapshot: (id: string) => Promise<void>;
+  clearHistory: () => Promise<void>;
   setRunning: (running: boolean) => void;
   setPaused: (paused: boolean) => void;
   setScanErrors: React.Dispatch<React.SetStateAction<ScanErrorItem[]>>;
@@ -292,6 +296,7 @@ export function useDiskScan(): UseDiskScanResult {
   // archive：元数据存 userData/scan-archive/，完整数据按 id 懒加载。
   // 这里只持元数据列表；调用方在需要完整数据时通过 loadArchive / loadSnapshot 拉取。
   const [directorySnapshots, setDirectorySnapshots] = useState<DiskSnapshotEntry[]>([]);
+  const [directorySnapshotData, setDirectorySnapshotData] = useState<DirectorySnapshot[]>([]);
   const [savedResults, setSavedResults] = useState<DiskArchiveEntry[]>([]);
 
   // USN
@@ -370,6 +375,14 @@ export function useDiskScan(): UseDiskScanResult {
         if (cancelled) return;
         setSavedResults(archive);
         setDirectorySnapshots(snapshots);
+        // 并行拉每个 snapshot 的完整数据，directoryChanges 派生需要
+        const fullData = await Promise.all(
+          snapshots.map((meta) => window.electronAPI.diskSpace.loadSnapshot(meta.id)),
+        );
+        if (cancelled) return;
+        setDirectorySnapshotData(
+          fullData.filter((value): value is DiskDirectorySnapshotData => value !== null),
+        );
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -501,7 +514,11 @@ export function useDiskScan(): UseDiskScanResult {
           };
           void window.electronAPI.diskSpace
             .saveSnapshot({ ...snapshotMeta, data: snapshotData })
-            .then((next) => setDirectorySnapshots(next))
+            .then((next) => {
+              setDirectorySnapshots(next);
+              // 同步把完整数据 push 到内存 state，directoryChanges 派生可直接用
+              setDirectorySnapshotData((current) => [...current, snapshotData].slice(-SNAPSHOTS_CAP));
+            })
             .catch(() => { /* 快照失败不致命 */ });
         }
       }
@@ -699,50 +716,78 @@ export function useDiskScan(): UseDiskScanResult {
     [root, loadDirectory],
   );
 
-  const restoreSavedResult = useCallback((saved: PersistedScanResult) => {
-    rootRef.current = saved.root;
-    scannedDirectoriesRef.current = saved.directories;
-    largestRef.current = saved.largest;
-    largestTopRef.current.load(saved.largest);
-    largestDirtyRef.current = false;
-    extensionsRef.current = saved.extensions;
-    duplicatesRef.current = saved.duplicates;
-    setRoot(saved.root);
-    setCurrentDirectory(saved.root);
-    setStats(saved.stats);
-    setDirectories(saved.directories);
-    setLargest(saved.largest);
-    setExtensions(saved.extensions);
-    setDuplicates(saved.duplicates);
-  }, []);
+  // 恢复存档：先按 id 异步加载完整数据，再写入 ref + state。
+  const restoreSavedResult = useCallback(async (id: string) => {
+    try {
+      const data = await window.electronAPI.diskSpace.loadArchive(id);
+      if (!data) throw new Error('存档不存在或已损坏');
+      // 主进程序列化去掉了 'type' 字段；恢复时补回以满足 DuplicateGroup 类型。
+      const duplicates: DuplicateGroup[] = (data.duplicates ?? []).map((group) => ({
+        type: 'duplicate' as const,
+        groupId: group.groupId,
+        size: group.size,
+        files: group.files,
+      }));
+      rootRef.current = data.root;
+      scannedDirectoriesRef.current = data.directories as DirectoryEntry[];
+      largestRef.current = data.largest as FileEntry[];
+      largestTopRef.current.load(data.largest as FileEntry[]);
+      largestDirtyRef.current = false;
+      extensionsRef.current = data.extensions;
+      duplicatesRef.current = duplicates;
+      setRoot(data.root);
+      setCurrentDirectory(data.root);
+      setStats(data.stats);
+      setDirectories(data.directories as DirectoryEntry[]);
+      setLargest(data.largest as FileEntry[]);
+      setExtensions(data.extensions);
+      setDuplicates(duplicates);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [setError]);
 
-  const removeSavedResult = useCallback((id: string) => {
-    setSavedResults((current) => {
-      const next = current.filter((item) => item.id !== id);
-      writeJson('disk-space.results', next);
-      return next;
-    });
-  }, []);
+  const removeSavedResult = useCallback(async (id: string) => {
+    try {
+      const next = await window.electronAPI.diskSpace.deleteArchive(id);
+      setSavedResults(next);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [setError]);
 
   const removeDirectorySnapshot = useCallback(
-    (timestamp: number, snapshotRoot: string) => {
-      setDirectorySnapshots((current) => {
-        const next = current.filter(
-          (item) => !(item.timestamp === timestamp && item.root === snapshotRoot),
-        );
-        writeJson('disk-space.directory-snapshots', next);
-        return next;
-      });
+    async (id: string) => {
+      try {
+        const next = await window.electronAPI.diskSpace.deleteSnapshot(id);
+        setDirectorySnapshots(next);
+        setDirectorySnapshotData((current) => {
+          // 通过元数据定位：找 timestamp 匹配的 snapshot
+          const meta = next.find((entry) => entry.id === id);
+          if (!meta) return current;
+          return current.filter(
+            (snapshot) => !(snapshot.timestamp === meta.timestamp && snapshot.root === meta.root),
+          );
+        });
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     },
-    [],
+    [setError],
   );
 
-  const clearHistory = useCallback(() => {
+  const clearHistory = useCallback(async () => {
     localStorage.removeItem('disk-space.history');
-    localStorage.removeItem('disk-space.directory-snapshots');
     setDiskHistory([]);
-    setDirectorySnapshots([]);
-  }, []);
+    try {
+      await window.electronAPI.diskSpace.clearArchive();
+      setDirectorySnapshots([]);
+      setDirectorySnapshotData([]);
+      setSavedResults([]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [setError]);
 
   const runCleanup = useCallback(async (action: CleanupActionId) => {
     if (cleanupStatus.kind === 'running') return;
@@ -792,6 +837,7 @@ export function useDiskScan(): UseDiskScanResult {
     extensions,
     directories,
     directorySnapshots,
+    directorySnapshotData,
     savedResults,
     usnInfo,
     usnDelta,
