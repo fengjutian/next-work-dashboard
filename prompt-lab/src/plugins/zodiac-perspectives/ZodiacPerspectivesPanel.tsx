@@ -1,0 +1,508 @@
+/**
+ * ZodiacPerspectivesPanel — 主面板
+ *
+ * 职责：
+ * - 串接 QuestionInput / PerspectiveGrid / SynthesisPanel / HistoryDrawer / FollowupDialog
+ * - 调度 zodiac-service 12 路并行 + 独立汇总
+ * - 维护 RunSession（卡片状态、汇总状态、错误）
+ * - 持久化：完成后写入 DB、读历史进入面板
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Copy, History, RefreshCw, Save, Sparkles } from '@/components/icons';
+import { Button } from '@/components/ui/button';
+import { createOpenAIProvider } from '@/core/llm';
+import { useStore } from '@/store/store';
+import { QuestionInput } from './components/QuestionInput';
+import { PerspectiveGrid, type DifferenceFilter, type LayoutMode } from './components/PerspectiveGrid';
+import { SynthesisPanel } from './components/SynthesisPanel';
+import { HistoryDrawer } from './components/HistoryDrawer';
+import { FollowupDialog } from './components/FollowupDialog';
+import { ZODIAC_SIGNS, ZODIAC_ORDER } from './zodiac-types';
+import type {
+  CardStatus,
+  GenerationOptions,
+  PerspectiveCardState,
+  SynthesisStatus,
+  ZodiacPerspective,
+  ZodiacRun,
+  ZodiacSign,
+} from './zodiac-types';
+import { generateAllPerspectives, parsePerspective, type GenerateCallbacks } from './zodiac-service';
+import { buildAllPerspectivesMarkdown, copyText } from './zodiac-copy';
+import {
+  defaultTitle,
+  pruneOldRuns,
+  saveRun,
+  setFavorite,
+  setPartial,
+  updateRunPerspectives,
+  updateRunSynthesis,
+} from './zodiac-storage';
+import { buildSingleSignUserPrompt, COMMON_SYSTEM_PROMPT, detectHighRisk } from './zodiac-prompts';
+import { ZODIAC_META } from './zodiac-data';
+
+const DEFAULT_OPTIONS: GenerationOptions = {
+  scene: 'general',
+  length: 'standard',
+  tone: 'gentle',
+  includeSynthesis: true,
+};
+
+const EMPTY_RUN: Omit<ZodiacRun, 'id' | 'createdAt' | 'updatedAt'> = {
+  question: '',
+  options: DEFAULT_OPTIONS,
+  perspectives: [],
+  synthesis: null,
+  favorite: false,
+  title: '',
+  model: '',
+  partial: false,
+};
+
+function makeInitialCards(): PerspectiveCardState[] {
+  return ZODIAC_SIGNS.map((sign) => ({ sign, status: 'pending' as CardStatus }));
+}
+
+// ── 差异识别：focus 第一条 / 关键词集合做近似去重 ──────────────────
+
+const SIGNATURE_STOPWORDS = new Set([
+  '的', '了', '是', '在', '和', '与', '或', '你', '我', '他', '她', '它', '我们', '你们', '他们',
+  '可以', '需要', '应该', '要', '把', '让', '给', '为', '到', '从', '对', '以', '及', '等', '与',
+  '一个', '一些', '什么', '怎么', '如何', '是否', '也', '就', '都', '还', '更', '最', '比较',
+]);
+
+function tokenize(text: string): string[] {
+  return text
+    .replace(/[，。！？、；：·…—《》（）()【】[]"'`]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length > 1 && !SIGNATURE_STOPWORDS.has(token));
+}
+
+function signatureOf(perspective: ZodiacPerspective): string {
+  const tokens = new Set<string>();
+  for (const item of perspective.focus) {
+    for (const token of tokenize(item)) tokens.add(token);
+  }
+  for (const item of perspective.advice) {
+    for (const token of tokenize(item.slice(0, 30))) tokens.add(token);
+  }
+  return [...tokens].sort().join('|');
+}
+
+function identifyOutliers(perspectives: ZodiacPerspective[]): ZodiacSign[] {
+  if (perspectives.length < 4) return [];
+  const counts = new Map<string, number>();
+  const sigOfPerspective = new Map<ZodiacSign, string>();
+  for (const p of perspectives) {
+    const sig = signatureOf(p);
+    sigOfPerspective.set(p.sign, sig);
+    counts.set(sig, (counts.get(sig) ?? 0) + 1);
+  }
+  // 取出现次数最少（唯一）签名的视角作为差异
+  const minCount = Math.min(...counts.values());
+  const outliers: ZodiacSign[] = [];
+  for (const [sign, sig] of sigOfPerspective.entries()) {
+    if ((counts.get(sig) ?? 0) === minCount && minCount < 3) {
+      outliers.push(sign);
+    }
+  }
+  return outliers;
+}
+
+// ── 主面板 ─────────────────────────────────────────────────────
+
+export function ZodiacPerspectivesPanel() {
+  const aiApi = useStore((state) => state.aiApi);
+  const aiConfigured = Boolean(aiApi.apiKey?.trim() && aiApi.baseUrl?.trim() && aiApi.model?.trim());
+
+  const [options, setOptions] = useState<GenerationOptions>(DEFAULT_OPTIONS);
+  const [run, setRun] = useState<ZodiacRun | null>(null);
+  const [cards, setCards] = useState<PerspectiveCardState[]>(() => makeInitialCards());
+  const [synthesisStatus, setSynthesisStatus] = useState<SynthesisStatus>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [highRiskNotice, setHighRiskNotice] = useState<string | null>(null);
+  const [layout, setLayout] = useState<LayoutMode>('grid');
+  const [differenceFilter, setDifferenceFilter] = useState<DifferenceFilter>('all');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [followup, setFollowup] = useState<{ open: boolean; sign: ZodiacSign | null }>({ open: false, sign: null });
+  const [running, setRunning] = useState(false);
+
+  const abortRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef<string | null>(null);
+
+  // 计算差异
+  const outlierSigns = useMemo(() => {
+    const done = cards.filter((c) => c.status === 'done' && c.perspective).map((c) => c.perspective!);
+    return identifyOutliers(done);
+  }, [cards]);
+
+  const completedCount = useMemo(() => cards.filter((c) => c.status === 'done').length, [cards]);
+
+  // 写入 DB：每次 perspectives / synthesis 变化时（去抖）
+  useEffect(() => {
+    if (!run) return;
+    const completed = cards.filter((c) => c.perspective).map((c) => c.perspective!) as ZodiacPerspective[];
+    if (completed.length === 0 && synthesisStatus !== 'done') return;
+    const next: ZodiacRun = {
+      ...run,
+      perspectives: completed,
+      updatedAt: Date.now(),
+    };
+    if (next.perspectives.length > 0) {
+      saveRun(next);
+    }
+  }, [cards, synthesisStatus, run?.synthesis, run?.id]);
+
+  // 启动时清理历史
+  useEffect(() => {
+    pruneOldRuns();
+  }, []);
+
+  // ── 操作：开始生成 ────────────────────────────────────────────
+
+  const startGeneration = useCallback(
+    async (question: string) => {
+      if (!aiConfigured) {
+        toast.error('请先在工作台设置中配置 AI 服务（API Key、Base URL、模型）');
+        return;
+      }
+      // 取消旧任务
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const runId = crypto.randomUUID();
+      runIdRef.current = runId;
+      const newRun: ZodiacRun = {
+        ...EMPTY_RUN,
+        id: runId,
+        question,
+        title: defaultTitle(question),
+        options,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: aiApi.model,
+        partial: false,
+      };
+      setRun(newRun);
+      setCards(makeInitialCards());
+      setSynthesisStatus('idle');
+      setErrorMessage(null);
+
+      // 高风险提示
+      const hr = detectHighRisk(question);
+      setHighRiskNotice(hr ? `${hr.category}类问题：${hr.guidance}` : null);
+
+      setRunning(true);
+
+      // 流式更新卡片
+      const updateCard = (sign: ZodiacSign, patch: Partial<PerspectiveCardState>) => {
+        setCards((prev) => prev.map((c) => (c.sign === sign ? { ...c, ...patch } : c)));
+      };
+
+      const callbacks: GenerateCallbacks = {
+        onCardStart: (sign) => updateCard(sign, { status: 'streaming', streamedInterpretation: '', error: undefined }),
+        onCardStream: ({ sign, streamedInterpretation }) => {
+          setCards((prev) => prev.map((c) => (c.sign === sign
+            ? { ...c, status: 'streaming', streamedInterpretation: (c.streamedInterpretation ?? '') + streamedInterpretation }
+            : c)));
+        },
+        onCardDone: (sign, perspective) => updateCard(sign, { status: 'done', perspective, streamedInterpretation: undefined, error: undefined }),
+        onCardFailed: (sign, error) => updateCard(sign, { status: 'failed', error, streamedInterpretation: undefined }),
+        onSynthesisStart: () => setSynthesisStatus('running'),
+        onSynthesisDone: (synthesis) => {
+          setSynthesisStatus('done');
+          setRun((prev) => (prev ? { ...prev, synthesis, updatedAt: Date.now() } : prev));
+          updateRunSynthesis(runId, synthesis);
+        },
+        onSynthesisFailed: (error) => {
+          setSynthesisStatus('failed');
+          setErrorMessage(error);
+        },
+        onFatalError: (error) => {
+          setErrorMessage(error);
+          toast.error(error);
+        },
+      };
+
+      try {
+        const result = await generateAllPerspectives(question, options, {
+          apiKey: aiApi.apiKey,
+          baseUrl: aiApi.baseUrl,
+          model: aiApi.model,
+        }, callbacks, controller.signal);
+
+        // 标记 partial（失败项）
+        if (result.partialSigns.length > 0) {
+          setPartial(runId, true);
+          setRun((prev) => (prev ? { ...prev, partial: true } : prev));
+        }
+        if (result.warnings.length > 0) {
+          for (const w of result.warnings) toast.warning(w);
+        }
+        if (result.synthesis) {
+          setSynthesisStatus('done');
+        } else if (options.includeSynthesis) {
+          setSynthesisStatus('failed');
+        }
+        if (result.partialSigns.length > 0) {
+          toast.warning(`${result.partialSigns.length} 个视角生成失败，可在卡片上点击「重试」补全。`);
+        } else {
+          toast.success('十二星座已全部回答完毕。');
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (controller.signal.aborted) {
+          toast.message('已取消当前生成。');
+        } else {
+          setErrorMessage(message);
+          toast.error(message);
+        }
+      } finally {
+        setRunning(false);
+        abortRef.current = null;
+      }
+    },
+    [aiApi, aiConfigured, options],
+  );
+
+  // ── 操作：取消 ────────────────────────────────────────────────
+
+  const handleCancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  // ── 操作：重试单张卡 ──────────────────────────────────────────
+
+  const handleRetryOneSign = useCallback(
+    async (sign: ZodiacSign) => {
+      if (!run || !aiConfigured) return;
+      const updateCard = (patch: Partial<PerspectiveCardState>) => {
+        setCards((prev) => prev.map((c) => (c.sign === sign ? { ...c, ...patch } : c)));
+      };
+      updateCard({ status: 'streaming', error: undefined, streamedInterpretation: '' });
+      const controller = new AbortController();
+      try {
+        const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+        let raw = '';
+        for await (const chunk of provider.chat(
+          [
+            { role: 'system', content: COMMON_SYSTEM_PROMPT },
+            { role: 'user', content: buildSingleSignUserPrompt(run.question, run.options, sign) },
+          ],
+          { model: aiApi.model, temperature: 0.85, maxTokens: 700, stream: true, signal: controller.signal },
+        )) {
+          if (chunk.delta) {
+            raw += chunk.delta;
+            setCards((prev) => prev.map((c) => (c.sign === sign
+              ? { ...c, status: 'streaming', streamedInterpretation: (c.streamedInterpretation ?? '') + chunk.delta }
+              : c)));
+          }
+        }
+        const perspective = parsePerspective(raw, sign);
+        updateCard({ status: 'done', perspective, streamedInterpretation: undefined });
+        const nextPerspectives = [...run.perspectives.filter((p) => p.sign !== sign), perspective]
+          .sort((a, b) => ZODIAC_ORDER.indexOf(a.sign) - ZODIAC_ORDER.indexOf(b.sign));
+        updateRunPerspectives(run.id, nextPerspectives);
+        if (nextPerspectives.length === 12) {
+          setPartial(run.id, false);
+          setRun((prev) => (prev ? { ...prev, partial: false, perspectives: nextPerspectives } : prev));
+        } else {
+          setRun((prev) => (prev ? { ...prev, perspectives: nextPerspectives } : prev));
+        }
+        toast.success(`${ZODIAC_META[sign].name} 已重新生成。`);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        const message = error instanceof Error ? error.message : String(error);
+        updateCard({ status: 'failed', error: message, streamedInterpretation: undefined });
+        toast.error(`重试失败：${message}`);
+      }
+    },
+    [aiApi, aiConfigured, run],
+  );
+
+  // ── 操作：补全缺失 ──────────────────────────────────────────
+
+  const handleFillMissing = useCallback(async () => {
+    const missing = cards.filter((c) => c.status === 'failed' || c.status === 'pending').map((c) => c.sign);
+    if (!missing.length) return;
+    for (const sign of missing) {
+      // 顺序串行重试，避免触发限流
+      // eslint-disable-next-line no-await-in-loop
+      await handleRetryOneSign(sign);
+    }
+  }, [cards, handleRetryOneSign]);
+
+  // ── 操作：复制全部 ──────────────────────────────────────────
+
+  const handleCopyAll = useCallback(async () => {
+    if (!run) return;
+    const ok = await copyText(buildAllPerspectivesMarkdown(run));
+    toast[ok ? 'success' : 'error'](ok ? '已复制全部视角（Markdown）' : '复制失败');
+  }, [run]);
+
+  // ── 操作：保存 / 收藏 / 命名 ──────────────────────────────────
+
+  const handleToggleFavorite = useCallback(() => {
+    if (!run) return;
+    const nextFavorite = !run.favorite;
+    setFavorite(run.id, nextFavorite);
+    setRun((prev) => (prev ? { ...prev, favorite: nextFavorite } : prev));
+    toast.success(nextFavorite ? '已收藏本轮' : '已取消收藏');
+  }, [run]);
+
+  // ── 操作：打开历史 ──────────────────────────────────────────
+
+  const handleSelectHistory = useCallback((historical: ZodiacRun) => {
+    const cardsFromHistory = ZODIAC_SIGNS.map((sign) => {
+      const p = historical.perspectives.find((item) => item.sign === sign);
+      return p
+        ? { sign, status: 'done' as CardStatus, perspective: p }
+        : { sign, status: 'pending' as CardStatus };
+    });
+    setRun(historical);
+    setCards(cardsFromHistory);
+    setSynthesisStatus(historical.synthesis ? 'done' : historical.options.includeSynthesis ? 'skipped' : 'idle');
+    setOptions(historical.options);
+    setHistoryOpen(false);
+    toast.message('已加载历史记录（只读模式）');
+  }, []);
+
+  // ── 操作：开启追问 ──────────────────────────────────────────
+
+  const handleOpenFollowup = useCallback((sign: ZodiacSign) => {
+    setFollowup({ open: true, sign });
+  }, []);
+
+  const currentRunForFollowup: ZodiacRun | null = useMemo(() => {
+    if (!run) return null;
+    // 给当前 run 加最新的 cards 状态
+    return { ...run, perspectives: cards.filter((c) => c.perspective).map((c) => c.perspective!) as ZodiacPerspective[] };
+  }, [run, cards]);
+
+  return (
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
+      <header className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-primary" />
+          <h1 className="text-xl font-semibold">十二星座视角</h1>
+          <span className="text-xs text-muted-foreground">· 星座圆桌</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          输入一个问题，让十二种星座思考原型从不同角度回应，再帮你归纳共识、分歧和行动建议。
+          星座仅作为易理解的角色原型，不用于人格诊断或命运预测。
+        </p>
+      </header>
+
+      <QuestionInput
+        options={options}
+        onOptionsChange={setOptions}
+        onSubmit={startGeneration}
+        onClear={() => { setErrorMessage(null); setHighRiskNotice(null); }}
+        disabled={running}
+        aiConfigured={aiConfigured}
+      />
+
+      {highRiskNotice && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <span>⚠</span>
+          <span>{highRiskNotice}</span>
+        </div>
+      )}
+
+      {running && (
+        <div className="flex items-center justify-between rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-sm text-blue-700 dark:text-blue-300">
+          <span>正在并行生成 12 个星座视角（已完成 {completedCount} / 12）…</span>
+          <Button variant="outline" size="sm" onClick={handleCancel}>
+            <RefreshCw className="h-3.5 w-3.5" /> 取消
+          </Button>
+        </div>
+      )}
+
+      {errorMessage && !running && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          {errorMessage}
+        </div>
+      )}
+
+      {run && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2">
+            <div className="min-w-0 flex-1 text-sm">
+              <div className="truncate text-foreground">
+                <span className="text-xs text-muted-foreground">本轮问题：</span>
+                {run.question}
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {new Date(run.createdAt).toLocaleString('zh-CN')} · 场景 {run.options.scene} · 篇幅 {run.options.length} · 语气 {run.options.tone} · 模型 {run.model}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={handleCopyAll} disabled={!run.perspectives.length}>
+                <Copy className="h-3.5 w-3.5" /> 复制全部
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleToggleFavorite} disabled={!run.perspectives.length}>
+                <Save className="h-3.5 w-3.5" /> {run.favorite ? '已收藏' : '收藏'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)}>
+                <History className="h-3.5 w-3.5" /> 历史
+              </Button>
+              {run.partial && (
+                <Button variant="outline" size="sm" onClick={handleFillMissing} disabled={running || !aiConfigured}>
+                  <RefreshCw className="h-3.5 w-3.5" /> 补全缺失视角
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {run.perspectives.length > 0 && (
+            <PerspectiveGrid
+              cards={cards}
+              outlierSigns={outlierSigns}
+              run={run}
+              layout={layout}
+              differenceFilter={differenceFilter}
+              onLayoutChange={setLayout}
+              onDifferenceFilterChange={setDifferenceFilter}
+              onFollowup={handleOpenFollowup}
+              onRetry={handleRetryOneSign}
+              onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
+            />
+          )}
+
+          {run.options.includeSynthesis && (
+            <SynthesisPanel
+              run={run}
+              status={synthesisStatus}
+              synthesis={run.synthesis}
+              error={errorMessage ?? undefined}
+              onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
+              onRetry={() => startGeneration(run.question)}
+            />
+          )}
+        </>
+      )}
+
+      <HistoryDrawer
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onSelectRun={handleSelectHistory}
+        onAfterMutation={() => { /* 抽屉内自刷新；这里无需动作 */ }}
+        onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
+      />
+
+      <FollowupDialog
+        open={followup.open}
+        onOpenChange={(open) => setFollowup((prev) => ({ ...prev, open }))}
+        run={currentRunForFollowup}
+        sign={followup.sign}
+        apiKey={aiApi.apiKey ?? ''}
+        baseUrl={aiApi.baseUrl ?? ''}
+        model={aiApi.model ?? ''}
+        onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
+      />
+    </div>
+  );
+}

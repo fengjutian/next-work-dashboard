@@ -52,6 +52,7 @@ const networkObservatory = preloadable(() => import('../network-observatory').th
 const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ default: m.LyricStudioPanel })));
 const videoPlayer = preloadable(() => import('../video-player').then((m) => ({ default: m.VideoPlayerPanel })));
 const mycast = preloadable(() => import('../mycast').then((m) => ({ default: m.MyCastPanel })));
+const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -77,6 +78,7 @@ const NetworkObservatoryPanel = networkObservatory.component;
 const LyricStudioPanel = lyricStudio.component;
 const VideoPlayerPanel = videoPlayer.component;
 const MyCastPanel = mycast.component;
+const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -525,6 +527,21 @@ const builtInPlugins: Plugin[] = [
     enabled: true,
     order: 10,
   },
+  {
+    id: 'zodiac-perspectives',
+    name: '十二星座视角',
+    icon: Sparkles,
+    component: ZodiacPerspectivesPanel,
+    enabled: true,
+    order: 27,
+    keepAlive: true,
+    contributions: {
+      commands: [
+        { id: 'zodiac-perspectives.new', title: '新建一轮十二星座问答', category: '十二星座视角' },
+        { id: 'zodiac-perspectives.openHistory', title: '查看历史与收藏', category: '十二星座视角' },
+      ],
+    },
+  },
 ];
 
 export function registerBuiltInPlugins(): void {
@@ -559,6 +576,7 @@ export function registerBuiltInPlugins(): void {
     'lyric-studio': lyricStudio.preload,
     'video-player': videoPlayer.preload,
     mycast: mycast.preload,
+    'zodiac-perspectives': zodiacPerspectives.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,

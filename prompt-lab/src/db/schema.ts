@@ -297,3 +297,33 @@ export const netProbeLanHosts = sqliteTable('net_probe_lan_hosts', {
   scanId: text('scan_id'),
 });
 export type NetProbeLanHostRow = InferSelectModel<typeof netProbeLanHosts>;
+
+// ── 十二星座视角插件 ──
+
+/** 一轮完整运行（12 视角 + 可选汇总 + 选项 + 收藏 + 自定义标题） */
+export const zodiacRuns = sqliteTable('zodiac_runs', {
+  id: text('id').primaryKey(),
+  question: text('question').notNull(),
+  title: text('title').notNull().default(''),
+  options: text('options').notNull().default('{}'),   // JSON of GenerationOptions
+  perspectives: text('perspectives').notNull().default('[]'),  // JSON of ZodiacPerspective[]
+  synthesis: text('synthesis'),                       // nullable JSON of ZodiacSynthesis
+  favorite: integer('favorite').notNull().default(0),
+  partial: integer('partial').notNull().default(0),   // 1 = 部分生成（缺项）
+  model: text('model').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** 单星座追问产生的对话消息（仅保存本机） */
+export const zodiacFollowupMessages = sqliteTable('zodiac_followup_messages', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => zodiacRuns.id, { onDelete: 'cascade' }),
+  sign: text('sign').notNull(),                 // ZodiacSign
+  role: text('role').notNull(),                 // 'user' | 'assistant'
+  content: text('content').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
+export type ZodiacRunRow = InferSelectModel<typeof zodiacRuns>;
+export type ZodiacFollowupMessageRow = InferSelectModel<typeof zodiacFollowupMessages>;

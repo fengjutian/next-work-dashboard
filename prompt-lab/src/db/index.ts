@@ -407,6 +407,35 @@ function ensureSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_net_probe_lan_hosts_last_seen
       ON net_probe_lan_hosts(last_seen DESC);
+
+    -- ── 十二星座视角 ──
+    CREATE TABLE IF NOT EXISTS zodiac_runs (
+      id TEXT PRIMARY KEY,
+      question TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      options TEXT NOT NULL DEFAULT '{}',
+      perspectives TEXT NOT NULL DEFAULT '[]',
+      synthesis TEXT,
+      favorite INTEGER NOT NULL DEFAULT 0,
+      partial INTEGER NOT NULL DEFAULT 0,
+      model TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_zodiac_runs_time
+      ON zodiac_runs(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_zodiac_runs_favorite
+      ON zodiac_runs(favorite, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS zodiac_followup_messages (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES zodiac_runs(id) ON DELETE CASCADE,
+      sign TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_zodiac_followup_run
+      ON zodiac_followup_messages(run_id, created_at ASC);
   `);
   try {
     _sqlDb.run(`CREATE VIRTUAL TABLE IF NOT EXISTS weread_notes_fts USING fts5(
@@ -959,6 +988,190 @@ export function dbDeleteHanyuJinjieExecution(id: string): void {
 
 export function dbUpdateHanyuJinjieExecution(id: string, patch: Partial<Pick<HanyuJinjieExecution, 'svgContent' | 'explanation'>>): void {
   getDb().update(schema.hanyuJinjieExecutions).set(patch).where(eq(schema.hanyuJinjieExecutions.id, id)).run();
+}
+
+// ═══════════════════════════════════════════
+// 十二星座视角 — 一轮运行 + 追问消息
+// ═══════════════════════════════════════════
+
+export interface ZodiacRunRecord {
+  id: string;
+  question: string;
+  title: string;
+  options: Record<string, unknown>;     // GenerationOptions 的 JSON
+  perspectives: unknown[];              // ZodiacPerspective[] 的 JSON
+  synthesis: unknown | null;            // ZodiacSynthesis | null 的 JSON
+  favorite: boolean;
+  partial: boolean;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface ZodiacRunRow {
+  id: string;
+  question: string;
+  title: string;
+  options: string;
+  perspectives: string;
+  synthesis: string | null;
+  favorite: number;
+  partial: number;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function zodiacRunRowToRecord(row: ZodiacRunRow): ZodiacRunRecord {
+  return {
+    id: row.id,
+    question: row.question,
+    title: row.title,
+    options: safeJsonParse(row.options, {}),
+    perspectives: safeJsonParse(row.perspectives, []),
+    synthesis: row.synthesis == null ? null : safeJsonParse(row.synthesis, null),
+    favorite: row.favorite === 1,
+    partial: row.partial === 1,
+    model: row.model,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function zodiacRunRecordToRow(record: ZodiacRunRecord): ZodiacRunRow {
+  return {
+    id: record.id,
+    question: record.question,
+    title: record.title,
+    options: JSON.stringify(record.options ?? {}),
+    perspectives: JSON.stringify(record.perspectives ?? []),
+    synthesis: record.synthesis == null ? null : JSON.stringify(record.synthesis),
+    favorite: record.favorite ? 1 : 0,
+    partial: record.partial ? 1 : 0,
+    model: record.model ?? '',
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+export function dbSaveZodiacRun(record: ZodiacRunRecord): void {
+  const row = zodiacRunRecordToRow(record);
+  getDb().insert(schema.zodiacRuns).values(row as never)
+    .onConflictDoUpdate({
+      target: schema.zodiacRuns.id,
+      set: {
+        question: row.question,
+        title: row.title,
+        options: row.options,
+        perspectives: row.perspectives,
+        synthesis: row.synthesis,
+        favorite: row.favorite,
+        partial: row.partial,
+        model: row.model,
+        updatedAt: row.updatedAt,
+      },
+    })
+    .run();
+}
+
+export interface DbLoadZodiacRunsOptions {
+  limit?: number;
+  favoriteOnly?: boolean;
+  search?: string;
+}
+
+export function dbLoadZodiacRuns(options: DbLoadZodiacRunsOptions = {}): ZodiacRunRecord[] {
+  const limit = Math.max(1, Math.min(500, options.limit ?? 50));
+  const search = options.search?.trim() ?? '';
+  // MVP：用 sql.js 原生 exec 做 LIKE 过滤；FTS5 留给后续版本。
+  if (!_sqlDb) return [];
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+  if (options.favoriteOnly) where.push('favorite = 1');
+  if (search) {
+    where.push('(question LIKE ? OR title LIKE ?)');
+    const like = `%${search}%`;
+    params.push(like, like);
+  }
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const statement = _sqlDb.prepare(
+    `SELECT id, question, title, options, perspectives, synthesis, favorite, partial, model, created_at AS createdAt, updated_at AS updatedAt
+     FROM zodiac_runs ${whereClause}
+     ORDER BY updated_at DESC
+     LIMIT ?`,
+  );
+  try {
+    const rows: ZodiacRunRow[] = [];
+    statement.bind(params.concat(limit));
+    while (statement.step()) {
+      const row = statement.getAsObject() as unknown as ZodiacRunRow;
+      rows.push(row);
+    }
+    return rows.map(zodiacRunRowToRecord);
+  } finally {
+    statement.free();
+  }
+}
+
+export function dbGetZodiacRun(id: string): ZodiacRunRecord | null {
+  const row = (getDb().select().from(schema.zodiacRuns).where(eq(schema.zodiacRuns.id, id)).get() as unknown as ZodiacRunRow | undefined) ?? null;
+  return row ? zodiacRunRowToRecord(row) : null;
+}
+
+export function dbDeleteZodiacRun(id: string): void {
+  getDb().delete(schema.zodiacRuns).where(eq(schema.zodiacRuns.id, id)).run();
+}
+
+export function dbUpdateZodiacRun(
+  id: string,
+  patch: Partial<Pick<ZodiacRunRecord, 'title' | 'favorite' | 'partial' | 'synthesis' | 'perspectives' | 'options'>>,
+): void {
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.title !== undefined) dbPatch.title = patch.title;
+  if (patch.favorite !== undefined) dbPatch.favorite = patch.favorite ? 1 : 0;
+  if (patch.partial !== undefined) dbPatch.partial = patch.partial ? 1 : 0;
+  if (patch.synthesis !== undefined) dbPatch.synthesis = patch.synthesis == null ? null : JSON.stringify(patch.synthesis);
+  if (patch.perspectives !== undefined) dbPatch.perspectives = JSON.stringify(patch.perspectives);
+  if (patch.options !== undefined) dbPatch.options = JSON.stringify(patch.options);
+  if (!Object.keys(dbPatch).length) return;
+  dbPatch.updatedAt = Date.now();
+  getDb().update(schema.zodiacRuns).set(dbPatch as never).where(eq(schema.zodiacRuns.id, id)).run();
+}
+
+/** 保留最近 N 条非收藏记录（收藏永不裁剪）；返回被删除的 id 列表。 */
+export function dbPruneZodiacRuns(maxRows: number): string[] {
+  if (!_sqlDb) return [];
+  const rows = _sqlDb.exec(
+    `SELECT id FROM zodiac_runs WHERE favorite = 0 ORDER BY updated_at DESC`,
+  );
+  const ids = (rows[0]?.values ?? []).map((row) => String(row[0]));
+  if (ids.length <= maxRows) return [];
+  const stale = ids.slice(maxRows);
+  if (!stale.length) return [];
+  const placeholders = stale.map(() => '?').join(',');
+  _sqlDb.run(`DELETE FROM zodiac_runs WHERE id IN (${placeholders})`, stale);
+  return stale;
+}
+
+export interface ZodiacFollowupMessageRecord {
+  id: string;
+  runId: string;
+  sign: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+}
+
+export function dbLoadZodiacFollowupMessages(runId: string): ZodiacFollowupMessageRecord[] {
+  return (getDb().select().from(schema.zodiacFollowupMessages).where(eq(schema.zodiacFollowupMessages.runId, runId)).orderBy(schema.zodiacFollowupMessages.createdAt).all() as unknown as ZodiacFollowupMessageRecord[]);
+}
+
+export function dbAppendZodiacFollowupMessage(message: ZodiacFollowupMessageRecord): void {
+  getDb().insert(schema.zodiacFollowupMessages).values(message as never).run();
+}
+
+export function dbClearZodiacFollowupMessages(runId: string): void {
+  getDb().delete(schema.zodiacFollowupMessages).where(eq(schema.zodiacFollowupMessages.runId, runId)).run();
 }
 
 export interface DocumentKnowledgeRecord {
