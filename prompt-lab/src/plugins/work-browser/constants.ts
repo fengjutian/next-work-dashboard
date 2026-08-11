@@ -11,4 +11,6 @@ export const STORAGE_KEYS = {
   AI_MODEL: 'workBrowser.ai.model',
   CLEANER_OPTIONS: 'workBrowser.cleaner.options',
   LAST_WORKSPACE: 'workBrowser.lastWorkspace',
+  LEFT_SIDEBAR_COLLAPSED: 'workBrowser.layout.leftCollapsed',
+  RIGHT_SIDEBAR_COLLAPSED: 'workBrowser.layout.rightCollapsed',
 } as const;

@@ -122,6 +122,16 @@ function HanyuJinjie({ className, ...props }: SVGProps<SVGSVGElement>) {
   </svg>;
 }
 
+/** Browser window + discovery spark, used by the Work Browser plugin. */
+function WorkBrowser({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...props}>
+    <rect x="2.75" y="4" width="18.5" height="16" rx="3" fill="none" stroke="currentColor" strokeWidth="1.65" />
+    <path d="M3.5 8.25h17" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <circle cx="6" cy="6.2" r=".7" fill="currentColor" />
+    <path d="m13.4 11.1.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7.7-1.9Z" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+  </svg>;
+}
+
 export {
   ArrowLeft,
   ArrowLeftRight,
@@ -165,6 +175,7 @@ export {
   Languages,
   Loader2,
   Weread,
+  WorkBrowser,
   HanyuJinjie,
   Maximize2,
   Menu,

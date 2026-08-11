@@ -208,6 +208,34 @@
   scrollbar-gutter: stable;
 }
 
+/* Work Browser uses compact floating rails so three-pane layouts stay quiet. */
+.work-browser-panel * {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.22) transparent;
+}
+
+.work-browser-panel ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.work-browser-panel ::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.18);
+  background-clip: padding-box;
+}
+
+.work-browser-panel ::-webkit-scrollbar-thumb:hover {
+  border-width: 1px;
+  background: hsl(var(--primary) / 0.42);
+  background-clip: padding-box;
+}
+
+.work-browser-panel ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* Monaco draws its own scrollbar instead of using the browser pseudo-elements. */
 .monaco-scrollable-element > .scrollbar {
   background: transparent !important;

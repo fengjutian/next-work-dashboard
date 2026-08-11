@@ -35,6 +35,25 @@ function injectStyle(css: string) {
   (document.head || document.documentElement).appendChild(style);
 }
 
+function injectBrowserChromeStyle() {
+  if (document.querySelector('[data-work-browser-chrome]')) return;
+  const style = document.createElement('style');
+  style.setAttribute('data-work-browser-chrome', '');
+  style.textContent = `
+    :root { scrollbar-width: thin; scrollbar-color: rgba(97,36,91,.32) transparent; }
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      min-width: 32px; min-height: 32px;
+      border: 2px solid transparent; border-radius: 999px;
+      background: rgba(97,36,91,.24); background-clip: padding-box;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.48); background-clip: padding-box; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+  `;
+  (document.head || document.documentElement).appendChild(style);
+}
+
 function runCleanerScript(js: string) {
   if (!js) return;
   try {
@@ -67,6 +86,19 @@ function reportSelection() {
   ipcRenderer.sendToHost('work-browser:selection-changed', { text, selector });
 }
 
+function interceptNewWindowLinks(event: MouseEvent) {
+  if (event.defaultPrevented || event.button !== 0) return;
+  const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
+  if (!(target instanceof HTMLAnchorElement)) return;
+  const opensNewWindow = target.target.toLowerCase() === '_blank' || event.ctrlKey || event.metaKey;
+  if (!opensNewWindow) return;
+  const url = target.href;
+  if (!/^https?:\/\//i.test(url)) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  ipcRenderer.sendToHost('work-browser:open-url', { url });
+}
+
 function buildSelector(el: Element): string {
   const parts: string[] = [];
   let cur: Element | null = el;
@@ -84,6 +116,7 @@ function buildSelector(el: Element): string {
 }
 
 async function main() {
+  injectBrowserChromeStyle();
   const payload = await getPayload();
   if (!payload) return;
 
@@ -109,6 +142,8 @@ async function main() {
 
   // 选区监听
   document.addEventListener('selectionchange', reportSelection, true);
+  // 网站的 target=_blank / Ctrl+Click 统一交给宿主创建内部 Tab，禁止弹独立窗口。
+  document.addEventListener('click', interceptNewWindowLinks, true);
 
   // Annotation 高亮回放：等首屏稳定后拉取
   window.addEventListener('load', () => {

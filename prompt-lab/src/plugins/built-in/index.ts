@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines, WorkBrowser } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -442,7 +442,7 @@ const builtInPlugins: Plugin[] = [
   {
     id: 'work-browser',
     name: 'Work Browser',
-    icon: Globe,
+    icon: WorkBrowser,
     component: WorkBrowserPanel,
     enabled: false,
     order: 9,

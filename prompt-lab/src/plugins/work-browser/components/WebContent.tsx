@@ -79,6 +79,9 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
         if (total > 0) {
           console.info(`[work-browser] rendered ${hit}/${total} annotations`);
         }
+      } else if (e.channel === 'work-browser:open-url') {
+        const url = String((e.args?.[0] as any)?.url || '');
+        if (/^https?:\/\//i.test(url)) onOpenUrl?.(url);
       }
     };
     const onDidFinishLoad = () => {
@@ -87,16 +90,23 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       void wv.executeJavaScript(`window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`).catch(() => undefined);
     };
     const onDidStartLoading = () => setLoaded(false);
+    const onNewWindow = (event: Event) => {
+      const popupEvent = event as Event & { url?: string };
+      event.preventDefault();
+      if (popupEvent.url && /^https?:\/\//i.test(popupEvent.url)) onOpenUrl?.(popupEvent.url);
+    };
 
     wv.addEventListener('ipc-message', onIpcMessage);
     wv.addEventListener('did-finish-load', onDidFinishLoad);
     wv.addEventListener('did-start-loading', onDidStartLoading);
+    wv.addEventListener('new-window' as any, onNewWindow as any);
     return () => {
       wv.removeEventListener('ipc-message', onIpcMessage);
       wv.removeEventListener('did-finish-load', onDidFinishLoad);
       wv.removeEventListener('did-start-loading', onDidStartLoading);
+      wv.removeEventListener('new-window' as any, onNewWindow as any);
     };
-  }, [tab?.id, preloadPath, onSelectionChange]);
+  }, [tab?.id, preloadPath, onSelectionChange, onOpenUrl]);
 
   const handleAnnotation = useCallback(async (note: string, color: string) => {
     if (!selection || !activeDocumentId) return;
@@ -161,7 +171,6 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
           partition="persist:work-browser"
           preload={preloadPath}
           useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-          allowpopups={'true' as unknown as boolean}
           style={{ flex: 1, border: 'none', background: '#fff' }}
         />
       ) : (

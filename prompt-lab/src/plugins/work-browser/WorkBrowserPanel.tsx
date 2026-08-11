@@ -15,7 +15,7 @@
  * └──────────┴──────────────────────────────────┴──────────┘
  */
 import { Empty, message, Tabs, ToastHost } from './ui';
-import { Bot, BookOpen, FolderKanban, GitFork, ListTodo } from 'lucide-react';
+import { Bot, BookOpen, FolderKanban, GitFork, ListTodo, PanelLeft, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   Workspace, Tab, Document, Annotation, SearchHistoryEntry,
@@ -50,6 +50,8 @@ export function WorkBrowserPanel() {
   const [cleanerEnabled, setCleanerEnabled] = useState(true);
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(undefined);
+  const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem(STORAGE_KEYS.LEFT_SIDEBAR_COLLAPSED) === 'true');
+  const [rightCollapsed, setRightCollapsed] = useState(() => localStorage.getItem(STORAGE_KEYS.RIGHT_SIDEBAR_COLLAPSED) === 'true');
 
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
@@ -191,11 +193,25 @@ export function WorkBrowserPanel() {
     if (await handleAddTab(url)) setSearchOpen(false);
   }, [handleAddTab]);
 
+  const toggleLeftSidebar = () => setLeftCollapsed((collapsed) => {
+    localStorage.setItem(STORAGE_KEYS.LEFT_SIDEBAR_COLLAPSED, String(!collapsed));
+    return !collapsed;
+  });
+  const toggleRightSidebar = () => setRightCollapsed((collapsed) => {
+    localStorage.setItem(STORAGE_KEYS.RIGHT_SIDEBAR_COLLAPSED, String(!collapsed));
+    return !collapsed;
+  });
+
+  const gridTemplateColumns = leftCollapsed
+    ? (rightCollapsed ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(250px, 310px)')
+    : (rightCollapsed ? 'minmax(180px, 220px) minmax(0, 1fr)' : 'minmax(180px, 220px) minmax(0, 1fr) minmax(250px, 310px)');
+
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+    <div className="work-browser-panel flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <ToastHost />
       <header className="relative z-10 shrink-0 bg-background/95 px-3 py-2 backdrop-blur-xl">
         <div className="flex items-center gap-3">
+          <button type="button" onClick={toggleLeftSidebar} title={leftCollapsed ? '展开工作区侧栏' : '折叠工作区侧栏'} aria-label={leftCollapsed ? '展开工作区侧栏' : '折叠工作区侧栏'} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border bg-card transition hover:border-primary/25 hover:bg-accent ${leftCollapsed ? 'border-primary/20 text-primary shadow-sm' : 'border-border/60 text-muted-foreground'}`}><PanelLeft size={17} /></button>
           {activeWorkspace && (
             <div className="hidden shrink-0 items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 shadow-sm xl:flex">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary-light text-primary"><FolderKanban size={14} /></span>
@@ -215,10 +231,11 @@ export function WorkBrowserPanel() {
             loading={searchLoading}
           />
           </div>
+          <button type="button" onClick={toggleRightSidebar} title={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} aria-label={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border bg-card transition hover:border-primary/25 hover:bg-accent ${rightCollapsed ? 'border-primary/20 text-primary shadow-sm' : 'border-border/60 text-muted-foreground'}`}><PanelRight size={17} /></button>
         </div>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(180px,220px)_minmax(360px,1fr)_minmax(250px,310px)] gap-2 bg-muted/30 p-2 pt-0 max-[1080px]:grid-cols-[190px_minmax(320px,1fr)_250px]">
-        <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
+      <div className="grid min-h-0 flex-1 gap-2 bg-muted/30 p-2 pt-0 transition-[grid-template-columns] duration-200" style={{ gridTemplateColumns }}>
+        {!leftCollapsed && <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
           <WorkspaceList
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
@@ -229,7 +246,7 @@ export function WorkBrowserPanel() {
               return created;
             }}
           />
-        </aside>
+        </aside>}
         <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_12px_36px_hsl(var(--foreground)/0.05)]">
           {activeWorkspace ? (
             <>
@@ -253,7 +270,7 @@ export function WorkBrowserPanel() {
                   cleanerEnabled={cleanerEnabled}
                   blockedDomains={blockedDomains}
                   activeDocumentId={activeDocumentId}
-                  onOpenUrl={(url) => void handleAddTab(url)}
+                  onOpenUrl={handleAddTab}
                   onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
                 />
               </div>
@@ -264,7 +281,7 @@ export function WorkBrowserPanel() {
             </div>
           )}
         </main>
-        <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
+        {!rightCollapsed && <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
           {activeWorkspace ? (
             <Tabs
               size="small"
@@ -316,7 +333,7 @@ export function WorkBrowserPanel() {
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Library 暂不可用" style={{ marginTop: 24 }} />
           )}
-        </aside>
+        </aside>}
       </div>
       <SearchResults
         open={searchOpen}
