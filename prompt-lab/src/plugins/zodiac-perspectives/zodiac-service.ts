@@ -25,6 +25,7 @@ import {
   type QuestionContext,
 } from './zodiac-types';
 import { ZODIAC_META } from './zodiac-data';
+import { evaluatePerspectiveQuality, hasValidDistinctiveViews, maxPairSimilarity, passesHighRiskGate } from './zodiac-quality';
 import {
   COMMON_SYSTEM_PROMPT,
   buildFollowupSystemPrompt,
@@ -308,7 +309,14 @@ async function generateFastBatch(
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return parseFastBatch(await collectStream(messages, { model: ctx.model, temperature: 0.75, maxTokens: 3200, signal }, ctx), options.selectedSigns);
+      const parsed = parseFastBatch(await collectStream(messages, { model: ctx.model, temperature: 0.75, maxTokens: 3200, signal }, ctx), options.selectedSigns);
+      const accepted = parsed.filter((perspective) => {
+        const quality = evaluatePerspectiveQuality(perspective);
+        const text = `${perspective.interpretation} ${perspective.advice.join(' ')} ${perspective.caution ?? ''}`;
+        return quality.hasActionVerb && !quality.hasFatalism && passesHighRiskGate(question, text);
+      });
+      if (!accepted.length) throw new Error('快速模式回答未通过质量门禁');
+      return accepted;
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
@@ -371,7 +379,13 @@ export async function generatePerspective(
     if (signal?.aborted) throw new DOMException('生成已取消', 'AbortError');
     try {
       const raw = await collectStream(messages, baseOpts, ctx, onDelta);
-      return parsePerspective(raw, sign);
+      const perspective = parsePerspective(raw, sign);
+      const quality = evaluatePerspectiveQuality(perspective);
+      if (!quality.hasActionVerb) throw new Error('建议缺少可执行动作');
+      if (quality.hasFatalism) throw new Error('回答包含宿命式或绝对化表达');
+      const userFacingText = `${perspective.interpretation} ${perspective.focus.join(' ')} ${perspective.advice.join(' ')} ${perspective.caution ?? ''}`;
+      if (!passesHighRiskGate(question, userFacingText)) throw new Error('高风险回答缺少专业求助提示');
+      return perspective;
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
@@ -412,7 +426,11 @@ export async function regenerateSynthesis(
     if (signal?.aborted) throw new DOMException('生成已取消', 'AbortError');
     try {
       const raw = await collectStream(messages, baseOpts, ctx);
-      return parseSynthesis(raw);
+      const synthesis = parseSynthesis(raw);
+      if (!hasValidDistinctiveViews(synthesis, perspectives.map((item) => item.sign))) {
+        synthesis.distinctiveViews = synthesis.distinctiveViews?.filter((item) => perspectives.some((perspective) => perspective.sign === item.sign));
+      }
+      return synthesis;
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
@@ -528,6 +546,7 @@ export async function generateAllPerspectives(
 
   // 按黄道顺序排序
   perspectives.sort((a, b) => ZODIAC_SIGNS.indexOf(a.sign) - ZODIAC_SIGNS.indexOf(b.sign));
+  if (maxPairSimilarity(perspectives) >= 0.65) warnings.push('部分视角内容相似度偏高，建议使用卡片反馈标记“太重复”');
 
   let synthesis: ZodiacSynthesis | null = null;
   if (options.includeSynthesis) {

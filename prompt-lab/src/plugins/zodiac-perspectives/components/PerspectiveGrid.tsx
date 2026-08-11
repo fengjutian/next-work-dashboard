@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import type { PerspectiveCardState, ZodiacRun, ZodiacSign } from '../zodiac-types';
 import { ZODIAC_SIGNS } from '../zodiac-types';
 import { PerspectiveCard } from './PerspectiveCard';
+import type { FeedbackKind } from '../zodiac-quality';
 
 export type LayoutMode = 'grid' | 'list';
 export type DifferenceFilter = 'all' | 'outliers';
@@ -22,6 +23,7 @@ export interface PerspectiveGridProps {
   onFollowup: (sign: ZodiacSign) => void;
   onRetry: (sign: ZodiacSign) => void;
   onCopy: (text: string, success: boolean) => void;
+  onFeedback: (sign: ZodiacSign, kind: FeedbackKind) => void;
 }
 
 export function PerspectiveGrid({
@@ -35,6 +37,7 @@ export function PerspectiveGrid({
   onFollowup,
   onRetry,
   onCopy,
+  onFeedback,
 }: PerspectiveGridProps) {
   const outlierSet = new Set(outlierSigns);
   const sorted = ZODIAC_SIGNS
@@ -113,6 +116,7 @@ export function PerspectiveGrid({
               onFollowup={onFollowup}
               onRetry={onRetry}
               onCopy={onCopy}
+              onFeedback={onFeedback}
             />
           ))}
         </div>

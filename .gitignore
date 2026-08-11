@@ -1,3 +1,52 @@
 .qodo
 
+# Dependencies
 node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+build
+out
+.next
+.nuxt
+.vite
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Coverage
+coverage
+*.lcov
+
+# Electron sidecar binaries — these are downloaded by the build / first-run scripts,
+# never committed. See scripts/fetch-sidecars.* in each plugin.
+prompt-lab/resources/**/*.exe
+prompt-lab/resources/**/*.dll
+prompt-lab/resources/**/*.so
+prompt-lab/resources/**/*.dylib
+prompt-lab/resources/**/.tmp/
+prompt-lab/resources/**/SHA256SUMS
+
+# Local binary restore stash (used by history-rewrite scripts)
+_binary_backup/

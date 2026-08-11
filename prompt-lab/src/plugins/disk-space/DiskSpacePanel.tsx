@@ -178,6 +178,7 @@ export function DiskSpacePanel() {
     loadDirectory, openPreview, restoreSavedResult, removeSavedResult,
     removeDirectorySnapshot, clearHistory, setRunning, setPaused, setScanErrors,
     setBrowserLoading, setEntries, setDuplicates,
+    cleanupStatus, runCleanup, clearCleanupStatus,
   } = scan;
 
   // 切 tab 清空 error
@@ -520,6 +521,22 @@ export function DiskSpacePanel() {
           <section className="rounded-2xl border bg-card p-5 shadow-sm">
             <h2 className="font-medium">官方清理动作</h2>
             <p className="mt-1 text-xs text-muted-foreground">每次执行都会显示系统确认框、实际命令和影响说明</p>
+            {cleanupStatus.kind === 'running' && (
+              <div className="mt-3 flex items-center gap-2 rounded-md bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4" />清理中…
+              </div>
+            )}
+            {cleanupStatus.kind === 'success' && (
+              <div className="mt-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700">
+                清理完成：{cleanupStatus.message}
+              </div>
+            )}
+            {cleanupStatus.kind === 'error' && (
+              <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                清理失败：{cleanupStatus.message}
+                <button className="ml-2 underline" onClick={clearCleanupStatus}>关闭</button>
+              </div>
+            )}
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {([['docker-build-cache', 'Docker Build Cache', '需要确认'], ['npm-cache', 'npm 缓存', '低风险'], ['pnpm-store', 'pnpm Store', '低风险']] as const).map(([action, label, risk]) => (
                 <div key={action} className="rounded-lg border p-4">
@@ -527,8 +544,8 @@ export function DiskSpacePanel() {
                     <span className="text-sm font-medium">{label}</span>
                     <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700">{risk}</span>
                   </div>
-                  <button className="mt-4 w-full rounded-md border px-3 py-2 text-sm hover:bg-accent" onClick={() => void window.electronAPI.diskSpace.runCleanup(action, root).then((result) => { if (result.success) setError(`${label} 清理完成`); }).catch((cause) => setError(String(cause)))}>
-                    查看影响并执行
+                  <button className="mt-4 w-full rounded-md border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50" disabled={cleanupStatus.kind === 'running'} onClick={() => void runCleanup(action)}>
+                    {cleanupStatus.kind === 'running' && cleanupStatus.action === action ? '执行中…' : '查看影响并执行'}
                   </button>
                 </div>
               ))}

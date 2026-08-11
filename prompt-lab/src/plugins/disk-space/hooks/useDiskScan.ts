@@ -59,6 +59,15 @@ export type ScanTelemetry = {
 };
 export type ScanPhase = 'scanning' | 'hashing';
 
+// 清理动作状态机：替换原 error 字符串匹配（"清理完成$"）的反模式。
+// 任何时刻只能处于以下状态之一；切换状态时驱动副作用（自动重扫、Toast）。
+export type CleanupStatus =
+  | { kind: 'idle' }
+  | { kind: 'running'; action: CleanupActionId }
+  | { kind: 'success'; action: CleanupActionId; message: string }
+  | { kind: 'error'; action: CleanupActionId; message: string };
+export type CleanupActionId = 'docker-build-cache' | 'npm-cache' | 'pnpm-store';
+
 const SCAN_ERROR_LABELS: Record<ScanErrorItem['category'], string> = {
   'permission-denied': '拒绝访问',
   'not-found': '路径失效',
@@ -225,6 +234,11 @@ export interface UseDiskScanResult {
   setBrowserLoading: (loading: boolean) => void;
   setEntries: (entries: DiskDirectoryItem[]) => void;
   setDuplicates: React.Dispatch<React.SetStateAction<DuplicateGroup[]>>;
+
+  // cleanup 状态机
+  cleanupStatus: CleanupStatus;
+  runCleanup: (action: CleanupActionId) => Promise<void>;
+  clearCleanupStatus: () => void;
 }
 
 // ---------------- Hook 实现 ----------------
@@ -294,6 +308,9 @@ export function useDiskScan(): UseDiskScanResult {
 
   // error
   const [error, setError] = useState('');
+
+  // cleanup 状态机
+  const [cleanupStatus, setCleanupStatus] = useState<CleanupStatus>({ kind: 'idle' });
 
   // TopN flush —— 把堆里的 top 50 同步到 state/largestRef
   const flushLargest = useCallback(() => {
@@ -645,6 +662,31 @@ export function useDiskScan(): UseDiskScanResult {
     setDirectorySnapshots([]);
   }, []);
 
+  const runCleanup = useCallback(async (action: CleanupActionId) => {
+    if (cleanupStatus.kind === 'running') return;
+    setCleanupStatus({ kind: 'running', action });
+    try {
+      const result = await window.electronAPI.diskSpace.runCleanup(action, root);
+      if (result.success) {
+        setCleanupStatus({ kind: 'success', action, message: result.output ?? '清理完成' });
+      } else if (result.canceled) {
+        setCleanupStatus({ kind: 'idle' });
+      } else {
+        setCleanupStatus({ kind: 'error', action, message: result.output ?? '清理失败' });
+      }
+    } catch (cause) {
+      setCleanupStatus({
+        kind: 'error',
+        action,
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }, [cleanupStatus.kind, root]);
+
+  const clearCleanupStatus = useCallback(() => {
+    setCleanupStatus({ kind: 'idle' });
+  }, []);
+
   return {
     system,
     diskHistory,
@@ -692,5 +734,8 @@ export function useDiskScan(): UseDiskScanResult {
     setBrowserLoading,
     setEntries,
     setDuplicates,
+    cleanupStatus,
+    runCleanup,
+    clearCleanupStatus,
   };
 }

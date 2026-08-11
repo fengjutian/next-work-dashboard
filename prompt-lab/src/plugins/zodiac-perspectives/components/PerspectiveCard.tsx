@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ZODIAC_META } from '../zodiac-data';
 import type { CardStatus, ZodiacPerspective, ZodiacRun, ZodiacSign } from '../zodiac-types';
 import { buildSinglePerspectiveMarkdown, copyText } from '../zodiac-copy';
+import type { FeedbackKind } from '../zodiac-quality';
 
 export interface PerspectiveCardProps {
   sign: ZodiacSign;
@@ -23,6 +24,7 @@ export interface PerspectiveCardProps {
   onFollowup: (sign: ZodiacSign) => void;
   onRetry: (sign: ZodiacSign) => void;
   onCopy: (text: string, success: boolean) => void;
+  onFeedback: (sign: ZodiacSign, kind: FeedbackKind) => void;
 }
 
 export function PerspectiveCard({
@@ -35,9 +37,11 @@ export function PerspectiveCard({
   onFollowup,
   onRetry,
   onCopy,
+  onFeedback,
 }: PerspectiveCardProps) {
   const meta = ZODIAC_META[sign];
   const [expanded, setExpanded] = useState(true);
+  const [feedback, setFeedback] = useState<FeedbackKind | null>(null);
 
   const handleCopy = async () => {
     if (!perspective) return;
@@ -152,7 +156,8 @@ export function PerspectiveCard({
       )}
 
       {perspective && (
-        <footer className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2">
+        <footer className="space-y-2 border-t border-border/40 pt-2">
+          <div className="flex flex-wrap items-center gap-1.5">
           <Button variant="ghost" size="sm" onClick={() => setExpanded((prev) => !prev)}>
             <ChevronDown className={'h-3.5 w-3.5 transition-transform ' + (expanded ? 'rotate-180' : '')} />
             {expanded ? '收起' : '展开'}
@@ -166,6 +171,13 @@ export function PerspectiveCard({
           <Button variant="ghost" size="sm" onClick={() => onRetry(sign)} disabled={status === 'streaming'}>
             <RefreshCw className="h-3.5 w-3.5" /> 重试
           </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+            <span>这条回答：</span>
+            {FEEDBACK_OPTIONS.map((item) => (
+              <button key={item.kind} type="button" onClick={() => { setFeedback(item.kind); onFeedback(sign, item.kind); }} className={'rounded-full border px-2 py-0.5 ' + (feedback === item.kind ? 'border-primary bg-primary/10 text-primary' : 'border-border/60 hover:bg-muted')}>{item.label}</button>
+            ))}
+          </div>
         </footer>
       )}
 
@@ -180,3 +192,8 @@ export function PerspectiveCard({
     </article>
   );
 }
+
+const FEEDBACK_OPTIONS: Array<{ kind: FeedbackKind; label: string }> = [
+  { kind: 'helpful', label: '有启发' }, { kind: 'repetitive', label: '太重复' },
+  { kind: 'offPersona', label: '不符合视角' }, { kind: 'notActionable', label: '建议不具体' },
+];

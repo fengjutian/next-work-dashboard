@@ -19,6 +19,8 @@ import { SynthesisPanel } from './components/SynthesisPanel';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { FollowupDialog } from './components/FollowupDialog';
 import { DecisionSummary } from './components/DecisionSummary';
+import { QualityStatsDialog } from './components/QualityStatsDialog';
+import { recordFeedback, recordRunMetric } from './zodiac-quality';
 import { ZODIAC_SIGNS, ZODIAC_ORDER } from './zodiac-types';
 import type {
   CardStatus,
@@ -130,6 +132,7 @@ export function ZodiacPerspectivesPanel() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [followup, setFollowup] = useState<{ open: boolean; sign: ZodiacSign | null }>({ open: false, sign: null });
   const [running, setRunning] = useState(false);
+  const [qualityStatsOpen, setQualityStatsOpen] = useState(false);
 
   const generationAbortRef = useRef<AbortController | null>(null);
   const synthesisAbortRef = useRef<AbortController | null>(null);
@@ -212,6 +215,7 @@ export function ZodiacPerspectivesPanel() {
       setHighRiskNotice(hr ? `${hr.category}类问题：${hr.guidance}` : null);
 
       setRunning(true);
+      const generationStartedAt = Date.now();
 
       // 流式更新卡片
       const updateCard = (sign: ZodiacSign, patch: Partial<PerspectiveCardState>) => {
@@ -245,6 +249,15 @@ export function ZodiacPerspectivesPanel() {
           baseUrl: aiApi.baseUrl,
           model: aiApi.model,
         }, callbacks, controller.signal);
+        recordRunMetric({
+          scene: options.scene,
+          mode: options.mode,
+          durationMs: Date.now() - generationStartedAt,
+          expected: options.selectedSigns.length,
+          parsed: result.perspectives.length,
+          fastFallback: options.mode === 'fast' && result.warnings.some((item) => item.includes('自动逐项补全')),
+          perspectives: result.perspectives,
+        });
 
         // 标记 partial（失败项）
         if (result.partialSigns.length > 0) {
@@ -433,6 +446,7 @@ export function ZodiacPerspectivesPanel() {
           输入一个问题，让十二种星座思考原型从不同角度回应，再帮你归纳共识、分歧和行动建议。
           星座仅作为易理解的角色原型，不用于人格诊断或命运预测。
         </p>
+        <Button variant="outline" size="sm" onClick={() => setQualityStatsOpen(true)}>质量统计</Button>
       </header>
 
       <QuestionInput
@@ -510,6 +524,10 @@ export function ZodiacPerspectivesPanel() {
               onFollowup={handleOpenFollowup}
               onRetry={handleRetryOneSign}
               onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
+              onFeedback={(sign, kind) => {
+                recordFeedback({ sign, kind, scene: run.options.scene, model: run.model });
+                toast.success('感谢反馈，已匿名保存在本地。');
+              }}
             />
           )}
 
@@ -544,6 +562,7 @@ export function ZodiacPerspectivesPanel() {
         model={aiApi.model ?? ''}
         onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
       />
+      <QualityStatsDialog open={qualityStatsOpen} onClose={() => setQualityStatsOpen(false)} />
     </div>
   );
 }
