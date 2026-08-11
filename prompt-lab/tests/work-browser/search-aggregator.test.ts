@@ -6,6 +6,7 @@ import { aggregateSearch } from '@/core/work-browser/search/aggregator';
 import { dedupeResults } from '@/core/work-browser/search/dedup';
 import { rankResults } from '@/core/work-browser/search/rank';
 import type { SearchProvider, SearchQuery, SearchResult } from '@/core/work-browser/types';
+import { BUILTIN_PROVIDERS } from '@/core/work-browser/search/providers';
 
 function mkResult(over: Partial<SearchResult> & { source: string; url: string; title: string }): SearchResult {
   return {
@@ -21,6 +22,12 @@ function mkResult(over: Partial<SearchResult> & { source: string; url: string; t
 }
 
 const baseQuery: SearchQuery = { text: 'clickhouse memory', locale: 'zh-CN', safeSearch: true, timeRange: 'all', page: 1, perPage: 20 };
+
+describe('built-in providers', () => {
+  it('enables Bing, Baidu and Google by default', () => {
+    expect(BUILTIN_PROVIDERS.slice(0, 3).map((provider) => provider.id)).toEqual(['bing', 'baidu', 'google']);
+  });
+});
 
 describe('dedupeResults', () => {
   it('merges same canonicalUrl from different providers', () => {
