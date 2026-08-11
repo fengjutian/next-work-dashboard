@@ -15,8 +15,8 @@
  * └──────────┴──────────────────────────────────┴──────────┘
  */
 import { Empty, message, Tabs, ToastHost } from './ui';
-import { Bot, BookOpen, GitFork, ListTodo } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { Bot, BookOpen, FolderKanban, GitFork, ListTodo } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   Workspace, Tab, Document, Annotation, SearchHistoryEntry,
 } from '../../core/work-browser/types';
@@ -51,58 +51,79 @@ export function WorkBrowserPanel() {
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(undefined);
 
+  const activeWorkspaceId = activeWorkspace?.id;
+  const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
+  activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
   // 默认选第一个 workspace
   useEffect(() => {
-    if (!activeWorkspace && workspaces.length > 0) setActiveWorkspace(workspaces[0]);
-  }, [workspaces, activeWorkspace]);
+    setActiveWorkspace((current) => {
+      if (workspaces.length === 0) return null;
+      return workspaces.find((workspace) => workspace.id === current?.id) ?? workspaces[0];
+    });
+  }, [workspaces]);
 
   // 加载 active workspace 的 tabs / documents
   const refreshTabs = useCallback(async (wsId: string) => {
-    const list = (await window.electronAPI.workBrowser.tab.list(wsId)) as Tab[];
-    setTabs(list);
-    if (list.length && !list.find((t) => t.id === activeTab?.id)) {
-      setActiveTab(list[0]);
-    } else if (list.length === 0) {
-      setActiveTab(null);
+    try {
+      const list = (await window.electronAPI.workBrowser.tab.list(wsId)) as Tab[];
+      if (activeWorkspaceIdRef.current !== wsId) return;
+      setTabs(list);
+      setActiveTab((current) => list.find((tab) => tab.id === current?.id) ?? list[0] ?? null);
+    } catch (error) {
+      if (activeWorkspaceIdRef.current === wsId) message.error(`标签页加载失败：${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [activeTab?.id]);
+  }, []);
 
   const refreshDocuments = useCallback(async (wsId: string) => {
-    const docs = (await window.electronAPI.workBrowser.document.list(wsId, 100)) as Document[];
-    setDocuments(docs);
+    try {
+      const docs = (await window.electronAPI.workBrowser.document.list(wsId, 100)) as Document[];
+      if (activeWorkspaceIdRef.current === wsId) setDocuments(docs);
+    } catch (error) {
+      if (activeWorkspaceIdRef.current === wsId) message.error(`文档加载失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   }, []);
 
   const refreshAnnotations = useCallback(async (wsId: string) => {
     try {
       const anns = (await window.electronAPI.workBrowser.annotation.listByWorkspace(wsId)) as Annotation[];
-      setAnnotations(anns);
+      if (activeWorkspaceIdRef.current === wsId) setAnnotations(anns);
     } catch (error) {
       // Annotation Graph 是增强能力；旧版主进程未注册该 channel 时不阻塞浏览器主体。
       console.warn('[work-browser] workspace annotations unavailable:', error);
-      setAnnotations([]);
+      if (activeWorkspaceIdRef.current === wsId) setAnnotations([]);
     }
   }, []);
 
   const refreshHistory = useCallback(async () => {
-    const h = (await window.electronAPI.workBrowser.search.history(50)) as SearchHistoryEntry[];
-    setHistory(h);
+    try {
+      const h = (await window.electronAPI.workBrowser.search.history(50)) as SearchHistoryEntry[];
+      setHistory(h);
+    } catch (error) {
+      console.warn('[work-browser] search history unavailable:', error);
+    }
   }, []);
 
   useEffect(() => {
-    if (activeWorkspace) {
-      void refreshTabs(activeWorkspace.id);
-      void refreshDocuments(activeWorkspace.id);
-      void refreshAnnotations(activeWorkspace.id);
+    if (activeWorkspaceId) {
+      setTabs([]);
+      setActiveTab(null);
+      setDocuments([]);
+      setAnnotations([]);
+      void refreshTabs(activeWorkspaceId);
+      void refreshDocuments(activeWorkspaceId);
+      void refreshAnnotations(activeWorkspaceId);
     }
-  }, [activeWorkspace, refreshTabs, refreshDocuments, refreshAnnotations]);
+  }, [activeWorkspaceId, refreshTabs, refreshDocuments, refreshAnnotations]);
 
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
 
   // Cleaner 配置
   useEffect(() => {
-    void window.electronAPI.workBrowser.cleaner.payload().then((p) => setBlockedDomains(p.blockedDomains));
+    void window.electronAPI.workBrowser.cleaner.payload()
+      .then((p) => setBlockedDomains(p.blockedDomains))
+      .catch((error) => console.warn('[work-browser] cleaner payload unavailable:', error));
     const stored = localStorage.getItem(STORAGE_KEYS.CLEANER_OPTIONS);
     if (stored) {
       try {
@@ -120,18 +141,26 @@ export function WorkBrowserPanel() {
   };
 
   const handleSearch = useCallback(async (text: string, scope: 'web' | 'workspace' | 'library' = 'workspace') => {
-    await runSearch(text, activeWorkspace?.id, scope);
-    setSearchOpen(true);
+    const result = await runSearch(text, activeWorkspace?.id, scope);
+    if (result) setSearchOpen(true);
+    else message.error('搜索失败，请检查搜索服务配置后重试');
     void refreshHistory();
   }, [activeWorkspace?.id, runSearch, refreshHistory]);
 
   const handleAddTab = useCallback(async (url: string) => {
-    if (!activeWorkspace) { message.warning('请先选择 Workspace'); return; }
-    const normalizedUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url : `https://${url}`;
-    const tab = (await window.electronAPI.workBrowser.tab.create({ workspaceId: activeWorkspace.id, url: normalizedUrl, title: url })) as Tab;
-    await refreshTabs(activeWorkspace.id);
-    setActiveTab(tab);
-  }, [activeWorkspace, refreshTabs]);
+    if (!activeWorkspace) { message.warning('请先选择 Workspace'); return false; }
+    try {
+      const normalizedUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url : `https://${url}`;
+      const position = tabs.reduce((max, tab) => Math.max(max, Number.isFinite(tab.position) ? tab.position : 0), 0) + 1;
+      const tab = (await window.electronAPI.workBrowser.tab.create({ workspaceId: activeWorkspace.id, url: normalizedUrl, title: url, position })) as Tab;
+      await refreshTabs(activeWorkspace.id);
+      setActiveTab(tab);
+      return true;
+    } catch (error) {
+      message.error(`新建标签页失败：${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }, [activeWorkspace, refreshTabs, tabs]);
 
   const handleSave = useCallback(async (input: { url: string; title?: string; workspaceId: string }) => {
     try {
@@ -139,13 +168,13 @@ export function WorkBrowserPanel() {
         workspaceId: input.workspaceId,
         url: input.url,
         title: input.title,
-        tabId: activeTab?.id,
+        tabId: input.workspaceId === activeWorkspace?.id ? activeTab?.id : undefined,
       });
       message.success(`已保存：${r.wordCount} 词${r.isNewVersion ? `（新版本 ${r.diffSummary}）` : ''}`);
       setSaveOpen(false);
-      if (activeWorkspace) await refreshDocuments(activeWorkspace.id);
+      if (activeWorkspace?.id === input.workspaceId) await refreshDocuments(activeWorkspace.id);
       // 保存后建立 tab → document 关联
-      if (activeTab) setActiveDocumentId(r.documentId);
+      if (activeTab && activeWorkspace?.id === input.workspaceId) setActiveDocumentId(r.documentId);
     } catch (e) {
       message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -158,9 +187,8 @@ export function WorkBrowserPanel() {
     setActiveDocumentId(matched?.id);
   }, [activeTab, documents]);
 
-  const handleOpenResult = useCallback((url: string) => {
-    void handleAddTab(url);
-    setSearchOpen(false);
+  const handleOpenResult = useCallback(async (url: string) => {
+    if (await handleAddTab(url)) setSearchOpen(false);
   }, [handleAddTab]);
 
   return (
@@ -170,7 +198,7 @@ export function WorkBrowserPanel() {
         <div className="flex items-center gap-3">
           {activeWorkspace && (
             <div className="hidden shrink-0 items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 shadow-sm xl:flex">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary-light text-sm">{activeWorkspace.icon}</span>
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary-light text-primary"><FolderKanban size={14} /></span>
               <div className="leading-tight">
                 <div className="max-w-28 truncate text-xs font-semibold">{activeWorkspace.name}</div>
                 <div className="text-[10px] text-muted-foreground">{tabs.length} 标签 · {documents.length} 文档</div>
@@ -195,7 +223,11 @@ export function WorkBrowserPanel() {
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
             onSelect={setActiveWorkspace}
-            onCreate={async (input) => { await createWorkspace(input); }}
+            onCreate={async (input) => {
+              const created = await createWorkspace(input);
+              setActiveWorkspace(created);
+              return created;
+            }}
           />
         </aside>
         <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_12px_36px_hsl(var(--foreground)/0.05)]">
@@ -206,8 +238,12 @@ export function WorkBrowserPanel() {
                 activeId={activeTab?.id}
                 onActivate={setActiveTab}
                 onClose={async (t) => {
-                  await window.electronAPI.workBrowser.tab.remove(t.id);
-                  await refreshTabs(activeWorkspace.id);
+                  try {
+                    await window.electronAPI.workBrowser.tab.remove(t.id);
+                    await refreshTabs(activeWorkspace.id);
+                  } catch (error) {
+                    message.error(`关闭标签页失败：${error instanceof Error ? error.message : String(error)}`);
+                  }
                 }}
                 onAdd={handleAddTab}
               />
@@ -241,7 +277,7 @@ export function WorkBrowserPanel() {
                     <LibraryList
                       documents={documents}
                       history={history}
-                      onOpenDocument={(d) => { window.open(d.url, '_blank'); }}
+                      onOpenDocument={(d) => { void handleAddTab(d.url); }}
                       onReplayQuery={handleSearch}
                     />
                   ),

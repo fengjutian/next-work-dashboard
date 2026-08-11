@@ -17,7 +17,7 @@ export const workBrowserBridge = {
   },
   tab: {
     list: (workspaceId: string) => ipcRenderer.invoke('work-browser:tab:list', workspaceId),
-    create: (input: { workspaceId: string; url: string; title?: string }) => ipcRenderer.invoke('work-browser:tab:create', input),
+    create: (input: { workspaceId: string; url: string; title?: string; position?: number }) => ipcRenderer.invoke('work-browser:tab:create', input),
     update: (id: string, patch: any) => ipcRenderer.invoke('work-browser:tab:update', id, patch),
     remove: (id: string) => ipcRenderer.invoke('work-browser:tab:delete', id),
   },

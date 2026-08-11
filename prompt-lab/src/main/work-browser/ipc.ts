@@ -54,7 +54,7 @@ export function setupWorkBrowserIPC(): void {
   // ── Tab ──
 
   ipcMain.handle('work-browser:tab:list', (_e, workspaceId: WorkspaceId) => workspaces.listTabs(workspaceId));
-  ipcMain.handle('work-browser:tab:create', (_e, input: { workspaceId: WorkspaceId; url: string; title?: string }) => workspaces.createTab(input));
+  ipcMain.handle('work-browser:tab:create', (_e, input: { workspaceId: WorkspaceId; url: string; title?: string; position?: number }) => workspaces.createTab(input));
   ipcMain.handle('work-browser:tab:update', (_e, id: TabId, patch: any) => { workspaces.updateTab(id, patch); });
   ipcMain.handle('work-browser:tab:delete', (_e, id: TabId) => workspaces.deleteTab(id));
 

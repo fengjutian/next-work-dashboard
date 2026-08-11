@@ -432,7 +432,7 @@ export interface ElectronAPI {
     };
     tab: {
       list: (workspaceId: string) => Promise<unknown[]>;
-      create: (input: { workspaceId: string; url: string; title?: string }) => Promise<unknown>;
+      create: (input: { workspaceId: string; url: string; title?: string; position?: number }) => Promise<unknown>;
       update: (id: string, patch: any) => Promise<void>;
       remove: (id: string) => Promise<void>;
     };

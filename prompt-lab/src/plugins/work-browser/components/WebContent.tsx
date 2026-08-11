@@ -96,7 +96,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       wv.removeEventListener('did-finish-load', onDidFinishLoad);
       wv.removeEventListener('did-start-loading', onDidStartLoading);
     };
-  }, [tab?.id, onSelectionChange]);
+  }, [tab?.id, preloadPath, onSelectionChange]);
 
   const handleAnnotation = useCallback(async (note: string, color: string) => {
     if (!selection || !activeDocumentId) return;
