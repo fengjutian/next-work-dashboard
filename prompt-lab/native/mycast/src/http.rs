@@ -112,7 +112,7 @@ async fn post_pair_complete(
         "ok": true,
         "session_token": session.token,
         "device_id": session.device_id,
-        "ws_url": format!("ws://{lan}:{}", state.cfg.ws_port),
+        "ws_url": format!("ws://{lan}:{}", state.cfg.http_port),
         "http_url": format!("http://{lan}:{}", state.cfg.http_port),
     })))
 }

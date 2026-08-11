@@ -11,6 +11,15 @@ tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "tim
 cpal = "0.15"
 # Ring buffer for producer (cpal callback) -> consumer (VAD/ASR worker).
 ringbuf = "0.4"
+# ONNX Runtime — drives both VAD and (in a later phase) ASR.
+# We pin to rc.9 because rc.13's build script has a ureq TLS regression
+# that breaks the native-lib download. Bump deliberately.
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["download-binaries", "copy-dylibs"] }
+ort-sys = "=2.0.0-rc.9"
+# ndarray is what ort 1.x uses for tensor IO.
+ndarray = "0.15"
+# HTTP client for first-run VAD model download.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 # WAV writer so we can persist a smoke-test recording to disk.
 hound = "3.5"
 # JSONL RPC.

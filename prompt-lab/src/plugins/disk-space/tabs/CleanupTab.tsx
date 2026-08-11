@@ -20,11 +20,11 @@ export interface CleanupTabProps {
   runCleanup: (action: 'docker-build-cache' | 'npm-cache' | 'pnpm-store') => Promise<void>;
   clearCleanupStatus: () => void;
   start: (focusedScan: boolean) => Promise<void>;
-  choose: () => Promise<void>;
+  pickRoot: () => Promise<void>;
 }
 
 export function CleanupTab(props: CleanupTabProps) {
-  const { scan, cleanupItems, cleanupTotal, cleanupAssessments, isFocusedTab, cleanupStatus, runCleanup, clearCleanupStatus, start, choose } = props;
+  const { scan, cleanupItems, cleanupTotal, cleanupAssessments, isFocusedTab, cleanupStatus, runCleanup, clearCleanupStatus, start, pickRoot } = props;
   const { root, stats, running } = scan;
 
   return (
@@ -123,7 +123,7 @@ export function CleanupTab(props: CleanupTabProps) {
         {!root && (
           <button
             className="mt-5 flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent"
-            onClick={() => void choose()}
+            onClick={() => void pickRoot()}
           >
             <FolderOpen className="h-4 w-4" />选择分析目录
           </button>

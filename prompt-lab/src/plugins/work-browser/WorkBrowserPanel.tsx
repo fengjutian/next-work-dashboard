@@ -43,6 +43,7 @@ export function WorkBrowserPanel() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [cleanerEnabled, setCleanerEnabled] = useState(true);
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(undefined);
 
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
@@ -123,11 +124,20 @@ export function WorkBrowserPanel() {
       });
       message.success(`已保存：${r.wordCount} 词${r.isNewVersion ? `（新版本 ${r.diffSummary}）` : ''}`);
       setSaveOpen(false);
-      if (activeWorkspace) void refreshDocuments(activeWorkspace.id);
+      if (activeWorkspace) await refreshDocuments(activeWorkspace.id);
+      // 保存后建立 tab → document 关联
+      if (activeTab) setActiveDocumentId(r.documentId);
     } catch (e) {
       message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     }
-  }, [activeWorkspace, activeTab?.id, refreshDocuments]);
+  }, [activeWorkspace, activeTab, refreshDocuments]);
+
+  // activeTab 变化时，自动查找匹配的 document
+  useEffect(() => {
+    if (!activeTab) { setActiveDocumentId(undefined); return; }
+    const matched = documents.find((d) => d.url === activeTab.url);
+    setActiveDocumentId(matched?.id);
+  }, [activeTab, documents]);
 
   const handleOpenResult = useCallback((url: string) => {
     void handleAddTab(url);
@@ -175,7 +185,12 @@ export function WorkBrowserPanel() {
                 onAdd={handleAddTab}
               />
               <div style={{ flex: 1, overflow: 'hidden' }}>
-                <WebContent tab={activeTab} cleanerEnabled={cleanerEnabled} blockedDomains={blockedDomains} />
+                <WebContent
+                  tab={activeTab}
+                  cleanerEnabled={cleanerEnabled}
+                  blockedDomains={blockedDomains}
+                  activeDocumentId={activeDocumentId}
+                />
               </div>
             </>
           ) : (

@@ -371,6 +371,7 @@ export interface ElectronAPI {
   diskSpace: {
     systemInfo: () => Promise<DiskSystemInfo>;
     pickRoot: () => Promise<string | null>;
+    chooseDrive: (drive: string) => Promise<string>;
     listDirectory: (rootPath: string, directoryPath?: string) => Promise<DiskDirectoryItem[]>;
     preview: (rootPath: string, filePath: string) => Promise<DiskFilePreview>;
     probeSpecialties: () => Promise<DiskSpecialtyProbe[]>;
@@ -462,6 +463,13 @@ export interface ElectronAPI {
     };
     cleaner: {
       payload: (options?: any) => Promise<{ css: string; js: string; blockedDomains: string[] }>;
+      webviewPayload: () => Promise<{ css: string; js: string; blockedDomains: string[] }>;
+      webviewPreloadPath: () => Promise<string>;
+    };
+    annotation: {
+      list: (documentId: string) => Promise<unknown[]>;
+      create: (input: { documentId: string; selector: string; rangeText: string; note: string; color: string }) => Promise<unknown>;
+      remove: (id: string) => Promise<void>;
     };
     settings: {
       get: (key: string) => Promise<string | null>;

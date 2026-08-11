@@ -51,6 +51,13 @@ export const workBrowserBridge = {
   },
   cleaner: {
     payload: (options?: any) => ipcRenderer.invoke('work-browser:cleaner:payload', options),
+    webviewPayload: () => ipcRenderer.invoke('work-browser:cleaner:webview-payload'),
+    webviewPreloadPath: () => ipcRenderer.invoke('work-browser:cleaner:webview-preload-path'),
+  },
+  annotation: {
+    list: (documentId: string) => ipcRenderer.invoke('work-browser:annotation:list', documentId),
+    create: (input: { documentId: string; selector: string; rangeText: string; note: string; color: string }) => ipcRenderer.invoke('work-browser:annotation:create', input),
+    remove: (id: string) => ipcRenderer.invoke('work-browser:annotation:delete', id),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),

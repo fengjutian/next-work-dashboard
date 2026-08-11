@@ -30,7 +30,7 @@ let _Notification: typeof ElectronNotification | null = null;
 function getNotification(): typeof ElectronNotification | null {
   if (_Notification) return _Notification;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const electron = require('electron');
     if (electron && typeof electron.Notification === 'function') {
       _Notification = electron.Notification as typeof ElectronNotification;

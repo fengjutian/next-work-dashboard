@@ -106,13 +106,6 @@ function reducer(state: State, action: Action): State {
           return { ...doc, dirty: action.saving ? true : doc.dirty };
         }),
       };
-    case 'set-save-state':
-      return {
-        ...state,
-        documents: state.documents.map((doc) =>
-          doc.id === action.documentId ? { ...doc, saving: action.saving, saveError: action.error } : doc,
-        ),
-      };
     case 'set-mode':
       return {
         ...state,

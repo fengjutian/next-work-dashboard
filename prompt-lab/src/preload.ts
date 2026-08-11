@@ -413,6 +413,7 @@ const electronAPI: ElectronAPI = {
   diskSpace: {
     systemInfo: () => ipcRenderer.invoke('disk-space:system-info'),
     pickRoot: () => ipcRenderer.invoke('disk-space:pick-root'),
+    chooseDrive: (drive: string) => ipcRenderer.invoke('disk-space:choose-drive', drive),
     listDirectory: (rootPath: string, directoryPath?: string) => ipcRenderer.invoke('disk-space:list-directory', rootPath, directoryPath),
     preview: (rootPath: string, filePath: string) => ipcRenderer.invoke('disk-space:preview', rootPath, filePath),
     probeSpecialties: () => ipcRenderer.invoke('disk-space:probe-specialties'),

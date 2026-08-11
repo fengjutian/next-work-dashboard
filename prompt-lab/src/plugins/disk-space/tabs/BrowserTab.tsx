@@ -1,3 +1,5 @@
+import { useEffect, useMemo } from 'react';
+import { Select } from 'antd';
 import { ChevronDown, ExternalLink, FileText, FolderOpen, Image, Loader2, Square } from '@/components/icons';
 import type { DiskDirectoryItem, DiskFilePreview } from '@/types/electron';
 import { displayPath, type UseDiskScanResult } from '../hooks/useDiskScan';
@@ -25,20 +27,46 @@ export interface BrowserTabProps {
   isFocusedTab: boolean;
   start: (focusedScan: boolean) => Promise<void>;
   cancelScan: () => Promise<void>;
-  choose: () => Promise<void>;
+  choose: (drive: string) => Promise<void>;
 }
 
 export function BrowserTab(props: BrowserTabProps) {
   const { scan, preview, setPreview, openPreview, parentDirectory, loadDirectory, showAnalysisControls, isFocusedTab, start, cancelScan, choose } = props;
-  const { root, currentDirectory, entries, browserLoading, scanIdRef, running, exclusionsText, setExclusionsText } = scan;
+  const { root, currentDirectory, entries, browserLoading, scanIdRef, running, exclusionsText, setExclusionsText, system } = scan;
+
+  // 盘符列表来自 systemInfo（disk-service 已经在 A-Z 探测了）
+  const driveOptions = useMemo(
+    () =>
+      system.disks.map((disk) => ({
+        value: disk.path,
+        label: `${disk.path} · ${formatBytes(disk.free)} 可用 / ${formatBytes(disk.total)}`,
+      })),
+    [system.disks],
+  );
+
+  // 默认 C 盘：盘符列表加载好但 root 还没选时自动选第一个（通常是 C:）
+  useEffect(() => {
+    if (!root && driveOptions.length > 0) {
+      const defaultDrive = driveOptions.find((option) => option.value.startsWith('C'))?.value ?? driveOptions[0].value;
+      void choose(defaultDrive);
+    }
+    // 仅在盘符列表变化时自动选一次，避免用户主动切换后被覆盖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driveOptions]);
 
   return (
     <>
       <section className="rounded-2xl border bg-card p-4 shadow-sm">
         <div className="flex gap-2">
-          <button className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent" onClick={() => void choose()}>
-            <FolderOpen className="h-4 w-4" />选择目录
-          </button>
+          <Select
+            className="min-w-[260px]"
+            value={root || undefined}
+            placeholder="选择盘符"
+            options={driveOptions}
+            onChange={(value) => void choose(value)}
+            disabled={running}
+            suffixIcon={<FolderOpen className="h-4 w-4" />}
+          />
           <div className="min-w-0 flex-1 truncate rounded-md border bg-muted/30 px-3 py-2 text-sm" title={root}>
             {root || '选择目录后可浏览与分析'}
           </div>

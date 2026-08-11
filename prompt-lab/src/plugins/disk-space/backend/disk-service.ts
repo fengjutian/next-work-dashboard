@@ -184,6 +184,18 @@ export function setupDiskSpaceIPC(): void {
     if (selected) authorizedRoots.add(fs.realpathSync(selected));
     return selected;
   });
+  // 盘符下拉授权：与 pickRoot 走同一条 authorizedRoots 通道。返回 realpath 供前端使用。
+  ipcMain.handle('disk-space:choose-drive', async (_event, drivePath: string) => {
+    if (typeof drivePath !== 'string' || drivePath.length === 0) throw new Error('无效的盘符路径');
+    let real: string;
+    try {
+      real = fs.realpathSync(drivePath);
+    } catch (cause) {
+      throw new Error(`盘符不存在或不可访问: ${drivePath}`);
+    }
+    authorizedRoots.add(real);
+    return real;
+  });
   ipcMain.handle('disk-space:list-directory', async (_event, rootPath: string, directoryPath?: string) => {
     const { candidate } = authorizedPath(rootPath, directoryPath);
     if (!(await fs.promises.stat(candidate)).isDirectory()) throw new Error('目标不是目录');

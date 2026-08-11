@@ -12,6 +12,7 @@
  * - choose() / start() / cancelScan() / togglePause() 等动作幂等且自包含。
  */
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useToast } from '@/components/Toast';
 import type {
   DiskArchiveEntry,
   DiskDirectoryItem,
@@ -227,7 +228,8 @@ export interface UseDiskScanResult {
 
   // actions
   refreshSystem: () => Promise<void>;
-  choose: () => Promise<void>;
+  choose: (drive: string) => Promise<void>;
+  pickRoot: () => Promise<void>;
   start: (focusedScan: boolean) => Promise<void>;
   cancelScan: () => Promise<void>;
   togglePause: () => Promise<void>;
@@ -254,6 +256,7 @@ export interface UseDiskScanResult {
 // ---------------- Hook 实现 ----------------
 
 export function useDiskScan(): UseDiskScanResult {
+  const { toast } = useToast();
   // system / history
   const [system, setSystem] = useState<DiskSystemInfo | null>(null);
   const [diskHistory, setDiskHistory] = useState<DiskHistoryPoint[]>(() =>
@@ -581,7 +584,10 @@ export function useDiskScan(): UseDiskScanResult {
 
   // actions
   const refreshSystem = refreshSystemImpl;
-  const choose = useCallback(async () => {
+
+  // applyRoot: 取消旧 scan + 加载新 root + 还原 last-result 缓存。choose / pickRoot 复用。
+  const applyRoot = useCallback(async (chosen: string) => {
+    if (!chosen) return;
     const previousScanId = scanIdRef.current;
     if (previousScanId && running) {
       void window.electronAPI.diskSpace.cancel(previousScanId);
@@ -589,8 +595,6 @@ export function useDiskScan(): UseDiskScanResult {
       setRunning(false);
       setPaused(false);
     }
-    const chosen = await window.electronAPI.diskSpace.pickRoot();
-    if (!chosen) return;
     rootRef.current = chosen;
     setRoot(chosen);
     setCurrentDirectory(chosen);
@@ -625,6 +629,31 @@ export function useDiskScan(): UseDiskScanResult {
       setBrowserLoading(false);
     }
   }, [running]);
+
+  // choose: BrowserTab 用的盘符下拉（默认 C:），参数已经是合法路径
+  const choose = useCallback(async (drive: string) => {
+    try {
+      const real = await window.electronAPI.diskSpace.chooseDrive(drive);
+      await applyRoot(real);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      toast(message, 'error');
+      setError(message);
+    }
+  }, [applyRoot, toast]);
+
+  // pickRoot: CleanupTab / DeveloperTab 用的文件对话框，可选任意子目录
+  const pickRoot = useCallback(async () => {
+    try {
+      const chosen = await window.electronAPI.diskSpace.pickRoot();
+      if (!chosen) return;
+      await applyRoot(chosen);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      toast(message, 'error');
+      setError(message);
+    }
+  }, [applyRoot, toast]);
 
   const start = useCallback(
     async (focusedScan: boolean) => {
@@ -849,6 +878,7 @@ export function useDiskScan(): UseDiskScanResult {
     setError,
     refreshSystem,
     choose,
+    pickRoot,
     start,
     cancelScan,
     togglePause,

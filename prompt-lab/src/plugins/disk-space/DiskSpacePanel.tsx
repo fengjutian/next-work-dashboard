@@ -57,7 +57,7 @@ export function DiskSpacePanel() {
     setPreview, scanIdRef, rootRef, running, paused, phase,
     scanTelemetry, scanErrors, stats, largest, duplicates, extensions, directories,
     directorySnapshots, savedResults, usnInfo, usnDelta, exclusionsText, setExclusionsText,
-    error, setError, refreshSystem, choose, start, cancelScan, togglePause,
+    error, setError, refreshSystem, choose, pickRoot, start, cancelScan, togglePause,
     loadDirectory, openPreview, restoreSavedResult, removeSavedResult,
     removeDirectorySnapshot, clearHistory, setRunning, setPaused, setScanErrors,
     setBrowserLoading, setEntries, setDuplicates,
@@ -467,7 +467,7 @@ export function DiskSpacePanel() {
             setSpecialtyProbes={setSpecialtyProbes}
             setProbing={setProbing}
             start={start}
-            choose={choose}
+            pickRoot={pickRoot}
           />
         )}
         {activeTab === 'cleanup' && (
@@ -481,7 +481,7 @@ export function DiskSpacePanel() {
             runCleanup={runCleanup}
             clearCleanupStatus={clearCleanupStatus}
             start={start}
-            choose={choose}
+            pickRoot={pickRoot}
           />
         )}
         {activeTab === 'doctor' && (

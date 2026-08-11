@@ -270,8 +270,6 @@ export const MyCastPanel: React.FC = () => {
       .catch(() => setQrSvg(null));
   }, [state, pairCode]);
 
-  const httpFallbackUrl = state && pairCode ? buildMobileUrl(state, pairCode).httpLink : null;
-
   /* ── 自动刷新会话 / 传输 ── */
   useEffect(() => {
     const t = window.setInterval(() => { void refreshAll(); }, 5000);
@@ -292,10 +290,13 @@ export const MyCastPanel: React.FC = () => {
       <header className="flex h-14 items-center gap-3 border-b px-5">
         <Monitor className="h-5 w-5 text-primary" />
         <div className="flex-1">
-          <h2 className="text-sm font-semibold">MyCast · 局域网投屏</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">MyCast · 局域网投屏</h2>
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600">技术预览</span>
+          </div>
           <p className="text-[11px] text-muted-foreground">
             {state?.ready
-              ? `${state.deviceName ?? '桌面'} · ${state.platform ?? ''} · HTTP :${state.httpPort} · WS :${state.wsPort} · mDNS ${state.mdnsEnabled ? '✓' : '✗'}`
+              ? `${state.deviceName ?? '桌面'} · ${state.lanAddr ?? 'LAN'}:${state.httpPort} · mDNS ${state.mdnsEnabled ? '✓' : '✗'}`
               : state === null ? '正在连接…' : 'daemon 未就绪'}
           </p>
         </div>
@@ -323,6 +324,11 @@ export const MyCastPanel: React.FC = () => {
         })}
       </nav>
 
+      <div className="flex items-center justify-between gap-3 border-b border-amber-500/20 bg-amber-500/10 px-5 py-2 text-xs text-amber-700">
+        <span><strong>当前版本：</strong>文件传输可用；Android 投屏正在验证 WebRTC 链路，视频源暂为前置摄像头，不是手机屏幕。</span>
+        <button type="button" onClick={() => setTab('screen')} className="shrink-0 rounded border border-amber-500/30 px-2 py-1 hover:bg-amber-500/10">查看投屏状态</button>
+      </div>
+
       <main className="flex-1 overflow-auto p-5">
         {error && (
           <div className="mb-3 flex items-center justify-between rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -334,7 +340,7 @@ export const MyCastPanel: React.FC = () => {
         {tab === 'home' && <HomeTab state={state} pairCode={pairCode} pairRemaining={pairRemaining} qrSvg={qrSvg} onIssue={issuePairing} starting={starting} />}
         {tab === 'devices' && <DevicesTab devices={devices} sessions={sessions} onEndSession={async (id) => { await window.electronAPI.mycast.endSession(id); await refreshAll(); }} />}
         {tab === 'screen' && <ScreenTab videoRef={videoRef} activeScreen={activeScreen} streamStats={streamStats} onStop={teardownScreen} state={state} />}
-        {tab === 'files' && <FilesTab transfers={transfers} onCancel={async (id) => { await window.electronAPI.mycast.cancelTransfer(id); await refreshAll(); }} onRefresh={refreshAll} state={state} />}
+        {tab === 'files' && <FilesTab transfers={transfers} onCancel={async (id) => { await window.electronAPI.mycast.cancelTransfer(id); await refreshAll(); }} onRefresh={refreshAll} />}
       </main>
     </div>
   );
@@ -359,8 +365,8 @@ const HomeTab: React.FC<{
   const mobileUrl = state && pairCode ? buildMobileUrl(state, pairCode) : null;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="rounded-lg border bg-card p-5">
+    <div className="mx-auto grid max-w-5xl gap-4 lg:grid-cols-2">
+      <div className="order-2 rounded-lg border bg-card p-5">
         <h3 className="mb-3 text-sm font-semibold flex items-center gap-2"><Monitor className="h-4 w-4 text-primary" /> 桌面端</h3>
         <dl className="grid grid-cols-[80px_1fr] gap-y-2 text-xs">
           <dt className="text-muted-foreground">设备名</dt><dd className="font-medium">{state?.deviceName ?? '—'}</dd>
@@ -385,9 +391,12 @@ const HomeTab: React.FC<{
         </p>
       </div>
 
-      <div className="rounded-lg border bg-card p-5">
+      <div className="order-first rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 via-card to-card p-6 shadow-sm lg:col-span-2">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2"><Network className="h-4 w-4 text-primary" /> 配对</h3>
+          <div>
+            <h3 className="text-base font-semibold flex items-center gap-2"><Network className="h-4 w-4 text-primary" /> 用 MyCast App 扫码连接</h3>
+            <p className="mt-1 text-xs text-muted-foreground">确保手机与电脑连接同一个 Wi-Fi</p>
+          </div>
           <Button size="sm" variant="outline" onClick={onIssue} disabled={!state?.ready || starting}>
             <RotateCcw className={`mr-1 h-3.5 w-3.5 ${starting ? 'animate-spin' : ''}`} />
             {pairCode ? '换一组' : '生成配对码'}
@@ -395,12 +404,12 @@ const HomeTab: React.FC<{
         </div>
         {pairCode ? (
           <>
-            <div className="flex items-baseline gap-3">
+            <div className="flex items-baseline justify-center gap-3">
               <span className="font-mono text-4xl font-semibold tracking-widest text-primary">{pairCode.slice(0, 3)} {pairCode.slice(3, 6)}</span>
               <span className="text-xs text-muted-foreground">剩余 {pairRemaining}s</span>
             </div>
             {qrSvg && (
-              <div className="mt-3 flex justify-center" dangerouslySetInnerHTML={{ __html: qrSvg }} />
+              <div className="mx-auto mt-4 flex w-fit justify-center rounded-xl border bg-white p-3 shadow-sm" dangerouslySetInnerHTML={{ __html: qrSvg }} />
             )}
             {mobileUrl && (
               <>
@@ -423,11 +432,15 @@ const HomeTab: React.FC<{
             )}
           </>
         ) : (
-          <p className="text-xs text-muted-foreground">点击"生成配对码"创建 6 位配对码。配对码一次性有效，过期自动失效。</p>
+          <div className="py-10 text-center">
+            <Network className="mx-auto mb-3 h-10 w-10 text-primary/40" />
+            <p className="text-sm font-medium">生成一次性配对码</p>
+            <p className="mt-1 text-xs text-muted-foreground">配对码5分钟有效，只能成功使用一次。</p>
+          </div>
         )}
       </div>
 
-      <div className="rounded-lg border bg-card p-5 lg:col-span-2">
+      <div className="order-3 rounded-lg border bg-card p-5">
         <h3 className="mb-2 text-sm font-semibold">三种连接方式</h3>
         <ul className="space-y-2 text-xs text-muted-foreground">
           <li><span className="font-medium text-foreground">1. QR 码（推荐）</span> · 在手机相机/微信扫描桌面端的 QR 码，手机浏览器自动打开配对页（<code className="font-mono text-foreground">{lanAddress}</code>）。</li>
@@ -509,6 +522,9 @@ const ScreenTab: React.FC<{
 }> = ({ videoRef, activeScreen, streamStats, onStop, state }) => {
   return (
     <div className="space-y-3">
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-700">
+        <strong>投屏技术预览：</strong>当前 Android 客户端发送前置摄像头视频，用于验证配对、SDP 和 ICE 链路；真实屏幕捕获仍在开发中。
+      </div>
       <div className="rounded-lg border bg-black">
         <div className="relative aspect-video">
           <video ref={videoRef} className="h-full w-full" autoPlay playsInline muted />
@@ -549,8 +565,7 @@ const FilesTab: React.FC<{
   transfers: TransferInfo[];
   onCancel: (id: string) => void;
   onRefresh: () => void;
-  state: MyCastState | null;
-}> = ({ transfers, onCancel, onRefresh, state }) => {
+}> = ({ transfers, onCancel, onRefresh }) => {
   return (
     <div className="space-y-3">
       <div className="rounded-lg border bg-card p-4 text-xs text-muted-foreground">
@@ -623,7 +638,8 @@ export function buildMobileUrl(state: MyCastState, pairCode: string): { deepLink
     || (typeof window !== 'undefined' ? window.location.hostname : null)
     || '127.0.0.1';
   const port = state.httpPort ?? 17890;
-  const wsPort = state.wsPort ?? 17891;
+  // The Rust sidecar serves HTTP and WebSocket on the same Axum listener.
+  const wsPort = state.httpPort ?? 17890;
   const deepLink = `mycast://pair?host=${encodeURIComponent(host)}&httpPort=${port}&wsPort=${wsPort}&code=${encodeURIComponent(pairCode)}`;
   const httpLink = `http://${host}:${port}/?pair=${encodeURIComponent(pairCode)}`;
   return { deepLink, httpLink };

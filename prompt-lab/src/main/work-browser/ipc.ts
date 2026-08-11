@@ -12,10 +12,10 @@ import { WorkspaceStore } from './workspace-store';
 import { DocumentStore } from './document-store';
 import { SearchRouter } from './search-router';
 import { savePageAsMarkdown } from './save';
-import { getCleanerPayload } from './cleaner';
+import { getCleanerPayload, getWebviewCleanerPreloadPath, setupWorkBrowserSession } from './cleaner';
 import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
 import type {
-  WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus,
+  WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, AnnotationId,
 } from '../../core/work-browser/types';
 
 let initialized = false;
@@ -23,6 +23,9 @@ let initialized = false;
 export function setupWorkBrowserIPC(): void {
   if (initialized) return;
   initialized = true;
+
+  // 注册 work-browser 专属 session 的网络层净化
+  setupWorkBrowserSession();
 
   const db = getDatabase();
   const workspaces = new WorkspaceStore(db);
@@ -81,6 +84,14 @@ export function setupWorkBrowserIPC(): void {
   // ── Cleaner ──
 
   ipcMain.handle('work-browser:cleaner:payload', (_e, options?: any) => getCleanerPayload(options));
+  ipcMain.handle('work-browser:cleaner:webview-payload', () => getCleanerPayload());
+  ipcMain.handle('work-browser:cleaner:webview-preload-path', () => getWebviewCleanerPreloadPath());
+
+  // ── Annotation ──
+
+  ipcMain.handle('work-browser:annotation:list', (_e, documentId: DocumentId) => documents.listAnnotations(documentId));
+  ipcMain.handle('work-browser:annotation:create', (_e, input: { documentId: DocumentId; selector: string; rangeText: string; note: string; color: string }) => documents.createAnnotation(input));
+  ipcMain.handle('work-browser:annotation:delete', (_e, id: AnnotationId) => documents.deleteAnnotation(id));
 
   // ── Settings ──
 
