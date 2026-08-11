@@ -2,7 +2,7 @@
  * LibraryList — 右侧 Library（已保存文档 + 搜索历史）
  */
 import { Tabs, List, Typography, Empty, Space, Tag } from '../ui';
-import { FilePenLine, FileText, Search } from 'lucide-react';
+import { FilePenLine, FileText, GitCompareArrows, Search } from 'lucide-react';
 import type { Document, SearchHistoryEntry } from '../../../core/work-browser/types';
 
 export interface LibraryListProps {
@@ -10,10 +10,11 @@ export interface LibraryListProps {
   history: SearchHistoryEntry[];
   onOpenDocument: (doc: Document) => void;
   onEditDocument: (doc: Document) => void;
+  onCompareDocument: (doc: Document) => void;
   onReplayQuery: (text: string) => void;
 }
 
-export function LibraryList({ documents, history, onOpenDocument, onEditDocument, onReplayQuery }: LibraryListProps) {
+export function LibraryList({ documents, history, onOpenDocument, onEditDocument, onCompareDocument, onReplayQuery }: LibraryListProps) {
   return (
     <Tabs
       size="small"
@@ -35,6 +36,15 @@ export function LibraryList({ documents, history, onOpenDocument, onEditDocument
                       <Space direction="vertical" size={2} style={{ width: '100%' }}>
                         <div className="flex w-full items-center gap-2">
                           <Typography.Text strong ellipsis className="min-w-0 flex-1">{d.title}</Typography.Text>
+                          <button
+                            type="button"
+                            title="比较最近两个版本"
+                            aria-label={`比较 ${d.title} 的版本`}
+                            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
+                            onClick={(event) => { event.stopPropagation(); onCompareDocument(d); }}
+                          >
+                            <GitCompareArrows size={13} />
+                          </button>
                           <button
                             type="button"
                             title="在 Markdown 编辑器中打开"

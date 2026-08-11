@@ -19,11 +19,13 @@ import { instantiateTask, ALL_TEMPLATES, type TaskTemplate } from '../../core/wo
 import { runTask, type TaskStepHandler } from '../../core/work-browser/task/runner';
 import { buildAutoHandlers, type TaskAutoContext } from '../../core/work-browser/task/auto-handlers';
 import { buildRagContext } from '../../core/work-browser/ai/rag';
+import { extractReadability } from '../../core/work-browser/parser';
 import { embed } from '../../core/work-browser/embedding/embedder';
 import { searchLanceDocuments } from '../lancedb-memory';
 import { DEFAULT_MODEL_ID } from '../../core/work-browser/embedding/embedder';
 import { summarizeResults } from '../../core/work-browser/ai/summarizer';
 import { resolveWorkBrowserAIConfig, setRuntimeAIConfig } from './ai-config';
+import { buildMcpAgentTools, recordMcpAgentDenial } from './mcp-tools';
 import { GraphStore } from '../../core/work-browser/graph/edges';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
@@ -65,6 +67,23 @@ export function setupWorkBrowserIPC(): void {
   ipcMain.handle('work-browser:document:list', (_e, workspaceId: WorkspaceId, limit?: number) => documents.listDocuments(workspaceId, limit));
   ipcMain.handle('work-browser:document:get', (_e, id: DocumentId) => documents.getDocument(id));
   ipcMain.handle('work-browser:document:versions', (_e, id: DocumentId) => documents.listVersions(id));
+  ipcMain.handle('work-browser:document:compare', async (_e, id: DocumentId) => {
+    const document = documents.getDocument(id);
+    if (!document) throw new Error(`Document not found: ${id}`);
+    const versions = documents.listVersions(id, 2);
+    if (versions.length < 2) throw new Error('至少需要两个已保存版本才能比较');
+    const fs = await import('node:fs/promises');
+    const readVersion = async (version: typeof versions[number]) => {
+      const html = await fs.readFile(version.rawPath, 'utf8');
+      const parsed = await extractReadability(html);
+      return {
+        label: `${document.title} · ${new Date(version.capturedAt).toLocaleString('zh-CN')}.md`,
+        content: `# ${parsed.title || document.title}\n\n${parsed.contentMarkdown}`,
+      };
+    };
+    const [newer, older] = await Promise.all([readVersion(versions[0]), readVersion(versions[1])]);
+    return { left: older, right: newer };
+  });
   ipcMain.handle('work-browser:document:save', async (_e, input: Parameters<typeof savePageAsMarkdown>[0]) => {
     return await savePageAsMarkdown(input, workspaces, documents);
   });
@@ -98,6 +117,7 @@ export function setupWorkBrowserIPC(): void {
     const ctxBlock = buildAgentContextBlock(workspaces, input.workspaceId as WorkspaceId | undefined, input.contextSources);
     const finalSystem = ctxBlock ? `${ctxBlock}\n\n${input.systemPrompt || ''}`.trim() : input.systemPrompt;
     const steps: any[] = [];
+    const mcpTools = buildMcpAgentTools();
     const result = await runAgent({
       userMessage: input.userMessage,
       systemPrompt: finalSystem,
@@ -157,13 +177,15 @@ export function setupWorkBrowserIPC(): void {
             noLink: true,
           });
           const allowed = result.response === 0;
+          if (!allowed) recordMcpAgentDenial(toolName, args as Record<string, unknown>);
           console.log(`[work-browser:agent] dangerous tool "${toolName}" ${allowed ? 'allowed' : 'denied'} by user`);
           return allowed;
         },
       },
+      extraTools: mcpTools,
       onStep: (s) => { steps.push(s); },
     });
-    return { ...result, steps, availableTools: BUILTIN_TOOLS.map((t) => t.name) };
+    return { ...result, steps, availableTools: [...BUILTIN_TOOLS, ...mcpTools].map((t) => t.name) };
   });
 
   // Research Mode 一站式：构造 task + run auto + 保存报告
@@ -378,6 +400,31 @@ export function setupWorkBrowserIPC(): void {
       }
     }
     return documentIds.length;
+  });
+  ipcMain.handle('work-browser:graph:record-edge', (_e, input: {
+    kind: string; workspaceId: WorkspaceId;
+    fromType: string; fromId: string; toType: string; toId: string;
+    weight?: number; metadata?: Record<string, unknown>;
+  }) => {
+    const kinds = new Set(['cited-by', 'similar-to', 'searched-from', 'opened-from', 'saved-with']);
+    const nodeTypes = new Set(['document', 'tab', 'annotation']);
+    if (!kinds.has(input.kind) || !nodeTypes.has(input.fromType) || !nodeTypes.has(input.toType)) throw new Error('INVALID_GRAPH_EDGE');
+    if (!input.workspaceId || !input.fromId || !input.toId || input.fromId.length > 1024 || input.toId.length > 1024) throw new Error('INVALID_GRAPH_NODE');
+    const weight = typeof input.weight === 'number' && Number.isFinite(input.weight)
+      ? Math.max(0.01, Math.min(100, input.weight))
+      : 1;
+    const metadata = JSON.stringify(input.metadata ?? {});
+    if (metadata.length > 16_384) throw new Error('GRAPH_METADATA_TOO_LARGE');
+    graph.recordEdge({
+      kind: input.kind as any,
+      workspaceId: input.workspaceId,
+      fromType: input.fromType as any,
+      fromId: input.fromId,
+      toType: input.toType as any,
+      toId: input.toId,
+      weight,
+      metadata,
+    });
   });
 
   // ── Annotation ──

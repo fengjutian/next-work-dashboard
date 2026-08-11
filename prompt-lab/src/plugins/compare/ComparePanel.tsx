@@ -142,6 +142,32 @@ export const ComparePanel: React.FC = () => {
     localStorage.setItem('compare.preferences.v1', JSON.stringify(preferences));
   }, [preferences]);
 
+  useEffect(() => {
+    const applyComparison = (detail?: { left?: CompareDocument; right?: CompareDocument }) => {
+      if (!detail?.left || !detail.right) return;
+      setLeft({ ...detail.left, readOnly: true });
+      setRight({ ...detail.right, readOnly: true });
+      setPreferences((current) => ({ ...current, mode: 'markdown' }));
+      setActiveChange(-1);
+      setStatus(`正在比较 ${detail.left.label} 与 ${detail.right.label}`);
+    };
+    const openComparison = (event: Event) => {
+      applyComparison((event as CustomEvent<{ left?: CompareDocument; right?: CompareDocument }>).detail);
+      sessionStorage.removeItem('compare.pending.v1');
+    };
+    try {
+      const pending = sessionStorage.getItem('compare.pending.v1');
+      if (pending) {
+        applyComparison(JSON.parse(pending) as { left?: CompareDocument; right?: CompareDocument });
+        sessionStorage.removeItem('compare.pending.v1');
+      }
+    } catch {
+      sessionStorage.removeItem('compare.pending.v1');
+    }
+    window.addEventListener('compare:open-content', openComparison);
+    return () => window.removeEventListener('compare:open-content', openComparison);
+  }, []);
+
   const documentFromFile = (file: FilePickResult): CompareDocument => ({
     label: file.name,
     content: file.text ?? decodeBase64Utf8(file.content),

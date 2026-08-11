@@ -111,6 +111,9 @@ export async function savePageAsMarkdown(
   // 5. 写文件
   const contentPath = path.join(docsDir, `${doc.id}.md`);
   const rawPath = path.join(rawDir, `${doc.id}-${t}.html`);
+  const previousContentMd = existing && isNewVersion
+    ? await fs.readFile(existing.contentPath, 'utf8').catch(() => null)
+    : null;
   await fs.writeFile(contentPath, contentMd, 'utf8');
   await fs.writeFile(rawPath, html, 'utf8');
   documentStore.upsertDocument({ ...doc, contentPath, rawPath, updatedAt: t, plainText: readability.contentText } as any);
@@ -130,8 +133,7 @@ export async function savePageAsMarkdown(
   let diffSummary: string | null = null;
   if (existing && isNewVersion) {
     try {
-      const oldContent = await fs.readFile(existing.contentPath, 'utf8');
-      const hunks = lineDiff(oldContent, contentMd);
+      const hunks = lineDiff(previousContentMd ?? '', contentMd);
       diffSummary = summarizeDiff(hunks);
     } catch { diffSummary = 'unable to diff'; }
     documentStore.appendVersion(newDocumentVersion({
@@ -169,4 +171,3 @@ function appPath(...parts: string[]): string {
   const { app } = require('electron') as typeof import('electron');
   return path.join(app.getPath('userData'), ...parts);
 }
-

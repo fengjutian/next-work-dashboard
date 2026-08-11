@@ -440,6 +440,7 @@ export interface ElectronAPI {
       list: (workspaceId: string, limit?: number) => Promise<unknown[]>;
       get: (id: string) => Promise<unknown>;
       versions: (id: string) => Promise<unknown[]>;
+      compare: (id: string) => Promise<{ left: { label: string; content: string }; right: { label: string; content: string } }>;
       save: (input: { workspaceId: string; tabId?: string | null; url: string; html?: string; title?: string }) => Promise<{ documentId: string; contentPath: string; rawPath: string; contentHash: string; wordCount: number; isNewVersion: boolean; diffSummary: string | null }>;
     };
     note: {
@@ -489,6 +490,7 @@ export interface ElectronAPI {
       listByDocument: (documentId: string, kinds?: string[]) => Promise<unknown[]>;
       listByWorkspace: (workspaceId: string, kind?: string) => Promise<unknown[]>;
       recordSavedWith: (workspaceId: string, documentIds: string[]) => Promise<number>;
+      recordEdge: (input: { kind: string; workspaceId: string; fromType: string; fromId: string; toType: string; toId: string; weight?: number; metadata?: Record<string, unknown> }) => Promise<void>;
     };
     settings: {
       get: (key: string) => Promise<string | null>;

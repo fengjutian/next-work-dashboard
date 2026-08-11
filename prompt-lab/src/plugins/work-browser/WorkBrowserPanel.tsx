@@ -76,6 +76,17 @@ export function WorkBrowserPanel() {
     })));
   }, [setActiveActivity]);
 
+  const compareDocument = useCallback(async (document: Document) => {
+    try {
+      const comparison = await window.electronAPI.workBrowser.document.compare(document.id);
+      sessionStorage.setItem('compare.pending.v1', JSON.stringify(comparison));
+      setActiveActivity('compare');
+      requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('compare:open-content', { detail: comparison })));
+    } catch (error) {
+      message.warning(error instanceof Error ? error.message : String(error));
+    }
+  }, [setActiveActivity]);
+
   useEffect(() => {
     void window.electronAPI.workBrowser.config.setAI({
       baseUrl: aiApi.baseUrl,
@@ -334,6 +345,7 @@ export function WorkBrowserPanel() {
                       history={history}
                       onOpenDocument={(d) => { void handleAddTab(d.url); }}
                       onEditDocument={editDocument}
+                      onCompareDocument={(document) => { void compareDocument(document); }}
                       onReplayQuery={handleSearch}
                     />
                   ),

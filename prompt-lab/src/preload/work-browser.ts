@@ -25,6 +25,7 @@ export const workBrowserBridge = {
     list: (workspaceId: string, limit?: number) => ipcRenderer.invoke('work-browser:document:list', workspaceId, limit),
     get: (id: string) => ipcRenderer.invoke('work-browser:document:get', id),
     versions: (id: string) => ipcRenderer.invoke('work-browser:document:versions', id),
+    compare: (id: string) => ipcRenderer.invoke('work-browser:document:compare', id),
     save: (input: { workspaceId: string; tabId?: string | null; url: string; html?: string; title?: string }) =>
       ipcRenderer.invoke('work-browser:document:save', input),
   },
@@ -80,6 +81,8 @@ export const workBrowserBridge = {
     listByDocument: (documentId: string, kinds?: string[]) => ipcRenderer.invoke('work-browser:graph:list-by-document', documentId, kinds),
     listByWorkspace: (workspaceId: string, kind?: string) => ipcRenderer.invoke('work-browser:graph:list-by-workspace', workspaceId, kind),
     recordSavedWith: (workspaceId: string, documentIds: string[]) => ipcRenderer.invoke('work-browser:graph:record-saved-with', workspaceId, documentIds),
+    recordEdge: (input: { kind: string; workspaceId: string; fromType: string; fromId: string; toType: string; toId: string; weight?: number; metadata?: Record<string, unknown> }) =>
+      ipcRenderer.invoke('work-browser:graph:record-edge', input),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),
