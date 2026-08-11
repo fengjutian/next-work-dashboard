@@ -155,6 +155,46 @@ function Chart({ option, className }: ChartProps) {
   return <div ref={ref} className={className} />;
 }
 
+interface ConfirmDialogProps {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}
+
+const ConfirmDialog: React.FC<ConfirmDialogProps> = ({ title, description, confirmLabel, destructive = false, onCancel, onConfirm }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+      <div ref={dialogRef} role="alertdialog" aria-modal="true" aria-labelledby="net-confirm-title" aria-describedby="net-confirm-description" tabIndex={-1} className="w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-2xl outline-none">
+        <div className="flex items-start gap-3">
+          <div className={`rounded-full p-2 ${destructive ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}>
+            <ShieldAlert className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="net-confirm-title" className="text-sm font-semibold">{title}</h2>
+            <p id="net-confirm-description" className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="rounded border border-border px-3 py-1.5 text-xs hover:bg-muted">取消</button>
+          <button type="button" onClick={() => void onConfirm()} className={`rounded px-3 py-1.5 text-xs font-medium text-white ${destructive ? 'bg-destructive hover:opacity-90' : 'bg-primary hover:opacity-90'}`}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function formatTimestamp(ms: number): string {
   return new Date(ms).toLocaleTimeString();
 }
@@ -182,6 +222,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [autoStart] = useState<boolean>(true);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [showAddTarget, setShowAddTarget] = useState<boolean>(false);
+  const [pendingDeleteTarget, setPendingDeleteTarget] = useState<NetProbeTarget | null>(null);
 
   // Add-target form state
   const [draftKind, setDraftKind] = useState<NetProbeKind>('icmp');
@@ -349,8 +390,6 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const removeTarget = useCallback(
     async (id: string) => {
       if (!api) return;
-      const target = targetMap.get(id);
-      if (!window.confirm(`确认删除监控目标“${target?.target ?? id}”？相关历史数据也可能被移除。`)) return;
       try {
         await api.removeTarget(id);
         setTargets((prev) => prev.filter((t) => t.id !== id));
@@ -362,7 +401,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
         setError(String((e as Error).message ?? e));
       }
     },
-    [api, selectedId, targetMap],
+    [api, selectedId],
   );
 
   const toggleTarget = useCallback(
@@ -736,7 +775,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void removeTarget(t.id)}
+                    onClick={() => setPendingDeleteTarget(t)}
                     className="rounded p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                     title="删除"
                     aria-label={`删除 ${t.target}`}
@@ -748,6 +787,13 @@ export const NetworkObservatoryPanel: React.FC = () => {
             )}
           </div>
           <div className="border-t border-border p-2 space-y-1">
+            <button
+              type="button"
+              onClick={() => setActiveView('overview')}
+              className={`w-full rounded border px-2 py-1.5 text-xs ${activeView === 'overview' ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
+            >
+              网络健康总览
+            </button>
             <button
               type="button"
               onClick={() => setActiveView('rules')}
@@ -824,6 +870,20 @@ export const NetworkObservatoryPanel: React.FC = () => {
           systemInfo={systemInfo}
           selectedId={selectedId}
           onClose={() => setShowExportModal(false)}
+        />
+      )}
+      {pendingDeleteTarget && (
+        <ConfirmDialog
+          title="删除监控目标"
+          description={`确认删除“${pendingDeleteTarget.target}”？相关历史数据也可能被移除。`}
+          confirmLabel="删除目标"
+          destructive
+          onCancel={() => setPendingDeleteTarget(null)}
+          onConfirm={async () => {
+            const id = pendingDeleteTarget.id;
+            setPendingDeleteTarget(null);
+            await removeTarget(id);
+          }}
         />
       )}
     </div>
@@ -1005,6 +1065,19 @@ const TargetDetail: React.FC<TargetDetailProps> = ({ target, history, stats, cha
       )}
       {traceroutePath ? (
         <TraceroutePathView path={traceroutePath} />
+      ) : target.probe === 'traceroute' ? (
+        <div className="flex h-48 flex-col items-center justify-center gap-2 border-b border-border bg-muted/10 px-6 text-center">
+          {history.some((result) => !result.success) ? (
+            <ShieldAlert className="h-7 w-7 text-destructive/70" />
+          ) : (
+            <RefreshCw className="h-7 w-7 animate-spin text-primary/70" />
+          )}
+          <p className="text-sm font-medium">{history.some((result) => !result.success) ? '路径探测暂未成功' : '正在等待首次路径结果'}</p>
+          <p className="max-w-lg text-xs leading-5 text-muted-foreground">
+            {history.find((result) => !result.success)?.error
+              ?? `Traceroute 最长可能需要几十秒，下一次探测间隔为 ${Math.round(target.intervalMs / 1000)} 秒。`}
+          </p>
+        </div>
       ) : (
         <>
           <div className="h-48 border-b border-border">

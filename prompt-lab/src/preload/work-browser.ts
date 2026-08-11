@@ -1,0 +1,63 @@
+/**
+ * Work Browser — Preload 桥接
+ *
+ * 暴露到 window.electronAPI.workBrowser
+ * 与 main/work-browser/ipc.ts 一一对应；channel 名必须同步。
+ */
+import { ipcRenderer } from 'electron';
+
+export const workBrowserBridge = {
+  workspace: {
+    list: (includeArchived?: boolean) => ipcRenderer.invoke('work-browser:workspace:list', includeArchived),
+    get: (id: string) => ipcRenderer.invoke('work-browser:workspace:get', id),
+    create: (input: { name: string; description?: string; icon?: string; color?: string; storagePath?: string; privacyMode?: 'normal' | 'local-only' }) =>
+      ipcRenderer.invoke('work-browser:workspace:create', input),
+    update: (id: string, patch: any) => ipcRenderer.invoke('work-browser:workspace:update', id, patch),
+    archive: (id: string) => ipcRenderer.invoke('work-browser:workspace:archive', id),
+  },
+  tab: {
+    list: (workspaceId: string) => ipcRenderer.invoke('work-browser:tab:list', workspaceId),
+    create: (input: { workspaceId: string; url: string; title?: string }) => ipcRenderer.invoke('work-browser:tab:create', input),
+    update: (id: string, patch: any) => ipcRenderer.invoke('work-browser:tab:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('work-browser:tab:delete', id),
+  },
+  document: {
+    list: (workspaceId: string, limit?: number) => ipcRenderer.invoke('work-browser:document:list', workspaceId, limit),
+    get: (id: string) => ipcRenderer.invoke('work-browser:document:get', id),
+    versions: (id: string) => ipcRenderer.invoke('work-browser:document:versions', id),
+    save: (input: { workspaceId: string; tabId?: string | null; url: string; html?: string; title?: string }) =>
+      ipcRenderer.invoke('work-browser:document:save', input),
+  },
+  note: {
+    list: (workspaceId: string) => ipcRenderer.invoke('work-browser:note:list', workspaceId),
+    create: (input: { workspaceId: string; title: string; content: string; documentId?: string; tabId?: string; taskId?: string; tags?: string[] }) =>
+      ipcRenderer.invoke('work-browser:note:create', input),
+  },
+  task: {
+    list: (workspaceId: string, status?: string) => ipcRenderer.invoke('work-browser:task:list', workspaceId, status),
+    upsert: (task: any) => ipcRenderer.invoke('work-browser:task:upsert', task),
+  },
+  conversation: {
+    list: (workspaceId: string) => ipcRenderer.invoke('work-browser:conversation:list', workspaceId),
+    get: (id: string) => ipcRenderer.invoke('work-browser:conversation:get', id),
+    upsert: (conv: any) => ipcRenderer.invoke('work-browser:conversation:upsert', conv),
+  },
+  search: {
+    providers: () => ipcRenderer.invoke('work-browser:search:providers'),
+    run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string }) =>
+      ipcRenderer.invoke('work-browser:search:run', input),
+    suggest: (text: string) => ipcRenderer.invoke('work-browser:search:suggest', text),
+    history: (limit?: number) => ipcRenderer.invoke('work-browser:search:history', limit),
+  },
+  cleaner: {
+    payload: (options?: any) => ipcRenderer.invoke('work-browser:cleaner:payload', options),
+  },
+  settings: {
+    get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),
+    set: (key: string, value: string) => ipcRenderer.invoke('work-browser:settings:set', key, value),
+  },
+  autoGroup: {
+    suggest: (docSummary: { title: string; url: string; capturedAt: number }) =>
+      ipcRenderer.invoke('work-browser:auto-group:suggest', docSummary),
+  },
+};

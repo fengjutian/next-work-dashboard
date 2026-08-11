@@ -420,6 +420,56 @@ export interface ElectronAPI {
   shell: {
     openExternal: (url: string) => Promise<void>;
   };
+  workBrowser: {
+    workspace: {
+      list: (includeArchived?: boolean) => Promise<unknown[]>;
+      get: (id: string) => Promise<unknown>;
+      create: (input: { name: string; description?: string; icon?: string; color?: string; storagePath?: string; privacyMode?: 'normal' | 'local-only' }) => Promise<unknown>;
+      update: (id: string, patch: any) => Promise<unknown>;
+      archive: (id: string) => Promise<void>;
+    };
+    tab: {
+      list: (workspaceId: string) => Promise<unknown[]>;
+      create: (input: { workspaceId: string; url: string; title?: string }) => Promise<unknown>;
+      update: (id: string, patch: any) => Promise<void>;
+      remove: (id: string) => Promise<void>;
+    };
+    document: {
+      list: (workspaceId: string, limit?: number) => Promise<unknown[]>;
+      get: (id: string) => Promise<unknown>;
+      versions: (id: string) => Promise<unknown[]>;
+      save: (input: { workspaceId: string; tabId?: string | null; url: string; html?: string; title?: string }) => Promise<{ documentId: string; contentPath: string; rawPath: string; contentHash: string; wordCount: number; isNewVersion: boolean; diffSummary: string | null }>;
+    };
+    note: {
+      list: (workspaceId: string) => Promise<unknown[]>;
+      create: (input: { workspaceId: string; title: string; content: string; documentId?: string; tabId?: string; taskId?: string; tags?: string[] }) => Promise<unknown>;
+    };
+    task: {
+      list: (workspaceId: string, status?: string) => Promise<unknown[]>;
+      upsert: (task: any) => Promise<void>;
+    };
+    conversation: {
+      list: (workspaceId: string) => Promise<unknown[]>;
+      get: (id: string) => Promise<unknown>;
+      upsert: (conv: any) => Promise<void>;
+    };
+    search: {
+      providers: () => Promise<Array<{ id: string; name: string; capabilities: any }>>;
+      run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string }) => Promise<{ results: any[]; providers: any[]; aiSummary: string | null; took: number }>;
+      suggest: (text: string) => Promise<string[]>;
+      history: (limit?: number) => Promise<unknown[]>;
+    };
+    cleaner: {
+      payload: (options?: any) => Promise<{ css: string; js: string; blockedDomains: string[] }>;
+    };
+    settings: {
+      get: (key: string) => Promise<string | null>;
+      set: (key: string, value: string) => Promise<void>;
+    };
+    autoGroup: {
+      suggest: (docSummary: { title: string; url: string; capturedAt: number }) => Promise<Array<{ workspaceId: string; score: number; reasons: string[] }>>;
+    };
+  };
 }
 
 export interface RagWorkerChunkInput {

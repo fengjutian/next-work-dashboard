@@ -1,5 +1,6 @@
 ﻿import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron';
 import type { ElectronAPI, MemoryFile } from './types/electron';
+import { workBrowserBridge } from './preload/work-browser';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
@@ -463,6 +464,9 @@ const electronAPI: ElectronAPI = {
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
   },
+
+  // Work Browser（work-browser 插件）
+  workBrowser: workBrowserBridge,
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
