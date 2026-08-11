@@ -39,13 +39,39 @@ const WEBVIEW_SCROLLBAR_CSS = `
   ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.5) !important; background-clip: padding-box !important; }
 `;
 
+const INSTALL_LINK_BRIDGE = `(() => {
+  if (window.__workBrowserLinkBridgeInstalled) return;
+  window.__workBrowserLinkBridgeInstalled = true;
+  document.addEventListener('click', (event) => {
+    if (event.button !== 0) return;
+    const anchor = event.composedPath().find((node) => node instanceof HTMLAnchorElement && node.href)
+      || (event.target && event.target.closest ? event.target.closest('a[href]') : null);
+    if (!anchor || anchor.hasAttribute('download') || !/^https?:\\/\\//i.test(anchor.href)) return;
+    const current = location.href.split('#')[0];
+    const target = anchor.href.split('#')[0];
+    if (current === target && anchor.href.includes('#')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    console.info('__WORK_BROWSER_LINK__' + anchor.href);
+  }, true);
+})()`;
+
 export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
+  const lastOpenedUrlRef = useRef<{ url: string; at: number }>({ url: '', at: 0 });
   const [preloadPath, setPreloadPath] = useState<string>('');
   const [selection, setSelection] = useState<{ text: string; selector: string; x: number; y: number } | null>(null);
   const [annotationPanel, setAnnotationPanel] = useState<{ id: string; note: string; rangeText: string; color: string; url: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [startValue, setStartValue] = useState('');
+
+  const openInInternalTab = useCallback((url: string) => {
+    if (!/^https?:\/\//i.test(url)) return;
+    const now = Date.now();
+    if (lastOpenedUrlRef.current.url === url && now - lastOpenedUrlRef.current.at < 1000) return;
+    lastOpenedUrlRef.current = { url, at: now };
+    onOpenUrl?.(url);
+  }, [onOpenUrl]);
 
   // 取 webview-cleaner-preload 路径
   useEffect(() => {
@@ -60,6 +86,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
+    void wv.executeJavaScript(INSTALL_LINK_BRIDGE).catch(() => undefined);
 
     const onIpcMessage = (e: Electron.IpcMessageEvent) => {
       if (e.channel === 'work-browser:selection-changed') {
@@ -90,12 +117,13 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
         }
       } else if (e.channel === 'work-browser:open-url') {
         const url = String((e.args?.[0] as any)?.url || '');
-        if (/^https?:\/\//i.test(url)) onOpenUrl?.(url);
+        openInInternalTab(url);
       }
     };
     const onDidFinishLoad = () => {
       setLoaded(true);
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
+      void wv.executeJavaScript(INSTALL_LINK_BRIDGE).catch(() => undefined);
       // 主动触发 webview 内部重读 annotations
       void wv.executeJavaScript(`window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`).catch(() => undefined);
     };
@@ -115,12 +143,26 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     const onNewWindow = (event: Event) => {
       const popupEvent = event as Event & { url?: string };
       event.preventDefault();
-      if (popupEvent.url && /^https?:\/\//i.test(popupEvent.url)) onOpenUrl?.(popupEvent.url);
+      if (popupEvent.url) openInInternalTab(popupEvent.url);
+    };
+    const onWillNavigate = (event: Event) => {
+      const navigation = event as Event & { url?: string };
+      const url = String(navigation.url || '');
+      if (!url || !tab || url === tab.url || !/^https?:\/\//i.test(url)) return;
+      event.preventDefault();
+      openInInternalTab(url);
+    };
+    const onConsoleMessage = (event: Event) => {
+      const message = String((event as Event & { message?: string }).message || '');
+      const prefix = '__WORK_BROWSER_LINK__';
+      if (message.startsWith(prefix)) openInInternalTab(message.slice(prefix.length));
     };
     wv.addEventListener('ipc-message', onIpcMessage);
     wv.addEventListener('did-finish-load', onDidFinishLoad);
     wv.addEventListener('did-start-loading', onDidStartLoading);
     wv.addEventListener('new-window' as any, onNewWindow as any);
+    wv.addEventListener('will-navigate' as any, onWillNavigate as any);
+    wv.addEventListener('console-message', onConsoleMessage as any);
     wv.addEventListener('page-title-updated', onPageTitleUpdated as any);
     wv.addEventListener('did-navigate', onDidNavigate as any);
     wv.addEventListener('page-favicon-updated', onPageFaviconUpdated as any);
@@ -129,11 +171,13 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       wv.removeEventListener('did-finish-load', onDidFinishLoad);
       wv.removeEventListener('did-start-loading', onDidStartLoading);
       wv.removeEventListener('new-window' as any, onNewWindow as any);
+      wv.removeEventListener('will-navigate' as any, onWillNavigate as any);
+      wv.removeEventListener('console-message', onConsoleMessage as any);
       wv.removeEventListener('page-title-updated', onPageTitleUpdated as any);
       wv.removeEventListener('did-navigate', onDidNavigate as any);
       wv.removeEventListener('page-favicon-updated', onPageFaviconUpdated as any);
     };
-  }, [tab, preloadPath, onSelectionChange, onOpenUrl, onTabUpdate]);
+  }, [tab, preloadPath, onSelectionChange, openInInternalTab, onTabUpdate]);
 
   const handleAnnotation = useCallback(async (note: string, color: string) => {
     if (!selection || !activeDocumentId) return;
