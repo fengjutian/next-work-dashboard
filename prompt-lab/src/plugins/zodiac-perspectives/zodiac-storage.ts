@@ -22,6 +22,7 @@ import {
   HISTORY_MAX_RUNS,
   ZODIAC_SIGNS,
   type GenerationLength,
+  type GenerationMode,
   type GenerationScene,
   type GenerationTone,
   type ZodiacPerspective,
@@ -36,6 +37,7 @@ const DEFAULT_OPTIONS: Record<string, unknown> = {
   length: 'standard',
   tone: 'gentle',
   includeSynthesis: true,
+  mode: 'standard',
 };
 
 function recordToRun(record: ZodiacRunRecord): ZodiacRun {
@@ -75,11 +77,13 @@ function normalizeOptions(raw: unknown): ZodiacRun['options'] {
   const scenes: readonly GenerationScene[] = ['general', 'work', 'relationship', 'decision', 'creative', 'entertainment'];
   const lengths: readonly GenerationLength[] = ['short', 'standard', 'detailed'];
   const tones: readonly GenerationTone[] = ['rational', 'gentle', 'sharp', 'humorous'];
+  const modes: readonly GenerationMode[] = ['fast', 'standard', 'deep'];
   return {
     scene: scenes.includes(base.scene as GenerationScene) ? base.scene as GenerationScene : 'general',
     length: lengths.includes(base.length as GenerationLength) ? base.length as GenerationLength : 'standard',
     tone: tones.includes(base.tone as GenerationTone) ? base.tone as GenerationTone : 'gentle',
     includeSynthesis: base.includeSynthesis !== false,
+    mode: modes.includes(base.mode as GenerationMode) ? base.mode as GenerationMode : 'standard',
   };
 }
 

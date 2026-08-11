@@ -27,6 +27,7 @@ import { ZODIAC_META } from './zodiac-data';
 import {
   COMMON_SYSTEM_PROMPT,
   buildFollowupSystemPrompt,
+  buildFastBatchUserPrompt,
   buildSingleSignUserPrompt,
   buildSynthesisUserPrompt,
   detectHighRisk,
@@ -251,10 +252,59 @@ async function collectStream(
   return raw;
 }
 
+export function parseFastBatch(raw: string): ZodiacPerspective[] {
+  const parsed = extractJson(raw);
+  if (!parsed || typeof parsed !== 'object') throw new Error('快速模式返回的不是 JSON 对象');
+  const items = (parsed as Record<string, unknown>).perspectives;
+  if (!Array.isArray(items)) throw new Error('快速模式缺少 perspectives 数组');
+  const bySign = new Map<ZodiacSign, ZodiacPerspective>();
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const sign = (item as Record<string, unknown>).sign;
+    if (typeof sign !== 'string' || !(ZODIAC_SIGNS as readonly string[]).includes(sign)) continue;
+    if (!bySign.has(sign as ZodiacSign)) bySign.set(sign as ZodiacSign, parsePerspective(JSON.stringify(item), sign as ZodiacSign));
+  }
+  if (bySign.size !== ZODIAC_SIGNS.length) throw new Error(`快速模式仅返回 ${bySign.size} / 12 个有效视角`);
+  return ZODIAC_SIGNS.map((sign) => bySign.get(sign)!);
+}
+
+async function generateFastBatch(
+  question: string,
+  options: GenerationOptions,
+  ctx: GenerateContext,
+  signal?: AbortSignal,
+): Promise<ZodiacPerspective[]> {
+  const messages: ChatMessage[] = [
+    { role: 'system', content: COMMON_SYSTEM_PROMPT },
+    { role: 'user', content: buildFastBatchUserPrompt(question, options) },
+  ];
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return parseFastBatch(await collectStream(messages, { model: ctx.model, temperature: 0.75, maxTokens: 3200, signal }, ctx));
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+      if (attempt === 0 && isTransientLlmError(error)) await waitForRetry(attempt, signal);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 export function isTransientLlmError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return /LLM API error (408|409|425|429|5\d\d)\b/i.test(error.message)
     || /\b(timeout|timed out|network|fetch failed|ECONNRESET|ETIMEDOUT)\b/i.test(error.message);
+}
+
+export function describeLlmError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/LLM API error 401|LLM API error 403/i.test(message)) return 'AI 服务鉴权失败，请检查 API Key 和服务权限。';
+  if (/LLM API error 429/i.test(message)) return 'AI 服务请求过于频繁，自动重试后仍未成功，请稍后再试。';
+  if (/LLM API error 5\d\d/i.test(message)) return 'AI 服务暂时不可用，请稍后重试。';
+  if (/timeout|timed out|network|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message)) return '网络连接异常或请求超时，请检查网络后重试。';
+  if (/JSON|interpretation|perspectives|汇总.*(?:缺少|至少)/i.test(message)) return `AI 输出格式不完整：${message}`;
+  return message;
 }
 
 async function waitForRetry(attempt: number, signal?: AbortSignal): Promise<void> {
@@ -369,6 +419,20 @@ export async function generateAllPerspectives(
   const warnings: string[] = [];
   if (highRisk) {
     warnings.push(`检测到「${highRisk.category}」类高风险问题：${highRisk.guidance}`);
+  }
+
+  if (options.mode === 'fast') {
+    for (const sign of ZODIAC_SIGNS) callbacks.onCardStart?.(sign);
+    try {
+      const perspectives = await generateFastBatch(question, options, ctx, signal);
+      for (const perspective of perspectives) callbacks.onCardDone?.(perspective.sign, perspective);
+      return { perspectives, synthesis: null, partialSigns: [], warnings };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      for (const sign of ZODIAC_SIGNS) callbacks.onCardFailed?.(sign, message);
+      throw error;
+    }
   }
 
   const tasks = ZODIAC_SIGNS.map((sign) => async (): Promise<{ sign: ZodiacSign; perspective: ZodiacPerspective }> => {

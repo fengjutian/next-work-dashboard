@@ -28,7 +28,7 @@ import type {
   ZodiacRun,
   ZodiacSign,
 } from './zodiac-types';
-import { generateAllPerspectives, generatePerspective, regenerateSynthesis, type GenerateCallbacks } from './zodiac-service';
+import { describeLlmError, generateAllPerspectives, generatePerspective, regenerateSynthesis, type GenerateCallbacks } from './zodiac-service';
 import { buildAllPerspectivesMarkdown, copyText } from './zodiac-copy';
 import {
   defaultTitle,
@@ -47,6 +47,7 @@ const DEFAULT_OPTIONS: GenerationOptions = {
   length: 'standard',
   tone: 'gentle',
   includeSynthesis: true,
+  mode: 'standard',
 };
 
 const EMPTY_RUN: Omit<ZodiacRun, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -250,7 +251,7 @@ export function ZodiacPerspectivesPanel() {
           toast.success('十二星座已全部回答完毕。');
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = describeLlmError(error);
         if (controller.signal.aborted) {
           toast.message('已取消当前生成。');
         } else {
@@ -305,7 +306,7 @@ export function ZodiacPerspectivesPanel() {
         toast.success(`${ZODIAC_META[sign].name} 已重新生成。`);
       } catch (error) {
         if (controller.signal.aborted) return;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = describeLlmError(error);
         updateCard({ status: 'failed', error: message, streamedInterpretation: undefined });
         toast.error(`重试失败：${message}`);
       }
@@ -333,7 +334,7 @@ export function ZodiacPerspectivesPanel() {
       toast.success('圆桌纪要已更新。');
     } catch (error) {
       if (controller.signal.aborted) return;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeLlmError(error);
       setErrorMessage(message);
       setSynthesisStatus('failed');
       toast.error(`总结生成失败：${message}`);

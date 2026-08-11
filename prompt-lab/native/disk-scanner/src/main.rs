@@ -1,5 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet},
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet},
     env, fs,
     hash::{DefaultHasher, Hasher},
     io::{self, BufRead, BufReader, Read, Write},
@@ -100,15 +101,45 @@ struct FileResult {
     extension: String,
 }
 
+/// 只按 size 排序的 wrapper —— BinaryHeap 不能直接对 FileResult 排序（会落到 path
+/// 等无关字段）。Reverse<BySize> 配合 BinaryHeap 形成 size 最小在堆顶的 min-heap，
+/// 便于在 O(log n) 内维护 TopN。
+struct BySize(pub FileResult);
+
+impl PartialEq for BySize {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.size == other.0.size
+    }
+}
+impl Eq for BySize {}
+impl PartialOrd for BySize {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for BySize {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.size.cmp(&other.0.size)
+    }
+}
+
 struct DuplicateGroup {
     size: u64,
     files: Vec<FileResult>,
 }
 
-fn retain_largest(largest: &mut Vec<FileResult>, candidate: FileResult, limit: usize) {
-    if largest.len() < limit { largest.push(candidate); return; }
-    if let Some((index, smallest)) = largest.iter().enumerate().min_by_key(|(_, file)| file.size) {
-        if candidate.size > smallest.size { largest[index] = candidate; }
+fn retain_largest(heap: &mut BinaryHeap<Reverse<BySize>>, candidate: FileResult, limit: usize) {
+    let item = Reverse(BySize(candidate));
+    if heap.len() < limit {
+        heap.push(item);
+        return;
+    }
+    // BinaryHeap<Reverse<BySize>> 的 peek 是 size 最小者；新候选 size 更大才替换。
+    if let Some(min) = heap.peek() {
+        if item.0.0.size > min.0.0.size {
+            heap.pop();
+            heap.push(item);
+        }
     }
 }
 
@@ -167,6 +198,44 @@ fn emit(line: &str) {
     let _ = io::stdout().flush();
 }
 
+/// 攒批 emit `files` 事件：把 buffer 里的 FileResult 序列化为单个 JSON 数组。
+/// 减少 IPC 流量与 setState 频率，渲染端的 TopN 在收到批次后一次性 bulk push。
+fn emit_files_batch(buffer: &mut Vec<FileResult>) {
+    if buffer.is_empty() { return; }
+    let mut out = String::with_capacity(buffer.len() * 96);
+    out.push_str(r#"{"type":"files","items":["#);
+    for (index, file) in buffer.iter().enumerate() {
+        if index > 0 { out.push(','); }
+        out.push_str(&format!(
+            r#"{{"path":"{}","size":{},"modifiedAt":{},"extension":"{}"}}"#,
+            escape_json(&file.path),
+            file.size,
+            file.modified,
+            escape_json(&file.extension),
+        ));
+    }
+    out.push_str("]}");
+    emit(&out);
+    buffer.clear();
+}
+
+/// 攒批 emit `directories` 事件：与 files 同理。
+fn emit_directories_batch(buffer: &mut Vec<(String, u64)>) {
+    if buffer.is_empty() { return; }
+    let mut out = String::with_capacity(buffer.len() * 96);
+    out.push_str(r#"{"type":"directories","items":["#);
+    for (index, (path, size)) in buffer.iter().enumerate() {
+        if index > 0 { out.push(','); }
+        out.push_str(&format!(
+            r#"{{"path":"{}","size":{size}}}"#,
+            escape_json(path),
+        ));
+    }
+    out.push_str("]}");
+    emit(&out);
+    buffer.clear();
+}
+
 fn normalized_name(value: &str) -> String {
     if cfg!(windows) {
         value.to_lowercase()
@@ -186,7 +255,20 @@ fn error_category(error: &io::Error) -> &'static str {
         io::ErrorKind::PermissionDenied => "permission-denied",
         io::ErrorKind::NotFound => "not-found",
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => "busy",
-        _ => "io",
+        _ => {
+            // Windows 上 ERROR_SHARING_VIOLATION (32) 与 ERROR_LOCK_VIOLATION (33) 表示
+            // 目标文件正被其他进程占用（常用于日志、pdb、锁文件）。这两个错误在 std 里
+            // 不映射为 WouldBlock/TimedOut，必须按 raw_os_error 额外识别。
+            #[cfg(windows)]
+            {
+                if let Some(code) = error.raw_os_error() {
+                    if code == 32 || code == 33 {
+                        return "busy";
+                    }
+                }
+            }
+            "io"
+        }
     }
 }
 
@@ -205,10 +287,13 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
     let mut reported_errors = 0_u64;
     let mut directories_scanned = 0_u64;
     let started = Instant::now();
-    let mut largest: Vec<FileResult> = Vec::with_capacity(50);
     let mut extensions: HashMap<String, u64> = HashMap::new();
     let mut by_size: HashMap<u64, Vec<FileResult>> = HashMap::new();
     let mut directory_bytes: HashMap<PathBuf, u64> = HashMap::new();
+    // 攒批 buffer：每 256 个文件 flush 一次 `files` 事件，避免每文件一次 IPC。
+    // 渲染端按 TopN 自己算 largest，这里不再维护 largest heap。
+    let mut file_buffer: Vec<FileResult> = Vec::with_capacity(256);
+    const FILE_BATCH_SIZE: usize = 256;
     while let Some(directory) = stack.pop() {
         while paused.load(Ordering::Relaxed) { thread::sleep(std::time::Duration::from_millis(100)); }
         directories_scanned += 1;
@@ -296,8 +381,10 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
             }
         }
     }
-    largest.sort_unstable_by(|a, b| b.size.cmp(&a.size));
-    for file in largest {
+    // BinaryHeap::into_sorted_vec 升序输出；UI 期望最大在前，reverse 一次。
+    let mut sorted = largest.into_sorted_vec();
+    sorted.reverse();
+    for Reverse(BySize(file)) in sorted {
         emit(&format!(
             r#"{{"type":"file","path":"{}","size":{},"modifiedAt":{},"extension":"{}"}}"#,
             escape_json(&file.path),
@@ -465,8 +552,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_hash, normalized_name, retain_largest, same_content, should_exclude, FileResult};
-    use std::collections::HashSet;
+    use super::{content_hash, normalized_name, retain_largest, same_content, should_exclude, BySize, FileResult};
+    use std::cmp::Reverse;
+    use std::collections::{BinaryHeap, HashSet};
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -510,13 +598,16 @@ mod tests {
 
     #[test]
     fn top_files_remain_bounded_for_large_streams() {
-        let mut largest = Vec::new();
+        let mut largest: BinaryHeap<Reverse<BySize>> = BinaryHeap::with_capacity(50);
         for size in 0..1_000_000_u64 {
             retain_largest(&mut largest, FileResult { path: size.to_string(), size, modified: 0, extension: String::new() }, 50);
         }
-        largest.sort_unstable_by(|a, b| b.size.cmp(&a.size));
+        // 验证堆容量始终为 50（不再依赖 Vec 长度收缩）
         assert_eq!(largest.len(), 50);
-        assert_eq!(largest[0].size, 999_999);
-        assert_eq!(largest[49].size, 999_950);
+        let mut sorted = largest.into_sorted_vec();
+        sorted.reverse();
+        assert_eq!(sorted.len(), 50);
+        assert_eq!(sorted[0].0.size, 999_999);
+        assert_eq!(sorted[49].0.size, 999_950);
     }
 }

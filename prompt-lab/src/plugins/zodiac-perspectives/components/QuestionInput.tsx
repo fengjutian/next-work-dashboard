@@ -5,7 +5,7 @@
 import { useCallback, useId, useState } from 'react';
 import { Sparkles, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { LENGTH_OPTIONS, SCENE_OPTIONS, TONE_OPTIONS } from '../zodiac-data';
+import { LENGTH_OPTIONS, MODE_OPTIONS, SCENE_OPTIONS, TONE_OPTIONS } from '../zodiac-data';
 import type { GenerationOptions } from '../zodiac-types';
 import { QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH } from '../zodiac-types';
 
@@ -41,6 +41,7 @@ export function QuestionInput({
   const sceneId = useId();
   const toneId = useId();
   const synthesisId = useId();
+  const modeId = useId();
   const trimmed = question.trim();
   const tooShort = trimmed.length < QUESTION_MIN_LENGTH;
   const tooLong = trimmed.length > QUESTION_MAX_LENGTH;
@@ -108,7 +109,23 @@ export function QuestionInput({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <OptionGroup
+          inputId={modeId}
+          label="模式"
+          value={options.mode}
+          options={MODE_OPTIONS}
+          onChange={(value) => {
+            const mode = value as GenerationOptions['mode'];
+            onOptionsChange({
+              ...options,
+              mode,
+              length: mode === 'fast' ? 'short' : mode === 'deep' ? 'detailed' : options.length,
+              includeSynthesis: mode === 'fast' ? false : mode === 'deep' ? true : options.includeSynthesis,
+            });
+          }}
+          disabled={disabled}
+        />
         <OptionGroup
           inputId={sceneId}
           label="场景"
@@ -144,12 +161,15 @@ export function QuestionInput({
               type="checkbox"
               checked={options.includeSynthesis}
               onChange={(event) => onOptionsChange({ ...options, includeSynthesis: event.target.checked })}
-              disabled={disabled}
+              disabled={disabled || options.mode === 'fast'}
+              aria-describedby={`${synthesisId}-hint`}
               className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
             />
             <span>生成对比总结</span>
           </label>
-          <p className="text-xs text-muted-foreground">关闭后只输出 12 个星座视角</p>
+          <p id={`${synthesisId}-hint`} className="text-xs text-muted-foreground">
+            {options.mode === 'fast' ? '快速模式固定关闭总结' : '关闭后只输出 12 个星座视角'}
+          </p>
         </div>
       </div>
 
@@ -159,7 +179,7 @@ export function QuestionInput({
             <span className="text-destructive">⚠ 请先在工作台设置中配置 AI 服务（API Key、Base URL、模型）</span>
           )}
           {aiConfigured && (
-            <span>提示：Ctrl/⌘ + Enter 快速提交</span>
+            <span>预计 {options.mode === 'fast' ? '1' : options.includeSynthesis ? '13' : '12'} 次模型请求 · Ctrl/⌘ + Enter 提交</span>
           )}
         </div>
         <Button onClick={handleSubmit} disabled={!canSubmit} className="gap-2">

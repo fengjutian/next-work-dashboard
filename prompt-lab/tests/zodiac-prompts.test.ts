@@ -18,6 +18,7 @@ const BASE_OPTIONS: GenerationOptions = {
   length: 'standard',
   tone: 'gentle',
   includeSynthesis: true,
+  mode: 'standard',
 };
 
 describe('Zodiac prompts', () => {

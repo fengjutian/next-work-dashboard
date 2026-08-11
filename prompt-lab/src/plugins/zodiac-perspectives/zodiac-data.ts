@@ -7,6 +7,7 @@
 
 import type {
   GenerationLength,
+  GenerationMode,
   GenerationScene,
   GenerationTone,
   ZodiacMeta,
@@ -156,4 +157,10 @@ export const TONE_OPTIONS: ReadonlyArray<{ value: GenerationTone; label: string;
   { value: 'gentle',    label: '温和', hint: '包容、鼓励、关注情绪' },
   { value: 'sharp',     label: '犀利', hint: '直接、不绕弯、敢于点破' },
   { value: 'humorous',  label: '幽默', hint: '轻松、调侃、避免说教' },
+];
+
+export const MODE_OPTIONS: ReadonlyArray<{ value: GenerationMode; label: string; hint: string }> = [
+  { value: 'fast', label: '快速', hint: '1 次请求，短回答，不生成总结' },
+  { value: 'standard', label: '标准', hint: '12 个独立视角，可生成总结' },
+  { value: 'deep', label: '深度', hint: '深入回答并生成圆桌总结' },
 ];

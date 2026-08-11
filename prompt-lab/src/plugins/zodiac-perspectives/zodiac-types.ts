@@ -35,12 +35,14 @@ export const ZODIAC_ORDER: readonly ZodiacSign[] = ZODIAC_SIGNS;
 export type GenerationScene = 'general' | 'work' | 'relationship' | 'decision' | 'creative' | 'entertainment';
 export type GenerationLength = 'short' | 'standard' | 'detailed';
 export type GenerationTone = 'rational' | 'gentle' | 'sharp' | 'humorous';
+export type GenerationMode = 'fast' | 'standard' | 'deep';
 
 export interface GenerationOptions {
   scene: GenerationScene;
   length: GenerationLength;
   tone: GenerationTone;
   includeSynthesis: boolean;
+  mode: GenerationMode;
 }
 
 // ── 服务端输出契约（§7） ──────────────────────────────────────────

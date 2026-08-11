@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   allSettledWithConcurrency,
+  describeLlmError,
   extractJson,
   isValidPerspectiveArray,
   isValidSynthesis,
   isTransientLlmError,
   parsePerspective,
+  parseFastBatch,
   parseSynthesis,
 } from '../src/plugins/zodiac-perspectives/zodiac-service';
 import { ZODIAC_SIGNS } from '../src/plugins/zodiac-perspectives/zodiac-types';
@@ -40,6 +42,19 @@ describe('zodiac-service JSON parsing', () => {
     expect(isTransientLlmError(new Error('LLM API error 429: busy'))).toBe(true);
     expect(isTransientLlmError(new Error('LLM API error 503: unavailable'))).toBe(true);
     expect(isTransientLlmError(new Error('缺少 interpretation 字段或为空'))).toBe(false);
+  });
+
+  it('turns provider failures into actionable user-facing errors', () => {
+    expect(describeLlmError(new Error('LLM API error 401: invalid'))).toContain('API Key');
+    expect(describeLlmError(new Error('LLM API error 429: busy'))).toContain('频繁');
+    expect(describeLlmError(new Error('fetch failed'))).toContain('网络');
+  });
+
+  it('parses a complete fast-mode batch in zodiac order', () => {
+    const raw = JSON.stringify({ perspectives: ZODIAC_SIGNS.map((sign) => ({
+      sign, interpretation: `${sign} view`, focus: ['focus'], advice: ['act'],
+    })) });
+    expect(parseFastBatch(raw).map((item) => item.sign)).toEqual([...ZODIAC_SIGNS]);
   });
 
   it('extractJson unwraps fenced ```json``` blocks', () => {

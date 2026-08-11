@@ -26,6 +26,66 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 function formatDuration(milliseconds: number): string { const seconds = Math.floor(milliseconds / 1000); return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`; }
+
+/**
+ * TopN 容器：维护 capacity 个最大元素，内部用 size_t 的小顶堆。
+ * - 容量未满时 push 为 O(log n)
+ * - 容量已满且新候选 ≤ 当前最小时为 O(1) 拒绝
+ * - 容量已满且新候选更大时为 O(log n) 替换堆顶
+ * 避免每条 file 事件都跑一次 [...arr].sort().slice(0, N)，百万级事件下差距
+ * 是 O(n log n) → O(log n) per event。
+ */
+class TopN<T> {
+  private readonly data: T[] = [];
+  constructor(
+    private readonly capacity: number,
+    private readonly sizeOf: (item: T) => number,
+  ) {}
+  get size(): number { return this.data.length; }
+  push(item: T): void {
+    if (this.data.length < this.capacity) {
+      this.data.push(item);
+      this.bubbleUp(this.data.length - 1);
+      return;
+    }
+    if (this.sizeOf(item) > this.sizeOf(this.data[0]!)) {
+      this.data[0] = item;
+      this.sinkDown(0);
+    }
+  }
+  toSortedDesc(): T[] {
+    return [...this.data].sort((a, b) => this.sizeOf(b) - this.sizeOf(a));
+  }
+  reset(): void { this.data.length = 0; }
+  private bubbleUp(i: number): void {
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      const cur = this.sizeOf(this.data[i]!);
+      const par = this.sizeOf(this.data[parent]!);
+      if (cur < par) {
+        const tmp = this.data[i]!;
+        this.data[i] = this.data[parent]!;
+        this.data[parent] = tmp;
+        i = parent;
+      } else break;
+    }
+  }
+  private sinkDown(i: number): void {
+    const n = this.data.length;
+    while (true) {
+      const l = 2 * i + 1;
+      const r = 2 * i + 2;
+      let smallest = i;
+      if (l < n && this.sizeOf(this.data[l]!) < this.sizeOf(this.data[smallest]!)) smallest = l;
+      if (r < n && this.sizeOf(this.data[r]!) < this.sizeOf(this.data[smallest]!)) smallest = r;
+      if (smallest === i) break;
+      const tmp = this.data[i]!;
+      this.data[i] = this.data[smallest]!;
+      this.data[smallest] = tmp;
+      i = smallest;
+    }
+  }
+}
 function displayPath(value: string): string {
   if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`;
   return value.startsWith('\\\\?\\') ? value.slice(4) : value;
@@ -127,21 +187,38 @@ export function DiskSpacePanel() {
   const [error, setError] = useState(''); const [phase, setPhase] = useState<'scanning' | 'hashing'>('scanning');
   const [exclusionsText, setExclusionsText] = useState(() => localStorage.getItem('disk-space.exclusions') ?? '.git,node_modules,target'); const scanId = useRef('');
   const scannedDirectoriesRef = useRef<DirectoryEntry[]>([]);
-  const largestRef = useRef<FileEntry[]>([]); const extensionsRef = useRef<Record<string, number>>({}); const duplicatesRef = useRef<DuplicateGroup[]>([]);
+  const largestRef = useRef<FileEntry[]>([]);
+  // TopN 容器 + rAF 批处理：每条 file 事件只更新堆（O(log 50)），下一帧统一 setState
+  // 一次，避免百万级 IPC 事件触发百万次 React 渲染。
+  const largestTopRef = useRef(new TopN<FileEntry>(50, (item) => item.size));
+  const largestDirtyRef = useRef(false);
+  const flushLargest = () => {
+    largestDirtyRef.current = false;
+    const sorted = largestTopRef.current.toSortedDesc();
+    largestRef.current = sorted;
+    setLargest(sorted);
+  };
+  const extensionsRef = useRef<Record<string, number>>({}); const duplicatesRef = useRef<DuplicateGroup[]>([]);
   const rootRef = useRef('');
 
   const refreshSystem = async (): Promise<void> => { try { const next = await window.electronAPI.diskSpace.systemInfo(); setSystem(next); setDiskHistory((current) => { const now = Date.now(); const latest = current.at(-1); if (latest && now - latest.timestamp < 60 * 60 * 1000) return current; const history = [...current, { timestamp: now, disks: next.disks.map((disk) => ({ path: disk.path, used: disk.used })) }].slice(-168); localStorage.setItem('disk-space.history', JSON.stringify(history)); return history; }); } catch (cause) { setError(String(cause)); } };
   useEffect((): (() => void) => { void refreshSystem(); const timer = window.setInterval((): void => { void refreshSystem(); }, 30_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => window.electronAPI.diskSpace.onEvent((id, event) => {
     if (id !== scanId.current) return;
-    if (event.type === 'file') { const next = [...largestRef.current, event].sort((a, b) => b.size - a.size).slice(0, 50); largestRef.current = next; setLargest(next); }
+    if (event.type === 'file') {
+      largestTopRef.current.push(event);
+      if (!largestDirtyRef.current) {
+        largestDirtyRef.current = true;
+        requestAnimationFrame(flushLargest);
+      }
+    }
     else if (event.type === 'directory') { const next = [...scannedDirectoriesRef.current, event].sort((a, b) => b.size - a.size).slice(0, 500); scannedDirectoriesRef.current = next; setDirectories(next); }
     else if (event.type === 'duplicate-progress') setPhase('hashing');
     else if (event.type === 'scan-status') setScanTelemetry(event);
     else if (event.type === 'scan-error') { const labels = { 'permission-denied': '拒绝访问', 'not-found': '路径失效', busy: '文件占用', io: 'I/O 错误' } as const; setScanErrors((value) => [...value, { path: event.path, category: event.category, message: `【${labels[event.category]}】${event.message}` }].slice(-100)); }
     else if (event.type === 'duplicate') { const next = [...duplicatesRef.current, event]; duplicatesRef.current = next; setDuplicates(next); }
     else if (event.type === 'extension') { const next = { ...extensionsRef.current, [event.extension || '(无扩展名)']: event.size }; extensionsRef.current = next; setExtensions(next); }
-    else if (event.type === 'progress' || event.type === 'done') { setStats({ files: event.files, bytes: event.bytes, errors: event.errors }); if (event.type === 'done' && rootRef.current) { const saved: PersistedScanResult = { id: crypto.randomUUID(), root: rootRef.current, savedAt: Date.now(), stats: { files: event.files, bytes: event.bytes, errors: event.errors }, directories: scannedDirectoriesRef.current.slice(0, 500), largest: largestRef.current.slice(0, 50), extensions: extensionsRef.current, duplicates: duplicatesRef.current.slice(0, 100) }; localStorage.setItem('disk-space.last-result', JSON.stringify(saved)); setSavedResults((current) => { const next = [...current, saved].slice(-5); localStorage.setItem('disk-space.results', JSON.stringify(next)); return next; }); setDirectorySnapshots((current) => { const snapshot: DirectorySnapshot = { timestamp: Date.now(), root: rootRef.current, directories: scannedDirectoriesRef.current.map((item) => ({ path: item.path, size: item.size })) }; const next = [...current, snapshot].slice(-20); localStorage.setItem('disk-space.directory-snapshots', JSON.stringify(next)); return next; }); } }
+    else if (event.type === 'progress' || event.type === 'done') { setStats({ files: event.files, bytes: event.bytes, errors: event.errors }); if (event.type === 'done' && rootRef.current) { flushLargest(); const saved: PersistedScanResult = { id: crypto.randomUUID(), root: rootRef.current, savedAt: Date.now(), stats: { files: event.files, bytes: event.bytes, errors: event.errors }, directories: scannedDirectoriesRef.current.slice(0, 500), largest: largestRef.current.slice(0, 50), extensions: extensionsRef.current, duplicates: duplicatesRef.current.slice(0, 100) }; localStorage.setItem('disk-space.last-result', JSON.stringify(saved)); setSavedResults((current) => { const next = [...current, saved].slice(-5); localStorage.setItem('disk-space.results', JSON.stringify(next)); return next; }); setDirectorySnapshots((current) => { const snapshot: DirectorySnapshot = { timestamp: Date.now(), root: rootRef.current, directories: scannedDirectoriesRef.current.map((item) => ({ path: item.path, size: item.size })) }; const next = [...current, snapshot].slice(-20); localStorage.setItem('disk-space.directory-snapshots', JSON.stringify(next)); return next; }); } }
   }), []);
   useEffect(() => window.electronAPI.diskSpace.onExit((id, result) => { if (id === scanId.current) { setRunning(false); setPaused(false); if (result.error) setError(result.error); } }), []);
   useEffect(() => { localStorage.setItem('disk-space.exclusions', exclusionsText); }, [exclusionsText]);
@@ -151,12 +228,12 @@ export function DiskSpacePanel() {
   useEffect(() => { const navigate = (event: Event) => { const directory = (event as CustomEvent<string>).detail; if (!directory || !rootRef.current) return; setActiveTab('browser'); setBrowserLoading(true); setPreview(null); void window.electronAPI.diskSpace.listDirectory(rootRef.current, directory).then((items) => { setEntries(items); setCurrentDirectory(directory); }).catch((cause) => setError(String(cause))).finally(() => setBrowserLoading(false)); }; window.addEventListener('disk-space:navigate', navigate); return () => window.removeEventListener('disk-space:navigate', navigate); }, []);
 
   const loadDirectory = async (directory: string) => { if (!root) return; setBrowserLoading(true); setPreview(null); try { setEntries(await window.electronAPI.diskSpace.listDirectory(root, directory)); setCurrentDirectory(directory); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setBrowserLoading(false); } };
-  const choose = async () => { const chosen = await window.electronAPI.diskSpace.pickRoot(); if (!chosen) return; rootRef.current = chosen; setRoot(chosen); setCurrentDirectory(chosen); setPreview(null); setBrowserLoading(true); try { setEntries(await window.electronAPI.diskSpace.listDirectory(chosen, chosen)); const saved = JSON.parse(localStorage.getItem('disk-space.last-result') || 'null') as null | { root: string; stats: typeof stats; directories: DirectoryEntry[]; largest: FileEntry[]; extensions: Record<string, number>; duplicates?: DuplicateGroup[] }; if (saved && displayPath(saved.root).toLowerCase() === displayPath(chosen).toLowerCase()) { scannedDirectoriesRef.current = saved.directories; largestRef.current = saved.largest; extensionsRef.current = saved.extensions; duplicatesRef.current = saved.duplicates ?? []; setStats(saved.stats); setDirectories(saved.directories); setLargest(saved.largest); setExtensions(saved.extensions); setDuplicates(saved.duplicates ?? []); } } catch (cause) { setError(String(cause)); } finally { setBrowserLoading(false); } };
-  const start = async () => { if (!root || running) return; const focusedScan = activeTab === 'developer' || activeTab === 'cleanup'; const exclusions = focusedScan ? ['.git'] : exclusionsText.split(',').map((value) => value.trim()).filter(Boolean); rootRef.current = root; scannedDirectoriesRef.current = []; largestRef.current = []; extensionsRef.current = {}; duplicatesRef.current = []; scanId.current = crypto.randomUUID(); setStats({ files: 0, bytes: 0, errors: 0 }); setScanTelemetry({ currentPath: root, directories: 0, files: 0, bytes: 0, elapsedMs: 0 }); setScanErrors([]); setLargest([]); setExtensions({}); setDirectories([]); setDuplicates([]); setPhase('scanning'); setError(''); setPaused(false); setRunning(true); try { await window.electronAPI.diskSpace.start(scanId.current, root, { exclusions, skipDuplicates: focusedScan }); } catch (cause) { setRunning(false); setError(cause instanceof Error ? cause.message : String(cause)); } };
+  const choose = async () => { const chosen = await window.electronAPI.diskSpace.pickRoot(); if (!chosen) return; rootRef.current = chosen; setRoot(chosen); setCurrentDirectory(chosen); setPreview(null); setBrowserLoading(true); try { setEntries(await window.electronAPI.diskSpace.listDirectory(chosen, chosen)); const saved = JSON.parse(localStorage.getItem('disk-space.last-result') || 'null') as null | { root: string; stats: typeof stats; directories: DirectoryEntry[]; largest: FileEntry[]; extensions: Record<string, number>; duplicates?: DuplicateGroup[] }; if (saved && displayPath(saved.root).toLowerCase() === displayPath(chosen).toLowerCase()) { scannedDirectoriesRef.current = saved.directories; largestRef.current = saved.largest; largestTopRef.current.reset(); for (const file of saved.largest) largestTopRef.current.push(file); largestDirtyRef.current = false; extensionsRef.current = saved.extensions; duplicatesRef.current = saved.duplicates ?? []; setStats(saved.stats); setDirectories(saved.directories); setLargest(saved.largest); setExtensions(saved.extensions); setDuplicates(saved.duplicates ?? []); } } catch (cause) { setError(String(cause)); } finally { setBrowserLoading(false); } };
+  const start = async () => { if (!root || running) return; const focusedScan = activeTab === 'developer' || activeTab === 'cleanup'; const exclusions = focusedScan ? ['.git'] : exclusionsText.split(',').map((value) => value.trim()).filter(Boolean); rootRef.current = root; scannedDirectoriesRef.current = []; largestRef.current = []; largestTopRef.current.reset(); largestDirtyRef.current = false; extensionsRef.current = {}; duplicatesRef.current = []; scanId.current = crypto.randomUUID(); setStats({ files: 0, bytes: 0, errors: 0 }); setScanTelemetry({ currentPath: root, directories: 0, files: 0, bytes: 0, elapsedMs: 0 }); setScanErrors([]); setLargest([]); setExtensions({}); setDirectories([]); setDuplicates([]); setPhase('scanning'); setError(''); setPaused(false); setRunning(true); try { await window.electronAPI.diskSpace.start(scanId.current, root, { exclusions, skipDuplicates: focusedScan }); } catch (cause) { setRunning(false); setError(cause instanceof Error ? cause.message : String(cause)); } };
   const openPreview = async (entry: DiskDirectoryItem) => { if (entry.type === 'directory') { await loadDirectory(entry.path); return; } setBrowserLoading(true); try { setPreview(await window.electronAPI.diskSpace.preview(root, entry.path)); } catch (cause) { setError(String(cause)); } finally { setBrowserLoading(false); } };
   useEffect(() => { if (activeTab === 'cleanup' && /清理完成$/.test(error)) { setSpecialtyProbes([]); void refreshSystem(); if (root && !running) void start(); } }, [error]);
   const parentDirectory = currentDirectory && currentDirectory !== root ? currentDirectory.replace(/[\\/][^\\/]+[\\/]?$/, '') : '';
-  const restoreSavedResult = (saved: PersistedScanResult) => { rootRef.current = saved.root; scannedDirectoriesRef.current = saved.directories; largestRef.current = saved.largest; extensionsRef.current = saved.extensions; duplicatesRef.current = saved.duplicates; setRoot(saved.root); setCurrentDirectory(saved.root); setStats(saved.stats); setDirectories(saved.directories); setLargest(saved.largest); setExtensions(saved.extensions); setDuplicates(saved.duplicates); setResultsOpen(false); setActiveTab('analysis'); };
+  const restoreSavedResult = (saved: PersistedScanResult) => { rootRef.current = saved.root; scannedDirectoriesRef.current = saved.directories; largestRef.current = saved.largest; largestTopRef.current.reset(); for (const file of saved.largest) largestTopRef.current.push(file); largestDirtyRef.current = false; extensionsRef.current = saved.extensions; duplicatesRef.current = saved.duplicates; setRoot(saved.root); setCurrentDirectory(saved.root); setStats(saved.stats); setDirectories(saved.directories); setLargest(saved.largest); setExtensions(saved.extensions); setDuplicates(saved.duplicates); setResultsOpen(false); setActiveTab('analysis'); };
   const extensionData = useMemo(() => Object.entries(extensions).sort((a, b) => b[1] - a[1]).slice(0, 10), [extensions]);
   const extensionOption = useMemo<EChartsCoreOption>(() => ({ color: ['#7c3aed', '#2563eb', '#0891b2', '#059669', '#ca8a04', '#ea580c', '#dc2626', '#db2777'], tooltip: { trigger: 'item', formatter: (p: { name: string; value: number; percent: number }) => `${p.name}<br/>${formatBytes(p.value)} · ${p.percent}%` }, series: [{ type: 'pie', radius: ['48%', '76%'], center: ['42%', '50%'], itemStyle: { borderRadius: 6, borderWidth: 2, borderColor: 'transparent' }, label: { color: '#746075', formatter: '{b}\n{d}%' }, data: extensionData.map(([name, value]) => ({ name, value })) }] }), [extensionData]);
   const directoryData = useMemo(() => buildDirectoryTree(directories, root), [directories, root]);
