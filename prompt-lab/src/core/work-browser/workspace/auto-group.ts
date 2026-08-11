@@ -26,14 +26,19 @@ function pathOf(url: string): string {
 }
 
 function tokenize(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/[^\w\u4e00-\u9fff]+/g, ' ')
-      .split(/\s+/)
-      .filter((t) => t.length > 1),
-  );
+  const normalized = text.toLowerCase().replace(/<[^>]+>/g, ' ');
+  const tokens: string[] = [];
+  for (const part of normalized.split(/[^\w\u4e00-\u9fff]+/)) {
+    if (!part) continue;
+    if (/[\u4e00-\u9fff]/.test(part)) {
+      // CJK: 每字一 token
+      for (const ch of part) tokens.push(ch);
+    } else {
+      // ASCII: 整体作为一 token（去掉 1 字符噪声）
+      if (part.length >= 2) tokens.push(part);
+    }
+  }
+  return new Set(tokens);
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {

@@ -44,10 +44,10 @@ describe('suggestWorkspacesForDocument', () => {
     const ws = mkWs('ws1', 'ClickHouse 内存');
     const t = now();
     const tabs = [
-      mkTab('ws1', 'https://alt.com/a', 'ClickHouse Memory Optimization 笔记', t),
+      mkTab('ws1', 'https://alt.com/a', 'ClickHouse 内存优化 笔记', t),
     ];
     const out = suggestWorkspacesForDocument(
-      { title: 'ClickHouse 内存优化', url: 'https://x.com/y', capturedAt: t },
+      { title: 'ClickHouse 内存优化指南', url: 'https://x.com/y', capturedAt: t },
       [{ workspace: ws, tabs }],
     );
     expect(out.length).toBe(1);

@@ -8,9 +8,9 @@
  *   largeFile* / probing / diagnosing）由 panel 持有并通过 props 传给 tab。
  */
 
-import type { DiskDirectoryItem, DiskFilePreview, DiskSpecialtyProbe } from '@/types/electron';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { UseDiskScanResult } from '../hooks/useDiskScan';
+import type { TreemapNode } from './helpers';
 
 export type ActiveTab = 'overview' | 'browser' | 'analysis' | 'developer' | 'cleanup' | 'doctor';
 
@@ -18,7 +18,7 @@ export type ActiveTab = 'overview' | 'browser' | 'analysis' | 'developer' | 'cle
 export interface ScanSummary {
   extensionData: Array<[string, number]>;
   extensionOption: EChartsCoreOption;
-  directoryData: ReturnType<typeof import('../DiskSpacePanel')['buildDirectoryTreeForTabs']> | unknown[];
+  directoryData: TreemapNode[];
   directoryOption: EChartsCoreOption;
   developerItems: UseDiskScanResult['directories'];
   cleanupItems: UseDiskScanResult['directories'];
@@ -38,15 +38,3 @@ export interface ScanSummary {
 }
 
 export type DirectoryChange = ScanSummary['directoryChanges'][number];
-
-/** 共享 callbacks：openPreview / setPreview / setRunning 等 */
-export interface ScanCallbacks {
-  openPreview: (entry: DiskDirectoryItem) => Promise<void>;
-  setPreview: (preview: DiskFilePreview | null) => void;
-  setRunning: (running: boolean) => void;
-  setPaused: (paused: boolean) => void;
-  setScanErrors: React.Dispatch<React.SetStateAction<UseDiskScanResult['scanErrors']>>;
-  setDuplicates: React.Dispatch<React.SetStateAction<UseDiskScanResult['duplicates']>>;
-  setEntries: (entries: DiskDirectoryItem[]) => void;
-  setBrowserLoading: (loading: boolean) => void;
-}

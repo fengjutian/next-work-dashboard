@@ -47,8 +47,8 @@ describe('dedupeResults', () => {
 describe('rankResults', () => {
   it('promotes trusted domains', () => {
     const results = [
-      mkResult({ source: 'duckduckgo', url: 'https://example.com/p', title: 'A', score: 0.5 }),
-      mkResult({ source: 'duckduckgo', url: 'https://github.com/p', title: 'B', score: 0.5 }),
+      mkResult({ source: 'duckduckgo', url: 'https://example.com/p', title: 'A', score: 0.5, domain: 'example.com' }),
+      mkResult({ source: 'duckduckgo', url: 'https://github.com/p', title: 'B', score: 0.5, domain: 'github.com' }),
     ];
     const ranked = rankResults(results);
     expect(ranked[0].domain).toBe('github.com');

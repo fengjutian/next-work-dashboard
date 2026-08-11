@@ -33,29 +33,37 @@ export function dedupeResults(results: SearchResult[], options: DedupOptions = {
 
   for (const r of results) {
     const urlKey = r.canonicalUrl;
-    const hashKey = r.contentHash;
+    const hashKey = r.contentHash || '';
     const titleKey = `${r.domain}::${normalizeTitle(r.title)}`;
 
     let merged: number | null = null;
-    for (const k of [urlKey, hashKey, titleKey]) {
-      const idx = seen.get(k);
-      if (idx !== undefined) { merged = idx; break; }
+    if (options.strictUrl) {
+      const idx = seen.get(urlKey);
+      if (idx !== undefined) merged = idx;
+    } else {
+      for (const k of [urlKey, hashKey, titleKey]) {
+        if (!k) continue; // 跳过空 hashKey 导致的"全空合并"
+        const idx = seen.get(k);
+        if (idx !== undefined) { merged = idx; break; }
+      }
     }
 
     if (merged === null && !options.strictUrl) {
-      // 标题相似度兜底
-      const tn = normalizeTitle(r.title);
-      for (let i = 0; i < out.length; i++) {
-        const ex = out[i];
-        if (ex.domain !== r.domain) continue;
-        if (jaccard(tn, normalizeTitle(ex.title)) > 0.8) { merged = i; break; }
+      // 标题相似度兜底（要求双方都有 domain）
+      if (r.domain) {
+        const tn = normalizeTitle(r.title);
+        for (let i = 0; i < out.length; i++) {
+          const ex = out[i];
+          if (!ex.domain || ex.domain !== r.domain) continue;
+          if (jaccard(tn, normalizeTitle(ex.title)) > 0.8) { merged = i; break; }
+        }
       }
     }
 
     if (merged === null) {
       out.push(r);
       seen.set(urlKey, out.length - 1);
-      seen.set(hashKey, out.length - 1);
+      if (hashKey) seen.set(hashKey, out.length - 1);
       seen.set(titleKey, out.length - 1);
     } else {
       const ex = out[merged];
