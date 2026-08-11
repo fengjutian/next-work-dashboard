@@ -33,7 +33,6 @@ import type {
   RecordingStartedEvent,
   SpeechEndEvent,
   SpeechStartEvent,
-  VadModelInfo,
   VoiceErrorEvent,
   VoiceEvent,
   VoiceState,
@@ -372,7 +371,11 @@ export function listStorageRecordings(): { path: string; mtimeMs: number; size: 
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
-    .filter((name) => name.startsWith('voice-smoke-') && name.endsWith('.wav'))
+    .filter(
+      (name) =>
+        (name.startsWith('speech-') || name.startsWith('voice-smoke-')) &&
+        name.endsWith('.wav'),
+    )
     .map((name) => {
       const full = path.join(dir, name);
       const st = fs.statSync(full);

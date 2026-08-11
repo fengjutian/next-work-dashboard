@@ -1,15 +1,17 @@
 /**
- * Voice Input panel — W1 smoke test UI.
+ * Voice Input panel — W2 VAD preview.
  *
- * The W1 panel only verifies the audio pipeline: pressing "Start recording"
- * spawns the sidecar (if not already running) and asks it to capture a
- * fixed-duration WAV. While the recording is in flight, the audio level
- * events from the sidecar are displayed as a horizontal bar. After the
- * recording finishes, the resulting file path is shown and the recording
- * is added to the list below.
+ * Talks to the nwd-voice-engine sidecar via the `voice.*` preload bridge.
+ * What the user sees here is the VAD in action:
+ *   - A live audio level meter + speech-probability bar.
+ *   - A "speech" badge that turns green while we're inside a detected
+ *     segment.
+ *   - A list of segments captured so far, each with the per-segment WAV
+ *     path, start time, and duration.
  *
- * W2+ will add VAD, partial transcripts, the global hotkey, and the
- * transparent overlay window.
+ * The actual recording is driven by `recording.start`, which kicks off
+ * the cpal stream + the VAD state machine. Each `speech.end` event from
+ * the sidecar pushes a new row into the segment list.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -17,10 +19,10 @@ import {
   CircleStop,
   Info,
   Mic,
-  Play,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
+  AudioWaveform,
 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useVoiceStore } from './voice-store';
@@ -31,11 +33,15 @@ const VoiceInputPanel: React.FC = () => {
   const {
     ready,
     recording,
+    inSpeech,
     level,
+    speechProb,
     levelProgress,
     lastError,
     lastRecordingPath,
     info,
+    models,
+    segments,
     recordings,
     startSidecar,
     refreshState,
@@ -86,6 +92,7 @@ const VoiceInputPanel: React.FC = () => {
   }, [refreshState, refreshRecordings]);
 
   const levelPct = Math.round(level * 100);
+  const speechPct = Math.round(speechProb * 100);
   const progressPct = Math.round(levelProgress * 100);
 
   const status = useMemo(() => {
@@ -93,20 +100,24 @@ const VoiceInputPanel: React.FC = () => {
       return { tone: 'error' as const, label: `未连接:${lastError}` };
     }
     if (recording) {
-      return { tone: 'active' as const, label: '正在录音…' };
+      return inSpeech
+        ? { tone: 'active' as const, label: '正在说话…' }
+        : { tone: 'active' as const, label: '录音中(静音)' };
     }
     if (ready) {
       return { tone: 'ready' as const, label: '已就绪' };
     }
     return { tone: 'idle' as const, label: '未启动' };
-  }, [lastError, ready, recording]);
+  }, [lastError, ready, recording, inSpeech]);
+
+  const vadReady = models?.vad?.ready ?? false;
 
   return (
     <div className="flex h-full flex-col bg-card text-foreground">
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <AudioLines className="h-4 w-4 text-primary" />
-          <h1 className="text-sm font-semibold">语音输入 · W1 烟测</h1>
+          <h1 className="text-sm font-semibold">语音输入 · W2 VAD 预览</h1>
         </div>
         <StatusBadge tone={status.tone} label={status.label} />
       </header>
@@ -116,15 +127,14 @@ const VoiceInputPanel: React.FC = () => {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Info className="h-3.5 w-3.5" />
             <span>
-              W1 范围:cpal 采 {duration} 秒 PCM → 16 kHz mono WAV,文件存到{' '}
-              <code className="font-mono text-foreground/80">
-                {info?.storage_dir || 'voice-engine storage dir'}
-              </code>
+              W2 范围:Silero VAD 实时切片,每段说话独立存为{' '}
+              <code className="font-mono text-foreground/80">speech-*.wav</code>。
+              最大录音时长作为兜底,实际由 VAD 决定何时停。
             </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">录音时长</span>
+            <span className="text-xs text-muted-foreground">录音时长上限</span>
             {RECORD_DURATIONS.map((d) => (
               <Button
                 key={d}
@@ -136,14 +146,28 @@ const VoiceInputPanel: React.FC = () => {
                 {d}s
               </Button>
             ))}
+            <span
+              className={`ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                vadReady
+                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+              }`}
+              title={models?.vad?.path ?? 'VAD model path unknown'}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${vadReady ? 'bg-emerald-500' : 'bg-amber-500'}`}
+              />
+              {vadReady ? 'VAD 模型就绪' : 'VAD 模型缺失'}
+            </span>
           </div>
 
           <div className="flex items-center gap-3">
             <Button
               size="lg"
               onClick={handleStart}
-              disabled={busy || recording}
+              disabled={busy || recording || !vadReady}
               className="min-w-[160px]"
+              title={!vadReady ? '需要先放置 silero_vad.onnx 到模型目录' : undefined}
             >
               {recording ? (
                 <>
@@ -168,11 +192,11 @@ const VoiceInputPanel: React.FC = () => {
             </Button>
             {recording ? (
               <span className="text-xs text-muted-foreground">
-                电平 {levelPct}% · 进度 {progressPct}%
+                电平 {levelPct}% · VAD {speechPct}% · {inSpeech ? '说话中' : '静音'}
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
-                最近一次录音:{lastRecordingPath ? shortPath(lastRecordingPath) : '—'}
+                最近一段:{lastRecordingPath ? shortPath(lastRecordingPath) : '—'}
               </span>
             )}
           </div>
@@ -184,16 +208,55 @@ const VoiceInputPanel: React.FC = () => {
                 style={{ width: `${levelPct}%` }}
               />
             </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full transition-[width] duration-75 ${
+                  inSpeech ? 'bg-emerald-500' : 'bg-emerald-500/30'
+                }`}
+                style={{ width: `${speechPct}%` }}
+              />
+            </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full bg-emerald-500/70 transition-[width] duration-150"
+                className="h-full bg-sky-500/70 transition-[width] duration-150"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
             <p className="text-[11px] text-muted-foreground">
-              上:实时电平 (RMS×4) · 下:录音进度
+              上:实时电平 (RMS×4) · 中:VAD 说话概率 (绿=检测到语音) · 下:本次录音进度
             </p>
           </div>
+        </section>
+
+        <section className="rounded-md border border-border bg-background p-4 space-y-2">
+          <h2 className="text-sm font-semibold">VAD 切出的语音段</h2>
+          {segments.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              还没有。开启录音后,检测到一段说话就会出现在这里。
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {segments.map((seg) => (
+                <li
+                  key={`${seg.path}-${seg.start_ms}`}
+                  className="flex items-center justify-between rounded border border-border bg-card px-3 py-2 text-xs"
+                >
+                  <div className="flex items-center gap-2">
+                    <AudioWaveform className="h-3.5 w-3.5 text-emerald-500" />
+                    <code
+                      className="truncate font-mono text-foreground/80"
+                      title={seg.path}
+                    >
+                      {shortPath(seg.path)}
+                    </code>
+                  </div>
+                  <span className="text-muted-foreground">
+                    {seg.start_ms}ms · {seg.duration_ms}ms · {seg.sample_rate}Hz
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="rounded-md border border-border bg-background p-4 space-y-2">
@@ -201,17 +264,19 @@ const VoiceInputPanel: React.FC = () => {
           <dl className="grid grid-cols-2 gap-y-1 text-xs">
             <Row label="version" value={info?.version} />
             <Row label="platform" value={info?.platform} />
-            <Row label="pid" value={info ? String(info.recording) : null} />
+            <Row label="recording" value={info ? String(info.recording) : null} />
             <Row label="device" value={info?.input_device ?? '—'} />
             <Row label="sample_rate" value={info ? `${info.sample_rate} Hz` : '—'} />
             <Row label="channels" value={info ? String(info.channels) : '—'} />
+            <Row label="vad_model" value={models?.vad?.path ?? info?.vad_model_path ?? null} />
+            <Row label="vad_ready" value={vadReady ? 'yes' : 'no'} />
           </dl>
         </section>
 
         <section className="rounded-md border border-border bg-background p-4 space-y-2">
-          <h2 className="text-sm font-semibold">最近的录音文件</h2>
+          <h2 className="text-sm font-semibold">磁盘上的录音文件</h2>
           {recordings.length === 0 ? (
-            <p className="text-xs text-muted-foreground">还没有。点上面的"开始录音"。</p>
+            <p className="text-xs text-muted-foreground">还没有。</p>
           ) : (
             <ul className="space-y-1.5">
               {recordings.map((r) => (
@@ -244,7 +309,9 @@ const VoiceInputPanel: React.FC = () => {
 const Row: React.FC<{ label: string; value: string | null | undefined }> = ({ label, value }) => (
   <>
     <dt className="text-muted-foreground">{label}</dt>
-    <dd className="font-mono text-foreground/80">{value ?? '—'}</dd>
+    <dd className="truncate font-mono text-foreground/80" title={value ?? ''}>
+      {value ?? '—'}
+    </dd>
   </>
 );
 
@@ -275,4 +342,4 @@ function shortPath(p: string): string {
 
 export default VoiceInputPanel;
 // re-export so the icon import is not tree-shaken
-export { Play };
+export { AudioWaveform };

@@ -176,6 +176,7 @@ const electronAPI: ElectronAPI = {
     state: () => ipcRenderer.invoke('voice:state'),
     ping: () => ipcRenderer.invoke('voice:ping'),
     requestState: () => ipcRenderer.invoke('voice:request-state'),
+    requestModels: () => ipcRenderer.invoke('voice:request-models'),
     startRecording: (durationSecs: number) => ipcRenderer.invoke('voice:start-recording', durationSecs),
     listRecordings: () => ipcRenderer.invoke('voice:list-recordings'),
     onEvent: (handler: (event: import('./plugins/voice-input/backend/voice-types').VoiceEvent) => void) => {

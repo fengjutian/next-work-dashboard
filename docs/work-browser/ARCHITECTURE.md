@@ -57,6 +57,7 @@
 - **core**：纯函数 + 类型，不 import Electron / DOM。vitest 直接跑。
 - **main**：唯一可以 import Electron 的层；SQLite + IPC handler。
 - **render**：React 组件 + hooks；只能通过 `window.electronAPI.workBrowser` 通信。
+- **webview-cleaner-preload**：Electron `<webview>` 内部跑的脚本，DOM 注入净化 + annotation 高亮。
 
 好处：core 可独立单测、可在 Node 脚本里复用、未来可换 main 框架（不一定非 Electron）。
 
@@ -127,7 +128,7 @@ SQLite 查重（按 url + workspaceId）
 - **DOM 层**：CSS `display:none` 注入 + JS 兜底移除（适配常见 cookie banner / 弹窗 / 广告）
 - Phase 1 渲染端用 `<iframe sandbox>`，等 Phase 1.5 切到 Electron `<webview>` + 完整净化脚本
 
-### 9. Workspace 自动归组（启发式 Phase 1）
+### 9. Workspace 自动归组（启发式 Phase 1 + Phase 2 Embedding 升级路径）
 
 四维加权：
 - 域名集中度（60%+ 同域 → 强信号）
@@ -135,7 +136,17 @@ SQLite 查重（按 url + workspaceId）
 - 路径前缀相似
 - 时间窗口（30 分钟内活跃）
 
-Phase 2 接 Embedding 升级。
+Phase 2 已交付 Embedding 集成：Save Document 时异步入 lance 索引；hybridSearch 用 BM25 + Vector 双路召回，RRF 融合。
+
+### 10. RAG 检索（Phase 2 已交付）
+
+`core/work-browser/ai/rag.ts` 提供 `buildRagContext`：
+1. query 走 `hybridSearch`（FTS5 + Lance cosine）
+2. top-k chunks 按 fusedScore 排序
+3. 拼成 systemPrompt：来源列表 + 原文片段（每段标注 [n]）
+4. 返回 citations + chunks + AIContext
+
+调用方拿到 bundle 后自己拼 messages 调 LLM，确保引用清晰可追溯。
 
 ## 已知限制
 

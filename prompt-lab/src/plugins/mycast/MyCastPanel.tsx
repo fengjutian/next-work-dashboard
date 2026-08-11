@@ -264,8 +264,10 @@ export const MyCastPanel: React.FC = () => {
   /* ── QR 码生成 ── */
   useEffect(() => {
     if (!state?.ready || !pairCode) { setQrSvg(null); return; }
-    const { deepLink } = buildMobileUrl(state, pairCode);
-    QRCode.toString(deepLink, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 220 })
+    const { httpLink } = buildMobileUrl(state, pairCode);
+    // Encode a regular HTTP URL so the system camera and WeChat can open it.
+    // The MyCast in-app scanner also accepts this format.
+    QRCode.toString(httpLink, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 220 })
       .then(setQrSvg)
       .catch(() => setQrSvg(null));
   }, [state, pairCode]);
@@ -414,10 +416,10 @@ const HomeTab: React.FC<{
             {mobileUrl && (
               <>
                 <p className="mt-2 break-all text-center font-mono text-[10px] text-muted-foreground">
-                  {mobileUrl.deepLink}
+                  {mobileUrl.httpLink}
                 </p>
                 <p className="mt-1 text-center text-[10px] text-muted-foreground">
-                  扫码优先唤起 MyCast 手机端 App；未安装时{' '}
+                  手机相机/微信扫码会直接打开配对页；也可在 MyCast App 内扫码。{' '}
                   <a
                     className="text-primary underline"
                     href={mobileUrl.httpLink}
@@ -639,7 +641,7 @@ export function buildMobileUrl(state: MyCastState, pairCode: string): { deepLink
     || '127.0.0.1';
   const port = state.httpPort ?? 17890;
   // The Rust sidecar serves HTTP and WebSocket on the same Axum listener.
-  const wsPort = state.httpPort ?? 17890;
+  const wsPort = state.wsPort ?? 17891;
   const deepLink = `mycast://pair?host=${encodeURIComponent(host)}&httpPort=${port}&wsPort=${wsPort}&code=${encodeURIComponent(pairCode)}`;
   const httpLink = `http://${host}:${port}/?pair=${encodeURIComponent(pairCode)}`;
   return { deepLink, httpLink };

@@ -48,15 +48,48 @@
 - `annotation-model.test.ts`（2 用例）
 - `search-local.test.ts`（5 纯函数 + 6 Electron 环境 skip）
 
+### Phase 2（第三轮，"继续全部开发"）
+
+**Embedding 集成**：
+- `core/work-browser/embedding/chunker.ts` 段落优先 + 句切 + overlap（11 单测用例）
+- `core/work-browser/embedding/embedder.ts` Transformers.js (Xenova/all-MiniLM-L6-v2 384 维)，懒加载 + cache
+- `main/work-browser/embedding.ts` 串行入 lance 索引（按 dim 分表）
+- `save.ts` 写完文档后 `enqueueIndexDocument` 异步触发
+
+**混合检索**：
+- `core/work-browser/search/hybrid.ts` BM25 (FTS5) + Vector (Lance) 并行召回
+- RRF 融合：`score = Σ 1/(k + rank_i)`，k=60
+- 关联 SQLite 拿 document metadata
+- `hybridToSearchResults` 转 SearchResult 格式（8 单测用例）
+
+**RAG 接入**：
+- `core/work-browser/ai/rag.ts` `buildRagContext`
+  - query → hybridSearch → top-k → systemPrompt（含来源列表 + 原文片段 + 引用编号）
+  - 严格引用 [n] 标注（PRD 第 15 节红线）
+  - citations + chunks + AIContext
+- main 端 IPC `work-browser:rag:query` + SearchRouter.runRag
+
+**Annotation 高亮回放**：
+- `webview-cleaner-preload.ts` 扩展
+  - did-finish-load 后调 `work-browser:annotation:list-by-url`
+  - 用 `Range.surroundContents` + `<mark>` 包裹 + 颜色映射
+  - selector 失败时回退到 rangeText 文本搜索
+- `WebContent.tsx` 监听 `work-browser:annotation-clicked` → `AnnotationSidePanel` 弹笔记侧边
+- IPC `work-browser:annotation:list-by-url`（按 URL 查 document → list annotations）
+
+**单测**：
+- `chunker.test.ts`（11 用例）
+- `hybrid-rrf.test.ts`（8 用例：transformation + RRF 公式）
+
 ## 验证状态
 
-| 项 | 命令 | Phase 1 | Phase 1.5 |
-|---|---|---|---|
-| IPC 契约 | `npm run check:ipc` | ✅ work-browser 全部对齐 | ✅ 同样通过 |
-| TypeScript | `npm run typecheck` | ✅ work-browser 域 0 错 | ✅ 整项目 0 错 |
-| ESLint | `npm run lint` | ✅ work-browser 域 0 错 | ✅ 整项目 0 错 |
-| Vitest | `npx vitest run tests/work-browser/` | ✅ 32/32 | ✅ 46/46（6 skip 待 Electron） |
-| Electron 启动 | `npm start` | ✅ main + window 起来 | ✅ 同样通过 |
+| 项 | 命令 | Phase 1 | Phase 1.5 | Phase 2 |
+|---|---|---|---|---|
+| IPC 契约 | `npm run check:ipc` | ✅ | ✅ | ✅ |
+| TypeScript | `npm run typecheck` | ✅ work-browser 域 0 错 | ✅ 整项目 0 错 | ✅ 整项目 0 错 |
+| ESLint | `npm run lint` | ✅ work-browser 域 0 错 | ✅ 整项目 0 错 | ✅ 整项目 0 错 |
+| Vitest | `npx vitest run tests/work-browser/` | ✅ 32/32 | ✅ 46/46（6 skip） | ✅ 67/67（6 skip 待 Electron） |
+| Electron 启动 | `npm start` | ✅ | ✅ | ✅ |
 
 ### 新增文件
 

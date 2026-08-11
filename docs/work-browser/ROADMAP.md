@@ -43,18 +43,32 @@
 
 **入口**：ActivityBar → Work Browser → 右侧 Sider 切到 "Tasks" tab。
 
-## Phase 2：本地知识 + RAG（**已部分交付**：FTS5 完成；Embedding/RAG 待）
+## Phase 2：本地知识 + RAG（**本轮已交付**）
 
 - ✅ **本地全文搜索**：BM25（SQLite FTS5）— documents_fts + notes_fts + 触发器同步
 - ✅ **多 scope 检索**：SearchBar 加 🌐网络 / 📁工作区 / 📚全库 三档
-- ✅ **save 时写 plain_text**：FTS5 索引内容来源
-- ⏳ **Embedding**：复用 `lancedb-memory`（已有）做 Document / Note / Annotation 向量化
-- ⏳ **RAG**：AI 回答时检索 top-k + 原文片段引用 + 高亮
+- ✅ **Embedding 集成**：Transformers.js (Xenova/all-MiniLM-L6-v2 384 维) + chunker 滑动窗口
+  - `core/work-browser/embedding/chunker.ts` 段落优先切分
+  - `core/work-browser/embedding/embedder.ts` mean-pooled + normalize
+  - `main/work-browser/embedding.ts` 串行入 lance 索引（dim 分表）
+  - `save.ts` 写完文档后 `enqueueIndexDocument` 异步触发
+- ✅ **混合检索**：`core/work-browser/search/hybrid.ts`
+  - BM25 (FTS5) + Vector (Lance cosine) 双路并行
+  - RRF 融合：`score = Σ 1/(k + rank_i)`，k=60
+  - 关联 SQLite 拿 document metadata
+- ✅ **RAG 接入**：`core/work-browser/ai/rag.ts`
+  - query → hybridSearch → top-k → systemPrompt（含来源列表 + 原文片段 + 引用编号）
+  - 严格引用 [n] 标注（PRD 第 15 节红线）
+  - main 端 IPC `work-browser:rag:query` + SearchRouter.runRag
+- ✅ **Annotation 高亮回放**：
+  - webview-cleaner-preload 在 `load` 事件后自动调 `work-browser:annotation:list-by-url`
+  - 用 `Range.surroundContents` + `<mark>` 包裹 + 颜色映射（黄/绿/红/蓝/紫）
+  - selector 失败时回退到 rangeText 文本搜索
+  - 点击高亮 → sendToHost → WebContent 弹笔记侧边面板
 - ⏳ **Note 富文本**：复用 markdown-editor，集成 wiki-link / 反向引用
 - ⏳ **PDF / Docling 接入**：复用 document-knowledge 已有 PDF 解析
 - ⏳ **AI Context 切换**：当前页 / Workspace / 全库 / 选中文档 四档
 - ⏳ **Embedding 升级的 Workspace auto-group**：用余弦相似度替换 Jaccard
-- ⏳ **Annotation 高亮回放**：webview 加载 document 时按 selector 重新渲染高亮
 
 ## Phase 3：Task + Research + 可视化（建议 6–8 周）
 
