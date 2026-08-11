@@ -25,11 +25,11 @@ export interface DoctorTabProps {
 }
 
 export function DoctorTab(props: DoctorTabProps) {
-  const { scan, diagnosis, setDiagnosis, diagnosing, setDiagnosing, generateDiagnosis, exportScanReport, directoryChanges, cleanupTotal } = props;
+  const { scan, diagnosis, setDiagnosis, diagnosing, generateDiagnosis, exportScanReport, directoryChanges, cleanupTotal } = props;
   const { stats, duplicates } = scan;
   const duplicateReclaimable = duplicates.reduce((sum, group) => sum + group.size * (group.files.length - 1), 0);
-  void setDiagnosis; void setDiagnosing; // 留作扩展（手动中止诊断等）
-  void directoryChanges; void displayPath; // 当前未在 JSX 直接用
+  void setDiagnosis; // 留作扩展（手动中止诊断等）
+  void displayPath; // 当前未在 JSX 直接用
 
   return (
     <>

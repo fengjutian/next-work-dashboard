@@ -1912,6 +1912,7 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
   const [subnet, setSubnet] = useState<string>('');
   const [lastScan, setLastScan] = useState<{ scanId: string; found: number; totalMs: number | null; ts: number } | null>(null);
+  const [pendingLanAction, setPendingLanAction] = useState<{ type: 'scan' } | { type: 'delete'; host: LanHostUI } | null>(null);
 
   const cyRef = useRef<HTMLDivElement | null>(null);
   const cyCoreRef = useRef<Core | null>(null);
@@ -1941,8 +1942,6 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
   }, [refresh]);
 
   const handleScan = useCallback(async () => {
-    const requestedSubnet = subnet.trim() || '自动检测的本地 /24 网段';
-    if (!window.confirm(`将主动扫描 ${requestedSubnet}，最多探测 254 台主机。请确认你有权扫描该网络。`)) return;
     setBusy(true);
     setError(null);
     try {
@@ -1964,7 +1963,6 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
       // the raw IP used as the cytoscape node id. Look up the host by id
       // before deleting so we can match against the right value.
       const target = hosts.find((h) => h.id === id);
-      if (!window.confirm(`确认删除设备记录“${target?.ip ?? id}”？`)) return;
       await api.deleteLanHost(id);
       await refresh();
       if (target && selectedIp === target.ip) setSelectedIp(null);
@@ -2216,7 +2214,7 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
           />
           <button
             type="button"
-            onClick={handleScan}
+            onClick={() => setPendingLanAction({ type: 'scan' })}
             disabled={busy}
             className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
@@ -2345,7 +2343,7 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleDelete(selected.id)}
+                  onClick={() => setPendingLanAction({ type: 'delete', host: selected })}
                   className="rounded border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
                 >
                   <Trash2 className="mr-1 inline h-3 w-3" />
@@ -2388,6 +2386,23 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
           )}
         </aside>
       </div>
+      {pendingLanAction && (
+        <ConfirmDialog
+          title={pendingLanAction.type === 'scan' ? '确认扫描局域网' : '删除设备记录'}
+          description={pendingLanAction.type === 'scan'
+            ? `将主动扫描 ${subnet.trim() || '自动检测的本地 /24 网段'}，最多探测 254 台主机。请确认你有权扫描该网络。`
+            : `确认删除“${pendingLanAction.host.ip}”的设备记录？`}
+          confirmLabel={pendingLanAction.type === 'scan' ? '开始扫描' : '删除记录'}
+          destructive={pendingLanAction.type === 'delete'}
+          onCancel={() => setPendingLanAction(null)}
+          onConfirm={async () => {
+            const action = pendingLanAction;
+            setPendingLanAction(null);
+            if (action.type === 'scan') await handleScan();
+            else await handleDelete(action.host.id);
+          }}
+        />
+      )}
     </div>
   );
 };
