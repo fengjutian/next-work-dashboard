@@ -13,9 +13,13 @@
  */
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type {
+  DiskArchiveEntry,
   DiskDirectoryItem,
+  DiskDirectorySnapshotData,
   DiskFilePreview,
+  DiskPersistedResult,
   DiskScanEvent,
+  DiskSnapshotEntry,
   DiskSystemInfo,
   DiskUsnInfo,
 } from '@/types/electron';
@@ -285,13 +289,10 @@ export function useDiskScan(): UseDiskScanResult {
   const [extensions, setExtensions] = useState<Record<string, number>>({});
   const extensionsRef = useRef<Record<string, number>>({});
 
-  // archive
-  const [directorySnapshots, setDirectorySnapshots] = useState<DirectorySnapshot[]>(() =>
-    readJson<DirectorySnapshot[]>('disk-space.directory-snapshots', []),
-  );
-  const [savedResults, setSavedResults] = useState<PersistedScanResult[]>(() =>
-    readJson<PersistedScanResult[]>('disk-space.results', []),
-  );
+  // archive：元数据存 userData/scan-archive/，完整数据按 id 懒加载。
+  // 这里只持元数据列表；调用方在需要完整数据时通过 loadArchive / loadSnapshot 拉取。
+  const [directorySnapshots, setDirectorySnapshots] = useState<DiskSnapshotEntry[]>([]);
+  const [savedResults, setSavedResults] = useState<DiskArchiveEntry[]>([]);
 
   // USN
   const [usnInfo, setUsnInfo] = useState<DiskUsnInfo | null>(null);
@@ -311,6 +312,70 @@ export function useDiskScan(): UseDiskScanResult {
 
   // cleanup 状态机
   const [cleanupStatus, setCleanupStatus] = useState<CleanupStatus>({ kind: 'idle' });
+
+  // 一次性副作用：挂载时从 userData 拉取 archive / snapshot 元数据，
+  // 并把老版本 localStorage 数据迁移到 userData 后清空。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // 1) 老数据迁移
+      const legacyResults = readJson<PersistedScanResult[] | null>('disk-space.results', null);
+      const legacySnapshots = readJson<DirectorySnapshot[] | null>('disk-space.directory-snapshots', null);
+      if (legacyResults && legacyResults.length > 0) {
+        for (const saved of legacyResults) {
+          try {
+            await window.electronAPI.diskSpace.saveArchive({
+              id: saved.id,
+              root: saved.root,
+              savedAt: saved.savedAt,
+              stats: saved.stats,
+              duplicates: saved.duplicates.length,
+              data: {
+                id: saved.id,
+                root: saved.root,
+                savedAt: saved.savedAt,
+                stats: saved.stats,
+                directories: saved.directories,
+                largest: saved.largest,
+                extensions: saved.extensions,
+                duplicates: saved.duplicates,
+              },
+            });
+          } catch { /* 迁移失败忽略，不阻塞新流程 */ }
+        }
+        localStorage.removeItem('disk-space.results');
+      }
+      if (legacySnapshots && legacySnapshots.length > 0) {
+        for (const snapshot of legacySnapshots) {
+          const id = `${snapshot.root.replace(/[\\/:*?"<>|]/g, '_')}__${snapshot.timestamp}`;
+          try {
+            await window.electronAPI.diskSpace.saveSnapshot({
+              id,
+              root: snapshot.root,
+              timestamp: snapshot.timestamp,
+              directoryCount: snapshot.directories.length,
+              data: snapshot,
+            });
+          } catch { /* ignore */ }
+        }
+        localStorage.removeItem('disk-space.directory-snapshots');
+      }
+
+      // 2) 加载 userData 元数据
+      try {
+        const [archive, snapshots] = await Promise.all([
+          window.electronAPI.diskSpace.listArchive(),
+          window.electronAPI.diskSpace.listSnapshots(),
+        ]);
+        if (cancelled) return;
+        setSavedResults(archive);
+        setDirectorySnapshots(snapshots);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [setError]);
 
   // TopN flush —— 把堆里的 top 50 同步到 state/largestRef
   const flushLargest = useCallback(() => {
@@ -392,8 +457,9 @@ export function useDiskScan(): UseDiskScanResult {
         setStats({ files: event.files, bytes: event.bytes, errors: event.errors });
         if (event.type === 'done' && rootRef.current) {
           flushLargest();
-          const saved: PersistedScanResult = {
-            id: crypto.randomUUID(),
+          const id = crypto.randomUUID();
+          const fullData: DiskPersistedResult = {
+            id,
             root: rootRef.current,
             savedAt: Date.now(),
             stats: { files: event.files, bytes: event.bytes, errors: event.errors },
@@ -402,25 +468,41 @@ export function useDiskScan(): UseDiskScanResult {
             extensions: { ...extensionsRef.current },
             duplicates: duplicatesRef.current.slice(0, 100),
           };
-          writeJson('disk-space.last-result', saved);
-          setSavedResults((current) => {
-            const next = [...current, saved].slice(-SAVED_RESULTS_CAP);
-            writeJson('disk-space.results', next);
-            return next;
-          });
-          setDirectorySnapshots((current) => {
-            const snapshot: DirectorySnapshot = {
-              timestamp: Date.now(),
-              root: rootRef.current,
-              directories: scannedDirectoriesRef.current.map((item) => ({
-                path: item.path,
-                size: item.size,
-              })),
-            };
-            const next = [...current, snapshot].slice(-SNAPSHOTS_CAP);
-            writeJson('disk-space.directory-snapshots', next);
-            return next;
-          });
+          const meta: DiskArchiveEntry = {
+            id,
+            root: fullData.root,
+            savedAt: fullData.savedAt,
+            stats: fullData.stats,
+            duplicates: fullData.duplicates.length,
+          };
+          // 异步写 userData 文件；不阻塞渲染。
+          void window.electronAPI.diskSpace
+            .saveArchive({ ...meta, data: fullData })
+            .then((next) => setSavedResults(next))
+            .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+
+          // last-result 缓存：只存 id + root，恢复时按 id 加载。
+          writeJson('disk-space.last-result', { id, root: fullData.root });
+
+          const snapshotData: DiskDirectorySnapshotData = {
+            timestamp: fullData.savedAt,
+            root: fullData.root,
+            directories: scannedDirectoriesRef.current.map((item) => ({
+              path: item.path,
+              size: item.size,
+            })),
+          };
+          const snapshotId = `${fullData.root.replace(/[\\/:*?"<>|]/g, '_')}__${fullData.savedAt}`;
+          const snapshotMeta: DiskSnapshotEntry = {
+            id: snapshotId,
+            root: fullData.root,
+            timestamp: fullData.savedAt,
+            directoryCount: snapshotData.directories.length,
+          };
+          void window.electronAPI.diskSpace
+            .saveSnapshot({ ...snapshotMeta, data: snapshotData })
+            .then((next) => setDirectorySnapshots(next))
+            .catch(() => { /* 快照失败不致命 */ });
         }
       }
     });

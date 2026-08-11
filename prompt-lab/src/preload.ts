@@ -420,6 +420,15 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('disk-space:exit', handler);
       return () => ipcRenderer.removeListener('disk-space:exit', handler);
     },
+    listArchive: () => ipcRenderer.invoke('disk-space:list-archive'),
+    loadArchive: (id: string) => ipcRenderer.invoke('disk-space:load-archive', id),
+    deleteArchive: (id: string) => ipcRenderer.invoke('disk-space:delete-archive', id),
+    saveArchive: (payload: import('./types/electron').DiskArchiveEntry & { data: import('./types/electron').DiskPersistedResult }) => ipcRenderer.invoke('disk-space:save-archive', payload),
+    listSnapshots: () => ipcRenderer.invoke('disk-space:list-snapshots'),
+    loadSnapshot: (id: string) => ipcRenderer.invoke('disk-space:load-snapshot', id),
+    deleteSnapshot: (id: string) => ipcRenderer.invoke('disk-space:delete-snapshot', id),
+    saveSnapshot: (payload: import('./types/electron').DiskSnapshotEntry & { data: import('./types/electron').DiskDirectorySnapshotData }) => ipcRenderer.invoke('disk-space:save-snapshot', payload),
+    clearArchive: () => ipcRenderer.invoke('disk-space:clear-archive'),
   },
 
   netProbe: {

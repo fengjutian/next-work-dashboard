@@ -51,6 +51,36 @@ export interface DiskFilePreview {
 export interface DiskSpecialtyProbe { id: 'docker' | 'wsl' | 'ollama' | 'node' | 'rust' | 'java' | 'python' | 'android' | 'virtualization'; label: string; available: boolean; summary: string; details: string[]; }
 export interface DiskUsnInfo { supported: boolean; method?: 'native' | 'fsutil'; volume?: string; journalId?: number; firstUsn?: number; nextUsn?: number; lowestValidUsn?: number; maxUsn?: number; maximumSize?: number; allocationDelta?: number; error?: string; }
 
+// Scan 存档：元数据条目（不包含完整数据）。
+export interface DiskArchiveEntry {
+  id: string;
+  root: string;
+  savedAt: number;
+  stats: { files: number; bytes: number; errors: number };
+  duplicates: number;
+}
+export interface DiskPersistedResult {
+  id: string;
+  root: string;
+  savedAt: number;
+  stats: { files: number; bytes: number; errors: number };
+  directories: Array<{ path: string; size: number }>;
+  largest: Array<{ path: string; size: number; modifiedAt: number; extension: string }>;
+  extensions: Record<string, number>;
+  duplicates: Array<{ groupId: string; size: number; files: Array<{ path: string; size: number; modifiedAt: number }> }>;
+}
+export interface DiskSnapshotEntry {
+  id: string;
+  root: string;
+  timestamp: number;
+  directoryCount: number;
+}
+export interface DiskDirectorySnapshotData {
+  timestamp: number;
+  root: string;
+  directories: Array<{ path: string; size: number }>;
+}
+
 // --- Network Observatory (nwd-net-probe) ---
 
 export type NetProbeEvent =
@@ -353,6 +383,16 @@ export interface ElectronAPI {
     open: (rootPath: string, filePath: string) => Promise<{ success: boolean }>;
     onEvent: (callback: (scanId: string, event: DiskScanEvent) => void) => () => void;
     onExit: (callback: (scanId: string, result: { code: number | null; error?: string }) => void) => () => void;
+    // scan 存档：写到 userData/scan-archive/，列表只存元数据，完整数据按 id 懒加载
+    listArchive: () => Promise<DiskArchiveEntry[]>;
+    loadArchive: (id: string) => Promise<DiskPersistedResult | null>;
+    deleteArchive: (id: string) => Promise<DiskArchiveEntry[]>;
+    saveArchive: (payload: DiskArchiveEntry & { data: DiskPersistedResult }) => Promise<DiskArchiveEntry[]>;
+    listSnapshots: () => Promise<DiskSnapshotEntry[]>;
+    loadSnapshot: (id: string) => Promise<DiskDirectorySnapshotData | null>;
+    deleteSnapshot: (id: string) => Promise<DiskSnapshotEntry[]>;
+    saveSnapshot: (payload: DiskSnapshotEntry & { data: DiskDirectorySnapshotData }) => Promise<DiskSnapshotEntry[]>;
+    clearArchive: () => Promise<boolean>;
   };
   netProbe: {
     start: () => Promise<{ ready: boolean; version: string | null }>;

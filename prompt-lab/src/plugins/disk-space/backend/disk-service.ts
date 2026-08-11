@@ -382,6 +382,62 @@ export function setupDiskSpaceIPC(): void {
     if (error) throw new Error(error);
     return { success: true };
   });
+
+  // ---- scan archive (userData/scan-archive/) ----
+  ipcMain.handle('disk-space:list-archive', () => {
+    return readJsonSync<ArchiveEntry[]>(archiveIndexPath(), []);
+  });
+  ipcMain.handle('disk-space:load-archive', (_event, id: string) => {
+    return readJsonSync<unknown>(archiveFilePath(id), null);
+  });
+  ipcMain.handle('disk-space:delete-archive', (_event, id: string) => {
+    try { fs.unlinkSync(archiveFilePath(id)); } catch { /* 文件可能不存在，忽略 */ }
+    const next = readJsonSync<ArchiveEntry[]>(archiveIndexPath(), []).filter((entry) => entry.id !== id);
+    writeJsonSync(archiveIndexPath(), next);
+    return next;
+  });
+  ipcMain.handle('disk-space:save-archive', (_event, payload: ArchiveEntry & { data: unknown }) => {
+    if (!payload || typeof payload.id !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(payload.id)) {
+      throw new Error('存档数据无效');
+    }
+    const { data, ...meta } = payload;
+    writeJsonSync(archiveFilePath(meta.id), data);
+    const current = readJsonSync<ArchiveEntry[]>(archiveIndexPath(), []);
+    const next = [...current.filter((entry) => entry.id !== meta.id), meta].slice(-5);
+    writeJsonSync(archiveIndexPath(), next);
+    return next;
+  });
+
+  // ---- directory snapshots (per-root, file-backed) ----
+  ipcMain.handle('disk-space:list-snapshots', () => {
+    return readJsonSync<SnapshotEntry[]>(path.join(snapshotsDir(), 'index.json'), []);
+  });
+  ipcMain.handle('disk-space:load-snapshot', (_event, id: string) => {
+    return readJsonSync<unknown>(snapshotFilePath(id), null);
+  });
+  ipcMain.handle('disk-space:delete-snapshot', (_event, id: string) => {
+    try { fs.unlinkSync(snapshotFilePath(id)); } catch { /* 忽略 */ }
+    const next = readJsonSync<SnapshotEntry[]>(path.join(snapshotsDir(), 'index.json'), []).filter((entry) => entry.id !== id);
+    writeJsonSync(path.join(snapshotsDir(), 'index.json'), next);
+    return next;
+  });
+  ipcMain.handle('disk-space:save-snapshot', (_event, payload: SnapshotEntry & { data: unknown }) => {
+    if (!payload || typeof payload.id !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(payload.id)) {
+      throw new Error('快照数据无效');
+    }
+    const { data, ...meta } = payload;
+    writeJsonSync(snapshotFilePath(meta.id), data);
+    const current = readJsonSync<SnapshotEntry[]>(path.join(snapshotsDir(), 'index.json'), []);
+    const next = [...current.filter((entry) => entry.id !== meta.id), meta].slice(-20);
+    writeJsonSync(path.join(snapshotsDir(), 'index.json'), next);
+    return next;
+  });
+  ipcMain.handle('disk-space:clear-archive', () => {
+    try {
+      fs.rmSync(archiveDir(), { recursive: true, force: true });
+    } catch { /* 目录可能不存在 */ }
+    return true;
+  });
 }
 
 export function disposeDiskSpaceService(): void { for (const child of scans.values()) child.kill(); scans.clear(); scanResults.clear(); }
