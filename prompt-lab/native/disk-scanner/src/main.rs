@@ -600,10 +600,9 @@ mod tests {
         }
         // 验证堆容量始终为 50（不再依赖 Vec 长度收缩）
         assert_eq!(largest.len(), 50);
-        let mut sorted = largest.into_sorted_vec();
-        sorted.reverse();
+        // BinaryHeap::into_sorted_vec 已经按降序输出（max first，Reverse<BySize> 配合 max-heap 的特性）
+        let sorted = largest.into_sorted_vec();
         assert_eq!(sorted.len(), 50);
-        // sorted[i] 是 Reverse<BySize<FileResult>>，解构出 FileResult
         let Reverse(BySize(top)) = &sorted[0];
         let Reverse(BySize(bottom)) = &sorted[49];
         assert_eq!(top.size, 999_999);

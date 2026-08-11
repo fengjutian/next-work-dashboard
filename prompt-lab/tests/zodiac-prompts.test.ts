@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   COMMON_SYSTEM_PROMPT,
   buildFollowupSystemPrompt,
+  buildQuestionContextPrompt,
   buildSingleSignUserPrompt,
   buildSynthesisUserPrompt,
   detectHighRisk,
@@ -82,5 +83,13 @@ describe('Zodiac prompts', () => {
     expect(prompt).toContain('原问题');
     expect(prompt).toContain('原视角回答');
     expect(prompt).toContain('追问');
+  });
+
+  it('buildQuestionContextPrompt separates facts, assumptions and missing information', () => {
+    const prompt = buildQuestionContextPrompt('我该辞职吗？');
+    expect(prompt).toContain('knownFacts');
+    expect(prompt).toContain('assumptions');
+    expect(prompt).toContain('missingInformation');
+    expect(prompt).toContain('不得补造');
   });
 });

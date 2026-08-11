@@ -57,6 +57,14 @@ describe('zodiac-service JSON parsing', () => {
     expect(parseFastBatch(raw).map((item) => item.sign)).toEqual([...ZODIAC_SIGNS]);
   });
 
+  it('keeps valid partial fast-mode results for targeted fallback', () => {
+    const raw = JSON.stringify({ perspectives: [
+      { sign: 'aries', interpretation: '先试一步', focus: ['行动'], advice: ['验证'] },
+      { sign: 'taurus', interpretation: '', focus: ['成本'], advice: ['核算'] },
+    ] });
+    expect(parseFastBatch(raw).map((item) => item.sign)).toEqual(['aries']);
+  });
+
   it('extractJson unwraps fenced ```json``` blocks', () => {
     const raw = '噪音```json\n{"interpretation":"X","focus":["a"],"advice":["b"]}\n```尾部';
     const parsed = extractJson(raw) as Record<string, unknown>;

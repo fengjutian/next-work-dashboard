@@ -32,7 +32,9 @@ function isWithinOrEqualRoot(root: string, candidate: string): boolean {
   return normalizedRoot === normalizedCandidate || isWithinRoot(normalizedRoot, normalizedCandidate);
 }
 
+let cachedScannerPath: string | null = null;
 function scannerPath(): string {
+  if (cachedScannerPath) return cachedScannerPath;
   const executable = process.platform === 'win32' ? 'nwd-disk-scanner.exe' : 'nwd-disk-scanner';
   const candidates = app.isPackaged
     ? [path.join(process.resourcesPath, 'disk-scanner', executable)]
@@ -42,6 +44,7 @@ function scannerPath(): string {
       ];
   const found = candidates.find((candidate) => fs.existsSync(candidate));
   if (!found) throw new Error('Rust 磁盘扫描器尚未构建，请运行 npm run build:disk-scanner');
+  cachedScannerPath = found;
   return found;
 }
 
@@ -85,24 +88,27 @@ async function findSpecialFiles(root: string, extensions: Set<string>, maxDepth 
 
 export function setupDiskSpaceIPC(): void {
   ipcMain.handle('disk-space:system-info', async () => {
-    let disks: Array<{ path: string; total: number; free: number; used: number }> = [];
-    const result = spawnSync(scannerPath(), ['disks'], { windowsHide: true, encoding: 'utf8', timeout: 10_000 });
-    if (result.status === 0) {
-      try { disks = (JSON.parse(result.stdout) as { disks?: typeof disks }).disks ?? []; } catch { /* use statfs fallback */ }
-    }
-    if (disks.length === 0) {
-      const candidates = process.platform === 'win32'
-        ? Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
-        : [path.parse(app.getPath('home')).root || '/'];
-      const detected = await Promise.all(candidates.map(async (diskPath) => {
-        try {
-          const disk = await fs.promises.statfs(diskPath);
-          const total = disk.blocks * disk.bsize; const free = disk.bavail * disk.bsize;
-          return total > 0 ? { path: diskPath, total, free, used: Math.max(0, total - free) } : null;
-        } catch { return null; }
-      }));
-      disks = detected.filter((disk): disk is NonNullable<typeof disk> => disk !== null);
-    }
+    // 不再 fork Rust sidecar，直接用 Node 的 fs.promises.statfs 枚举盘符。
+    // 之前每 30s 触发一次 IPC，spawnSync 启动 2-3MB 的子进程白白耗 50-200ms。
+    // Windows：枚举 A-Z 26 个盘符；其他平台：枚举根与 home 父目录。
+    const candidates = process.platform === 'win32'
+      ? Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
+      : (() => {
+          const roots = new Set<string>();
+          const home = app.getPath('home');
+          roots.add(path.parse(home).root || '/');
+          roots.add('/');
+          return [...roots];
+        })();
+    const detected = await Promise.all(candidates.map(async (diskPath) => {
+      try {
+        const disk = await fs.promises.statfs(diskPath);
+        const total = disk.blocks * disk.bsize;
+        const free = disk.bavail * disk.bsize;
+        return total > 0 ? { path: diskPath, total, free, used: Math.max(0, total - free) } : null;
+      } catch { return null; }
+    }));
+    const disks = detected.filter((disk): disk is NonNullable<typeof disk> => disk !== null);
     const memoryTotal = os.totalmem();
     const memoryFree = os.freemem();
     return {
@@ -216,7 +222,16 @@ export function setupDiskSpaceIPC(): void {
     }
     const sender = event.sender;
     const lines = readline.createInterface({ input: child.stdout });
+    // Watchdog：扫描挂起（IO 死锁、锁文件、僵尸句柄）时 5 分钟无事件就 kill。
+    // 之前没有超时，只能等用户手动 stop；遇到冻结会一直挂着。
+    let lastEventAt = Date.now();
+    const SCAN_WATCHDOG_MS = 5 * 60 * 1000;
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastEventAt < SCAN_WATCHDOG_MS) return;
+      child.kill();
+    }, 30_000);
     lines.on('line', (line) => {
+      lastEventAt = Date.now();
       try {
         const payload = JSON.parse(line) as { type?: string; path?: string; groupId?: string; files?: AuthorizedFile[]; items?: Array<{ path?: string }> };
         const result = scanResults.get(scanId);
@@ -238,9 +253,11 @@ export function setupDiskSpaceIPC(): void {
       } catch { /* ignore malformed sidecar output */ }
     });
     let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-4096); });
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-4096); lastEventAt = Date.now(); });
     child.on('close', (code) => {
+      clearInterval(watchdog);
       scans.delete(scanId);
+      scanResults.delete(scanId);
       if (!sender.isDestroyed()) sender.send('disk-space:exit', scanId, { code, error: code === 0 ? undefined : stderr.trim() || '扫描器异常退出' });
     });
     return { success: true };

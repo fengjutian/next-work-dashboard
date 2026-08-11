@@ -234,7 +234,42 @@ export function DiskSpacePanel() {
   useEffect(() => { const navigate = (event: Event) => { const directory = (event as CustomEvent<string>).detail; if (!directory || !rootRef.current) return; setActiveTab('browser'); setBrowserLoading(true); setPreview(null); void window.electronAPI.diskSpace.listDirectory(rootRef.current, directory).then((items) => { setEntries(items); setCurrentDirectory(directory); }).catch((cause) => setError(String(cause))).finally(() => setBrowserLoading(false)); }; window.addEventListener('disk-space:navigate', navigate); return () => window.removeEventListener('disk-space:navigate', navigate); }, []);
 
   const loadDirectory = async (directory: string) => { if (!root) return; setBrowserLoading(true); setPreview(null); try { setEntries(await window.electronAPI.diskSpace.listDirectory(root, directory)); setCurrentDirectory(directory); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setBrowserLoading(false); } };
-  const choose = async () => { const chosen = await window.electronAPI.diskSpace.pickRoot(); if (!chosen) return; rootRef.current = chosen; setRoot(chosen); setCurrentDirectory(chosen); setPreview(null); setBrowserLoading(true); try { setEntries(await window.electronAPI.diskSpace.listDirectory(chosen, chosen)); const saved = JSON.parse(localStorage.getItem('disk-space.last-result') || 'null') as null | { root: string; stats: typeof stats; directories: DirectoryEntry[]; largest: FileEntry[]; extensions: Record<string, number>; duplicates?: DuplicateGroup[] }; if (saved && displayPath(saved.root).toLowerCase() === displayPath(chosen).toLowerCase()) { scannedDirectoriesRef.current = saved.directories; largestRef.current = saved.largest; largestTopRef.current.reset(); for (const file of saved.largest) largestTopRef.current.push(file); largestDirtyRef.current = false; extensionsRef.current = saved.extensions; duplicatesRef.current = saved.duplicates ?? []; setStats(saved.stats); setDirectories(saved.directories); setLargest(saved.largest); setExtensions(saved.extensions); setDuplicates(saved.duplicates ?? []); } } catch (cause) { setError(String(cause)); } finally { setBrowserLoading(false); } };
+  const choose = async () => {
+    // 切换根目录前先 cancel 当前正在跑的扫描 —— 旧 child 进程会继续推事件污染新结果。
+    const previousScanId = scanId.current;
+    if (previousScanId && running) {
+      void window.electronAPI.diskSpace.cancel(previousScanId);
+      scanId.current = '';
+      setRunning(false);
+      setPaused(false);
+    }
+    const chosen = await window.electronAPI.diskSpace.pickRoot();
+    if (!chosen) return;
+    rootRef.current = chosen;
+    setRoot(chosen);
+    setCurrentDirectory(chosen);
+    setPreview(null);
+    setBrowserLoading(true);
+    try {
+      setEntries(await window.electronAPI.diskSpace.listDirectory(chosen, chosen));
+      const saved = JSON.parse(localStorage.getItem('disk-space.last-result') || 'null') as null | { root: string; stats: typeof stats; directories: DirectoryEntry[]; largest: FileEntry[]; extensions: Record<string, number>; duplicates?: DuplicateGroup[] };
+      if (saved && displayPath(saved.root).toLowerCase() === displayPath(chosen).toLowerCase()) {
+        scannedDirectoriesRef.current = saved.directories;
+        largestRef.current = saved.largest;
+        largestTopRef.current.reset();
+        for (const file of saved.largest) largestTopRef.current.push(file);
+        largestDirtyRef.current = false;
+        extensionsRef.current = saved.extensions;
+        duplicatesRef.current = saved.duplicates ?? [];
+        setStats(saved.stats);
+        setDirectories(saved.directories);
+        setLargest(saved.largest);
+        setExtensions(saved.extensions);
+        setDuplicates(saved.duplicates ?? []);
+      }
+    } catch (cause) { setError(String(cause)); }
+    finally { setBrowserLoading(false); }
+  };
   const start = async () => { if (!root || running) return; const focusedScan = activeTab === 'developer' || activeTab === 'cleanup'; const exclusions = focusedScan ? ['.git'] : exclusionsText.split(',').map((value) => value.trim()).filter(Boolean); rootRef.current = root; scannedDirectoriesRef.current = []; largestRef.current = []; largestTopRef.current.reset(); largestDirtyRef.current = false; extensionsRef.current = {}; duplicatesRef.current = []; scanId.current = crypto.randomUUID(); setStats({ files: 0, bytes: 0, errors: 0 }); setScanTelemetry({ currentPath: root, directories: 0, files: 0, bytes: 0, elapsedMs: 0 }); setScanErrors([]); setLargest([]); setExtensions({}); setDirectories([]); setDuplicates([]); setPhase('scanning'); setError(''); setPaused(false); setRunning(true); try { await window.electronAPI.diskSpace.start(scanId.current, root, { exclusions, skipDuplicates: focusedScan }); } catch (cause) { setRunning(false); setError(cause instanceof Error ? cause.message : String(cause)); } };
   const openPreview = async (entry: DiskDirectoryItem) => { if (entry.type === 'directory') { await loadDirectory(entry.path); return; } setBrowserLoading(true); try { setPreview(await window.electronAPI.diskSpace.preview(root, entry.path)); } catch (cause) { setError(String(cause)); } finally { setBrowserLoading(false); } };
   useEffect(() => { if (activeTab === 'cleanup' && /清理完成$/.test(error)) { setSpecialtyProbes([]); void refreshSystem(); if (root && !running) void start(); } }, [error]);

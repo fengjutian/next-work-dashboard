@@ -1,4 +1,4 @@
-import type { LyricLineAnalysis, LyricProject, LyricScore } from './types';
+import type { LyricLineAnalysis, LyricProject, LyricScore, LyricSection } from './types';
 
 const RHYMES: Array<[string, RegExp]> = [
   ['ang', /(昂|帮|旁|忙|方|房|香|想|响|乡|光|望|忘|伤|长|浪|上|场|墙|霜|凉|黄)$/],
@@ -104,4 +104,153 @@ export function scoreProject(project: LyricProject): LyricScore {
 
 export function projectToText(project: LyricProject): string {
   return [`# ${project.title}`, `主题：${project.theme}`, `风格：${project.style} · ${project.bpm} BPM`, `场景：${project.time} · ${project.location}`, `核心意象：${project.coreImages.join('、')}`, `故事：${project.story}`, '', ...project.sections.flatMap((section) => [`[${section.title}]`, section.lyrics, ''])].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Quality gate for AI-generated candidates
+// ---------------------------------------------------------------------------
+
+export type QualityIssueCategory = 'rhythm' | 'rhyme' | 'cliche' | 'length' | 'singability' | 'pinyin';
+
+export interface QualityIssue {
+  sectionId: string;
+  sectionTitle: string;
+  line: string;
+  lineIndex: number;
+  category: QualityIssueCategory;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+}
+
+export interface QualityReport {
+  overall: number;
+  rhythm: number;
+  rhyme: number;
+  length: number;
+  flaggedLines: number;
+  totalLines: number;
+  issues: QualityIssue[];
+  summary: string[];
+}
+
+const GATE_CLICHES = [
+  '撕心裂肺', '爱到永远', '直到世界尽头', '没有你的世界', '心碎成片',
+  '眼泪成诗', '命中注定', '无法呼吸', '你那么美', '爱你到老', '刻骨铭心',
+  '生死相依', '天长地久', '海枯石烂', '不离不弃', '独自承受',
+];
+const GATE_ABSTRACT = ['爱情', '思念', '孤独', '悲伤', '幸福', '遗憾', '难过', '痛苦', '心痛', '永远', '回忆'];
+const SINGABILITY_TRIGRAMS = ['的的的', '了了了', '是是是', '啊啊阿'];
+
+function percentage(value: number): number { return Math.max(0, Math.min(100, Math.round(value))); }
+
+export function gateQuality(sections: LyricSection[], bpm: number): QualityReport {
+  const issues: QualityIssue[] = [];
+  const allLines: Array<{ section: LyricSection; line: string; lineIndex: number; rhyme: string; han: number }> = [];
+  let totalChars = 0;
+  sections.forEach((section) => {
+    const nonEmpty = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    nonEmpty.forEach((line, lineIndex) => {
+      allLines.push({ section, line, lineIndex, rhyme: detectRhyme(line), han: countHan(line) });
+      totalChars += countHan(line);
+    });
+  });
+
+  if (!allLines.length) {
+    return { overall: 0, rhythm: 0, rhyme: 0, length: 0, flaggedLines: 0, totalLines: 0, issues: [], summary: ['还没有歌词内容，先生成或写入一些文本。'] };
+  }
+
+  // --- rhythm: per-section length consistency ---
+  sections.forEach((section) => {
+    const lines = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 2) return;
+    const counts = lines.map(countHan);
+    const mean = counts.reduce((sum, value) => sum + value, 0) / counts.length;
+    const max = Math.max(...counts); const min = Math.min(...counts);
+    if (max - min >= 6) {
+      lines.forEach((line, lineIndex) => {
+        const deviation = counts[lineIndex] - mean;
+        if (Math.abs(deviation) >= 4) {
+          issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'rhythm', severity: 'warning', message: `与本段平均字数 (${mean.toFixed(1)}) 相差 ${Math.abs(deviation).toFixed(1)} 字，唱起来节奏会跳。` });
+        }
+      });
+    }
+  });
+
+  // --- rhyme: AABB / AAAA pattern + per-section primary rhyme ---
+  sections.forEach((section) => {
+    const lines = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 4) return;
+    const rhymes = lines.map(detectRhyme).filter((value) => value !== '—' && value !== '未知');
+    if (rhymes.length < 2) return;
+    const counts = rhymes.reduce<Record<string, number>>((map, value) => ({ ...map, [value]: (map[value] ?? 0) + 1 }), {});
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    if (top && top[1] / rhymes.length < 0.4) {
+      issues.push({ sectionId: section.id, sectionTitle: section.title, line: lines[0], lineIndex: 0, category: 'rhyme', severity: 'warning', message: `本段主韵较分散（最常用的“${top[0]}”只占 ${Math.round(top[1] / rhymes.length * 100)}%），建议在段落设置里锁定一个韵脚。` });
+    } else if (top && section.rhyme && section.rhyme !== '自由' && !rhymes.includes(section.rhyme.toLowerCase())) {
+      issues.push({ sectionId: section.id, sectionTitle: section.title, line: lines[lines.length - 1], lineIndex: lines.length - 1, category: 'rhyme', severity: 'info', message: `本段设置了主韵“${section.rhyme}”，但歌词中没检测到匹配。` });
+    }
+    // 连续 3 行同韵 (AAAA) 在主歌里通常需要变化
+    for (let index = 0; index < rhymes.length - 2; index += 1) {
+      if (rhymes[index] === rhymes[index + 1] && rhymes[index + 1] === rhymes[index + 2] && section.kind === 'Verse') {
+        const originalLines = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const matchedLines = originalLines.filter((line) => detectRhyme(line) === rhymes[index]);
+        const lineIndex = originalLines.findIndex((line) => line === matchedLines[0]);
+        if (lineIndex >= 0) issues.push({ sectionId: section.id, sectionTitle: section.title, line: matchedLines[0], lineIndex, category: 'rhyme', severity: 'info', message: '主歌连续三行同韵，听感可能单调；可考虑在第三句换韵。' });
+        break;
+      }
+    }
+  });
+
+  // --- length: per-line overlong / empty Chorus ---
+  sections.forEach((section) => {
+    if (section.kind === 'Chorus') {
+      const lines = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const empty = lines.length === 0;
+      if (empty) issues.push({ sectionId: section.id, sectionTitle: section.title, line: '', lineIndex: 0, category: 'length', severity: 'critical', message: '副歌不能为空，否则没有记忆点。' });
+      else {
+        const repeats = lines.filter((line, index) => lines.indexOf(line) !== index);
+        if (!repeats.length && lines.length >= 4) {
+          issues.push({ sectionId: section.id, sectionTitle: section.title, line: lines[0], lineIndex: 0, category: 'length', severity: 'info', message: '副歌里没有重复句，听众没有 hook 可以抓住。' });
+        }
+      }
+    }
+    const nonEmpty = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    nonEmpty.forEach((line, lineIndex) => {
+      const han = countHan(line);
+      if (han > 18) issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'length', severity: 'warning', message: `单行 ${han} 字偏长，演唱容易换气困难。` });
+      if (han < 3) issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'length', severity: 'info', message: '单行字数太少，可能撑不起一个乐句。' });
+    });
+  });
+
+  // --- cliché + abstract + singability ---
+  allLines.forEach(({ section, line, lineIndex }) => {
+    const cliche = GATE_CLICHES.find((word) => line.includes(word));
+    if (cliche) issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'cliche', severity: 'warning', message: `“${cliche}”是常见套话，试着用具象物件或动作替代。` });
+    const abstractCount = GATE_ABSTRACT.filter((word) => line.includes(word)).length;
+    if (abstractCount >= 2) issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'cliche', severity: 'warning', message: '同一行里出现多个抽象情绪词，让场景/物件/动作承担情绪。' });
+    const singability = SINGABILITY_TRIGRAMS.find((tri) => line.includes(tri));
+    if (singability) issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'singability', severity: 'info', message: `“${singability}”连续同字，演唱时会卡顿。` });
+    if (/[a-zA-Z]/.test(line) && countHan(line) > 0) issues.push({ sectionId: section.id, sectionTitle: section.title, line, lineIndex, category: 'pinyin', severity: 'info', message: '中英混排可能影响押韵计算和演唱。' });
+  });
+
+  // --- scoring ---
+  const rhythmIssues = issues.filter((issue) => issue.category === 'rhythm').length;
+  const rhymeIssues = issues.filter((issue) => issue.category === 'rhyme').length;
+  const clicheIssues = issues.filter((issue) => issue.category === 'cliche').length;
+  const lengthIssues = issues.filter((issue) => issue.category === 'length').length;
+  const rhythm = percentage(96 - rhythmIssues * 8);
+  const rhyme = percentage(92 - rhymeIssues * 10);
+  const length = percentage(90 - lengthIssues * 6 - clicheIssues * 4);
+  const overall = percentage((rhythm + rhyme + length) / 3);
+
+  // --- summary: top 3 actionable notes ---
+  const summary: string[] = [];
+  if (clicheIssues > 0) summary.push(`检测到 ${clicheIssues} 处常见套话或抽象词，建议换成具象动作或物件。`);
+  if (rhythmIssues > 0) summary.push(`${rhythmIssues} 行与所在段落的平均字数差距较大，节奏会跳。`);
+  if (rhymeIssues > 0) summary.push('有段落主韵较分散或与目标韵脚不一致，可以锁定一个韵脚后重写。');
+  if (lengthIssues > 0) summary.push(`存在 ${lengthIssues} 行长度异常（过长难唱或过短缺乐句）。`);
+  if (!summary.length) summary.push(`歌词整体稳定（${overall} 分），可以继续打磨细节或直接进入编排。`);
+
+  const flaggedLines = new Set(issues.map((issue) => `${issue.sectionId}:${issue.lineIndex}`)).size;
+  return { overall, rhythm, rhyme, length, flaggedLines, totalLines: allLines.length, issues, summary: summary.slice(0, 3) };
 }
