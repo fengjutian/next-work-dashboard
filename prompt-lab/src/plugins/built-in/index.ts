@@ -305,7 +305,7 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
-    id: 'markdown-editor',
+    id: 'markdown-editor-legacy',
     name: 'Markdown 编辑',
     icon: FileText,
     component: MarkdownEditorPanel,

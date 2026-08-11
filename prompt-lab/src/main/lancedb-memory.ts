@@ -19,6 +19,10 @@ export interface LanceMemoryChunk {
 export interface LanceMemoryMatch {
   id: string;
   distance: number;
+  documentId?: string;
+  content?: string;
+  sectionTitle?: string;
+  page?: number;
 }
 
 const TABLE_NAME = 'conversation_chunks';
@@ -54,6 +58,10 @@ export async function searchLanceMemory(vector: number[], limit: number): Promis
   return rows.map((row: Record<string, unknown>) => ({
     id: String(row.id),
     distance: typeof row._distance === 'number' ? row._distance : Number.POSITIVE_INFINITY,
+    documentId: typeof row.documentId === 'string' ? row.documentId : undefined,
+    content: typeof row.content === 'string' ? row.content : undefined,
+    sectionTitle: typeof row.sectionTitle === 'string' ? row.sectionTitle : undefined,
+    page: typeof row.page === 'number' ? row.page : undefined,
   }));
 }
 
@@ -131,5 +139,9 @@ export async function searchLanceDocuments(vector: number[], modelId: string, li
   return rows.map((row: Record<string, unknown>) => ({
     id: String(row.id),
     distance: typeof row._distance === 'number' ? row._distance : Number.POSITIVE_INFINITY,
+    documentId: typeof row.documentId === 'string' ? row.documentId : undefined,
+    content: typeof row.content === 'string' ? row.content : undefined,
+    sectionTitle: typeof row.sectionTitle === 'string' ? row.sectionTitle : undefined,
+    page: typeof row.page === 'number' ? row.page : undefined,
   }));
 }

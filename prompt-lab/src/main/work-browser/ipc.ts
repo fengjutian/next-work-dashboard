@@ -22,7 +22,8 @@ import { buildRagContext } from '../../core/work-browser/ai/rag';
 import { embed } from '../../core/work-browser/embedding/embedder';
 import { searchLanceDocuments } from '../lancedb-memory';
 import { DEFAULT_MODEL_ID } from '../../core/work-browser/embedding/embedder';
-import { summarizeResults, loadAIConfig } from '../../core/work-browser/ai/summarizer';
+import { summarizeResults } from '../../core/work-browser/ai/summarizer';
+import { resolveWorkBrowserAIConfig, setRuntimeAIConfig } from './ai-config';
 import { GraphStore } from '../../core/work-browser/graph/edges';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
@@ -40,7 +41,8 @@ export function setupWorkBrowserIPC(): void {
   const db = getDatabase();
   const workspaces = new WorkspaceStore(db);
   const documents = new DocumentStore(db);
-  const search = new SearchRouter(workspaces, db);
+  const resolveAIConfig = () => resolveWorkBrowserAIConfig((key) => workspaces.getSetting(key));
+  const search = new SearchRouter(workspaces, db, resolveAIConfig);
   const graph = new GraphStore(db);
 
   // ── Workspace ──
@@ -88,7 +90,7 @@ export function setupWorkBrowserIPC(): void {
   // AI Agent — 单轮 tool calling
   ipcMain.handle('work-browser:agent:run', async (_e, input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean; contextSources?: AgentContextSources }) => {
     const { runAgent, BUILTIN_TOOLS } = await import('../../core/work-browser/agent/runner');
-    const cfg = await loadAIConfig(async (k) => workspaces.getSetting(k));
+    const cfg = await resolveAIConfig();
     if (!cfg.apiKey && !cfg.local) {
       throw new Error('AI 未配置 baseUrl / apiKey');
     }
@@ -293,7 +295,7 @@ export function setupWorkBrowserIPC(): void {
         },
       },
       summarize: async ({ systemPrompt, userPrompt }) => {
-        const cfg = await loadAIConfig(async (k) => workspaces.getSetting(k));
+        const cfg = await resolveAIConfig();
         if (!cfg.apiKey && !cfg.local) return null;
         const res = await fetch(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
           method: 'POST',
@@ -419,9 +421,10 @@ export function setupWorkBrowserIPC(): void {
       vectorSearch: (vec, mid, limit) => searchLanceDocuments(vec, mid, limit).then((rows) => rows.map((r) => ({
         id: r.id,
         distance: r.distance,
-        content: '',
-        sectionTitle: '',
-        page: -1,
+        documentId: r.documentId,
+        content: r.content,
+        sectionTitle: r.sectionTitle,
+        page: r.page,
       }))),
       embedder: (text) => embed(text, modelId),
       workspaceId: input.workspaceId,
@@ -441,6 +444,9 @@ export function setupWorkBrowserIPC(): void {
 
   ipcMain.handle('work-browser:settings:get', (_e, key: string) => workspaces.getSetting(key));
   ipcMain.handle('work-browser:settings:set', (_e, key: string, value: string) => { workspaces.setSetting(key, value); });
+  ipcMain.handle('work-browser:config:set-ai', (_e, input: { baseUrl: string; apiKey: string; model: string; local?: boolean }) => {
+    setRuntimeAIConfig(input);
+  });
 
   // ── Auto-group ──
 

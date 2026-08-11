@@ -114,7 +114,7 @@ export async function hybridSearch(input: HybridSearchInput): Promise<HybridChun
   // 把 vector results 转成 hybrid entries
   vectorRaw.forEach((m, rank) => {
     // m.id 形如 `{documentId}::{chunkIndex}`，documentId 可能在 RRF 之前已有
-    const [documentId, chunkIndexStr] = m.id.split('::');
+    const documentId = m.documentId || m.id.split('::')[0];
     const chunkKey = m.id;
     const meta = getDocMeta(documentId);
     const existing = byChunkId.get(chunkKey);

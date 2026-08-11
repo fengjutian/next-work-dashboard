@@ -85,6 +85,10 @@ export const workBrowserBridge = {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),
     set: (key: string, value: string) => ipcRenderer.invoke('work-browser:settings:set', key, value),
   },
+  config: {
+    setAI: (input: { baseUrl: string; apiKey: string; model: string; local?: boolean }) =>
+      ipcRenderer.invoke('work-browser:config:set-ai', input),
+  },
   autoGroup: {
     suggest: (docSummary: { title: string; url: string; capturedAt: number }) =>
       ipcRenderer.invoke('work-browser:auto-group:suggest', docSummary),

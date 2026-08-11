@@ -17,6 +17,7 @@
 import { Empty, message, Tabs, ToastHost } from './ui';
 import { Bot, BookOpen, FolderKanban, GitFork, ListTodo, PanelLeft, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useStore } from '../../store';
 import type {
   Workspace, Tab, Document, Annotation, SearchHistoryEntry,
 } from '../../core/work-browser/types';
@@ -36,6 +37,8 @@ import { useSearch } from './hooks/useSearch';
 import { STORAGE_KEYS } from './constants';
 
 export function WorkBrowserPanel() {
+  const aiApi = useStore((state) => state.aiApi);
+  const setActiveActivity = useStore((state) => state.setActiveActivity);
   const { workspaces, create: createWorkspace } = useWorkspaces(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -57,6 +60,30 @@ export function WorkBrowserPanel() {
   const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
+
+  const editDocument = useCallback((document: Document) => {
+    if (!document.contentPath) {
+      message.warning('该文档没有可编辑的 Markdown 文件');
+      return;
+    }
+    setActiveActivity('markdown-editor');
+    requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('plugin:file-open', {
+      detail: {
+        pluginId: 'markdown-editor',
+        editorId: 'markdown-editor.default',
+        file: { path: document.contentPath, name: document.title || 'Work Browser Document.md' },
+      },
+    })));
+  }, [setActiveActivity]);
+
+  useEffect(() => {
+    void window.electronAPI.workBrowser.config.setAI({
+      baseUrl: aiApi.baseUrl,
+      apiKey: aiApi.apiKey,
+      model: aiApi.model,
+      local: /(?:localhost|127\.0\.0\.1)/i.test(aiApi.baseUrl),
+    }).catch((error) => console.warn('[work-browser] unable to sync application AI config', error));
+  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model]);
 
   // 默认选第一个 workspace
   useEffect(() => {
@@ -306,6 +333,7 @@ export function WorkBrowserPanel() {
                       documents={documents}
                       history={history}
                       onOpenDocument={(d) => { void handleAddTab(d.url); }}
+                      onEditDocument={editDocument}
                       onReplayQuery={handleSearch}
                     />
                   ),

@@ -5,7 +5,7 @@ import type Database from 'better-sqlite3';
 import { aggregateSearch } from '../../core/work-browser/search/aggregator';
 import { BUILTIN_PROVIDERS } from '../../core/work-browser/search/providers';
 import type { SearchProvider, SearchQuery, AggregatedSearchResponse } from '../../core/work-browser/types';
-import { summarizeResults, loadAIConfig } from '../../core/work-browser/ai/summarizer';
+import { loadAIConfig, summarizeResults, type AIProviderConfig } from '../../core/work-browser/ai/summarizer';
 import { buildRagContext } from '../../core/work-browser/ai/rag';
 import { embed } from '../../core/work-browser/embedding/embedder';
 import { searchLanceDocuments } from '../lancedb-memory';
@@ -15,7 +15,11 @@ import type { WorkspaceStore } from './workspace-store';
 export class SearchRouter {
   private providers: SearchProvider[];
 
-  constructor(private store: WorkspaceStore, private db: Database.Database) {
+  constructor(
+    private store: WorkspaceStore,
+    private db: Database.Database,
+    private getAIConfig?: () => Promise<AIProviderConfig>,
+  ) {
     this.providers = BUILTIN_PROVIDERS;
   }
 
@@ -32,7 +36,9 @@ export class SearchRouter {
       page: 1,
       perPage: input.perPage || 20,
     };
-    const config = await loadAIConfig(async (key) => this.store.getSetting(key));
+    const config = this.getAIConfig
+      ? await this.getAIConfig()
+      : await loadAIConfig((key) => this.store.getSetting(key));
 
     const scope = input.scope || 'workspace';
     const useLocal = scope === 'workspace' || scope === 'library' || scope === 'all';
@@ -89,7 +95,12 @@ export class SearchRouter {
       query: input.query,
       db: this.db,
       vectorSearch: (vec, mid, limit) => searchLanceDocuments(vec, mid, limit).then((rows) => rows.map((r) => ({
-        id: r.id, distance: r.distance, content: '', sectionTitle: '', page: -1,
+        id: r.id,
+        distance: r.distance,
+        documentId: r.documentId,
+        content: r.content,
+        sectionTitle: r.sectionTitle,
+        page: r.page,
       }))),
       embedder: (text) => embed(text, modelId),
       workspaceId: input.workspaceId,

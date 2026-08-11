@@ -2,17 +2,18 @@
  * LibraryList — 右侧 Library（已保存文档 + 搜索历史）
  */
 import { Tabs, List, Typography, Empty, Space, Tag } from '../ui';
-import { FileText, Search } from 'lucide-react';
+import { FilePenLine, FileText, Search } from 'lucide-react';
 import type { Document, SearchHistoryEntry } from '../../../core/work-browser/types';
 
 export interface LibraryListProps {
   documents: Document[];
   history: SearchHistoryEntry[];
   onOpenDocument: (doc: Document) => void;
+  onEditDocument: (doc: Document) => void;
   onReplayQuery: (text: string) => void;
 }
 
-export function LibraryList({ documents, history, onOpenDocument, onReplayQuery }: LibraryListProps) {
+export function LibraryList({ documents, history, onOpenDocument, onEditDocument, onReplayQuery }: LibraryListProps) {
   return (
     <Tabs
       size="small"
@@ -32,7 +33,18 @@ export function LibraryList({ documents, history, onOpenDocument, onReplayQuery 
                   renderItem={(d) => (
                     <List.Item onClick={() => onOpenDocument(d)} className="mb-1 cursor-pointer rounded-xl border border-transparent transition hover:border-border hover:bg-accent">
                       <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                        <Typography.Text strong ellipsis style={{ width: '100%' }}>{d.title}</Typography.Text>
+                        <div className="flex w-full items-center gap-2">
+                          <Typography.Text strong ellipsis className="min-w-0 flex-1">{d.title}</Typography.Text>
+                          <button
+                            type="button"
+                            title="在 Markdown 编辑器中打开"
+                            aria-label={`编辑 ${d.title}`}
+                            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
+                            onClick={(event) => { event.stopPropagation(); onEditDocument(d); }}
+                          >
+                            <FilePenLine size={13} />
+                          </button>
+                        </div>
                         <Space size={4}>
                           <Tag style={{ fontSize: 10 }}>{d.sourceType}</Tag>
                           <Typography.Text type="secondary" style={{ fontSize: 11 }}>{d.wordCount} 词</Typography.Text>

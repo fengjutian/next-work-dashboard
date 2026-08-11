@@ -494,6 +494,9 @@ export interface ElectronAPI {
       get: (key: string) => Promise<string | null>;
       set: (key: string, value: string) => Promise<void>;
     };
+    config: {
+      setAI: (input: { baseUrl: string; apiKey: string; model: string; local?: boolean }) => Promise<void>;
+    };
     autoGroup: {
       suggest: (docSummary: { title: string; url: string; capturedAt: number }) => Promise<Array<{ workspaceId: string; score: number; reasons: string[] }>>;
     };
