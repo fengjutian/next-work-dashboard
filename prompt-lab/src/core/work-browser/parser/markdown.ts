@@ -16,7 +16,7 @@ function escapeMarkdown(text: string): string {
 function inline(html: string): string {
   // 链接
   html = html.replace(/<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
-    const t = inline(String(text)).replace(/[\[\]]/g, '');
+    const t = inline(String(text)).replace(/[[\]]/g, '');
     return `[${t}](${href})`;
   });
   // 图片

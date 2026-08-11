@@ -96,7 +96,7 @@ async function main() {
   const wsPort = info.ws_port;
   const host = info.lan_addr || '127.0.0.1';
   check('lan_addr present', !!info.lan_addr, info.lan_addr);
-  check('pair_code present', !!info.pair_code, info.pair_code);
+  check('pair_code present only on local RPC ready event', !!info.pair_code, info.pair_code);
 
   // Helper: send an RPC and await the matching response.
   function sendRpc(type, payload = {}) {
@@ -115,17 +115,18 @@ async function main() {
         `status=${info2.status} device_id=${info2.json.device_id}`);
 
   // ── 3. Pair flow ───────────────────────────────────────────────────────
-  console.log('\n[3] /api/pair/request + /api/pair/complete');
-  const pairReq = await postJson(`${baseUrl(host, port)}/api/pair/request`, {
-    device_id: 'e2e-device',
-    device_name: 'E2E Test Phone',
-    platform: 'web',
+  console.log('\n[3] local RPC issue_pairing + /api/pair/complete');
+  check('/api/info does not expose pair_code', !('pair_code' in info2.json), '');
+  check('/api/info does not expose sessions', !('sessions' in info2.json), '');
+  const anonymousPairRequest = await postJson(`${baseUrl(host, port)}/api/pair/request`, {
+    device_id: 'attacker', device_name: 'Attacker', platform: 'web',
   });
-  check('pair_request returns 200', pairReq.status === 200, `status=${pairReq.status}`);
-  check('pair_code present', !!pairReq.json.pair_code, pairReq.json.pair_code);
-  const freshCode = pairReq.json.pair_code;
+  check('remote pair issuance is disabled', anonymousPairRequest.status === 404, `status=${anonymousPairRequest.status}`);
+  const issuedPairing = await sendRpc('issue_pairing');
+  const freshCode = issuedPairing?.data?.pair_code ?? issuedPairing?.pair_code;
+  check('local RPC issues pair_code', !!freshCode, freshCode);
   const pairComplete = await postJson(`${baseUrl(host, port)}/api/pair/complete`, {
-    device_id: 'e2e-device',
+    device_id: 'e2e-ws',
     device_name: 'E2E Test Phone',
     pairing_code: freshCode,
   });
@@ -139,6 +140,10 @@ async function main() {
   check('unauthenticated /api/files → 401', noAuth.status === 401, `status=${noAuth.status}`);
   const wrongAuth = await get(`${baseUrl(host, port)}/api/files`, { Authorization: 'Bearer wrong-token' });
   check('wrong token → 401', wrongAuth.status === 401, `status=${wrongAuth.status}`);
+  const anonymousSessions = await get(`${baseUrl(host, port)}/api/sessions`);
+  check('unauthenticated /api/sessions → 401', anonymousSessions.status === 401, `status=${anonymousSessions.status}`);
+  const anonymousWsRejected = await openWebSocketWithoutToken(host, port);
+  check('unauthenticated WebSocket rejected', anonymousWsRejected, '');
 
   // ── 5. File upload + listing + download ────────────────────────────────
   console.log('\n[5] File upload + list + download');
@@ -315,6 +320,16 @@ async function runWebSocketRoundtrip(host, port, sessionToken, sendRpc, eventSub
     });
     ws.on('error', () => finish(false));
     ws.on('close', () => finish(false));
+  });
+}
+
+async function openWebSocketWithoutToken(host, port) {
+  return await new Promise((resolve) => {
+    const ws = new WebSocket(`ws://${host}:${port}/ws`);
+    const timer = setTimeout(() => { try { ws.close(); } catch {} resolve(false); }, 2000);
+    ws.on('open', () => { clearTimeout(timer); ws.close(); resolve(false); });
+    ws.on('unexpected-response', (_request, response) => { clearTimeout(timer); resolve(response.statusCode === 401); });
+    ws.on('error', () => { clearTimeout(timer); resolve(true); });
   });
 }
 

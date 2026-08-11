@@ -115,11 +115,6 @@ impl TokenManager {
         before - guard.len()
     }
 
-    pub fn active_pair_code(&self) -> Option<String> {
-        let guard = self.inner.read().expect("token lock");
-        guard.as_ref().and_then(|e| if Instant::now() < e.expires_at { Some(e.pair_code.clone()) } else { None })
-    }
-
 }
 
 pub fn sha256_hex(input: &str) -> String {
@@ -162,5 +157,31 @@ fn local_ip_for_outbound() -> Option<std::net::IpAddr> {
     match socket.local_addr().ok()?.ip() {
         IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() => Some(IpAddr::V4(v4)),
         other => Some(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pairing_code_is_single_use_and_session_can_be_revoked() {
+        let manager = TokenManager::new();
+        let (_, code, _) = manager.issue_pairing(None);
+        let session = manager.consume_pairing_by_code(&code, "phone-1", "Phone").expect("pairing succeeds");
+        assert_eq!(manager.validate_session(&session.token).as_deref(), Some("phone-1"));
+        assert!(manager.consume_pairing_by_code(&code, "phone-2", "Other").is_none());
+        assert_eq!(manager.revoke_device("phone-1"), 1);
+        assert!(manager.validate_session(&session.token).is_none());
+    }
+
+    #[test]
+    fn pairing_is_invalidated_after_repeated_failures() {
+        let manager = TokenManager::new();
+        let (_, code, _) = manager.issue_pairing(None);
+        for _ in 0..MAX_PAIR_ATTEMPTS {
+            assert!(manager.consume_pairing_by_code("999999", "attacker", "Attacker").is_none());
+        }
+        assert!(manager.consume_pairing_by_code(&code, "phone-1", "Phone").is_none());
     }
 }

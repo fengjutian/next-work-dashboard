@@ -1,0 +1,38 @@
+[package]
+name = "nwd-voice-engine"
+version = "0.1.0"
+edition = "2021"
+description = "nwd-voice-engine: 本地语音输入 sidecar (CPAL + VAD + ASR) for prompt-lab."
+
+[dependencies]
+# Async runtime — same as nwd-mycast for consistency.
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "io-std", "sync", "signal", "fs"] }
+# Audio capture.
+cpal = "0.15"
+# Ring buffer for producer (cpal callback) -> consumer (VAD/ASR worker).
+ringbuf = "0.4"
+# WAV writer so we can persist a smoke-test recording to disk.
+hound = "3.5"
+# JSONL RPC.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+
+[target.'cfg(windows)'.dependencies]
+# Reserved for P1 SendInput / clipboard. Keep the windows crate available
+# now so we don't have to revisit Cargo.toml when we get there.
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_DataExchange",
+] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

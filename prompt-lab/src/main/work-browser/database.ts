@@ -4,16 +4,14 @@
  * 单例 better-sqlite3，路径：<userData>/work-browser.db
  * Phase 1 与原 next-work-dashboard 的主库（src/db/）独立；Phase 2 评估合并。
  */
+// eslint-disable-next-line import/no-unresolved
+import * as DatabaseNS from 'better-sqlite3';
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import * as DatabaseNS from 'better-sqlite3';
 import { runMigrations } from '../../core/work-browser/storage';
 
-// better-sqlite3 是 CJS default export，import/resolver 静态分析不识别 default。
-// 用 namespace import 并 alias 让 lint 通过。
 const Database = (DatabaseNS as unknown as { default?: typeof DatabaseNS }).default || DatabaseNS;
-type Database = typeof DatabaseNS;
 
 let db: Database.Database | null = null;
 
