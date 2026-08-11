@@ -1,0 +1,1 @@
+-- moved to ./schema.ts (avoid ESM import of .sql assets in vitest)
