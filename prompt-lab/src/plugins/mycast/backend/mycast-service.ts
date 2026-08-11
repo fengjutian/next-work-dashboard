@@ -95,6 +95,16 @@ function binaryPath(): string {
   return found;
 }
 
+function stageRuntimeBinary(source: string): string {
+  const extension = process.platform === 'win32' ? '.exe' : '';
+  const runtimeDirectory = path.join(app.getPath('temp'), 'next-work-dashboard', 'mycast-runtime');
+  fs.mkdirSync(runtimeDirectory, { recursive: true });
+  const runtimePath = path.join(runtimeDirectory, `nwd-mycast-${process.pid}-${Date.now()}${extension}`);
+  fs.copyFileSync(source, runtimePath);
+  if (process.platform !== 'win32') fs.chmodSync(runtimePath, 0o755);
+  return runtimePath;
+}
+
 function broadcast(event: MyCastEvent): void {
   for (const win of windowListeners) {
     if (!win.isDestroyed()) {
@@ -148,7 +158,7 @@ export async function startDaemon(): Promise<MyCastState> {
     });
   }
 
-  const binary = binaryPath();
+  const binary = stageRuntimeBinary(binaryPath());
   const child = spawn(binary, ['daemon'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   processHandle = child;
   state.pid = child.pid ?? null;
@@ -309,6 +319,7 @@ export async function startDaemon(): Promise<MyCastState> {
   });
 
   child.on('close', (code) => {
+    try { fs.unlinkSync(binary); } catch { /* best-effort runtime cleanup */ }
     processHandle = null;
     state.ready = false;
     state.pid = null;

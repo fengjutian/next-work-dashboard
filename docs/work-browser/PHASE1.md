@@ -1,8 +1,62 @@
-# Work Browser — Phase 1 交付说明
+# Work Browser — Phase 1 + 1.5 交付说明
 
 > 配套架构：[`ARCHITECTURE.md`](./ARCHITECTURE.md) / 路线：[`ROADMAP.md`](./ROADMAP.md) / PRD：父目录 `REQUIREMENTS.md`
 
-## 交付清单
+## 两轮交付清单
+
+### Phase 1（第一轮）
+
+- core/ 13 个文件（types + parser + search + ai + task + document + workspace + annotation + storage + sync 占位）
+- main/ 8 个文件
+- preload 桥 1 个
+- plugins/ 10 个文件
+- 6 个单测文件 / 32 用例
+- 3 份文档 + AGENTS.md
+
+### Phase 1.5（第二轮，"继续开发"）
+
+**净化升级**：
+- 新建 `src/webview-cleaner-preload.ts`（净化注入 + selection 监听）
+- forge.config.ts 加 webview-cleaner-preload entry
+- `cleaner.ts` 加 `setupWorkBrowserSession()`：专属 session + `webRequest.onBeforeRequest` 拦截
+- `WebContent.tsx` 改用 `<webview partition="persist:work-browser">` 替代 iframe
+
+**Task Runner UI**：
+- `useTasks.ts` hook
+- `TaskList.tsx` + Task 详情 Drawer
+- `workBrowser.task.{templates,createFromTemplate}` IPC
+- 模板实例化（investigation / research）
+
+**Annotation**：
+- `AnnotationPopover.tsx` 浮动菜单
+- `workBrowser.annotation.{list,create,delete}` IPC
+- webview → render IPC 走 selectionchange
+
+**FTS5 本地全文搜索**：
+- v2 migration：documents + notes 加 plain_text 列 + FTS5 虚拟表 + 3 触发器
+- `core/search/local.ts`：BM25 检索 + snippet 高亮
+- aggregator 合并 local + web results
+- `SearchBar` 加 scope 切换（🌐 / 📁 / 📚）
+
+**项目遗留清理**：
+- `useMarkdownDocuments.tsx:142` 删重复 case
+- `net-probe-notify.ts:34` 修 eslint-disable 注释
+- 全项目 typecheck / lint 0 错
+
+**单测**：
+- `task-runner.test.ts`（5 用例）
+- `annotation-model.test.ts`（2 用例）
+- `search-local.test.ts`（5 纯函数 + 6 Electron 环境 skip）
+
+## 验证状态
+
+| 项 | 命令 | Phase 1 | Phase 1.5 |
+|---|---|---|---|
+| IPC 契约 | `npm run check:ipc` | ✅ work-browser 全部对齐 | ✅ 同样通过 |
+| TypeScript | `npm run typecheck` | ✅ work-browser 域 0 错 | ✅ 整项目 0 错 |
+| ESLint | `npm run lint` | ✅ work-browser 域 0 错 | ✅ 整项目 0 错 |
+| Vitest | `npx vitest run tests/work-browser/` | ✅ 32/32 | ✅ 46/46（6 skip 待 Electron） |
+| Electron 启动 | `npm start` | ✅ main + window 起来 | ✅ 同样通过 |
 
 ### 新增文件
 
@@ -72,10 +126,29 @@ prompt-lab/
 
 ### 修改文件
 
+**Phase 1**：
 - `src/preload.ts`：import + 合并 workBrowserBridge 到 electronAPI
 - `src/main.ts`：import + 调用 setupWorkBrowserIPC()
 - `src/plugins/built-in/index.ts`：注册 work-browser 插件（order=9, enabled=false, keepAlive=true）
 - `src/types/electron.d.ts`：加 workBrowserBridge 接口
+
+**Phase 1.5**：
+- `forge.config.ts`：加 webview-cleaner-preload entry
+- `src/main/work-browser/cleaner.ts`：加 `setupWorkBrowserSession()` + `getWebviewCleanerPreloadPath()`
+- `src/main/work-browser/ipc.ts`：加 annotation:* / task:templates / task:create-from-template / cleaner:webview-* / search:run scope
+- `src/main/work-browser/document-store.ts`：upsertDocument 接 plainText + FTS5 触发器
+- `src/main/work-browser/save.ts`：写 plainText 到 documents
+- `src/main/work-browser/search-router.ts`：scope 解析 + 注入 localDb
+- `src/main/work-browser/search-router.ts`：FTS5 scope 透传
+- `src/main/work-browser/workspace-store.ts`（间接通过 migration 触发）：无改动
+- `src/core/work-browser/storage/schema.ts`：v1 schema 加 FTS5 + plain_text
+- `src/core/work-browser/storage/migrations.ts`：v2 migration + 回填
+- `src/core/work-browser/search/aggregator.ts`：合并 local + web
+- `src/core/work-browser/search/local.ts`：新建 FTS5 查询
+- `src/preload/work-browser.ts`：加 annotation.* + cleaner.webview* + search.run scope + task.*
+- `src/types/electron.d.ts`：加 annotation / cleaner.webview* / search scope / task.templates 类型
+- `src/plugins/markdown-editor/hooks/useMarkdownDocuments.tsx`：删重复 case
+- `src/plugins/network-observatory/backend/net-probe-notify.ts`：eslint-disable 注释修正
 
 ## 验证状态
 

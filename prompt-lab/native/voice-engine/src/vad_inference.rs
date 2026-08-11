@@ -85,7 +85,7 @@ impl SileroVad {
         let c_tensor = Tensor::from_array((HC_SHAPE, c_data))
             .context("create VAD c tensor")?;
 
-        let mut session = self.session.lock().expect("VAD session poisoned");
+        let session = self.session.lock().expect("VAD session poisoned");
         let outputs = session
             .run(ort::inputs![
                 "input" => input_tensor,
