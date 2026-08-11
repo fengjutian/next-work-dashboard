@@ -59,6 +59,7 @@ title: "Next Work Dashboard 文档中心"
 | Office | [Office Studio](./office-studio.html) | — |
 | 千问 | [API 接入](./qwen-api-integration.html) | — |
 | MyCast 投屏 | [MyCast 插件文档](./mycast-plugin.html) | [未完成功能交接单](./mycast-remaining-features.html) |
+| 语音输入 | [Voice Input 插件](./voice-input-plugin.html) | [未完成功能交接单（W4+）](./voice-input-remaining-features.html) |
 
 ## 项目级资料
 

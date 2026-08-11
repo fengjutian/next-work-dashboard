@@ -170,7 +170,8 @@ function writeJson(key: string, value: unknown): void {
 // ---------------- displayPath 工具 ----------------
 
 /** Windows 长路径前缀 \\?\ 或 \\?\UNC\ 还原成可见形式。 */
-export function displayPath(value: string): string {
+export function displayPath(value: string | null | undefined): string {
+  if (!value) return '';
   if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`;
   return value.startsWith('\\\\?\\') ? value.slice(4) : value;
 }
@@ -320,6 +321,17 @@ export function useDiskScan(): UseDiskScanResult {
   // error
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!error) return;
+    const friendlyMessage = /\bEPERM\b|operation not permitted/i.test(error)
+      ? '该目录受系统保护，无法访问'
+      : /\bEACCES\b|permission denied/i.test(error)
+        ? '没有权限访问该目录'
+        : error;
+    toast(friendlyMessage, 'error');
+    setError('');
+  }, [error, toast]);
+
   // cleanup 状态机
   const [cleanupStatus, setCleanupStatus] = useState<CleanupStatus>({ kind: 'idle' });
 
@@ -451,7 +463,16 @@ export function useDiskScan(): UseDiskScanResult {
       } else if (event.type === 'duplicate-progress') {
         setPhase('hashing');
       } else if (event.type === 'scan-status') {
-        setScanTelemetry(event);
+        // The Rust sidecar serializes struct fields as snake_case. Accept both
+        // shapes so old and new sidecars cannot put undefined into UI state.
+        const raw = event as typeof event & { current_path?: string; elapsed_ms?: number };
+        setScanTelemetry({
+          currentPath: raw.currentPath ?? raw.current_path ?? '',
+          directories: Number(raw.directories ?? 0),
+          files: Number(raw.files ?? 0),
+          bytes: Number(raw.bytes ?? 0),
+          elapsedMs: Number(raw.elapsedMs ?? raw.elapsed_ms ?? 0),
+        });
       } else if (event.type === 'scan-error') {
         setScanErrors((value) =>
           [
@@ -637,7 +658,6 @@ export function useDiskScan(): UseDiskScanResult {
       await applyRoot(real);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      toast(message, 'error');
       setError(message);
     }
   }, [applyRoot, toast]);
@@ -650,7 +670,6 @@ export function useDiskScan(): UseDiskScanResult {
       await applyRoot(chosen);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      toast(message, 'error');
       setError(message);
     }
   }, [applyRoot, toast]);

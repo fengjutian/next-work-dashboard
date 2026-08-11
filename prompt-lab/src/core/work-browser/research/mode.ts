@@ -112,7 +112,7 @@ function heuristicSubQueries(topic: string): string[] {
 function createResearchTaskFromTopic(workspaceId: WorkspaceId, topic: string, subQueries: string[]): Task {
   // 直接 import RESEARCH_TEMPLATE + instantiateTask
   // 动态 import 避免循环依赖
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { instantiateTask, RESEARCH_TEMPLATE } = require('../task/template') as typeof import('../task/template');
   void subQueries; // 已经在 evidence 里
   return instantiateTask(workspaceId, RESEARCH_TEMPLATE, `Research · ${topic}`);

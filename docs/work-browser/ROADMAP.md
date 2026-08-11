@@ -70,15 +70,68 @@
 - ⏳ **AI Context 切换**：当前页 / Workspace / 全库 / 选中文档 四档
 - ⏳ **Embedding 升级的 Workspace auto-group**：用余弦相似度替换 Jaccard
 
-## Phase 3：Task + Research + 可视化（建议 6–8 周）
+## Phase 3：Task + Research + 可视化（**infra 已交付**）
 
-- ⏳ **Task 编排 UI**：可视化 step 进度、AI 自动填证据
-- ⏳ **Research Mode**：多步研究流程（搜索 → 净化 → 摘要 → 报告）一站式
+> infra 层（core 逻辑 + 数据模型 + IPC handler）已落地。**用户能不能用到**是 Phase 3.5 的事。
+
+- ✅ **Task 编排 infra**：
+  - `core/work-browser/task/auto-handlers.ts` — INVESTIGATION / RESEARCH 两个模板的 step-handler 链
+  - `main/work-browser/ipc.ts:work-browser:task:run-auto` — 跑全链 + 实时落库
+  - `useTasks.runAuto` 包装
+- ✅ **Research Mode infra**：
+  - `core/work-browser/research/mode.ts` — 6 阶段状态机（plan → search → extract → analyze → write → save）
+  - `main/work-browser/ipc.ts:work-browser:research:run` — 一步生成结构化报告
+- ✅ **Research Graph infra**：
+  - `core/work-browser/graph/edges.ts` — 5 种边（cited-by / similar-to / searched-from / opened-from / saved-with）
+  - SQLite v3 migration 加 `page_edges` 表
+  - `main/work-browser/ipc.ts:work-browser:graph:{list-by-document,list-by-workspace,record-saved-with}`
+- ✅ **AI Agent infra**：
+  - `core/work-browser/agent/runner.ts` — 5 个内置 tool（search / rag / save-document / open-tab / create-annotation）+ 危险工具 confirm + rate limit
+  - `main/work-browser/ipc.ts:work-browser:agent:run` — 单轮 tool-calling 循环
 - ⏳ **Web Diff 增强**：diff-match-patch 字符级 + AI 解释变更
-- ⏳ **Research Graph**：Knowledge Graph 加 page-level 边（cited-by / similar-to / searched-from / opened-from / saved-with）
-- ⏳ **AI Agent**：MCP 工具接入，可执行"打开/点击/搜索/提取/保存"工作流
 - ⏳ **Developer Mode**：Network 面板（已在 network-observatory 借鉴）+ Console + WebSocket / WebRTC trace
 - ⏳ **Web Replay**：Navigation / Click / Input / Network / Console / Screenshot 录制 + 回放
+
+## Phase 3.5：user-visible UI 补全（**本轮已交付**）
+
+> Phase 3 跑通了数据 / IPC，但**用户从 Work Browser 面板上点不到**这些能力。Phase 3.5 把它们接到 Sider 4 个 tab。
+
+- ✅ **A · Research Mode UI**：`SearchBar` "Research" 按钮 → `ResearchDrawer.tsx`（输入 + 6 步进度条 + 报告 + 引用链接）。完成时自动 refresh documents。
+- ✅ **B · Task Runner 自动编排 UI**：`TaskList` 每张卡片 + Drawer 内加 `▶ Run Auto` 按钮（带 `Popconfirm` 提示 30s~1min）。`message.loading` 全局提示，`runAuto` 完成后整 task 替换本地 state，steps 自动按 `in-progress` / `done` 标色。
+- ✅ **C · AI Agent UI 入口**：右侧 Sider 加 `🤖 Agent` tab → `AgentPanel.tsx`。Input + 发送按钮（Shift+Enter 换行），结果区展示 `answer` + 工具调用表格（危险动作红色 deny 标签）+ steps 流 + `availableTools` 标签云。`useState` 保留 10 条历史。
+- ✅ **D · Research Graph 可视化**：右侧 Sider 加 `🔗 Graph` tab → `GraphView.tsx`：
+  - `cytoscape` + `cytoscape-fcose` 力导向布局
+  - 节点 = `Document`，5 种边按 kind 染色（蓝 / 紫 / 绿 / 橙 / 灰）
+  - 边权重映射到 `width`，hover 显示 kind + weight
+  - 节点点击 → 调 `onOpenDocument(url)` 在主 webview 打开
+  - 上方过滤器（按 kind 过滤）+ 节点/边计数 + 重新布局 / 适应屏幕按钮
+- ✅ **cyto-fcose.d.ts** 类型 shim（包没自带 types）
+
+**入口**：ActivityBar → Work Browser → 右侧 Sider 看到 4 个 tab：`Library` / `Tasks` / `🔗 Graph` / `🤖 Agent`。
+
+## Phase 3.5.1：细节打磨（**本轮已交付**）
+
+> 在 Phase 3.5 跑通 4 个 tab 后，挑 user-visible 价值最高的 3 处做深。
+
+- ✅ **A · Agent 危险动作 confirm dialog**：
+  - main 端 `work-browser:agent:run` 把 `confirmDanger` 改为 `dialog.showMessageBox(getMainWindow(), { type: 'warning', buttons: ['允许', '拒绝'], defaultId: 1, cancelId: 1 })`
+  - detail 显示 tool 名 + reason + 截断 600 字符的 args JSON
+  - 决策记录到 `console.log` 便于 audit
+  - AgentPanel 顶部提示「危险动作会弹原生 dialog 让你确认」
+- ✅ **B · AI Context 切换（4 档）**：
+  - main 端 agent IPC 接受 `contextSources: { workspace?, currentPage?, specificDocuments? }`
+  - 自动拼成 `<work-browser-context>...</work-browser-context>` block 注入 system prompt 头部
+  - AgentPanel 加 `Segmented`：`🌐无` / `📁WS` / `📄页` / `📑选`
+  - 「当前页」从 `activeTab` 传 props 进 AgentPanel
+  - 「指定文档」弹 Modal 多选（带搜索过滤 + 计数）
+- ✅ **C · Graph tab / annotation 节点**：
+  - 加新 IPC `work-browser:annotation:list-by-workspace`（JOIN 一次拿全）
+  - GraphView props 加 `tabs` / `annotations`
+  - 节点区分：Document（蓝色圆形）/ Tab（橙色六边形）/ Annotation（紫色菱形）
+  - 节点类型过滤器（仅文档 / 仅 Tab / 仅注释 / 所有）
+  - Annotation 节点点击弹 detail 框：note + rangeText 引用
+  - 自引用边 / 非三类型边过滤
+- ✅ **验证**：typecheck 0 错、check:ipc work-browser 域 0 错、vitest 83/83、eslint 0 errors
 
 ## Phase 4：Sync + 生态（建议 8–12 周）
 

@@ -57,7 +57,7 @@ export function DiskSpacePanel() {
     setPreview, scanIdRef, rootRef, running, paused, phase,
     scanTelemetry, scanErrors, stats, largest, duplicates, extensions, directories,
     directorySnapshots, savedResults, usnInfo, usnDelta, exclusionsText, setExclusionsText,
-    error, setError, refreshSystem, choose, pickRoot, start, cancelScan, togglePause,
+    setError, refreshSystem, choose, pickRoot, start, cancelScan, togglePause,
     loadDirectory, openPreview, restoreSavedResult, removeSavedResult,
     removeDirectorySnapshot, clearHistory, setRunning, setPaused, setScanErrors,
     setBrowserLoading, setEntries, setDuplicates,
@@ -157,7 +157,7 @@ export function DiskSpacePanel() {
       color: ['#7c3aed', '#2563eb', '#0891b2', '#059669'],
       tooltip: { trigger: 'axis', formatter: (items: Array<{ seriesName: string; value: number }>) => items.map((item) => `${item.seriesName}：${formatBytes(item.value)}`).join('<br/>') },
       legend: { top: 4, data: diskNames },
-      grid: { left: 16, right: 22, top: 42, bottom: 22, containLabel: true },
+      grid: { outerBounds: { left: 16, right: 22, top: 42, bottom: 22 } },
       xAxis: { type: 'category', boundaryGap: false, data: diskHistory.map((point) => new Date(point.timestamp).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit' })), axisLabel: { color: '#746075' } },
       yAxis: { type: 'value', axisLabel: { color: '#746075', formatter: (value: number) => formatBytes(value) }, splitLine: { lineStyle: { color: 'rgba(127,127,127,.12)' } } },
       series: diskNames.map((name) => ({
@@ -340,7 +340,7 @@ export function DiskSpacePanel() {
               <ExternalLink className="h-4 w-4" />默认应用打开
             </button>
           </div>
-        ) : null} onCancel={() => setPreview(null)} destroyOnClose>
+        ) : null} onCancel={() => setPreview(null)} destroyOnHidden>
           <div className="max-h-[72vh] min-h-[320px] overflow-auto rounded-lg bg-background p-5">
             {!preview ? null : preview.kind === 'image' && preview.content ? (
               <div className="flex min-h-[320px] items-center justify-center">
@@ -534,7 +534,6 @@ export function DiskSpacePanel() {
         )}
 
         {running && <div className="flex items-center gap-2 rounded-md bg-primary/5 px-3 py-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4" />{phase === 'hashing' ? '正在校验重复文件内容…' : '正在扫描目录…'}</div>}
-        {error && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
 
         {(running || stats.files > 0) && (
           <>

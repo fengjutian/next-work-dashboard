@@ -472,6 +472,7 @@ export interface ElectronAPI {
     annotation: {
       list: (documentId: string) => Promise<unknown[]>;
       listByUrl: (url: string) => Promise<unknown[]>;
+      listByWorkspace: (workspaceId: string) => Promise<unknown[]>;
       create: (input: { documentId: string; selector: string; rangeText: string; note: string; color: string }) => Promise<unknown>;
       remove: (id: string) => Promise<void>;
     };
@@ -482,7 +483,7 @@ export interface ElectronAPI {
       run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) => Promise<{ taskId: string; report: string; citations: any[]; reportPath?: string; took: number }>;
     };
     agent: {
-      run: (input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean }) => Promise<{ answer: string; iterations: number; toolCalls: any[]; steps: any[]; availableTools: string[] }>;
+      run: (input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean; contextSources?: { workspace?: boolean; currentPage?: { url: string; title: string }; specificDocuments?: Array<{ id: string; title: string; url: string }> } }) => Promise<{ answer: string; iterations: number; toolCalls: any[]; steps: any[]; availableTools: string[] }>;
     };
     graph: {
       listByDocument: (documentId: string, kinds?: string[]) => Promise<unknown[]>;

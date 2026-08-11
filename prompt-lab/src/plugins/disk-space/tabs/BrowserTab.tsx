@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { notification, Select, Tooltip } from 'antd';
+import { Select } from 'antd';
 import { ChevronDown, Copy, ExternalLink, FileText, FolderOpen, Image, Loader2, Search, Square, X } from '@/components/icons';
+import { useToast } from '@/components/Toast';
 import type { DiskDirectoryItem, DiskFilePreview } from '@/types/electron';
 import { displayPath, type UseDiskScanResult } from '../hooks/useDiskScan';
 import { EmptyState } from './components';
@@ -51,7 +52,7 @@ function fuzzyScore(value: string, query: string): number | null {
 }
 
 export function BrowserTab(props: BrowserTabProps) {
-  const [notice, noticeHolder] = notification.useNotification();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const { scan, preview, setPreview, openPreview, parentDirectory, loadDirectory, showAnalysisControls, isFocusedTab, start, cancelScan, choose } = props;
   const { root, currentDirectory, entries, browserLoading, scanIdRef, running, exclusionsText, setExclusionsText, system } = scan;
@@ -75,9 +76,9 @@ export function BrowserTab(props: BrowserTabProps) {
   const copyCurrentPath = async () => {
     try {
       await navigator.clipboard.writeText(currentDirectory);
-      notice.success({ message: '路径已复制', description: currentDirectory, placement: 'bottomRight' });
+      toast('路径已复制', 'success');
     } catch (error) {
-      notice.error({ message: '复制失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+      toast(`复制失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   };
 
@@ -88,7 +89,7 @@ export function BrowserTab(props: BrowserTabProps) {
       const sourcePath = entry.type === 'file' ? currentDirectory : entry.path;
       await window.electronAPI.diskSpace.open(root, sourcePath);
     } catch (error) {
-      notice.error({ message: '无法打开源文件路径', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+      toast(`无法打开源文件路径：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   };
 
@@ -104,7 +105,6 @@ export function BrowserTab(props: BrowserTabProps) {
 
   return (
     <>
-      {noticeHolder}
       <section className="rounded-2xl border bg-card p-4 shadow-sm">
         <div className="flex gap-2">
           <Select
@@ -165,11 +165,9 @@ export function BrowserTab(props: BrowserTabProps) {
               <span className="min-w-0 flex-1 truncate font-mono text-xs" title={currentDirectory}>
                 {displayPath(currentDirectory)}
               </span>
-              <Tooltip title="复制当前路径">
-                <button className="rounded p-1.5 hover:bg-accent" onClick={() => void copyCurrentPath()} aria-label="复制当前路径">
-                  <Copy className="h-4 w-4" />
-                </button>
-              </Tooltip>
+              <button className="rounded p-1.5 hover:bg-accent" title="复制当前路径" onClick={() => void copyCurrentPath()} aria-label="复制当前路径">
+                <Copy className="h-4 w-4" />
+              </button>
               <span className="text-xs text-muted-foreground">{searchQuery ? `${filteredEntries.length} / ${entries.length}` : entries.length} 项</span>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
@@ -190,11 +188,9 @@ export function BrowserTab(props: BrowserTabProps) {
                       <span className="truncate">{entry.name}</span>
                       <span className="text-right text-xs tabular-nums text-muted-foreground">{entry.type === 'directory' ? '文件夹' : formatBytes(entry.size)}</span>
                     </button>
-                    <Tooltip title={entry.type === 'directory' ? '在资源管理器中打开' : '打开源文件路径'}>
-                      <button className="rounded p-2 hover:bg-accent" onClick={() => void revealPath(entry)} aria-label="打开源文件路径">
-                        <ExternalLink className="h-4 w-4" />
-                      </button>
-                    </Tooltip>
+                    <button className="rounded p-2 hover:bg-accent" title={entry.type === 'directory' ? '在资源管理器中打开' : '打开源文件路径'} onClick={() => void revealPath(entry)} aria-label="打开源文件路径">
+                      <ExternalLink className="h-4 w-4" />
+                    </button>
                   </div>
                 ))
               )}

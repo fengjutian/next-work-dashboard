@@ -5,13 +5,13 @@
 import { useEffect, useMemo, useRef, type PropsWithChildren } from 'react';
 import * as echarts from 'echarts/core';
 import { LineChart, PieChart, TreemapChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { GraphicComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
 
 import { formatBytes } from './helpers';
 
-echarts.use([LineChart, PieChart, TreemapChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([LineChart, PieChart, TreemapChart, GraphicComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 export function Chart({ option, className }: { option: EChartsCoreOption; className: string }) {
   const ref = useRef<HTMLDivElement>(null);

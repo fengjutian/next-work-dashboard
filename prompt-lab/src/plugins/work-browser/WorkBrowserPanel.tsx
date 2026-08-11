@@ -17,7 +17,7 @@
 import { Layout, message, Space, Typography, Empty, Tabs } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import type {
-  Workspace, Tab, Document, SearchHistoryEntry,
+  Workspace, Tab, Document, Annotation, SearchHistoryEntry,
 } from '../../core/work-browser/types';
 import { SearchBar } from './components/SearchBar';
 import { WorkspaceList } from './components/WorkspaceList';
@@ -42,6 +42,7 @@ export function WorkBrowserPanel() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -74,6 +75,11 @@ export function WorkBrowserPanel() {
     setDocuments(docs);
   }, []);
 
+  const refreshAnnotations = useCallback(async (wsId: string) => {
+    const anns = (await window.electronAPI.workBrowser.annotation.listByWorkspace(wsId)) as Annotation[];
+    setAnnotations(anns);
+  }, []);
+
   const refreshHistory = useCallback(async () => {
     const h = (await window.electronAPI.workBrowser.search.history(50)) as SearchHistoryEntry[];
     setHistory(h);
@@ -83,8 +89,9 @@ export function WorkBrowserPanel() {
     if (activeWorkspace) {
       void refreshTabs(activeWorkspace.id);
       void refreshDocuments(activeWorkspace.id);
+      void refreshAnnotations(activeWorkspace.id);
     }
-  }, [activeWorkspace, refreshTabs, refreshDocuments]);
+  }, [activeWorkspace, refreshTabs, refreshDocuments, refreshAnnotations]);
 
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
 
@@ -236,6 +243,8 @@ export function WorkBrowserPanel() {
                     <GraphView
                       workspaceId={activeWorkspace.id}
                       documents={documents}
+                      tabs={tabs}
+                      annotations={annotations}
                       onOpenDocument={(url) => void handleAddTab(url)}
                     />
                   ),
@@ -243,7 +252,13 @@ export function WorkBrowserPanel() {
                 {
                   key: 'agent',
                   label: '🤖 Agent',
-                  children: <AgentPanel workspaceId={activeWorkspace.id} />,
+                  children: (
+                    <AgentPanel
+                      workspaceId={activeWorkspace.id}
+                      activeTab={activeTab}
+                      documents={documents}
+                    />
+                  ),
                 },
               ]}
             />

@@ -60,6 +60,7 @@ export const workBrowserBridge = {
   annotation: {
     list: (documentId: string) => ipcRenderer.invoke('work-browser:annotation:list', documentId),
     listByUrl: (url: string) => ipcRenderer.invoke('work-browser:annotation:list-by-url', url),
+    listByWorkspace: (workspaceId: string) => ipcRenderer.invoke('work-browser:annotation:list-by-workspace', workspaceId),
     create: (input: { documentId: string; selector: string; rangeText: string; note: string; color: string }) => ipcRenderer.invoke('work-browser:annotation:create', input),
     remove: (id: string) => ipcRenderer.invoke('work-browser:annotation:delete', id),
   },

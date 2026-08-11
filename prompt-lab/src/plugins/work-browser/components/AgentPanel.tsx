@@ -7,15 +7,23 @@
  *  - toolCalls 表格
  *  - availableTools 标签云
  *
- * 危险动作默认拒绝（main 端 default confirm = false），UI 在 toolCalls 表格里用 Tag 标红
+ * 危险动作由 main 端弹 Electron 原生 dialog 真实确认（dialog.showMessageBox）
+ * 4 档 context 注入：🌐无 / 📁Workspace / 📄当前页 / 📑指定文档
  */
-import { useState } from 'react';
-import { Alert, Button, Empty, Input, Space, Spin, Tag, Typography, message } from 'antd';
-import { Bot, Send, ShieldAlert, Wrench } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Alert, Button, Checkbox, Empty, Input, Modal, Segmented, Space, Spin, Tag, Typography, message } from 'antd';
+import { Bot, Send, ShieldAlert, Wrench, FileText } from 'lucide-react';
+import type { Document, Tab } from '../../../core/work-browser/types';
 
 export interface AgentPanelProps {
   workspaceId: string;
+  /** 当前活动 Tab — 「当前页」context 用 */
+  activeTab?: Tab | null;
+  /** 当前 workspace 文档列表 — 「指定文档」context 选 */
+  documents?: Document[];
 }
+
+type ContextMode = 'none' | 'workspace' | 'current-page' | 'specific';
 
 interface AgentStep {
   type: 'llm-call' | 'tool-call' | 'tool-result' | 'final';
@@ -30,11 +38,36 @@ interface AgentResult {
   availableTools: string[];
 }
 
-export function AgentPanel({ workspaceId }: AgentPanelProps) {
+export function AgentPanel({ workspaceId, activeTab, documents = [] }: AgentPanelProps) {
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<AgentResult | null>(null);
   const [history, setHistory] = useState<Array<{ user: string; result: AgentResult }>>([]);
+  const [ctxMode, setCtxMode] = useState<ContextMode>('workspace');
+  const [pickedDocIds, setPickedDocIds] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [docFilter, setDocFilter] = useState('');
+
+  const ctxSources = useMemo(() => {
+    if (ctxMode === 'none') return undefined;
+    const out: { workspace?: boolean; currentPage?: { url: string; title: string }; specificDocuments?: Array<{ id: string; title: string; url: string }> } = {};
+    if (ctxMode === 'workspace') out.workspace = true;
+    if (ctxMode === 'current-page' && activeTab) out.currentPage = { url: activeTab.url, title: activeTab.title || activeTab.url };
+    if (ctxMode === 'specific' && pickedDocIds.length) {
+      out.specificDocuments = documents
+        .filter((d) => pickedDocIds.includes(d.id))
+        .map((d) => ({ id: d.id, title: d.title, url: d.url }));
+    }
+    return out;
+  }, [ctxMode, activeTab, pickedDocIds, documents]);
+
+  const ctxHint = useMemo(() => {
+    if (ctxMode === 'none') return '（无 context）';
+    if (ctxMode === 'workspace') return '当前 Workspace';
+    if (ctxMode === 'current-page') return activeTab ? `当前页 · ${activeTab.title || activeTab.url}` : '当前页 · （无活动 Tab）';
+    if (ctxMode === 'specific') return pickedDocIds.length ? `${pickedDocIds.length} 篇文档` : '指定文档 · （未选）';
+    return '';
+  }, [ctxMode, activeTab, pickedDocIds]);
 
   const send = async () => {
     const text = input.trim();
@@ -47,15 +80,13 @@ export function AgentPanel({ workspaceId }: AgentPanelProps) {
         userMessage: text,
         workspaceId,
         maxSteps: 5,
+        contextSources: ctxSources,
       })) as AgentResult;
       setResult(r);
       setHistory((h) => [{ user: text, result: r }, ...h].slice(0, 10));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       message.error(`Agent 失败：${msg}`);
-      if (/未配置|apiKey|baseUrl/i.test(msg)) {
-        // 提示用户去 settings 配
-      }
     } finally {
       setRunning(false);
     }
@@ -73,6 +104,31 @@ export function AgentPanel({ workspaceId }: AgentPanelProps) {
               </Typography.Text>
             )}
           </Space>
+
+          <div>
+            <Typography.Text type="secondary" style={{ fontSize: 10 }}>Context</Typography.Text>
+            <Segmented<ContextMode>
+              size="small"
+              block
+              value={ctxMode}
+              onChange={(v) => setCtxMode(v as ContextMode)}
+              options={[
+                { value: 'none', label: '🌐 无' },
+                { value: 'workspace', label: '📁 WS' },
+                { value: 'current-page', label: '📄 页' },
+                { value: 'specific', label: '📑 选' },
+              ]}
+            />
+            <Space size={4} style={{ marginTop: 2 }}>
+              <Typography.Text type="secondary" style={{ fontSize: 10 }}>{ctxHint}</Typography.Text>
+              {ctxMode === 'specific' && (
+                <Button size="small" type="link" style={{ fontSize: 10, padding: 0, height: 'auto' }} onClick={() => setPickerOpen(true)}>
+                  选择文档
+                </Button>
+              )}
+            </Space>
+          </div>
+
           <Input.TextArea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -89,7 +145,7 @@ export function AgentPanel({ workspaceId }: AgentPanelProps) {
             onClick={() => void send()}
             disabled={running || !input.trim()}
           >
-            {running ? 'Agent 跑中…' : '发送'}
+            {running ? 'Agent 跑中…（危险动作会弹 dialog）' : '发送'}
           </Button>
           {result && result.availableTools.length > 0 && (
             <Space size={4} wrap>
@@ -107,6 +163,7 @@ export function AgentPanel({ workspaceId }: AgentPanelProps) {
           <Space direction="vertical" size={4} style={{ width: '100%', textAlign: 'center', padding: 24 }}>
             <Spin />
             <Typography.Text type="secondary" style={{ fontSize: 11 }}>Agent 正在思考 / 调用工具…</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 10 }}>危险动作会弹原生 dialog 让你确认</Typography.Text>
           </Space>
         )}
 
@@ -139,6 +196,48 @@ export function AgentPanel({ workspaceId }: AgentPanelProps) {
           </div>
         )}
       </div>
+
+      <Modal
+        title="选择文档（注入 Agent context）"
+        open={pickerOpen}
+        onCancel={() => setPickerOpen(false)}
+        onOk={() => setPickerOpen(false)}
+        okText="完成"
+        cancelText="取消"
+        width={520}
+      >
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            已选 {pickedDocIds.length} / {documents.length}
+          </Typography.Text>
+          <Input.Search
+            size="small"
+            placeholder="搜索文档标题 / URL"
+            onChange={(e) => setDocFilter(e.target.value)}
+            allowClear
+          />
+          <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 4 }}>
+            {documents
+              .filter((d) => !docFilter || d.title.toLowerCase().includes(docFilter.toLowerCase()) || d.url.toLowerCase().includes(docFilter.toLowerCase()))
+              .map((d) => (
+                <div key={d.id} style={{ padding: '4px 8px', borderBottom: '1px solid #f5f5f5' }}>
+                  <Checkbox
+                    checked={pickedDocIds.includes(d.id)}
+                    onChange={(e) => {
+                      setPickedDocIds((cur) => e.target.checked ? [...cur, d.id] : cur.filter((x) => x !== d.id));
+                    }}
+                  >
+                    <Space size={4} style={{ width: '100%' }}>
+                      <FileText size={11} />
+                      <Typography.Text style={{ fontSize: 11 }} ellipsis>{d.title}</Typography.Text>
+                    </Space>
+                    <Typography.Text type="secondary" style={{ fontSize: 10 }} ellipsis>{d.url}</Typography.Text>
+                  </Checkbox>
+                </div>
+              ))}
+          </div>
+        </Space>
+      </Modal>
     </div>
   );
 }
@@ -168,7 +267,7 @@ function ResultView({ result }: { result: AgentResult }) {
                     {tc.denied ? <ShieldAlert size={10} /> : <Wrench size={10} />}
                     {' '}iter {tc.iteration} · {tc.tool}
                   </Tag>
-                  {tc.denied && <Typography.Text type="danger" style={{ fontSize: 10 }}>已拒绝（危险动作）</Typography.Text>}
+                  {tc.denied && <Typography.Text type="danger" style={{ fontSize: 10 }}>已拒绝（dialog 选拒绝）</Typography.Text>}
                 </Space>
                 <details style={{ marginTop: 2 }}>
                   <summary style={{ fontSize: 10, color: '#888', cursor: 'pointer' }}>args / result</summary>

@@ -6,13 +6,14 @@
  * 规则：所有 channel 必须在 preload/work-browser.ts 中 ipcRenderer.invoke 对应。
  * scripts/check-ipc-contract.mjs 会自动校验。
  */
-import { ipcMain } from 'electron';
+import { ipcMain, dialog } from 'electron';
 import { getDatabase } from './database';
 import { WorkspaceStore } from './workspace-store';
 import { DocumentStore } from './document-store';
 import { SearchRouter } from './search-router';
 import { savePageAsMarkdown } from './save';
 import { getCleanerPayload, getWebviewCleanerPreloadPath, setupWorkBrowserSession } from './cleaner';
+import { getMainWindow } from '../globals';
 import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
 import { instantiateTask, ALL_TEMPLATES, type TaskTemplate } from '../../core/work-browser/task/template';
 import { runTask, type TaskStepHandler } from '../../core/work-browser/task/runner';
@@ -85,16 +86,19 @@ export function setupWorkBrowserIPC(): void {
   });
 
   // AI Agent — 单轮 tool calling
-  ipcMain.handle('work-browser:agent:run', async (_e, input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean }) => {
+  ipcMain.handle('work-browser:agent:run', async (_e, input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean; contextSources?: AgentContextSources }) => {
     const { runAgent, BUILTIN_TOOLS } = await import('../../core/work-browser/agent/runner');
     const cfg = await loadAIConfig(async (k) => workspaces.getSetting(k));
     if (!cfg.apiKey && !cfg.local) {
       throw new Error('AI 未配置 baseUrl / apiKey');
     }
+    // 把 contextSources 拼到 system prompt 头部（runner 不感知）
+    const ctxBlock = buildAgentContextBlock(workspaces, input.workspaceId as WorkspaceId | undefined, input.contextSources);
+    const finalSystem = ctxBlock ? `${ctxBlock}\n\n${input.systemPrompt || ''}`.trim() : input.systemPrompt;
     const steps: any[] = [];
     const result = await runAgent({
       userMessage: input.userMessage,
-      systemPrompt: input.systemPrompt,
+      systemPrompt: finalSystem,
       config: {
         baseUrl: cfg.baseUrl,
         apiKey: cfg.apiKey,
@@ -137,9 +141,22 @@ export function setupWorkBrowserIPC(): void {
         },
         confirmDanger: async ({ toolName, args, reason }) => {
           if (input.autoApproveDanger) return true;
-          // Phase 3.5: 通过 IPC 弹 dialog 真实确认；本轮默认拒绝危险
-          console.warn(`[work-browser:agent] dangerous tool call requires confirm: ${toolName}`, args);
-          return false;
+          // 弹原生 dialog 真实确认（用户必须选才能继续）
+          const win = getMainWindow();
+          const argPreview = JSON.stringify(args, null, 2).slice(0, 600);
+          const result = await dialog.showMessageBox(win ?? undefined as any, {
+            type: 'warning',
+            title: 'AI Agent 危险动作确认',
+            message: `工具：${toolName}`,
+            detail: `原因：${reason}\n\n参数：\n${argPreview}`,
+            buttons: ['允许', '拒绝'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          });
+          const allowed = result.response === 0;
+          console.log(`[work-browser:agent] dangerous tool "${toolName}" ${allowed ? 'allowed' : 'denied'} by user`);
+          return allowed;
         },
       },
       onStep: (s) => { steps.push(s); },
@@ -371,6 +388,24 @@ export function setupWorkBrowserIPC(): void {
     if (!doc) return [];
     return documents.listAnnotations(doc.id as DocumentId);
   });
+  // 一次拿 workspace 内所有 annotations（Graph 用）
+  ipcMain.handle('work-browser:annotation:list-by-workspace', (_e, workspaceId: WorkspaceId) => {
+    return db.prepare(`
+      SELECT a.* FROM annotations a
+      JOIN documents d ON a.document_id = d.id
+      WHERE d.workspace_id = ?
+      ORDER BY a.created_at ASC
+    `).all(workspaceId).map((r: any) => ({
+      id: r.id,
+      documentId: r.document_id,
+      selector: r.selector,
+      rangeText: r.range_text,
+      note: r.note,
+      color: r.color,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  });
   ipcMain.handle('work-browser:annotation:create', (_e, input: { documentId: DocumentId; selector: string; rangeText: string; note: string; color: 'yellow' | 'green' | 'red' | 'blue' }) => documents.createAnnotation(input));
   ipcMain.handle('work-browser:annotation:delete', (_e, id: AnnotationId) => documents.deleteAnnotation(id));
 
@@ -415,4 +450,39 @@ export function setupWorkBrowserIPC(): void {
       .map((ws) => ({ workspace: ws, tabs: workspaces.listTabs(ws.id) }))
       .flatMap((entry) => suggestWorkspacesForDocument(docSummary, [entry]).map((c) => ({ workspaceId: c.workspaceId, score: c.score, reasons: c.reasons })));
   });
+}
+
+// ── Agent Context Sources（拼接成 system prompt 块） ──
+
+export interface AgentContextSources {
+  /** 把当前 workspace 的元信息注入（name / id） */
+  workspace?: boolean;
+  /** 用户当前正在看的页面（Tab）— 让 Agent 知道"用户在想哪个页面" */
+  currentPage?: { url: string; title: string };
+  /** 用户显式选中的若干文档（一般是 Library 复选）— 让 Agent 优先参考 */
+  specificDocuments?: Array<{ id: string; title: string; url: string }>;
+}
+
+function buildAgentContextBlock(
+  workspaces: WorkspaceStore,
+  workspaceId: WorkspaceId | undefined,
+  ctx: AgentContextSources | undefined,
+): string {
+  if (!ctx) return '';
+  const lines: string[] = [];
+  if (ctx.workspace && workspaceId) {
+    const ws = workspaces.getWorkspace(workspaceId);
+    if (ws) lines.push(`[workspace] 名称: ${ws.name} (${ws.icon || '🗂'})  ID: ${ws.id}`);
+  }
+  if (ctx.currentPage) {
+    lines.push(`[current-page] 标题: ${ctx.currentPage.title}  URL: ${ctx.currentPage.url}`);
+  }
+  if (ctx.specificDocuments && ctx.specificDocuments.length) {
+    lines.push('[specific-documents] 用户选中的文档（请优先参考）：');
+    for (const d of ctx.specificDocuments) {
+      lines.push(`  - ${d.title} — ${d.url} (id: ${d.id})`);
+    }
+  }
+  if (!lines.length) return '';
+  return `<work-browser-context>\n${lines.join('\n')}\n</work-browser-context>`;
 }
