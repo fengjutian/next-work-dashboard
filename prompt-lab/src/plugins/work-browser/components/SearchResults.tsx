@@ -1,7 +1,7 @@
 /**
  * SearchResults — 搜索结果弹层
  */
-import { Card, List, Tag, Space, Typography, Empty, Spin, Button, Drawer, Tag as AntTag } from '../ui';
+import { Card, List, Tag, Space, Typography, Empty, Spin, Button, Drawer, Tag as SourceTag } from '../ui';
 import { Globe, BookMarked, BookOpen } from 'lucide-react';
 import type { AggregatedSearchResponse } from '../../../core/work-browser/types';
 import { AiSummaryCard } from './AiSummary';
@@ -59,7 +59,7 @@ export function SearchResults({ open, onClose, data, loading, onOpen }: SearchRe
                         {r.title}
                       </Typography.Link>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.domain}</Typography.Text>
-                      <AntTag>{r.source}</AntTag>
+                      <SourceTag>{r.source}</SourceTag>
                     </Space>
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ marginBottom: 0 }}>
                       {r.snippet}

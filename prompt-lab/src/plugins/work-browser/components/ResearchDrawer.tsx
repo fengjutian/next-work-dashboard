@@ -3,8 +3,8 @@
  *
  * user-visible 完成：用户点 🔬 Research 按钮 → 弹 Drawer → 输主题 → 看实时进度 → 看报告
  */
-import { Drawer, Input, Button, Space, Typography, Steps, Card, message, Tag, Spin, Select } from '../ui';
-import { FlaskConical, Sparkles, FileText, X } from 'lucide-react';
+import { Drawer, Input, Button, Space, Typography, Steps, Card, message, Tag, Spin } from '../ui';
+import { FlaskConical, Sparkles, FileText } from 'lucide-react';
 import { useState } from 'react';
 import { useResearch, type ResearchProgress } from '../hooks/useResearch';
 import type { Workspace } from '../../../core/work-browser/types';

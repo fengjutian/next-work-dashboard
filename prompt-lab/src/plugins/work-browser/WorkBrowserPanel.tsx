@@ -14,7 +14,7 @@
  * │          │                                  │          │
  * └──────────┴──────────────────────────────────┴──────────┘
  */
-import { message, Space, Typography, Empty, Tabs, ToastHost } from './ui';
+import { message, Tabs, ToastHost } from './ui';
 import { Bot, BookOpen, GitFork, ListTodo } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type {
@@ -121,7 +121,8 @@ export function WorkBrowserPanel() {
 
   const handleAddTab = useCallback(async (url: string) => {
     if (!activeWorkspace) { message.warning('请先选择 Workspace'); return; }
-    const tab = (await window.electronAPI.workBrowser.tab.create({ workspaceId: activeWorkspace.id, url, title: url })) as Tab;
+    const normalizedUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(url) ? url : `https://${url}`;
+    const tab = (await window.electronAPI.workBrowser.tab.create({ workspaceId: activeWorkspace.id, url: normalizedUrl, title: url })) as Tab;
     await refreshTabs(activeWorkspace.id);
     setActiveTab(tab);
   }, [activeWorkspace, refreshTabs]);
@@ -159,8 +160,18 @@ export function WorkBrowserPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <ToastHost />
-      <header className="relative z-10 shrink-0 border-b border-border/70 bg-card/90 px-4 py-3 shadow-[0_1px_12px_hsl(var(--foreground)/0.035)] backdrop-blur-xl">
-        <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <header className="relative z-10 shrink-0 bg-background/95 px-3 py-2 backdrop-blur-xl">
+        <div className="flex items-center gap-3">
+          {activeWorkspace && (
+            <div className="hidden shrink-0 items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 shadow-sm xl:flex">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary-light text-sm">{activeWorkspace.icon}</span>
+              <div className="leading-tight">
+                <div className="max-w-28 truncate text-xs font-semibold">{activeWorkspace.name}</div>
+                <div className="text-[10px] text-muted-foreground">{tabs.length} 标签 · {documents.length} 文档</div>
+              </div>
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
           <SearchBar
             onSearch={handleSearch}
             onSave={activeTab ? () => setSaveOpen(true) : undefined}
@@ -169,16 +180,11 @@ export function WorkBrowserPanel() {
             onToggleCleaner={toggleCleaner}
             loading={searchLoading}
           />
-          {activeWorkspace && (
-            <Typography.Text type="secondary" className="flex items-center gap-2 text-[11px]">
-              <span className="rounded-md bg-primary-light px-2 py-0.5 text-primary">{activeWorkspace.icon} {activeWorkspace.name}</span>
-              <span>{tabs.length} 个标签页</span><span className="text-border">•</span><span>{documents.length} 篇文档</span>
-            </Typography.Text>
-          )}
-        </Space>
+          </div>
+        </div>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(180px,220px)_minmax(360px,1fr)_minmax(240px,300px)] max-[1080px]:grid-cols-[190px_minmax(320px,1fr)_250px]">
-        <aside className="min-h-0 border-r border-border/70 bg-card/55">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(180px,220px)_minmax(360px,1fr)_minmax(250px,310px)] gap-2 bg-muted/30 p-2 pt-0 max-[1080px]:grid-cols-[190px_minmax(320px,1fr)_250px]">
+        <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
           <WorkspaceList
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
@@ -186,7 +192,7 @@ export function WorkBrowserPanel() {
             onCreate={async (input) => { await createWorkspace(input); }}
           />
         </aside>
-        <main className="flex min-h-0 min-w-0 flex-col bg-[radial-gradient(circle_at_50%_0%,hsl(var(--primary-light)/0.45),transparent_32rem)]">
+        <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_12px_36px_hsl(var(--foreground)/0.05)]">
           {activeWorkspace ? (
             <>
               <TabBar
@@ -205,6 +211,8 @@ export function WorkBrowserPanel() {
                   cleanerEnabled={cleanerEnabled}
                   blockedDomains={blockedDomains}
                   activeDocumentId={activeDocumentId}
+                  onOpenUrl={(url) => void handleAddTab(url)}
+                  onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
                 />
               </div>
             </>
@@ -214,7 +222,7 @@ export function WorkBrowserPanel() {
             </div>
           )}
         </main>
-        <aside className="min-h-0 overflow-hidden border-l border-border/70 bg-card/75">
+        <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
           {activeWorkspace ? (
             <Tabs
               size="small"

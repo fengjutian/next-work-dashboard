@@ -1,7 +1,8 @@
 /**
  * SavePageDialog — 保存页面确认弹窗
  */
-import { Modal, Form, Input, Select, Typography, Alert } from '../ui';
+import { Modal, Input, Select, Typography, Alert } from '../ui';
+import { useEffect, useState } from 'react';
 
 export interface SavePageDialogProps {
   open: boolean;
@@ -14,11 +15,19 @@ export interface SavePageDialogProps {
 }
 
 export function SavePageDialog({ open, onCancel, onConfirm, workspaces, defaultWorkspaceId, initialUrl, initialTitle }: SavePageDialogProps) {
-  const [form] = Form.useForm();
+  const [workspaceId, setWorkspaceId] = useState(defaultWorkspaceId || '');
+  const [url, setUrl] = useState(initialUrl || '');
+  const [title, setTitle] = useState(initialTitle || '');
+  useEffect(() => {
+    if (!open) return;
+    setWorkspaceId(defaultWorkspaceId || workspaces[0]?.id || '');
+    setUrl(initialUrl || '');
+    setTitle(initialTitle || '');
+  }, [open, defaultWorkspaceId, initialUrl, initialTitle, workspaces]);
   const submit = async () => {
-    const v = await form.validateFields();
-    await onConfirm(v);
-    form.resetFields();
+    if (!workspaceId || !url.trim()) return;
+    try { new URL(url); } catch { return; }
+    await onConfirm({ workspaceId, url: url.trim(), title: title.trim() || undefined });
   };
   return (
     <Modal
@@ -35,20 +44,14 @@ export function SavePageDialog({ open, onCancel, onConfirm, workspaces, defaultW
         style={{ marginBottom: 16 }}
         message="主进程会抓取目标 URL → Readability 净化 → 输出 Markdown + 归档原 HTML；版本变更会自动产生 diff。"
       />
-      <Form form={form} layout="vertical" initialValues={{ workspaceId: defaultWorkspaceId, url: initialUrl, title: initialTitle }}>
-        <Form.Item label="Workspace" name="workspaceId" rules={[{ required: true, message: '请选择 Workspace' }]}>
-          <Select options={workspaces.map((w) => ({ label: `${w.icon || '🌊'} ${w.name}`, value: w.id }))} />
-        </Form.Item>
-        <Form.Item label="URL" name="url" rules={[{ required: true, type: 'url', message: '请输入有效 URL' }]}>
-          <Input placeholder="https://..." />
-        </Form.Item>
-        <Form.Item label="标题（可选）" name="title">
-          <Input placeholder="留空将自动从页面提取" />
-        </Form.Item>
+      <div className="space-y-4">
+        <label className="block space-y-1.5"><span className="text-xs font-medium text-muted-foreground">工作区</span><Select value={workspaceId} onChange={setWorkspaceId} options={workspaces.map((w) => ({ label: `${w.icon || '🌊'} ${w.name}`, value: w.id }))} /></label>
+        <label className="block space-y-1.5"><span className="text-xs font-medium text-muted-foreground">URL</span><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." /></label>
+        <label className="block space-y-1.5"><span className="text-xs font-medium text-muted-foreground">标题（可选）</span><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="留空将自动从页面提取" /></label>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           隐私模式为「本地」的 Workspace，文档永远不会离开本机。
         </Typography.Text>
-      </Form>
+      </div>
     </Modal>
   );
 }

@@ -7,8 +7,8 @@
  *  - 选中文字后弹出 Annotation 浮动菜单
  *  - 净化走"网络层 session.webRequest" + "webview preload 注入 CSS/JS"双层
  */
-import { Empty, Alert, Tag, Tooltip, Button, Space, Typography } from '../ui';
-import { X } from 'lucide-react';
+import { Alert, Tag, Tooltip, Button, Space, Typography } from '../ui';
+import { ArrowRight, BookOpen, FlaskConical, Globe2, Search, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
 import { AnnotationPopover } from './AnnotationPopover';
@@ -20,6 +20,8 @@ export interface WebContentProps {
   /** 关联的 documentId；用户在 webview 里选中文字 → 弹 AnnotationPopover → 创建 annotation */
   activeDocumentId?: string;
   onSelectionChange?: (text: string, selector: string) => void;
+  onOpenUrl?: (url: string) => void;
+  onResearch?: (topic: string) => void;
 }
 
 declare global {
@@ -28,12 +30,13 @@ declare global {
   }
 }
 
-export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange }: WebContentProps) {
+export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const [preloadPath, setPreloadPath] = useState<string>('');
   const [selection, setSelection] = useState<{ text: string; selector: string; x: number; y: number } | null>(null);
   const [annotationPanel, setAnnotationPanel] = useState<{ id: string; note: string; rangeText: string; color: string; url: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [startValue, setStartValue] = useState('');
 
   // 取 webview-cleaner-preload 路径
   useEffect(() => {
@@ -113,8 +116,25 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
 
   if (!tab) {
     return (
-      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Empty description="选择或新建一个 Tab 开始浏览" />
+      <div className="relative flex h-full items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_35%,hsl(var(--primary-light)/0.85),transparent_24rem)] p-8">
+        <div className="pointer-events-none absolute inset-0 opacity-[0.035] [background-image:linear-gradient(hsl(var(--foreground))_1px,transparent_1px),linear-gradient(90deg,hsl(var(--foreground))_1px,transparent_1px)] [background-size:32px_32px]" />
+        <div className="relative w-full max-w-2xl">
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-[0_14px_38px_hsl(var(--primary)/0.28)]"><Sparkles size={24} /></div>
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">今天想探索什么？</h2>
+            <p className="mt-2 text-sm text-muted-foreground">浏览、研究并把有价值的信息沉淀到你的工作区</p>
+          </div>
+          <div className="flex items-center rounded-2xl border border-primary/15 bg-card p-1.5 shadow-[0_18px_55px_hsl(var(--foreground)/0.09)]">
+            <Search size={18} className="ml-3 shrink-0 text-muted-foreground" />
+            <input value={startValue} onChange={(e) => setStartValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && startValue.trim()) onOpenUrl?.(startValue.trim()); }} placeholder="输入网址，或粘贴你想阅读的页面…" className="h-11 min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground/70" />
+            <button type="button" onClick={() => startValue.trim() && onOpenUrl?.(startValue.trim())} className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary-hover"><ArrowRight size={17} /></button>
+          </div>
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            <button type="button" onClick={() => onOpenUrl?.('https://www.google.com')} className="group rounded-2xl border border-border/60 bg-card/75 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-lg"><Globe2 size={18} className="mb-3 text-blue-500" /><div className="text-sm font-medium">打开网页</div><div className="mt-1 text-[11px] text-muted-foreground">从互联网开始探索</div></button>
+            <button type="button" onClick={() => onResearch?.('帮我研究一个新主题')} className="group rounded-2xl border border-border/60 bg-card/75 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-lg"><FlaskConical size={18} className="mb-3 text-violet-500" /><div className="text-sm font-medium">深度研究</div><div className="mt-1 text-[11px] text-muted-foreground">多来源生成研究报告</div></button>
+            <div className="rounded-2xl border border-border/60 bg-card/75 p-4 text-left shadow-sm"><BookOpen size={18} className="mb-3 text-amber-500" /><div className="text-sm font-medium">知识沉淀</div><div className="mt-1 text-[11px] text-muted-foreground">保存页面并添加笔记</div></div>
+          </div>
+        </div>
       </div>
     );
   }

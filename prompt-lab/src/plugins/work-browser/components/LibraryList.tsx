@@ -22,7 +22,7 @@ export function LibraryList({ documents, history, onOpenDocument, onReplayQuery 
           key: 'docs',
           label: <span><FileText size={12} /> 文档 ({documents.length})</span>,
           children: (
-            <div style={{ overflow: 'auto', maxHeight: '100%' }}>
+            <div className="max-h-full overflow-auto p-2">
               {documents.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有保存的文档" />
               ) : (
@@ -30,7 +30,7 @@ export function LibraryList({ documents, history, onOpenDocument, onReplayQuery 
                   size="small"
                   dataSource={documents}
                   renderItem={(d) => (
-                    <List.Item onClick={() => onOpenDocument(d)} style={{ cursor: 'pointer' }}>
+                    <List.Item onClick={() => onOpenDocument(d)} className="mb-1 cursor-pointer rounded-xl border border-transparent transition hover:border-border hover:bg-accent">
                       <Space direction="vertical" size={2} style={{ width: '100%' }}>
                         <Typography.Text strong ellipsis style={{ width: '100%' }}>{d.title}</Typography.Text>
                         <Space size={4}>
@@ -50,7 +50,7 @@ export function LibraryList({ documents, history, onOpenDocument, onReplayQuery 
           key: 'history',
           label: <span><Search size={12} /> 搜索历史</span>,
           children: (
-            <div style={{ overflow: 'auto', maxHeight: '100%' }}>
+            <div className="max-h-full overflow-auto p-2">
               {history.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有搜索" />
               ) : (
@@ -58,9 +58,11 @@ export function LibraryList({ documents, history, onOpenDocument, onReplayQuery 
                   size="small"
                   dataSource={history}
                   renderItem={(h) => (
-                    <List.Item onClick={() => onReplayQuery(h.text)} style={{ cursor: 'pointer' }}>
-                      <Typography.Text ellipsis style={{ width: '100%' }}>{h.text}</Typography.Text>
-                      <Typography.Text type="secondary" style={{ fontSize: 11 }}>{h.resultCount} 条 · {new Date(h.executedAt).toLocaleString('zh-CN')}</Typography.Text>
+                    <List.Item onClick={() => onReplayQuery(h.text)} className="mb-1 cursor-pointer rounded-xl border border-transparent transition hover:border-border hover:bg-accent">
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <Typography.Text ellipsis className="text-xs font-medium">{h.text}</Typography.Text>
+                        <Typography.Text type="secondary" className="text-[10px]">{h.resultCount} 条结果 · {new Date(h.executedAt).toLocaleString('zh-CN')}</Typography.Text>
+                      </div>
                     </List.Item>
                   )}
                 />
