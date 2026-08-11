@@ -1,19 +1,21 @@
-// Package ratelimit provides per-IP token-bucket rate limiting for
-// nwd-admin HTTP endpoints.
+// Package ratelimit provides per-client token-bucket rate
+// limiting for nwd-admin HTTP endpoints.
 //
-// The Limiter is built on top of golang.org/x/time/rate and keeps a
-// separate bucket per client IP. Each bucket is reused while it
-// stays warm and is reaped after a configurable idle window so the
-// map cannot grow without bound.
+// The Limiter is built on top of golang.org/x/time/rate and
+// keeps a separate bucket per client key. The default key is
+// the request's IP (extracted with the same loopback-only
+// X-Forwarded-For rule as before), but operators that want to
+// limit by authenticated user can supply a custom KeyFunc
+// that returns the username once auth has stamped the context.
 //
-// The package exposes two consumption points:
+// The package exposes:
 //
-//   - Limiter.Middleware — generic middleware that drops requests
-//     returning HTTP 429 with a Retry-After header.
-//   - Policy.Middleware — convenience wrapper that derives the
-//     per-second and burst rates from a Policy struct, allowing
-//     operators to tune traffic classes (read / write / admin)
-//     through configuration.
+//   - Limiter.Middleware — generic middleware that drops
+//     requests returning HTTP 429 with a Retry-After header.
+//   - KeyFunc — pluggable bucket-key extractor.
+//
+// Buckets are reused while warm and reaped after a configurable
+// idle window so the map cannot grow without bound.
 package ratelimit
 
 import (
@@ -26,6 +28,19 @@ import (
 
 	"golang.org/x/time/rate"
 )
+
+// KeyFunc derives the per-request bucket key. Returning a
+// constant (or empty) string causes every request to share a
+// single bucket, which is rarely what you want — keep the
+// default IPKey unless you have a reason.
+type KeyFunc func(*http.Request) string
+
+// IPKey is the default key: best-effort client IP, honoring
+// X-Forwarded-For only when the request arrived from a loopback
+// address. This is the behavior the package shipped with before
+// the per-actor keying was added, so existing deployments that
+// only ever care about IPs see no change.
+func IPKey(r *http.Request) string { return clientIP(r) }
 
 // Policy describes the allowed traffic for a single traffic class.
 //
@@ -58,9 +73,10 @@ func (p Policy) WithDefaults() Policy {
 	return p
 }
 
-// Limiter holds per-IP token buckets for a single traffic class.
+// Limiter holds per-key token buckets for a single traffic class.
 type Limiter struct {
 	policy Policy
+	key    KeyFunc
 
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -72,10 +88,23 @@ type bucket struct {
 	lastSeen time.Time
 }
 
-// New builds a Limiter from a Policy.
+// New builds a Limiter with the default IP-based key. This is
+// the historical constructor; new code that needs per-actor
+// keying should call NewWithKey directly.
 func New(p Policy) *Limiter {
+	return NewWithKey(p, IPKey)
+}
+
+// NewWithKey builds a Limiter that derives its bucket key with
+// the supplied KeyFunc. The same KeyFunc instance is shared
+// across requests, so it should be safe for concurrent use.
+func NewWithKey(p Policy, key KeyFunc) *Limiter {
+	if key == nil {
+		key = IPKey
+	}
 	return &Limiter{
 		policy:  p.WithDefaults(),
+		key:     key,
 		buckets: make(map[string]*bucket),
 		now:     time.Now,
 	}
@@ -97,8 +126,7 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 		retryAfter = "1"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
-		if !l.allow(ip) {
+		if !l.allow(r) {
 			w.Header().Set("Retry-After", retryAfter)
 			http.Error(w, "请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 			return
@@ -116,10 +144,11 @@ func (l *Limiter) Reap() {
 	l.reapLocked(l.now())
 }
 
-// allow consumes a single token from the calling IP's bucket and
-// returns true if the request is permitted. Reaps stale buckets
-// opportunistically.
-func (l *Limiter) allow(ip string) bool {
+// allow consumes a single token from the calling client's bucket
+// and returns true if the request is permitted. Reaps stale
+// buckets opportunistically.
+func (l *Limiter) allow(r *http.Request) bool {
+	key := l.key(r)
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -132,11 +161,11 @@ func (l *Limiter) allow(ip string) bool {
 		l.reapLocked(now)
 	}
 
-	b, ok := l.buckets[ip]
+	b, ok := l.buckets[key]
 	if !ok {
 		lim := rate.NewLimiter(rate.Limit(l.policy.Rate), l.policy.Burst)
 		b = &bucket{lim: lim, lastSeen: now}
-		l.buckets[ip] = b
+		l.buckets[key] = b
 	}
 	b.lastSeen = now
 	return b.lim.Allow()

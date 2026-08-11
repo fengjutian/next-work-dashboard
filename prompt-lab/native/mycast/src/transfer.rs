@@ -39,10 +39,6 @@ pub struct TransferManager {
 }
 
 impl TransferManager {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn begin_upload(&self, id: &str, name: &str, declared_size: u64, target_path: PathBuf) {
         let rec = UploadRecord {
             id: id.to_string(),
@@ -73,10 +69,6 @@ impl TransferManager {
         rec.status = if ok { TransferStatus::Completed } else { TransferStatus::Failed };
         rec.error = error;
         Some(rec.clone())
-    }
-
-    pub fn get(&self, id: &str) -> Option<UploadRecord> {
-        self.uploads.read().expect("uploads lock").get(id).cloned()
     }
 
     pub fn list(&self) -> Vec<UploadRecord> {

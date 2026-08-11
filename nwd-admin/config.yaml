@@ -30,6 +30,15 @@ server:
       email: ""                  # contact for Let's Encrypt account
       staging: false             # use Let's Encrypt staging (test only)
 
+  # CSRF guard for write endpoints (POST/DELETE). Defaults:
+  #   - enabled (disable=false)
+  #   - require_custom_header=true (X-Requested-With: nwd-admin)
+  #   - allowed_origins derived from server.addr when empty
+  csrf:
+    disable: false
+    allowed_origins: []          # e.g. ["nwd-admin.example.com"]
+    require_custom_header: true  # omit to default to true
+
 database:
   data_dir: "./data"
 

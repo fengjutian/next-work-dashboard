@@ -28,7 +28,8 @@ type Action =
   | { type: 'mark-saving'; documentId: string; saving: boolean }
   | { type: 'set-mode'; documentId: string; mode: MarkdownEditorMode }
   | { type: 'set-external-change'; documentId: string; changed: boolean }
-  | { type: 'set-roundtrip'; documentId: string; safety: 'safe' | 'unsafe'; reason?: string; hasUnsupportedBlocks: boolean };
+  | { type: 'set-roundtrip'; documentId: string; safety: 'safe' | 'unsafe'; reason?: string; hasUnsupportedBlocks: boolean }
+  | { type: 'set-save-state'; documentId: string; saving: boolean; error: string | null };
 
 const initialState: State = { documents: [], activeDocumentId: null };
 
@@ -105,6 +106,13 @@ function reducer(state: State, action: Action): State {
           return { ...doc, dirty: action.saving ? true : doc.dirty };
         }),
       };
+    case 'set-save-state':
+      return {
+        ...state,
+        documents: state.documents.map((doc) =>
+          doc.id === action.documentId ? { ...doc, saving: action.saving, saveError: action.error } : doc,
+        ),
+      };
     case 'set-mode':
       return {
         ...state,
@@ -131,6 +139,18 @@ function reducer(state: State, action: Action): State {
             : doc,
         ),
       };
+    case 'set-save-state':
+      return {
+        ...state,
+        documents: state.documents.map((doc) => {
+          if (doc.id !== action.documentId) return doc;
+          // saving=true → 'saving'
+          // saving=false + error=null → 'saved'（短暂高亮）→ 1.5s 后由 UI 切到 saved
+          // saving=false + error!=null → 'error'
+          const status: import('../types').SaveStatus = action.saving ? 'saving' : action.error ? 'error' : 'saved';
+          return { ...doc, saveStatus: status, saveError: action.error };
+        }),
+      };
     default:
       return state;
   }
@@ -147,6 +167,7 @@ export interface DocumentsContextValue {
   markDirty(documentId: string, dirty: boolean): void;
   applySaveResult(documentId: string, content: string, lineEnding: 'lf' | 'crlf', result: SaveResult): void;
   setMode(documentId: string, mode: MarkdownEditorMode): void;
+  setSaveState(documentId: string, saving: boolean, error: string | null): void;
   subscribe(listener: (event: MarkdownDocumentEvent) => void): () => void;
 }
 
@@ -214,6 +235,11 @@ export function DocumentsProvider({ children, initialDocuments }: DocumentsProvi
     dispatch({ type: 'set-mode', documentId, mode });
   }, []);
 
+  const setSaveState = useCallback((documentId: string, saving: boolean, error: string | null) => {
+    dispatch({ type: 'set-save-state', documentId, saving, error });
+    notify({ kind: 'save-state-changed', documentId, saving, error });
+  }, [notify]);
+
   const subscribe = useCallback((listener: (event: MarkdownDocumentEvent) => void) => {
     listenersRef.current.add(listener);
     return () => listenersRef.current.delete(listener);
@@ -236,9 +262,10 @@ export function DocumentsProvider({ children, initialDocuments }: DocumentsProvi
       markDirty,
       applySaveResult,
       setMode,
+      setSaveState,
       subscribe,
     }),
-    [state.documents, state.activeDocumentId, activeDocument, openDocument, closeDocument, activate, updateContent, markDirty, applySaveResult, setMode, subscribe],
+    [state.documents, state.activeDocumentId, activeDocument, openDocument, closeDocument, activate, updateContent, markDirty, applySaveResult, setMode, setSaveState, subscribe],
   );
 
   return <DocumentsContext.Provider value={value}>{children}</DocumentsContext.Provider>;

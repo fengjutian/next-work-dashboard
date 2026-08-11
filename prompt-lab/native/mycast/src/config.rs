@@ -24,15 +24,9 @@ pub struct Config {
     pub ws_port: u16,
     pub storage_dir: PathBuf,
     pub mdns_enabled: bool,
-    /// Path to the mobile web UI assets directory. If None, embedded defaults are used.
-    pub web_root: Option<PathBuf>,
 }
 
 impl Config {
-    pub fn defaults() -> Self {
-        Self::with_overrides(&ConfigOverrides::default())
-    }
-
     pub fn with_overrides(ovr: &ConfigOverrides) -> Self {
         let device_id = format!("nwd-{}", &uuid::Uuid::new_v4().to_string()[..8]);
         let device_name = ovr
@@ -49,7 +43,6 @@ impl Config {
             ws_port: ovr.ws_port.unwrap_or(17891),
             storage_dir: ovr.storage_dir.clone().unwrap_or_else(default_storage_dir),
             mdns_enabled: ovr.mdns_enabled.unwrap_or(true),
-            web_root: None,
         }
     }
 }

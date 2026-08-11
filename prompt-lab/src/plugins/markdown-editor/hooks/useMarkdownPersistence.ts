@@ -17,6 +17,7 @@ export interface PersistenceDeps {
   openDocument: (doc: MarkdownDocument) => void;
   applySaveResult: (documentId: string, content: string, lineEnding: 'lf' | 'crlf', result: SaveResult) => void;
   markDirty: (documentId: string, dirty: boolean) => void;
+  setSaveState: (documentId: string, saving: boolean, error: string | null) => void;
 }
 
 export interface OpenOptions {
@@ -58,6 +59,8 @@ export function useMarkdownPersistence(deps: PersistenceDeps) {
       roundtrip: safe ? 'safe' : 'unsafe',
       hasUnsupportedBlocks: !safe,
       roundtripReason: safe ? undefined : '检测到无法安全往返的语法',
+      saveStatus: 'saved',
+      saveError: null,
       ...(Object.keys(attributes).length ? { roundtripReason: safe ? undefined : '检测到无法安全往返的语法' } : {}),
     };
     deps.openDocument(document);
@@ -70,6 +73,7 @@ export function useMarkdownPersistence(deps: PersistenceDeps) {
     }
     const inflight = inflightRef.current.get(document.id);
     if (inflight) return inflight;
+    deps.setSaveState(document.id, true, null);
     const promise = (async (): Promise<SaveResult> => {
       const content = contentOverride ?? document.content;
       const writeResult = await window.electronAPI.workspace.writeTextFile(
@@ -105,6 +109,20 @@ export function useMarkdownPersistence(deps: PersistenceDeps) {
       const result = await promise;
       deps.applySaveResult(document.id, contentOverride ?? document.content, document.lineEnding, result);
       deps.markDirty(document.id, false);
+      if (result.ok) {
+        deps.setSaveState(document.id, false, null);
+      } else {
+        const failure = result as Extract<SaveResult, { ok: false }>;
+        const errorMsg =
+          failure.reason === 'conflict'
+            ? '磁盘文件已被外部修改'
+            : failure.reason === 'read-only'
+              ? '文件为只读'
+              : failure.reason === 'error'
+                ? failure.message
+                : '保存失败';
+        deps.setSaveState(document.id, false, errorMsg);
+      }
       return result;
     } finally {
       inflightRef.current.delete(document.id);

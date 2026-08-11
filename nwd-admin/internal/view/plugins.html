@@ -167,12 +167,23 @@
         return 'Basic ' + btoa(unescape(encodeURIComponent(u + ':' + p)));
     }
 
+    // csrfHeaders returns the standard CSRF marker that the
+    // server expects on every write request. Combined with the
+    // Origin / Referer check, this proves the call came from a
+    // script we wrote (which can set custom headers) rather
+    // than a cross-site form submit.
+    const CSRF_HEADER_NAME = 'X-Requested-With';
+    const CSRF_HEADER_VALUE = 'nwd-admin';
+    function csrfHeaders(extra) {
+        return Object.assign({ [CSRF_HEADER_NAME]: CSRF_HEADER_VALUE }, extra || {});
+    }
+
     document.getElementById('creds-save').addEventListener('click', async () => {
         const header = buildAuthHeader();
         if (!header) { setStatus('请填写账号和密码', 'error'); return; }
         setStatus('验证中…', 'pending');
         try {
-            const probe = await fetch('/api/plugins/__probe__', { method: 'DELETE', headers: { 'Authorization': header } });
+            const probe = await fetch('/api/plugins/__probe__', { method: 'DELETE', headers: csrfHeaders({ 'Authorization': header }) });
             if (probe.status === 401) { setStatus('凭证无效', 'error'); return; }
         } catch (e) {
             setStatus('无法连接服务器', 'error');
@@ -205,7 +216,7 @@
             return;
         }
         const data = new FormData(event.target);
-        const response = await fetch('/api/plugins', { method: 'POST', body: data, headers: { 'Authorization': header } });
+        const response = await fetch('/api/plugins', { method: 'POST', body: data, headers: csrfHeaders({ 'Authorization': header }) });
         if (response.status === 401) {
             alert('管理员凭证无效，请先在上方"管理员凭证"中重新保存。');
             return;
@@ -263,7 +274,7 @@
             if (!confirm(`确定删除 ${name}？此操作不可撤销。`)) return;
             const header = buildAuthHeader();
             if (!header) { alert('请先保存管理员凭证。'); return; }
-            const response = await fetch('/api/plugins/' + encodeURIComponent(id) + '?version=' + encodeURIComponent(ver), { method: 'DELETE', headers: { 'Authorization': header } });
+            const response = await fetch('/api/plugins/' + encodeURIComponent(id) + '?version=' + encodeURIComponent(ver), { method: 'DELETE', headers: csrfHeaders({ 'Authorization': header }) });
             if (response.status === 401) { alert('管理员凭证无效。'); return; }
             if (response.ok) { location.reload(); return; }
             const text = await response.text();
@@ -296,7 +307,7 @@
             if (!confirm(`确认删除整个插件 ${name}（所有版本）？此操作不可撤销。`)) return;
             url = '/api/plugins/' + encodeURIComponent(id) + '?all=true';
         }
-        const response = await fetch(url, { method: 'DELETE', headers: { 'Authorization': header } });
+        const response = await fetch(url, { method: 'DELETE', headers: csrfHeaders({ 'Authorization': header }) });
         if (response.status === 401) { alert('管理员凭证无效。'); return; }
         if (response.ok) { location.reload(); return; }
         const text = await response.text();

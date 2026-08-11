@@ -6,9 +6,32 @@
             <p class="section-copy">所有写操作、认证失败和限流事件，按时间倒序展示。</p>
         </div>
         <div class="page-head-actions">
-            <a href="/api/audit-logs?size={{.Size}}" class="btn">导出 JSON</a>
+            <a href="/api/audit-logs?{{.Query.Encode}}" class="btn">导出当前 JSON</a>
         </div>
     </div>
+
+    <form method="GET" class="panel filter-bar">
+        <div class="filter-row">
+            <input class="text-input filter-input" type="text" name="actor" value="{{.Query.Actor}}" placeholder="操作者 (admin / anonymous)">
+            <select class="text-input filter-input" name="action">
+                <option value="">所有操作</option>
+                {{$current := .Query.Action}}
+                {{range .Actions}}
+                <option value="{{.}}" {{if eq . $current}}selected{{end}}>{{.}}</option>
+                {{end}}
+            </select>
+            <input class="text-input filter-input filter-input-small" type="text" name="status" value="{{statusText .Query.StatusMin .Query.StatusMax}}" placeholder="状态 (4xx / 401)">
+            <input class="text-input filter-input" type="text" name="target" value="{{.Query.Target}}" placeholder="目标 (插件 ID)">
+        </div>
+        <div class="filter-row">
+            <label class="field-label filter-date-label">从 <input class="text-input filter-date" type="date" name="from" value="{{dateInput .Query.From}}"></label>
+            <label class="field-label filter-date-label">至 <input class="text-input filter-date" type="date" name="to" value="{{dateInput .Query.To}}"></label>
+            <button class="btn btn-primary" type="submit">筛选</button>
+            {{if or .Query.Actor .Query.Action .Query.Target .Query.StatusMin .Query.StatusMax (not .Query.From.IsZero) (not .Query.To.IsZero)}}
+            <a class="btn" href="/audit">清除</a>
+            {{end}}
+        </div>
+    </form>
 
     {{if .Entries}}
     <div class="panel table-wrap">
@@ -44,14 +67,14 @@
     <nav class="pagination" aria-label="审计日志分页">
         <span class="pagination-info">共 {{.Total}} 条 · 第 {{.Page}} / {{.PageCount}} 页</span>
         <div class="pagination-buttons">
-            {{if gt .Page 1}}<a class="btn" href="?page={{subtract .Page 1}}&size={{.Size}}">‹ 上一页</a>{{end}}
-            {{if lt .Page .PageCount}}<a class="btn" href="?page={{add .Page 1}}&size={{.Size}}">下一页 ›</a>{{end}}
+            {{if gt .Page 1}}<a class="btn" href="?{{with .Query}}{{.WithPage (subtract $.Page 1) $.Size}}{{end}}">‹ 上一页</a>{{end}}
+            {{if lt .Page .PageCount}}<a class="btn" href="?{{with .Query}}{{.WithPage (add $.Page 1) $.Size}}{{end}}">下一页 ›</a>{{end}}
         </div>
     </nav>
     {{else}}
     <div class="panel empty">
         <div class="empty-icon">📜</div>
-        <p>暂无审计记录。一旦有上传、删除或认证事件，会出现在这里。</p>
+        <p>暂无审计记录{{if or .Query.Actor .Query.Action .Query.Target .Query.StatusMin .Query.StatusMax (not .Query.From.IsZero) (not .Query.To.IsZero)}}，尝试调整筛选条件{{end}}。</p>
     </div>
     {{end}}
 </div>

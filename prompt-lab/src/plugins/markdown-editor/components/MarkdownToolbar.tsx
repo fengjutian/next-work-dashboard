@@ -20,14 +20,18 @@ import {
   MessageSquare as Quote,
   RefreshCw as Redo2,
   RotateCcw as Undo2,
+  RotateCcw as RetryIcon,
   Columns2 as Table,
   Image as ImageIcon,
   Minus,
   Save,
   Search as SearchIcon,
+  CheckCircle as CheckIcon,
+  Loader2,
+  ShieldAlert as AlertCircle,
 } from '@/components/icons';
 import { cn } from '@/lib/utils';
-import type { MarkdownDocument, MarkdownEditorMode } from '../types';
+import type { MarkdownDocument, MarkdownEditorMode, SaveStatus } from '../types';
 
 export type EditorCommand =
   | { kind: 'undo' }
@@ -46,6 +50,7 @@ export type EditorCommand =
   | { kind: 'setHorizontalRule' }
   | { kind: 'setLink'; href: string }
   | { kind: 'setImage'; src: string }
+  | { kind: 'openImagePicker' }
   | { kind: 'openFindReplace' };
 
 export interface MarkdownToolbarProps {
@@ -101,23 +106,47 @@ export const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ document, onSa
   return (
     <div className="flex h-10 flex-shrink-0 items-center gap-1 border-b bg-background px-2 text-xs">
       <Group>
-        <button
-          type="button"
-          onClick={onSave}
-          title="保存 (Ctrl+S)"
-          className={cn(
-            'flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] transition-all',
-            document.dirty
-              ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary-hover'
-              : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-          )}
-        >
-          <Save className="h-3.5 w-3.5" />
-          <span className="font-medium">{document.dirty ? '保存' : '已保存'}</span>
-          <span className={cn('ml-1 rounded border px-1 font-mono text-[9px]', document.dirty ? 'border-primary-foreground/40' : 'border-border')}>
-            Ctrl+S
-          </span>
-        </button>
+        {document.saveStatus === 'saving' ? (
+          <button
+            type="button"
+            disabled
+            title="保存中…"
+            className="flex h-7 items-center gap-1 rounded-md bg-primary/80 px-2.5 text-[11px] text-primary-foreground shadow-sm"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span className="font-medium">保存中…</span>
+            <span className="ml-1 rounded border border-primary-foreground/40 px-1 font-mono text-[9px]">Ctrl+S</span>
+          </button>
+        ) : document.saveStatus === 'error' ? (
+          <button
+            type="button"
+            onClick={onSave}
+            title={`保存失败：${document.saveError ?? '未知错误'}（点击重试）`}
+            className="flex h-7 items-center gap-1 rounded-md bg-rose-600 px-2.5 text-[11px] font-medium text-white shadow-sm hover:bg-rose-500"
+          >
+            <AlertCircle className="h-3.5 w-3.5" />
+            <span>重试保存</span>
+            <span className="ml-1 rounded border border-white/30 px-1 font-mono text-[9px]">Ctrl+S</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onSave}
+            title="保存 (Ctrl+S)"
+            className={cn(
+              'flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] transition-all',
+              document.dirty
+                ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary-hover'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )}
+          >
+            <Save className="h-3.5 w-3.5" />
+            <span className="font-medium">{document.dirty ? '保存' : '已保存'}</span>
+            <span className={cn('ml-1 rounded border px-1 font-mono text-[9px]', document.dirty ? 'border-primary-foreground/40' : 'border-border')}>
+              Ctrl+S
+            </span>
+          </button>
+        )}
       </Group>
       <Divider />
       <Group>
@@ -198,10 +227,7 @@ export const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ document, onSa
         }}>
           <Link2 className="h-3.5 w-3.5" />
         </ToolbarButton>
-        <ToolbarButton label="图片" onClick={() => {
-          const src = window.prompt('请输入图片地址：', '');
-          if (src) onCommand({ kind: 'setImage', src });
-        }}>
+        <ToolbarButton label="图片（本地选择）" onClick={() => onCommand({ kind: 'openImagePicker' })}>
           <ImageIcon className="h-3.5 w-3.5" />
         </ToolbarButton>
       </Group>

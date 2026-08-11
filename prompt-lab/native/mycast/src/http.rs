@@ -11,7 +11,7 @@ use axum::{
         DefaultBodyLimit, Multipart, Path as AxPath, Query, State as AxState,
     },
     http::{header, HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -24,11 +24,9 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::config::Config;
-use crate::protocol::Event;
-use crate::security::TokenManager;
-use crate::signaling::{SignalingFrame, SignalingHub};
+use crate::signaling::SignalingFrame;
 use crate::state::SharedState;
-use crate::transfer::{Hasher, TransferStatus};
+use crate::transfer::Hasher;
 
 pub const MOBILE_HTML: &str = include_str!("../web/index.html");
 
@@ -115,7 +113,13 @@ async fn post_pair_request(
     // pairing. The phone still needs to call /api/pair/complete with the
     // code (and its own device identity) to claim the session token.
     let (_pair_token, pair_code, ttl) = state.shared.tokens.issue_pairing(None);
-    tracing::info!(target: "mycast.http", phone = %req.device_id, name = %req.device_name, "pair request issued (code-only)");
+    tracing::info!(
+        target: "mycast.http",
+        phone = %req.device_id,
+        name = %req.device_name,
+        platform = req.platform.as_deref().unwrap_or("unknown"),
+        "pair request issued (code-only)"
+    );
     let lan = crate::security::enumerate_lan_addrs()
         .into_iter()
         .find(|a| a.is_ipv4() && !a.is_loopback())

@@ -10,7 +10,7 @@
 /** 标签页模式：可视化（WYSIWYG） vs 源码（原始 Markdown 文本） */
 export type MarkdownEditorMode = 'visual' | 'source';
 
-/** 保存状态机。`unsaved` 表示本地有改动；`saving` 表示正在写盘；`error` 表示写盘失败。 */
+/** 保存状态机。`saved` 表示磁盘一致；`saving` 表示正在写盘；`error` 表示写盘失败。 */
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'error';
 
 /** 往返安全状态：'safe' 可视化模式；'unsafe' 必须降级源码模式。 */
@@ -55,6 +55,10 @@ export interface MarkdownDocument {
   roundtripReason?: string;
   /** 是否有内容被 roundtrip 守卫拒绝进入可视化模式（如 MDX、JSX 标签等）。 */
   hasUnsupportedBlocks: boolean;
+  /** 保存状态机。 */
+  saveStatus: SaveStatus;
+  /** 上次保存失败的错误信息。null 表示没有错误。 */
+  saveError?: string | null;
 }
 
 /** 文档的最小持久化信息：仅存元数据 + 内容，开/关插件后能恢复最近打开的标签。 */
@@ -91,4 +95,5 @@ export type MarkdownDocumentEvent =
   | { kind: 'saved'; documentId: string; modifiedAt: number }
   | { kind: 'save-failed'; documentId: string; reason: string }
   | { kind: 'external-change'; documentId: string; path: string }
-  | { kind: 'closed'; documentId: string };
+  | { kind: 'closed'; documentId: string }
+  | { kind: 'save-state-changed'; documentId: string; saving: boolean; error: string | null };

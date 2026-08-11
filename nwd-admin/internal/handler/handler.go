@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/fjutian/nwd-admin/internal/audit"
@@ -56,6 +57,24 @@ func init() {
 			}
 			_ = json.Unmarshal([]byte(raw), &out)
 			return out
+		},
+		"statusText": func(min, max int) string {
+			switch {
+			case min == 0 && max == 0:
+				return ""
+			case min == max:
+				return strconv.Itoa(min)
+			case min%100 == 0 && max == min+99 && min >= 100 && min < 600:
+				return strconv.Itoa(min/100) + "xx"
+			default:
+				return strconv.Itoa(min) + "-" + strconv.Itoa(max)
+			}
+		},
+		"dateInput": func(t time.Time) string {
+			if t.IsZero() {
+				return ""
+			}
+			return t.UTC().Format("2006-01-02")
 		},
 	}
 	baseLayout = template.Must(template.New("layout").Funcs(funcs).Parse(string(layoutBytes)))
@@ -277,7 +296,8 @@ const (
 )
 
 // AuditPage renders the audit log page. Pagination is read from
-// ?page=N (1-based) and ?size=N.
+// ?page=N (1-based) and ?size=N. Optional filters: ?actor=,
+// ?action=, ?status=, ?target=, ?from= (RFC3339), ?to= (RFC3339).
 func (h *Handler) AuditPage(w http.ResponseWriter, r *http.Request) {
 	if h.audits == nil {
 		http.Error(w, "审计日志未启用", http.StatusServiceUnavailable)
@@ -285,14 +305,15 @@ func (h *Handler) AuditPage(w http.ResponseWriter, r *http.Request) {
 	}
 	page, size := parseAuditPagination(r)
 	offset := (page - 1) * size
+	q := parseAuditQuery(r)
 
-	entries, err := h.audits.List(r.Context(), size, offset)
+	entries, err := h.audits.List(r.Context(), q, size, offset)
 	if err != nil {
 		slog.Error("list audit logs", "err", err)
 		http.Error(w, "读取审计日志失败", http.StatusInternalServerError)
 		return
 	}
-	total, err := h.audits.Count(r.Context())
+	total, err := h.audits.Count(r.Context(), q)
 	if err != nil {
 		slog.Warn("count audit logs", "err", err)
 		total = 0
@@ -304,6 +325,8 @@ func (h *Handler) AuditPage(w http.ResponseWriter, r *http.Request) {
 		"Size":      size,
 		"Total":     total,
 		"PageCount": pageCount(total, size),
+		"Query":     q,
+		"Actions":   knownActions(),
 	})
 }
 
@@ -315,20 +338,22 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	page, size := parseAuditPagination(r)
 	offset := (page - 1) * size
+	q := parseAuditQuery(r)
 
-	entries, err := h.audits.List(r.Context(), size, offset)
+	entries, err := h.audits.List(r.Context(), q, size, offset)
 	if err != nil {
 		slog.Error("list audit logs json", "err", err)
 		writeJSON(w, 500, map[string]string{"error": "读取失败"})
 		return
 	}
-	total, _ := h.audits.Count(r.Context())
+	total, _ := h.audits.Count(r.Context(), q)
 	writeJSON(w, 200, map[string]any{
 		"entries":   entries,
 		"page":      page,
 		"size":      size,
 		"total":     total,
 		"pageCount": pageCount(total, size),
+		"query":      q,
 	})
 }
 
@@ -345,6 +370,85 @@ func parseAuditPagination(r *http.Request) (page, size int) {
 		size = auditMaxPageSize
 	}
 	return
+}
+
+// parseAuditQuery pulls the filter set from the URL query string.
+// The status field accepts a single number (e.g. "401") or a range
+// like "4xx" / "5xx" / "200-299". Times accept RFC3339 or YYYY-MM-DD.
+func parseAuditQuery(r *http.Request) audit.Query {
+	q := r.URL.Query()
+	out := audit.Query{
+		Actor:  strings.TrimSpace(q.Get("actor")),
+		Action: strings.TrimSpace(q.Get("action")),
+		Target: strings.TrimSpace(q.Get("target")),
+	}
+	if s := strings.TrimSpace(q.Get("status")); s != "" {
+		out.StatusMin, out.StatusMax = parseStatusRange(s)
+	}
+	if s := strings.TrimSpace(q.Get("from")); s != "" {
+		if t, ok := parseTimeOrDate(s); ok {
+			out.From = t
+		}
+	}
+	if s := strings.TrimSpace(q.Get("to")); s != "" {
+		if t, ok := parseTimeOrDate(s); ok {
+			out.To = t
+		}
+	}
+	return out
+}
+
+// parseStatusRange converts "401" / "4xx" / "200-299" to a
+// (min, max) pair. Returns (0, 0) when the input is unparseable,
+// which the audit.Query treats as "no filter".
+func parseStatusRange(s string) (min, max int) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return 0, 0
+	}
+	if strings.HasSuffix(s, "xx") && len(s) == 3 {
+		// Class range: 2xx, 3xx, 4xx, 5xx.
+		digit := s[0] - '0'
+		if digit < 1 || digit > 5 {
+			return 0, 0
+		}
+		return int(digit) * 100, int(digit)*100 + 99
+	}
+	if i := strings.Index(s, "-"); i >= 0 {
+		mn, err1 := strconv.Atoi(s[:i])
+		mx, err2 := strconv.Atoi(s[i+1:])
+		if err1 == nil && err2 == nil {
+			return mn, mx
+		}
+		return 0, 0
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		return n, n
+	}
+	return 0, 0
+}
+
+func parseTimeOrDate(s string) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+// knownActions returns the canonical action labels so the audit
+// page can offer a dropdown instead of forcing the user to type.
+func knownActions() []string {
+	return []string{
+		audit.ActionUploadPlugin,
+		audit.ActionDeletePlugin,
+		audit.ActionListAuditLogs,
+		audit.ActionAuthFailure,
+		audit.ActionRateLimited,
+		audit.ActionUnknownWrite,
+	}
 }
 
 func pageCount(total int64, size int) int {

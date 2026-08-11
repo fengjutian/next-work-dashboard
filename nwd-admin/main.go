@@ -25,6 +25,7 @@ import (
 	"github.com/fjutian/nwd-admin/internal/audit"
 	"github.com/fjutian/nwd-admin/internal/auth"
 	"github.com/fjutian/nwd-admin/internal/config"
+	"github.com/fjutian/nwd-admin/internal/csrf"
 	"github.com/fjutian/nwd-admin/internal/db"
 	"github.com/fjutian/nwd-admin/internal/handler"
 	"github.com/fjutian/nwd-admin/internal/migrate"
@@ -328,12 +329,15 @@ func runServe(args []string) error {
 
 	hdlr := handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)), audit.NewGormRepository(gormDB))
 	recorder := audit.NewRecorder(hdlr.AuditRepo(), cfg.Audit.Disable)
+	csrfCfg := buildCSRFConfig(cfg)
 	opts := server.Options{
-		Verifier:   verifier,
-		ReadLimit:  ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Read.Rate, Burst: cfg.RateLimit.Read.Burst}),
-		WriteLimit: ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Write.Rate, Burst: cfg.RateLimit.Write.Burst}),
-		AdminLimit: ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Admin.Rate, Burst: cfg.RateLimit.Admin.Burst}),
-		Recorder:   recorder,
+		Verifier:    verifier,
+		ReadLimit:   ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Read.Rate, Burst: cfg.RateLimit.Read.Burst}),
+		WriteLimit:  ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Write.Rate, Burst: cfg.RateLimit.Write.Burst}),
+		AdminLimit:  ratelimit.New(ratelimit.Policy{Rate: cfg.RateLimit.Admin.Rate, Burst: cfg.RateLimit.Admin.Burst}),
+		Recorder:    recorder,
+		CSRF:        csrfCfg,
+		CSRFEnabled: !cfg.Server.CSRF.Disable,
 	}
 	handler := server.NewRouter(hdlr, opts)
 
@@ -500,6 +504,20 @@ func buildVerifier(cfg *config.Config) (*auth.Verifier, error) {
 		return nil, nil
 	}
 	return auth.NewVerifier(cfg.Admin)
+}
+
+// buildCSRFConfig translates the user-facing CSRFConfig into the
+// runtime form, filling in the default origin allow-list when the
+// operator left it empty.
+func buildCSRFConfig(cfg *config.Config) csrf.Config {
+	origins := cfg.Server.CSRF.AllowedOrigins
+	if len(origins) == 0 {
+		origins = cfg.Server.CSRF.DefaultOrigins(cfg.Server)
+	}
+	return csrf.Config{
+		AllowedOrigins:      origins,
+		RequireCustomHeader: cfg.Server.CSRF.RequireCustomHeader,
+	}
 }
 
 // runAuditPruner periodically removes audit rows older than the

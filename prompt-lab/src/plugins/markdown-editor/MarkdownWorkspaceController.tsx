@@ -56,7 +56,7 @@ export const MarkdownWorkspaceController: React.FC = () => {
 
 const MarkdownWorkspaceInner: React.FC = () => {
   const { activeActivity, theme } = useStore();
-  const { activeDocument, documents, closeDocument, activate, setMode } = useDocuments();
+  const { activeDocument, documents, closeDocument, activate, setMode, setSaveState } = useDocuments();
   const [preferences, setPreferences] = useState<MarkdownEditorPreferences>(loadPreferences);
   const [pendingExternalChange, setPendingExternalChange] = useState<{ id: string; path: string } | null>(null);
   const editorSurfaceRef = useRef<MarkdownEditorSurfaceHandle | null>(null);
@@ -70,6 +70,7 @@ const MarkdownWorkspaceInner: React.FC = () => {
     openDocument: () => undefined,
     applySaveResult: () => undefined,
     markDirty: () => undefined,
+    setSaveState,
   });
 
   const reloadDocument = useCallback(

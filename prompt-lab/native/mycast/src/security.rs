@@ -6,7 +6,6 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 const DEFAULT_TOKEN_TTL: Duration = Duration::from_secs(300);
-const PAIRING_CODE_LEN: usize = 6;
 
 pub struct TokenManager {
     /// The currently valid one-time pairing token. None means "no active pairing".
@@ -16,9 +15,7 @@ pub struct TokenManager {
 }
 
 struct TokenEntry {
-    token: String,
     pair_code: String,
-    issued_at: Instant,
     expires_at: Instant,
 }
 
@@ -26,8 +23,6 @@ struct TokenEntry {
 pub struct SessionToken {
     pub token: String,
     pub device_id: String,
-    pub device_name: String,
-    pub issued_at: Instant,
 }
 
 impl Default for TokenManager {
@@ -57,30 +52,11 @@ impl TokenManager {
         let ttl = ttl.unwrap_or(DEFAULT_TOKEN_TTL);
         let now = Instant::now();
         let entry = TokenEntry {
-            token: token.clone(),
             pair_code: pair_code.clone(),
-            issued_at: now,
             expires_at: now + ttl,
         };
         *self.inner.write().expect("token lock") = Some(entry);
         (token, pair_code, ttl)
-    }
-
-    /// Try to consume the current pairing token. Returns true on success.
-    /// `device_id`/`device_name` describe the phone that just paired.
-    pub fn consume_pairing(&self, presented: &str, device_id: &str, device_name: &str) -> Option<SessionToken> {
-        let mut guard = self.inner.write().expect("token lock");
-        let entry = guard.as_ref()?;
-        if Instant::now() > entry.expires_at {
-            *guard = None;
-            return None;
-        }
-        if !constant_time_eq(entry.token.as_bytes(), presented.as_bytes()) {
-            return None;
-        }
-        Self::promote_to_session(&mut self.sessions.write().expect("session lock"), entry, device_id, device_name);
-        *guard = None;
-        Some(self.sessions.read().expect("session lock").last().cloned().expect("just promoted"))
     }
 
     /// Consume the active pairing entry by its 6-digit display code (not the
@@ -102,15 +78,13 @@ impl TokenManager {
         Some(self.sessions.read().expect("session lock").last().cloned().expect("just promoted"))
     }
 
-    fn promote_to_session(sessions: &mut Vec<SessionToken>, _entry: &TokenEntry, device_id: &str, device_name: &str) {
+    fn promote_to_session(sessions: &mut Vec<SessionToken>, _entry: &TokenEntry, device_id: &str, _device_name: &str) {
         let mut rng = rand::thread_rng();
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         let session = SessionToken {
             token: hex::encode(bytes),
             device_id: device_id.to_string(),
-            device_name: device_name.to_string(),
-            issued_at: Instant::now(),
         };
         sessions.push(session);
     }
@@ -126,15 +100,6 @@ impl TokenManager {
         guard.as_ref().and_then(|e| if Instant::now() < e.expires_at { Some(e.pair_code.clone()) } else { None })
     }
 
-    pub fn list_sessions(&self) -> Vec<serde_json::Value> {
-        let guard = self.sessions.read().expect("session lock");
-        guard.iter().map(|s| serde_json::json!({
-            "token": sha256_hex(&s.token),
-            "device_id": s.device_id,
-            "device_name": s.device_name,
-            "issued_at_ms": s.issued_at.elapsed().as_millis() as i64,
-        })).collect()
-    }
 }
 
 pub fn sha256_hex(input: &str) -> String {

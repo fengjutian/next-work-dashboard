@@ -18,7 +18,7 @@ import { useDocuments } from './useMarkdownDocuments';
 import { useMarkdownPersistence } from './useMarkdownPersistence';
 import { AUTO_SAVE_IDLE_MS, type MarkdownEditorPreferences } from '../constants';
 import type { EditorHandle } from '../editor/createMarkdownEditor';
-import type { MarkdownDocument } from '../types';
+import type { MarkdownDocument, SaveResult } from '../types';
 
 export interface UseMarkdownEditorSyncOptions {
   handle: EditorHandle | null;
@@ -28,12 +28,17 @@ export interface UseMarkdownEditorSyncOptions {
 export function useMarkdownEditorSync({ handle, preferences }: UseMarkdownEditorSyncOptions): {
   save: (document: MarkdownDocument) => Promise<void>;
 } {
-  const { activeDocument, updateContent, markDirty, setMode } = useDocuments();
+  const { activeDocument, updateContent, markDirty, setMode, setSaveState } = useDocuments();
+  const noopOpen = (_doc: MarkdownDocument): void => undefined;
+  const noopApply = (_id: string, _c: string, _l: 'lf' | 'crlf', _r: SaveResult): void => undefined;
+  const noopDirty = (_id: string, _d: boolean): void => undefined;
+  const noopSave = (_id: string, _s: boolean, _e: string | null): void => undefined;
   const { save: persistSave } = useMarkdownPersistence({
     activeDocument,
-    openDocument: () => undefined,
-    applySaveResult: () => undefined,
-    markDirty: () => undefined,
+    openDocument: noopOpen,
+    applySaveResult: noopApply,
+    markDirty: noopDirty,
+    setSaveState: noopSave,
   });
   const autoSaveTimerRef = useRef<number | null>(null);
   const lastLoadedDocIdRef = useRef<string | null>(null);

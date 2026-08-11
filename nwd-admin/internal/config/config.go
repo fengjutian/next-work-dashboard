@@ -22,6 +22,30 @@ type ServerConfig struct {
 	WriteTimeout int        `mapstructure:"write_timeout"`
 	IdleTimeout  int        `mapstructure:"idle_timeout"`
 	TLS          TLSConfig  `mapstructure:"tls"`
+	CSRF         CSRFConfig `mapstructure:"csrf"`
+}
+
+// CSRFConfig controls the cross-site request forgery guard for
+// write endpoints. The middleware is stateless: it relies on
+// the Origin header plus a custom "X-Requested-With: nwd-admin"
+// header that a <form> cannot forge.
+//
+// Disable=true turns the guard off entirely; the custom-header
+// check is a strong second layer, so disabling both at once
+// should only happen behind a trusted reverse proxy.
+type CSRFConfig struct {
+	// Disable skips the entire CSRF middleware. Default false.
+	Disable bool `mapstructure:"disable"`
+	// AllowedOrigins lists the Origin / Referer host names
+	// accepted on write requests. "*" disables the check.
+	// When empty the middleware derives a default from
+	// server.addr + the TLS scheme on startup.
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
+	// RequireCustomHeader, when non-nil, sets whether the
+	// X-Requested-With header is required. nil = true.
+	// YAML booleans always materialize as a non-nil pointer;
+	// an unset key stays nil and the default is used.
+	RequireCustomHeader *bool `mapstructure:"require_custom_header"`
 }
 
 // TLSConfig controls optional TLS termination.
@@ -100,6 +124,28 @@ type ACMEConfig struct {
 	// Staging uses Let's Encrypt's staging environment. Useful
 	// for testing; never set this in production.
 	Staging bool `mapstructure:"staging"`
+}
+
+// DefaultOrigins returns a reasonable default allowed-origins
+// list when the operator left CSRFConfig.AllowedOrigins empty.
+// It composes http:// + server.Addr (or https:// when TLS is
+// active) so a single-binary deployment works without
+// configuration.
+func (c CSRFConfig) DefaultOrigins(server ServerConfig) []string {
+	addr := server.Addr
+	if addr == "" {
+		addr = ":8090"
+	}
+	// ":8090" → "localhost:8090"; "127.0.0.1:8090" → as-is.
+	host := addr
+	if host != "" && host[0] == ':' {
+		host = "localhost" + host
+	}
+	scheme := "http"
+	if server.TLS.EnabledMode() {
+		scheme = "https"
+	}
+	return []string{scheme + "://" + host}
 }
 
 type DatabaseConfig struct {
@@ -204,6 +250,12 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("server.tls.acme.cache_dir", "")
 	v.SetDefault("server.tls.acme.email", "")
 	v.SetDefault("server.tls.acme.staging", false)
+
+	// CSRF defaults.
+	v.SetDefault("server.csrf.disable", false)
+	v.SetDefault("server.csrf.allowed_origins", []string{})
+	// require_custom_header is *bool: leave it unset so the
+	// internal/csrf package's default (true) takes effect.
 
 	// Config file
 	if configPath != "" {

@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import { CheckCircle, Save, ShieldAlert, Info } from '@/components/icons';
+import { CheckCircle, Save, ShieldAlert, Info, Loader2, ShieldAlert as AlertCircle } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { MarkdownDocument } from '../types';
 
@@ -40,14 +40,18 @@ export const MarkdownStatusBar: React.FC<MarkdownStatusBarProps> = ({ document, 
           Ctrl/Cmd+点击 [[…]] 跳转
         </span>
       )}
-      {document.dirty && (
+      {(document.dirty || document.saveError) && document.saveStatus !== 'saving' && (
         <button
           type="button"
           onClick={onSave}
-          className="flex items-center gap-1 rounded-md px-2 py-0.5 hover:bg-accent hover:text-foreground"
+          className={cn(
+            'flex items-center gap-1 rounded-md px-2 py-0.5 hover:bg-accent hover:text-foreground',
+            document.saveError && 'text-rose-500',
+          )}
+          title={document.saveError ?? '保存'}
         >
-          <Save className="h-3 w-3" />
-          <span>保存</span>
+          {document.saveError ? <AlertCircle className="h-3 w-3" /> : <Save className="h-3 w-3" />}
+          <span>{document.saveError ? '重试' : '保存'}</span>
         </button>
       )}
     </footer>
@@ -57,6 +61,22 @@ export const MarkdownStatusBar: React.FC<MarkdownStatusBarProps> = ({ document, 
 const Sep: React.FC = () => <span className="h-3 w-px bg-border" />;
 
 const SaveStatus: React.FC<{ doc: MarkdownDocument }> = ({ doc }) => {
+  if (doc.saveStatus === 'saving') {
+    return (
+      <span className="flex items-center gap-1 text-primary">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>保存中</span>
+      </span>
+    );
+  }
+  if (doc.saveStatus === 'error') {
+    return (
+      <span className="flex items-center gap-1 text-rose-500" title={doc.saveError ?? ''}>
+        <AlertCircle className="h-3 w-3" />
+        <span>保存失败</span>
+      </span>
+    );
+  }
   if (doc.dirty) {
     return (
       <span className="flex items-center gap-1 text-amber-600">

@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { useDocuments } from '../hooks/useMarkdownDocuments';
 import { useMarkdownEditorSync } from '../hooks/useMarkdownEditorSync';
 import { useImageDrop } from '../hooks/useImageDrop';
+import { useImagePicker } from '../hooks/useImagePicker';
 import { useWikiLinkNavigation } from '../hooks/useWikiLinkNavigation';
 import { createMarkdownEditor, type EditorHandle, type CreateMarkdownEditorOptions } from '../editor/createMarkdownEditor';
 import type { EditorCommand } from './MarkdownToolbar';
@@ -124,6 +125,9 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
       case 'setImage':
         editor.chain().focus().setImage({ src: command.src }).run();
         return;
+      case 'openImagePicker':
+        void imagePicker.open();
+        return;
       case 'openFindReplace':
         setFindOpen(true);
         return;
@@ -150,6 +154,26 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // 跟踪 Ctrl/Cmd 按下状态：用于 wiki link 指针光标
+  const [isModifierPressed, setIsModifierPressed] = useState(false);
+  useEffect(() => {
+    const onDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) setIsModifierPressed(true);
+    };
+    const onUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) setIsModifierPressed(false);
+    };
+    const onBlur = () => setIsModifierPressed(false);
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
   // 拖放/粘贴图片
   const imageDrop = useImageDrop({
     editor: handle?.editor ?? null,
@@ -157,6 +181,13 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
     documentRelativePath: document.relativePath,
   });
   const { isDragging: isImageDragging, status: imageStatus } = imageDrop;
+
+  // 通过文件选择对话框插入图片
+  const imagePicker = useImagePicker({
+    editor: handle?.editor ?? null,
+    rootPath: document.rootPath,
+    documentRelativePath: document.relativePath,
+  });
 
   // Wiki Link 跳转（Ctrl/Cmd+click）
   useWikiLinkNavigation({
@@ -172,6 +203,7 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
       )}
       data-document-id={document.id}
       data-dragging={isImageDragging ? 'true' : undefined}
+      data-modifier-pressed={isModifierPressed ? 'true' : undefined}
     >
       <style>{`
         .markdown-editor-surface .md-search-match {
@@ -181,6 +213,22 @@ export const MarkdownEditorSurface = forwardRef<MarkdownEditorSurfaceHandle, Mar
         .markdown-editor-surface .md-search-match-active {
           background-color: rgba(255, 165, 0, 0.7);
           outline: 1px solid rgba(255, 140, 0, 0.9);
+        }
+        .markdown-editor-surface .md-wiki-link {
+          color: rgb(59, 130, 246);
+          border-bottom: 1px dashed rgba(59, 130, 246, 0.5);
+          transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+        }
+        .markdown-editor-surface[data-modifier-pressed] .md-wiki-link {
+          color: rgb(37, 99, 235);
+          border-bottom-color: rgba(37, 99, 235, 0.9);
+          background-color: rgba(59, 130, 246, 0.08);
+        }
+        .markdown-editor-surface[data-modifier-pressed] {
+          cursor: pointer;
+        }
+        .markdown-editor-surface[data-modifier-pressed] .ProseMirror {
+          cursor: pointer;
         }
       `}</style>
       <div ref={containerRef} className="prose prose-sm max-w-none px-8 py-6 focus:outline-none dark:prose-invert" style={{ fontSize: `${preferences.fontSize}rem` }} />

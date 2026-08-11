@@ -10,7 +10,6 @@ use crate::config::Config;
 
 pub struct MdnsAdvertiser {
     daemon: ServiceDaemon,
-    full_name: String,
 }
 
 impl MdnsAdvertiser {
@@ -34,11 +33,7 @@ impl MdnsAdvertiser {
         daemon.register(service)?;
         let full_name = format!("{instance}.{service_type}");
         tracing::info!(target: "mycast.mdns", name = %full_name, port = http_port, "mDNS service registered");
-        Ok(Self { daemon, full_name })
-    }
-
-    pub fn full_name(&self) -> &str {
-        &self.full_name
+        Ok(Self { daemon })
     }
 }
 

@@ -12,13 +12,13 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { createLowlight } from 'lowlight';
-import { grammars as commonGrammars } from 'lowlight/lib/common';
+import { common as commonGrammars, createLowlight } from 'lowlight';
 import { Markdown } from '@tiptap/markdown';
 import type { AnyExtension } from '@tiptap/core';
 import { SearchReplaceExtension } from '../extensions/search-replace';
 import { SlashCommandExtension } from '../extensions/slash-command';
 import { WikiLinkExtension } from '../extensions/wiki-link';
+import { WikiLinkDecorationsExtension } from '../extensions/wiki-link-decorations';
 
 const SUPPORTED_LANGUAGES: ReadonlyArray<string> = [
   'plaintext',
@@ -86,6 +86,7 @@ export function getCommonExtensions(options: { placeholder?: string; editable?: 
     SearchReplaceExtension,
     SlashCommandExtension,
     WikiLinkExtension,
+    WikiLinkDecorationsExtension,
   ];
 }
 

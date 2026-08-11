@@ -1,9 +1,9 @@
 // Package server wires the HTTP router for nwd-admin.
 //
 // Extracted from main.go so the route layout (and the exact
-// placement of auth, rate limit, and audit middlewares) can be
-// exercised by integration tests without standing up a real
-// listener.
+// placement of auth, rate limit, audit, and CSRF middlewares)
+// can be exercised by integration tests without standing up a
+// real listener.
 package server
 
 import (
@@ -11,6 +11,7 @@ import (
 
 	"github.com/fjutian/nwd-admin/internal/audit"
 	"github.com/fjutian/nwd-admin/internal/auth"
+	"github.com/fjutian/nwd-admin/internal/csrf"
 	"github.com/fjutian/nwd-admin/internal/handler"
 	"github.com/fjutian/nwd-admin/internal/ratelimit"
 	"github.com/go-chi/chi/v5"
@@ -20,11 +21,13 @@ import (
 // Options bundles every middleware factory the router needs.
 // Each field is optional; nil values are treated as no-op.
 type Options struct {
-	Verifier   *auth.Verifier
-	ReadLimit  *ratelimit.Limiter
-	WriteLimit *ratelimit.Limiter
-	AdminLimit *ratelimit.Limiter
-	Recorder   *audit.Recorder
+	Verifier    *auth.Verifier
+	ReadLimit   *ratelimit.Limiter
+	WriteLimit  *ratelimit.Limiter
+	AdminLimit  *ratelimit.Limiter
+	Recorder    *audit.Recorder
+	CSRF        csrf.Config
+	CSRFEnabled bool
 }
 
 // NewRouter builds the application HTTP handler.
@@ -62,17 +65,38 @@ func NewRouter(h *handler.Handler, opts Options) http.Handler {
 	r.Get("/api/plugins/{id}/download", h.DownloadPlugin)
 	r.Get("/api/plugins/{id}/versions", h.ListPluginVersions)
 
-	// Write endpoints: stricter per-IP throttling and admin auth.
-	r.Group(func(r chi.Router) {
-		if opts.WriteLimit != nil {
-			r.Use(opts.WriteLimit.Middleware)
-		}
-		if opts.Verifier != nil {
-			r.Use(opts.Verifier.Middleware)
-		}
-		r.Post("/api/plugins", h.UploadPlugin)
-		r.Delete("/api/plugins/{id}", h.DeletePlugin)
-	})
+	// Write endpoints: stricter per-IP throttling, CSRF guard,
+	// and admin auth. The CSRF middleware is the outermost
+	// gate so the rate limiter cannot be used to flood the
+	// origin check with lookups from a hostile origin.
+	//
+	// CSRFEnabled is computed by the caller (main.go) because
+	// the disable flag lives on config.CSRFConfig, not on the
+	// runtime csrf.Config.
+	if opts.CSRFEnabled {
+		r.Group(func(r chi.Router) {
+			r.Use(csrf.Middleware(opts.CSRF))
+			if opts.WriteLimit != nil {
+				r.Use(opts.WriteLimit.Middleware)
+			}
+			if opts.Verifier != nil {
+				r.Use(opts.Verifier.Middleware)
+			}
+			r.Post("/api/plugins", h.UploadPlugin)
+			r.Delete("/api/plugins/{id}", h.DeletePlugin)
+		})
+	} else {
+		r.Group(func(r chi.Router) {
+			if opts.WriteLimit != nil {
+				r.Use(opts.WriteLimit.Middleware)
+			}
+			if opts.Verifier != nil {
+				r.Use(opts.Verifier.Middleware)
+			}
+			r.Post("/api/plugins", h.UploadPlugin)
+			r.Delete("/api/plugins/{id}", h.DeletePlugin)
+		})
+	}
 
 	// Admin UI surface (audit log viewing). Requires admin auth
 	// like the write endpoints, with its own per-IP bucket so a

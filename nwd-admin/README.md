@@ -162,6 +162,54 @@ server:
 - **开发**：浏览器加例外；`curl` 加 `-k`。
 - **生产**：把自签 CA 装到系统信任库；或直接用 Let's Encrypt 拿正式证书。
 
+## CSRF 防护
+
+写接口（`POST /api/plugins`、`DELETE /api/plugins/{id}`）默认开启两层 stateless CSRF 防护：
+
+1. **Origin 检查**：请求的 `Origin`（或回退到 `Referer`）必须在 `server.csrf.allowed_origins` 白名单内。
+2. **自定义 header 校验**：写请求必须带 `X-Requested-With: nwd-admin`。`<form>` 提交无法设置自定义 header，所以被自动阻断。
+
+`GET` / `HEAD` / `OPTIONS` 永远放行。
+
+### 默认 Origin 白名单
+
+`server.csrf.allowed_origins` 为空时，按以下规则推断：
+
+- 普通 HTTP 模式：`<scheme>://<server.addr>`（`:8090` 自动补 `localhost`）
+- TLS 模式：`<scheme>` 切换为 `https`
+
+### 关闭 / 自定义
+
+```yaml
+server:
+  csrf:
+    # 全关（不推荐公网部署）
+    disable: true
+
+    # 自定义白名单
+    allowed_origins:
+      - "nwd-admin.example.com"
+      - "admin.example.org:8443"
+
+    # 关闭自定义 header 检查（仅依赖 Origin）
+    require_custom_header: false
+
+    # 关闭 Origin 检查（接受任何来源；保留 header 校验）
+    # allowed_origins: ["*"]
+```
+
+### 浏览器与 curl 行为
+
+- **浏览器 fetch**：自动带 `Origin` + 可设 `X-Requested-With`，正常工作
+- **浏览器 `<form>` POST**：不带 `X-Requested-With`（无法设置自定义 header）→ 被拒
+- **curl**：`curl -X POST` 默认不发 `Origin`；但 `-H "X-Requested-With: nwd-admin"` 能让请求通过：
+
+  ```bash
+  curl -u admin:pass -H "X-Requested-With: nwd-admin" -F "bundle=@x.nwd" http://localhost:8090/api/plugins
+  ```
+
+CSRF 中间件不引入 session/cookie 状态，与现有 Basic Auth 架构兼容。
+
 ## 数据库迁移
 
 `nwd-admin` 历史上使用单表 `plugins` 存所有元数据 + bundle。当前版本拆分成 `plugins`（元数据）+ `plugin_versions`（每个版本的 bundle）。如果从老版本升级，**直接重启服务会丢失所有 bundle**——GORM 的 AutoMigrate 会把 schema 改成新形状，但旧 plugins 行里的 `bundle` 列会被丢弃。
@@ -319,10 +367,28 @@ curl -X DELETE http://localhost:8090/api/plugins/my-plugin
 
 ### 查询审计日志
 
-需要 admin 凭证。`page` 是 1-based 页码，`size` 默认 50，上限 500。
+需要 admin 凭证。`page` 是 1-based 页码，`size` 默认 50，上限 500。多个筛选参数可以叠加。
+
+| 参数 | 格式 | 说明 |
+|---|---|---|
+| `page` | int | 1-based 页码 |
+| `size` | int | 每页条数 |
+| `actor` | string | 操作者子串（大小写不敏感），如 `admin` / `anonymous` |
+| `action` | string | 精确匹配动作标签（见下表） |
+| `target` | string | 目标资源子串（通常是插件 ID） |
+| `status` | int / range | `401` 精确、`4xx` 类、`400-499` 区间 |
+| `from` | date / RFC3339 | 起始时间（含） |
+| `to` | date / RFC3339 | 截止时间（含） |
 
 ```bash
-curl -u admin:mypassword 'http://localhost:8090/api/audit-logs?page=1&size=50'
+# 列出某 IP 的所有 401
+curl -u admin:mypassword 'http://localhost:8090/api/audit-logs?status=401&actor=anonymous'
+
+# 列出今天的所有删除操作
+curl -u admin:mypassword "http://localhost:8090/api/audit-logs?action=delete_plugin&from=$(date -I)"
+
+# 列出 hello-* 系列插件的所有动作
+curl -u admin:mypassword 'http://localhost:8090/api/audit-logs?target=hello-'
 ```
 
 返回结构：
@@ -348,7 +414,14 @@ curl -u admin:mypassword 'http://localhost:8090/api/audit-logs?page=1&size=50'
   "page": 1,
   "size": 50,
   "total": 1,
-  "pageCount": 1
+  "pageCount": 1,
+  "query": {
+    "actor": "",
+    "action": "delete_plugin",
+    "target": "",
+    "from": "0001-01-01T00:00:00Z",
+    "to": "0001-01-01T00:00:00Z"
+  }
 }
 ```
 
@@ -364,6 +437,8 @@ curl -u admin:mypassword 'http://localhost:8090/api/audit-logs?page=1&size=50'
 | `unknown_write` | 其他未识别的写方法（PUT/PATCH 等） |
 
 匿名行（`actor = "anonymous"`）通常是扫描器、爬虫或被误用的脚本的痕迹。日志表默认保留 90 天，1 小时一次的 pruner 自动清理；通过 `audit.retention_days` 配置。
+
+`/audit` 页面提供对应的表单筛选（操作者、操作下拉、状态、目标、起止日期），分页链接会自动保留所有当前筛选条件。
 
 ## `.nwd` 格式
 
@@ -436,15 +511,14 @@ go build ./...
 
 ## 当前限制
 
-- 写接口已加入 Basic Auth 和限流，但**没有 CSRF 防护**；浏览器直访需自行处理 CSRF
-- 审计日志的查询接口只支持时间倒序分页，没有按操作者/动作/状态筛选
 - 插件包存入 SQLite，不适合大规模下载或 CDN 分发
 - 下载计数会受到爬虫、重试和预取影响
 - 限流粒度只到 IP；同 NAT 后多用户会互相干扰
 - 标签是简单 JSON 数组，无层级或别名
 - ACME 模式只支持 http-01 challenge；需要 DNS 指向且 :80 可达
+- CSRF 防护依赖 Origin + 自定义 header；XSS 场景下不防护（需 CSP 等协同）
 
-公网部署前仍需加入 CSRF 防护、审计查询筛选、按用户限流。
+公网部署前仍需加入按用户限流。
 
 ## 相关文档
 
