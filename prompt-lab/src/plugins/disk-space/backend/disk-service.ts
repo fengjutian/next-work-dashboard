@@ -15,6 +15,64 @@ const scanResults = new Map<string, {
   entries: Map<string, 'file' | 'directory'>;
 }>();
 
+// ---------------- Scan 存档（userData 文件存储） ----------------
+//
+// 之前用 localStorage 存 5 份完整 PersistedScanResult，每份 ~1-5 MB，
+// 受 localStorage 5 MB 单 key 上限制约，且 JSON.stringify 同步阻塞 UI。
+// 改写到 userData/scan-archive/：完整存档进 <id>.json，列表只存元数据
+// （id + 概览数字 + 时间），按需懒加载完整数据。
+const ARCHIVE_FILENAME = 'index.json';
+type ArchiveEntry = {
+  id: string;
+  root: string;
+  savedAt: number;
+  stats: { files: number; bytes: number; errors: number };
+  duplicates: number; // 数量摘要；恢复时按需从完整存档读
+};
+type SnapshotEntry = {
+  id: string;
+  root: string;
+  timestamp: number;
+  directoryCount: number;
+};
+
+function archiveDir(): string {
+  // userData/scan-archive/
+  return path.join(app.getPath('userData'), 'scan-archive');
+}
+function archiveIndexPath(): string {
+  return path.join(archiveDir(), ARCHIVE_FILENAME);
+}
+function archiveFilePath(id: string): string {
+  // 防止路径穿越：id 必须是简单的字符串（短、横线、数字）
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('非法存档 ID');
+  return path.join(archiveDir(), `${id}.json`);
+}
+function snapshotsDir(): string {
+  return path.join(archiveDir(), 'snapshots');
+}
+function snapshotFilePath(id: string): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('非法快照 ID');
+  return path.join(snapshotsDir(), `${id}.json`);
+}
+function ensureDir(directory: string): void {
+  fs.mkdirSync(directory, { recursive: true });
+}
+function readJsonSync<T>(filePath: string, fallback: T): T {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+  } catch {
+    return fallback;
+  }
+}
+function writeJsonSync(filePath: string, value: unknown): void {
+  ensureDir(path.dirname(filePath));
+  // 原子写：先写临时文件再 rename，避免半写入。
+  const tmp = `${filePath}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(value));
+  fs.renameSync(tmp, filePath);
+}
+
 function normalizeWindowsPath(value: string): string {
   if (process.platform !== 'win32') return value;
   if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`;

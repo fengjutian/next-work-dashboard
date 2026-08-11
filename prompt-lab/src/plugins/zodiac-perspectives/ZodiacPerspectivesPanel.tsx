@@ -436,17 +436,13 @@ export function ZodiacPerspectivesPanel() {
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
-      <header className="space-y-1">
-        <div className="flex items-center gap-2">
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           <Sparkles className="h-5 w-5 text-primary" />
           <h1 className="text-xl font-semibold">十二星座视角</h1>
-          <span className="text-xs text-muted-foreground">· 星座圆桌</span>
+          <span className="hidden text-xs text-muted-foreground sm:inline">· 多视角思考</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          输入一个问题，让十二种星座思考原型从不同角度回应，再帮你归纳共识、分歧和行动建议。
-          星座仅作为易理解的角色原型，不用于人格诊断或命运预测。
-        </p>
-        <Button variant="outline" size="sm" onClick={() => setQualityStatsOpen(true)}>质量统计</Button>
+        <Button variant="ghost" size="sm" onClick={() => setQualityStatsOpen(true)}>质量统计</Button>
       </header>
 
       <QuestionInput

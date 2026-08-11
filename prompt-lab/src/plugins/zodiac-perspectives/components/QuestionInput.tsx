@@ -39,6 +39,9 @@ export function QuestionInput({
 }: QuestionInputProps) {
   const [question, setQuestion] = useState('');
   const [showGuide, setShowGuide] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
+  const [showPerspectives, setShowPerspectives] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [background, setBackground] = useState('');
   const lengthId = useId();
   const sceneId = useId();
@@ -94,16 +97,29 @@ export function QuestionInput({
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="例：我是否应该离开稳定但没有成长的工作？"
-          rows={4}
+          rows={3}
           maxLength={QUESTION_MAX_LENGTH}
           disabled={disabled}
-          className="flex min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex min-h-[76px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
         {tooLong && (
           <p className="text-xs text-destructive">问题超出 {QUESTION_MAX_LENGTH} 字上限</p>
         )}
-        <div className="flex flex-wrap gap-2">
-          {SAMPLE_QUESTIONS.map((sample) => (
+        <div className="flex flex-wrap gap-3 text-xs">
+          <button type="button" className="font-medium text-primary hover:underline" onClick={() => setShowExamples((value) => !value)} disabled={disabled}>
+            {showExamples ? '收起示例' : '查看示例'}
+          </button>
+          <button
+            type="button"
+            className="font-medium text-primary hover:underline"
+            onClick={() => setShowGuide((value) => !value)}
+            disabled={disabled}
+          >
+            {showGuide ? '收起背景' : '补充背景'}
+          </button>
+        </div>
+        {showExamples && <div className="flex flex-wrap gap-2">
+          {SAMPLE_QUESTIONS.slice(0, 4).map((sample) => (
             <button
               key={sample}
               type="button"
@@ -114,15 +130,7 @@ export function QuestionInput({
               {sample}
             </button>
           ))}
-        </div>
-        <button
-          type="button"
-          className="text-xs font-medium text-primary hover:underline"
-          onClick={() => setShowGuide((value) => !value)}
-          disabled={disabled}
-        >
-          {showGuide ? '收起补充向导' : '先补充背景，让回答更准确'}
-        </button>
+        </div>}
         {showGuide && (
           <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 p-3">
             <p className="text-xs font-medium text-foreground">可参考以下问题补充，不必全部回答：</p>
@@ -142,11 +150,12 @@ export function QuestionInput({
         )}
       </div>
 
-      <div className="space-y-2 rounded-md border border-border/60 p-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm font-medium">参与视角</span>
-          <span className="text-xs text-muted-foreground">已选 {options.selectedSigns.length} 个，至少 3 个</span>
-        </div>
+      <div className="rounded-md border border-border/60 bg-muted/10">
+        <button type="button" onClick={() => setShowPerspectives((value) => !value)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" disabled={disabled}>
+          <span><span className="font-medium">参与视角</span><span className="ml-2 text-muted-foreground">{selectedPresetLabel(options.selectedSigns)} · {options.selectedSigns.length} 个</span></span>
+          <span className="text-xs text-primary">{showPerspectives ? '收起' : '调整'}</span>
+        </button>
+        {showPerspectives && <div className="space-y-2 border-t border-border/50 p-3">
         <div className="flex flex-wrap gap-1.5">
           {Object.entries(SIGN_PRESETS).map(([id, preset]) => (
             <Button
@@ -182,9 +191,15 @@ export function QuestionInput({
             );
           })}
         </div>
+        </div>}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="rounded-md border border-border/60 bg-muted/10">
+        <button type="button" onClick={() => setShowAdvanced((value) => !value)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" disabled={disabled}>
+          <span><span className="font-medium">回答设置</span><span className="ml-2 text-muted-foreground">{optionLabel(MODE_OPTIONS, options.mode)} · {optionLabel(SCENE_OPTIONS, options.scene)} · {optionLabel(LENGTH_OPTIONS, options.length)} · {optionLabel(TONE_OPTIONS, options.tone)}{options.includeSynthesis ? ' · 含总结' : ''}</span></span>
+          <span className="text-xs text-primary">{showAdvanced ? '收起' : '调整'}</span>
+        </button>
+        {showAdvanced && <div className="grid grid-cols-1 gap-3 border-t border-border/50 p-3 sm:grid-cols-2 lg:grid-cols-5">
         <OptionGroup
           inputId={modeId}
           label="模式"
@@ -250,6 +265,7 @@ export function QuestionInput({
                 : `关闭后只输出所选的 ${options.selectedSigns.length} 个视角`}
           </p>
         </div>
+        </div>}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -289,6 +305,14 @@ const SIGN_PRESETS: Record<string, { label: string; signs: readonly ZodiacSign[]
 
 function sameSigns(left: readonly ZodiacSign[], right: readonly ZodiacSign[]): boolean {
   return left.length === right.length && left.every((sign) => right.includes(sign));
+}
+
+function selectedPresetLabel(signs: readonly ZodiacSign[]): string {
+  return Object.values(SIGN_PRESETS).find((preset) => sameSigns(signs, preset.signs))?.label ?? '自定义';
+}
+
+function optionLabel<T extends string>(items: ReadonlyArray<{ value: T; label: string }>, value: T): string {
+  return items.find((item) => item.value === value)?.label ?? value;
 }
 
 function estimateRequests(options: GenerationOptions): number {
