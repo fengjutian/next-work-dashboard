@@ -254,7 +254,7 @@ async function collectStream(
   return raw;
 }
 
-export function parseFastBatch(raw: string): ZodiacPerspective[] {
+export function parseFastBatch(raw: string, expectedSigns: readonly ZodiacSign[] = ZODIAC_SIGNS): ZodiacPerspective[] {
   const parsed = extractJson(raw);
   if (!parsed || typeof parsed !== 'object') throw new Error('快速模式返回的不是 JSON 对象');
   const items = (parsed as Record<string, unknown>).perspectives;
@@ -273,7 +273,7 @@ export function parseFastBatch(raw: string): ZodiacPerspective[] {
     }
   }
   if (bySign.size === 0) throw new Error('快速模式没有返回有效视角');
-  return ZODIAC_SIGNS.flatMap((sign) => bySign.has(sign) ? [bySign.get(sign)!] : []);
+  return expectedSigns.flatMap((sign) => bySign.has(sign) ? [bySign.get(sign)!] : []);
 }
 
 function parseQuestionContext(raw: string): QuestionContext {
@@ -308,7 +308,7 @@ async function generateFastBatch(
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return parseFastBatch(await collectStream(messages, { model: ctx.model, temperature: 0.75, maxTokens: 3200, signal }, ctx));
+      return parseFastBatch(await collectStream(messages, { model: ctx.model, temperature: 0.75, maxTokens: 3200, signal }, ctx), options.selectedSigns);
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
@@ -450,12 +450,12 @@ export async function generateAllPerspectives(
   }
 
   if (options.mode === 'fast') {
-    for (const sign of ZODIAC_SIGNS) callbacks.onCardStart?.(sign);
+    for (const sign of options.selectedSigns) callbacks.onCardStart?.(sign);
     try {
       const batch = await generateFastBatch(question, options, ctx, signal);
       const completed = new Map(batch.map((item) => [item.sign, item]));
       for (const perspective of batch) callbacks.onCardDone?.(perspective.sign, perspective);
-      const missing = ZODIAC_SIGNS.filter((sign) => !completed.has(sign));
+      const missing = options.selectedSigns.filter((sign) => !completed.has(sign));
       if (missing.length) warnings.push(`快速模式缺少 ${missing.length} 个视角，已自动逐项补全`);
       const supplemental = await allSettledWithConcurrency(missing.map((sign) => async () => {
         const perspective = await generatePerspective(sign, question, options, ctx, signal);
@@ -466,13 +466,13 @@ export async function generateAllPerspectives(
         if (result.status === 'fulfilled') completed.set(result.value.sign, result.value);
         else callbacks.onCardFailed?.(missing[index], describeLlmError(result.reason));
       });
-      const perspectives = ZODIAC_SIGNS.flatMap((sign) => completed.has(sign) ? [completed.get(sign)!] : []);
-      const partialSigns = ZODIAC_SIGNS.filter((sign) => !completed.has(sign));
+      const perspectives = options.selectedSigns.flatMap((sign) => completed.has(sign) ? [completed.get(sign)!] : []);
+      const partialSigns = options.selectedSigns.filter((sign) => !completed.has(sign));
       return { perspectives, synthesis: null, partialSigns, warnings };
     } catch (error) {
       if (signal?.aborted) throw error;
       const message = error instanceof Error ? error.message : String(error);
-      for (const sign of ZODIAC_SIGNS) callbacks.onCardFailed?.(sign, message);
+      for (const sign of options.selectedSigns) callbacks.onCardFailed?.(sign, message);
       throw error;
     }
   }
@@ -485,7 +485,7 @@ export async function generateAllPerspectives(
     warnings.push('共享事实摘要生成失败，已使用原问题继续生成');
   }
 
-  const tasks = ZODIAC_SIGNS.map((sign) => async (): Promise<{ sign: ZodiacSign; perspective: ZodiacPerspective }> => {
+  const tasks = options.selectedSigns.map((sign) => async (): Promise<{ sign: ZodiacSign; perspective: ZodiacPerspective }> => {
     if (signal?.aborted) throw new DOMException('生成已取消', 'AbortError');
     callbacks.onCardStart?.(sign);
     try {
@@ -518,7 +518,7 @@ export async function generateAllPerspectives(
   const partialSigns: ZodiacSign[] = [];
   for (let i = 0; i < settled.length; i += 1) {
     const result = settled[i];
-    const sign = ZODIAC_SIGNS[i];
+    const sign = options.selectedSigns[i];
     if (result.status === 'fulfilled') {
       perspectives.push(result.value.perspective);
     } else {

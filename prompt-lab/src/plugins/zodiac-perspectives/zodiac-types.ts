@@ -43,6 +43,7 @@ export interface GenerationOptions {
   tone: GenerationTone;
   includeSynthesis: boolean;
   mode: GenerationMode;
+  selectedSigns: ZodiacSign[];
 }
 
 // ── 服务端输出契约（§7） ──────────────────────────────────────────

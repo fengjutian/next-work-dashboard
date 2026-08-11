@@ -48,6 +48,7 @@ const DEFAULT_OPTIONS: GenerationOptions = {
   tone: 'gentle',
   includeSynthesis: true,
   mode: 'standard',
+  selectedSigns: [...ZODIAC_SIGNS],
 };
 
 const EMPTY_RUN: Omit<ZodiacRun, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -61,8 +62,8 @@ const EMPTY_RUN: Omit<ZodiacRun, 'id' | 'createdAt' | 'updatedAt'> = {
   partial: false,
 };
 
-function makeInitialCards(): PerspectiveCardState[] {
-  return ZODIAC_SIGNS.map((sign) => ({ sign, status: 'pending' as CardStatus }));
+function makeInitialCards(signs: readonly ZodiacSign[] = ZODIAC_SIGNS): PerspectiveCardState[] {
+  return signs.map((sign) => ({ sign, status: 'pending' as CardStatus }));
 }
 
 // ── 差异识别：focus 第一条 / 关键词集合做近似去重 ──────────────────
@@ -195,7 +196,7 @@ export function ZodiacPerspectivesPanel() {
         partial: false,
       };
       setRun(newRun);
-      setCards(makeInitialCards());
+      setCards(makeInitialCards(options.selectedSigns));
       setSynthesisStatus('idle');
       setErrorMessage(null);
 
@@ -304,7 +305,7 @@ export function ZodiacPerspectivesPanel() {
           if (!prev) return prev;
           const nextPerspectives = [...prev.perspectives.filter((p) => p.sign !== sign), perspective]
             .sort((a, b) => ZODIAC_ORDER.indexOf(a.sign) - ZODIAC_ORDER.indexOf(b.sign));
-          const partial = nextPerspectives.length !== 12;
+          const partial = nextPerspectives.length !== prev.options.selectedSigns.length;
           updateRunPerspectives(prev.id, nextPerspectives);
           setPartial(prev.id, partial);
           return { ...prev, partial, perspectives: nextPerspectives, synthesis: null, updatedAt: Date.now() };
@@ -382,7 +383,7 @@ export function ZodiacPerspectivesPanel() {
   // ── 操作：打开历史 ──────────────────────────────────────────
 
   const handleSelectHistory = useCallback((historical: ZodiacRun) => {
-    const cardsFromHistory = ZODIAC_SIGNS.map((sign) => {
+    const cardsFromHistory = historical.options.selectedSigns.map((sign) => {
       const p = historical.perspectives.find((item) => item.sign === sign);
       return p
         ? { sign, status: 'done' as CardStatus, perspective: p }
@@ -440,7 +441,7 @@ export function ZodiacPerspectivesPanel() {
 
       {running && (
         <div className="flex items-center justify-between rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-sm text-blue-700 dark:text-blue-300">
-          <span>正在并行生成 12 个星座视角（已完成 {completedCount} / 12）…</span>
+          <span>正在生成 {options.selectedSigns.length} 个星座视角（已完成 {completedCount} / {options.selectedSigns.length}）…</span>
           <Button variant="outline" size="sm" onClick={handleCancel}>
             <RefreshCw className="h-3.5 w-3.5" /> 取消
           </Button>

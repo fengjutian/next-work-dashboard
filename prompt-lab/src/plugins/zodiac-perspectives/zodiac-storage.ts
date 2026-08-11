@@ -38,6 +38,7 @@ const DEFAULT_OPTIONS: Record<string, unknown> = {
   tone: 'gentle',
   includeSynthesis: true,
   mode: 'standard',
+  selectedSigns: [...ZODIAC_SIGNS],
 };
 
 function recordToRun(record: ZodiacRunRecord): ZodiacRun {
@@ -84,7 +85,14 @@ function normalizeOptions(raw: unknown): ZodiacRun['options'] {
     tone: tones.includes(base.tone as GenerationTone) ? base.tone as GenerationTone : 'gentle',
     includeSynthesis: base.includeSynthesis !== false,
     mode: modes.includes(base.mode as GenerationMode) ? base.mode as GenerationMode : 'standard',
+    selectedSigns: normalizeSelectedSigns(base.selectedSigns),
   };
+}
+
+function normalizeSelectedSigns(raw: unknown): ZodiacRun['options']['selectedSigns'] {
+  if (!Array.isArray(raw)) return [...ZODIAC_SIGNS];
+  const selected = ZODIAC_SIGNS.filter((sign) => raw.includes(sign));
+  return selected.length >= 3 ? selected : [...ZODIAC_SIGNS];
 }
 
 function stringArray(value: unknown): string[] {

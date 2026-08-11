@@ -180,21 +180,22 @@ export function buildQuestionContextPrompt(question: string): string {
 }
 
 export function buildFastBatchUserPrompt(question: string, options: GenerationOptions): string {
-  const roles = ZODIAC_META_LIST.map((meta) =>
+  const selected = ZODIAC_META_LIST.filter((meta) => options.selectedSigns.includes(meta.sign));
+  const roles = selected.map((meta) =>
     `${meta.sign}: ${meta.name}｜${meta.seed}`,
   ).join('\n');
   return `
 # 当前问题
 ${question.trim()}
 
-# 十二种角色
+# 所选角色
 ${roles}
 
 # 任务
-一次性返回十二个简短但有实质差异的视角。每项都必须回应原问题，不能只改变语气。
+一次性返回 ${selected.length} 个简短但有实质差异的视角。每项都必须回应原问题，不能只改变语气。
 严格只输出合法 JSON：
 {"perspectives":[{"sign":"aries","interpretation":"...","focus":["..."],"advice":["..."]}]}
-perspectives 必须按黄道顺序包含全部 12 个英文 sign，每项 interpretation 40～80 字，focus 和 advice 各 1～3 条。
+perspectives 必须按黄道顺序包含全部所选英文 sign：${selected.map((meta) => meta.sign).join(', ')}。每项 interpretation 40～80 字，focus 和 advice 各 1～3 条。
 `.trim();
 }
 
