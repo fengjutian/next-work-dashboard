@@ -68,7 +68,8 @@ export class WorkspaceStore {
 
   createTab(input: { workspaceId: WorkspaceId; url: string; title?: string; position?: number }): Tab {
     const t = now();
-    const pos = input.position ?? Number(this.db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tabs WHERE workspace_id = ?').get(input.workspaceId) as { p: number });
+    const nextPosition = this.db.prepare('SELECT COALESCE(MAX(position), 0) + 1 AS p FROM tabs WHERE workspace_id = ?').get(input.workspaceId) as { p: number };
+    const pos = input.position ?? nextPosition.p;
     const tab: Tab = {
       id: newId<TabId>(),
       workspaceId: input.workspaceId,

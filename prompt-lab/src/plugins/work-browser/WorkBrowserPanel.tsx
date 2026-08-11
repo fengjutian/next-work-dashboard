@@ -14,7 +14,7 @@
  * │          │                                  │          │
  * └──────────┴──────────────────────────────────┴──────────┘
  */
-import { message, Tabs, ToastHost } from './ui';
+import { Empty, message, Tabs, ToastHost } from './ui';
 import { Bot, BookOpen, GitFork, ListTodo } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type {
@@ -75,8 +75,14 @@ export function WorkBrowserPanel() {
   }, []);
 
   const refreshAnnotations = useCallback(async (wsId: string) => {
-    const anns = (await window.electronAPI.workBrowser.annotation.listByWorkspace(wsId)) as Annotation[];
-    setAnnotations(anns);
+    try {
+      const anns = (await window.electronAPI.workBrowser.annotation.listByWorkspace(wsId)) as Annotation[];
+      setAnnotations(anns);
+    } catch (error) {
+      // Annotation Graph 是增强能力；旧版主进程未注册该 channel 时不阻塞浏览器主体。
+      console.warn('[work-browser] workspace annotations unavailable:', error);
+      setAnnotations([]);
+    }
   }, []);
 
   const refreshHistory = useCallback(async () => {
