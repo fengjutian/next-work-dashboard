@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS documents (
   captured_at     INTEGER NOT NULL,
   word_count      INTEGER NOT NULL DEFAULT 0,
   summary         TEXT,
+  plain_text      TEXT NOT NULL DEFAULT '',
   origin_tab_id   TEXT,
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
@@ -60,6 +61,25 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(content_hash);
 CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(url);
+
+-- FTS5 虚拟表（external content 模式同步 documents）
+CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+  title, summary, plain_text,
+  content='documents', content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
+);
+
+-- 触发器：documents → documents_fts 同步
+CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+  INSERT INTO documents_fts(rowid, title, summary, plain_text) VALUES (new.rowid, new.title, new.summary, new.plain_text);
+END;
+CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, title, summary, plain_text) VALUES ('delete', old.rowid, old.title, old.summary, old.plain_text);
+END;
+CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+  INSERT INTO documents_fts(documents_fts, rowid, title, summary, plain_text) VALUES ('delete', old.rowid, old.title, old.summary, old.plain_text);
+  INSERT INTO documents_fts(rowid, title, summary, plain_text) VALUES (new.rowid, new.title, new.summary, new.plain_text);
+END;
 
 CREATE TABLE IF NOT EXISTS document_versions (
   id            TEXT PRIMARY KEY,
@@ -89,6 +109,23 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_workspace ON notes(workspace_id, updated_at DESC);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  title, content, tags,
+  content='notes', content_rowid='rowid',
+  tokenize='unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
+  INSERT INTO notes_fts(rowid, title, content, tags) VALUES (new.rowid, new.title, new.content, new.tags);
+END;
+CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts, rowid, title, content, tags) VALUES ('delete', old.rowid, old.title, old.content, old.tags);
+END;
+CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts, rowid, title, content, tags) VALUES ('delete', old.rowid, old.title, old.content, old.tags);
+  INSERT INTO notes_fts(rowid, title, content, tags) VALUES (new.rowid, new.title, new.content, new.tags);
+END;
 
 CREATE TABLE IF NOT EXISTS annotations (
   id          TEXT PRIMARY KEY,

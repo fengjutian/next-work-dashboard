@@ -449,6 +449,8 @@ export interface ElectronAPI {
     task: {
       list: (workspaceId: string, status?: string) => Promise<unknown[]>;
       upsert: (task: any) => Promise<void>;
+      templates: () => Promise<Array<{ id: string; name: string; description: string; stepCount: number }>>;
+      createFromTemplate: (input: { workspaceId: string; templateId: string; title?: string }) => Promise<unknown>;
     };
     conversation: {
       list: (workspaceId: string) => Promise<unknown[]>;
@@ -457,7 +459,7 @@ export interface ElectronAPI {
     };
     search: {
       providers: () => Promise<Array<{ id: string; name: string; capabilities: any }>>;
-      run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string }) => Promise<{ results: any[]; providers: any[]; aiSummary: string | null; took: number }>;
+      run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => Promise<{ results: any[]; providers: any[]; aiSummary: string | null; took: number }>;
       suggest: (text: string) => Promise<string[]>;
       history: (limit?: number) => Promise<unknown[]>;
     };

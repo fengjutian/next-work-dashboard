@@ -14,7 +14,7 @@
  * │          │                                  │          │
  * └──────────┴──────────────────────────────────┴──────────┘
  */
-import { Layout, message, Space, Typography, Empty } from 'antd';
+import { Layout, message, Space, Typography, Empty, Tabs } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import type {
   Workspace, Tab, Document, SearchHistoryEntry,
@@ -24,6 +24,7 @@ import { WorkspaceList } from './components/WorkspaceList';
 import { TabBar } from './components/TabBar';
 import { WebContent } from './components/WebContent';
 import { LibraryList } from './components/LibraryList';
+import { TaskList } from './components/TaskList';
 import { SearchResults } from './components/SearchResults';
 import { SavePageDialog } from './components/SavePageDialog';
 import { useWorkspaces } from './hooks/useWorkspace';
@@ -201,11 +202,28 @@ export function WorkBrowserPanel() {
         </Content>
         <Sider width={280} theme="light" style={{ borderLeft: '1px solid #f0f0f0' }}>
           {activeWorkspace ? (
-            <LibraryList
-              documents={documents}
-              history={history}
-              onOpenDocument={(d) => { window.open(d.url, '_blank'); }}
-              onReplayQuery={handleSearch}
+            <Tabs
+              size="small"
+              style={{ height: '100%' }}
+              items={[
+                {
+                  key: 'library',
+                  label: 'Library',
+                  children: (
+                    <LibraryList
+                      documents={documents}
+                      history={history}
+                      onOpenDocument={(d) => { window.open(d.url, '_blank'); }}
+                      onReplayQuery={handleSearch}
+                    />
+                  ),
+                },
+                {
+                  key: 'tasks',
+                  label: 'Tasks',
+                  children: <TaskList workspaceId={activeWorkspace.id} />,
+                },
+              ]}
             />
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Library 暂不可用" style={{ marginTop: 24 }} />

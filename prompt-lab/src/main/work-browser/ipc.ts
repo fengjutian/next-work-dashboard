@@ -14,8 +14,9 @@ import { SearchRouter } from './search-router';
 import { savePageAsMarkdown } from './save';
 import { getCleanerPayload, getWebviewCleanerPreloadPath, setupWorkBrowserSession } from './cleaner';
 import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
+import { instantiateTask, ALL_TEMPLATES, type TaskTemplate } from '../../core/work-browser/task/template';
 import type {
-  WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, AnnotationId,
+  WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
 
 let initialized = false;
@@ -30,7 +31,7 @@ export function setupWorkBrowserIPC(): void {
   const db = getDatabase();
   const workspaces = new WorkspaceStore(db);
   const documents = new DocumentStore(db);
-  const search = new SearchRouter(workspaces);
+  const search = new SearchRouter(workspaces, db);
 
   // ── Workspace ──
 
@@ -64,7 +65,15 @@ export function setupWorkBrowserIPC(): void {
   // ── Task ──
 
   ipcMain.handle('work-browser:task:list', (_e, workspaceId: WorkspaceId, status?: TaskStatus) => workspaces.listTasks(workspaceId, status));
-  ipcMain.handle('work-browser:task:upsert', (_e, task: any) => { workspaces.upsertTask(task); });
+  ipcMain.handle('work-browser:task:upsert', (_e, task: Task) => { workspaces.upsertTask(task); });
+  ipcMain.handle('work-browser:task:templates', () => ALL_TEMPLATES.map((t) => ({ id: t.id, name: t.name, description: t.description, stepCount: t.steps.length })));
+  ipcMain.handle('work-browser:task:create-from-template', (_e, input: { workspaceId: WorkspaceId; templateId: string; title?: string }): Task => {
+    const tpl = ALL_TEMPLATES.find((t) => t.id === input.templateId);
+    if (!tpl) throw new Error(`Unknown task template: ${input.templateId}`);
+    const task = instantiateTask(input.workspaceId, tpl as TaskTemplate, input.title);
+    workspaces.upsertTask(task);
+    return task;
+  });
 
   // ── AI Conversation ──
 
@@ -75,7 +84,7 @@ export function setupWorkBrowserIPC(): void {
   // ── Search ──
 
   ipcMain.handle('work-browser:search:providers', () => search.listProviders());
-  ipcMain.handle('work-browser:search:run', async (_e, input: { text: string; locale?: string; perPage?: number; workspaceId?: string }) => {
+  ipcMain.handle('work-browser:search:run', async (_e, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => {
     return await search.runSearch(input);
   });
   ipcMain.handle('work-browser:search:suggest', async (_e, text: string) => await search.getSuggestions(text));
@@ -90,7 +99,7 @@ export function setupWorkBrowserIPC(): void {
   // ── Annotation ──
 
   ipcMain.handle('work-browser:annotation:list', (_e, documentId: DocumentId) => documents.listAnnotations(documentId));
-  ipcMain.handle('work-browser:annotation:create', (_e, input: { documentId: DocumentId; selector: string; rangeText: string; note: string; color: string }) => documents.createAnnotation(input));
+  ipcMain.handle('work-browser:annotation:create', (_e, input: { documentId: DocumentId; selector: string; rangeText: string; note: string; color: 'yellow' | 'green' | 'red' | 'blue' }) => documents.createAnnotation(input));
   ipcMain.handle('work-browser:annotation:delete', (_e, id: AnnotationId) => documents.deleteAnnotation(id));
 
   // ── Settings ──

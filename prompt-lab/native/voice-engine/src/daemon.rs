@@ -1,13 +1,12 @@
 //! Daemon entry: read JSONL requests from stdin, write events to stdout,
-//! coordinate cpal + recorder. This is the W1 smoke-test loop. W2+ will
-//! swap the recorder for VAD + ASR workers but keep the same shape.
+//! coordinate cpal + VAD. This is the W2 loop. W1's "record N seconds of
+//! PCM" mode is still available via the `recording.raw` request (mostly
+//! for debugging), but the default `recording.start` path runs the
+//! VAD-aware processor that emits `speech.start` / `speech.end` events
+//! per detected segment.
 //!
-//! cpal::Stream is `!Send` on every platform we target, so the recorder
-//! runs synchronously on the same task that opened the stream. While a
-//! recording is in progress, additional JSONL requests are buffered by
-//! tokio and processed after `recording.finished` fires. That's fine for
-//! W1 (a 5-second smoke test) and easy to upgrade in W2 by moving the
-//! audio worker into a dedicated tokio task and bridging back via channel.
+//! cpal::Stream is `!Send` on every platform we target, so the VAD
+//! worker runs synchronously on the same task that opened the stream.
 
 #![allow(dead_code)]
 
@@ -21,16 +20,20 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::audio::{AudioCapture, TARGET_CHANNELS, TARGET_SAMPLE_RATE};
+use crate::model_manager::{ensure_models, model_paths, ModelPaths};
 use crate::protocol::{DaemonInfo, Event, Request};
 use crate::recorder::{default_output_path, Recorder};
+use crate::vad_processor::VadProcessor;
 
-const RING_BUFFER_FRAMES: usize = 16_000 * 6; // 6 seconds at 16 kHz.
+const RING_BUFFER_FRAMES: usize = 16_000 * 30; // 30 seconds at 16 kHz.
 
 pub struct State {
     pub started_at: Instant,
     pub storage_dir: PathBuf,
+    pub model_dir: PathBuf,
     pub input_device: Option<String>,
     pub recording: bool,
+    pub models: Option<ModelPaths>,
 }
 
 impl State {
@@ -49,20 +52,28 @@ impl State {
 
 pub async fn run() -> Result<()> {
     let storage_dir = resolve_storage_dir();
+    let model_dir = storage_dir.join("models");
     std::fs::create_dir_all(&storage_dir)
         .with_context(|| format!("create storage dir {}", storage_dir.display()))?;
     info!(storage_dir = %storage_dir.display(), "voice daemon starting");
 
+    // Make sure the on-disk models are present. Network failure is
+    // non-fatal — we just won't be able to do VAD until the user
+    // manually drops `silero_vad.onnx` into the model dir.
+    if let Err(e) = ensure_models(&model_dir).await {
+        warn!(error = %e, "model download failed; voice daemon will run in degraded mode");
+    }
+    let models = model_paths(&model_dir);
+
     let state = Arc::new(Mutex::new(State {
         started_at: Instant::now(),
         storage_dir,
+        model_dir,
         input_device: None,
         recording: false,
+        models: Some(models),
     }));
 
-    // Event bus: requests handled in-line, plus an mpsc that any task can
-    // post events to. The stdout writer task owns the write half so we
-    // never interleave JSON lines.
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Event>();
     tokio::spawn(async move {
         let stdout = tokio::io::stdout();
@@ -90,6 +101,7 @@ pub async fn run() -> Result<()> {
             "platform": std::env::consts::OS,
             "sample_rate": TARGET_SAMPLE_RATE,
             "channels": TARGET_CHANNELS,
+            "vad_model_path": state.lock().unwrap().models.as_ref().map(|m| m.vad.to_string_lossy().to_string()),
         }),
     ));
 
@@ -107,8 +119,6 @@ pub async fn run() -> Result<()> {
                 continue;
             }
         };
-        // Recording runs synchronously, so each request is fully processed
-        // before we read the next stdin line.
         if let Err(e) = handle_request(req, &event_tx, &state) {
             error!("request handler failed: {e:#}");
             let _ = event_tx.send(Event::new(
@@ -139,7 +149,27 @@ fn handle_request(
         "state" => {
             let snap = state.lock().unwrap().snapshot(env!("CARGO_PKG_VERSION"));
             let payload = serde_json::to_value(&snap).unwrap_or(serde_json::Value::Null);
-            let _ = event_tx.send(Event::new("state", payload));
+            let _ = writer_send(event_tx, "state", payload);
+        }
+        "models" => {
+            let paths = state
+                .lock()
+                .unwrap()
+                .models
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("model paths not initialized"))?;
+            let vad_exists = paths.vad.exists();
+            let _ = writer_send(
+                event_tx,
+                "models",
+                serde_json::json!({
+                    "vad": {
+                        "path": paths.vad.to_string_lossy(),
+                        "exists": vad_exists,
+                        "ready": vad_exists,
+                    }
+                }),
+            );
         }
         "recording.start" => {
             let duration_secs = req
@@ -148,24 +178,100 @@ fn handle_request(
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32)
                 .unwrap_or(5);
-            run_recording(duration_secs, event_tx, state.clone())?;
+            run_recording_vad(duration_secs, event_tx, state.clone())?;
+        }
+        "recording.raw" => {
+            // W1-style raw recorder. Kept for debug + smoke tests.
+            let duration_secs = req
+                .payload
+                .get("duration_secs")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32)
+                .unwrap_or(5);
+            run_recording_raw(duration_secs, event_tx, state.clone())?;
         }
         _ => {
             warn!("unknown request type: {}", req.kind);
-            let _ = event_tx.send(Event::new(
+            let _ = writer_send(
+                event_tx,
                 "error",
                 serde_json::json!({
                     "request_id": req.id,
                     "kind": req.kind,
                     "message": "unknown request type",
                 }),
-            ));
+            );
         }
     }
     Ok(())
 }
 
-fn run_recording(
+fn writer_send(
+    tx: &mpsc::UnboundedSender<Event>,
+    kind: &str,
+    payload: serde_json::Value,
+) -> Option<Event> {
+    tx.send(Event::new(kind, payload)).ok()
+}
+
+fn run_recording_vad(
+    _duration_secs: u32,
+    event_tx: &mpsc::UnboundedSender<Event>,
+    state: Arc<Mutex<State>>,
+) -> Result<()> {
+    {
+        let g = state.lock().unwrap();
+        if g.recording {
+            anyhow::bail!("recording already in progress");
+        }
+        if g.models.as_ref().map(|m| !m.vad.exists()).unwrap_or(true) {
+            anyhow::bail!("VAD model not available; place silero_vad.onnx under the model dir");
+        }
+    }
+
+    let (producer, consumer) = ringbuf::HeapRb::<f32>::new(RING_BUFFER_FRAMES).split();
+    let capture = AudioCapture::start(producer).context("open microphone")?;
+    {
+        let mut g = state.lock().unwrap();
+        g.recording = true;
+        g.input_device = Some(capture.input_device.clone());
+    }
+
+    let model_path = state
+        .lock()
+        .unwrap()
+        .models
+        .as_ref()
+        .map(|m| m.vad.clone())
+        .ok_or_else(|| anyhow::anyhow!("model paths not initialized"))?;
+    let storage_dir = state.lock().unwrap().storage_dir.clone();
+    let _ = event_tx.send(Event::new(
+        "recording.started",
+        serde_json::json!({
+            "mode": "vad",
+            "sample_rate": TARGET_SAMPLE_RATE,
+        }),
+    ));
+
+    let processor = VadProcessor {
+        consumer,
+        sample_rate: TARGET_SAMPLE_RATE,
+        storage_dir,
+        tx: event_tx.clone(),
+        model_path,
+    };
+
+    // Runs synchronously on this task — cpal::Stream is `!Send`.
+    let result = processor.run();
+    capture.stop();
+    state.lock().unwrap().recording = false;
+    if let Err(e) = result {
+        return Err(e);
+    }
+    Ok(())
+}
+
+fn run_recording_raw(
     duration_secs: u32,
     event_tx: &mpsc::UnboundedSender<Event>,
     state: Arc<Mutex<State>>,
@@ -178,8 +284,10 @@ fn run_recording(
     }
 
     let (producer, consumer) = ringbuf::HeapRb::<f32>::new(RING_BUFFER_FRAMES).split();
-
-    let capture = AudioCapture::start(producer).context("open microphone")?;
+    let capture = match AudioCapture::start(producer) {
+        Ok(c) => c,
+        Err(e) => return Err(e),
+    };
     {
         let mut g = state.lock().unwrap();
         g.recording = true;
@@ -190,7 +298,6 @@ fn run_recording(
         let g = state.lock().unwrap();
         default_output_path(&g.storage_dir)
     };
-
     let recorder = Recorder {
         output_path,
         duration_secs,
@@ -200,13 +307,9 @@ fn run_recording(
         started_at: Instant::now(),
     };
 
-    // Runs synchronously on the calling task. cpal::Stream is `!Send`, so
-    // the AudioCapture guard must stay on this task — that's why we can't
-    // ship it to a worker thread.
     let result = recorder.run();
     capture.stop();
     state.lock().unwrap().recording = false;
-
     if let Err(e) = result {
         return Err(e);
     }
@@ -223,22 +326,19 @@ fn resolve_storage_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Tiny `dirs` stand-in so we don't pull another dependency. We only need
-/// a writable per-user directory; fall back to the current directory if we
-/// can't find one.
+#[cfg(windows)]
 fn dirs_fallback() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-    }
+    std::env::var_os("APPDATA").map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn dirs_fallback() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn dirs_fallback() -> Option<PathBuf> {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
 }

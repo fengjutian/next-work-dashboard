@@ -36,6 +36,8 @@ export const workBrowserBridge = {
   task: {
     list: (workspaceId: string, status?: string) => ipcRenderer.invoke('work-browser:task:list', workspaceId, status),
     upsert: (task: any) => ipcRenderer.invoke('work-browser:task:upsert', task),
+    templates: () => ipcRenderer.invoke('work-browser:task:templates'),
+    createFromTemplate: (input: { workspaceId: string; templateId: string; title?: string }) => ipcRenderer.invoke('work-browser:task:create-from-template', input),
   },
   conversation: {
     list: (workspaceId: string) => ipcRenderer.invoke('work-browser:conversation:list', workspaceId),
@@ -44,7 +46,7 @@ export const workBrowserBridge = {
   },
   search: {
     providers: () => ipcRenderer.invoke('work-browser:search:providers'),
-    run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string }) =>
+    run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) =>
       ipcRenderer.invoke('work-browser:search:run', input),
     suggest: (text: string) => ipcRenderer.invoke('work-browser:search:suggest', text),
     history: (limit?: number) => ipcRenderer.invoke('work-browser:search:history', limit),

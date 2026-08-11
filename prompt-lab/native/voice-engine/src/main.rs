@@ -13,8 +13,11 @@
 
 mod audio;
 mod daemon;
+mod model_manager;
 mod protocol;
 mod recorder;
+mod vad_inference;
+mod vad_processor;
 
 use std::process::ExitCode;
 

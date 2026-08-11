@@ -20,17 +20,18 @@ export class DocumentStore {
     return r ? rowToDocument(r) : null;
   }
 
-  upsertDocument(doc: Document): void {
+  upsertDocument(doc: Document & { plainText?: string }): void {
+    const plainText = (doc as any).plainText ?? '';
     const exists = this.db.prepare('SELECT 1 FROM documents WHERE id = ?').get(doc.id);
     if (exists) {
-      this.db.prepare(`UPDATE documents SET title=?, url=?, source_type=?, content_path=?, raw_path=?, screenshot_path=?, content_hash=?, author=?, published_at=?, captured_at=?, word_count=?, summary=?, origin_tab_id=?, updated_at=? WHERE id=?`)
+      this.db.prepare(`UPDATE documents SET title=?, url=?, source_type=?, content_path=?, raw_path=?, screenshot_path=?, content_hash=?, author=?, published_at=?, captured_at=?, word_count=?, summary=?, plain_text=?, origin_tab_id=?, updated_at=? WHERE id=?`)
         .run(doc.title, doc.url, doc.sourceType, doc.contentPath, doc.rawPath, doc.screenshotPath, doc.contentHash,
-             doc.author, doc.publishedAt, doc.capturedAt, doc.wordCount, doc.summary, doc.originTabId, doc.updatedAt, doc.id);
+             doc.author, doc.publishedAt, doc.capturedAt, doc.wordCount, doc.summary, plainText, doc.originTabId, doc.updatedAt, doc.id);
     } else {
-      this.db.prepare(`INSERT INTO documents(id, workspace_id, title, url, source_type, content_path, raw_path, screenshot_path, content_hash, author, published_at, captured_at, word_count, summary, origin_tab_id, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      this.db.prepare(`INSERT INTO documents(id, workspace_id, title, url, source_type, content_path, raw_path, screenshot_path, content_hash, author, published_at, captured_at, word_count, summary, plain_text, origin_tab_id, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         doc.id, doc.workspaceId, doc.title, doc.url, doc.sourceType, doc.contentPath, doc.rawPath, doc.screenshotPath,
-        doc.contentHash, doc.author, doc.publishedAt, doc.capturedAt, doc.wordCount, doc.summary, doc.originTabId, doc.createdAt, doc.updatedAt,
+        doc.contentHash, doc.author, doc.publishedAt, doc.capturedAt, doc.wordCount, doc.summary, plainText, doc.originTabId, doc.createdAt, doc.updatedAt,
       );
     }
   }

@@ -91,7 +91,7 @@ export async function savePageAsMarkdown(
   let doc;
   if (existing) {
     doc = { ...existing, title, contentHash, wordCount: readability.wordCount, summary: readability.excerpt, updatedAt: t };
-    documentStore.upsertDocument(doc);
+    documentStore.upsertDocument({ ...doc, plainText: readability.contentText } as any);
   } else {
     const id = newDocument({
       workspaceId: input.workspaceId,
@@ -113,7 +113,7 @@ export async function savePageAsMarkdown(
   const rawPath = path.join(rawDir, `${doc.id}-${t}.html`);
   await fs.writeFile(contentPath, contentMd, 'utf8');
   await fs.writeFile(rawPath, html, 'utf8');
-  documentStore.upsertDocument({ ...doc, contentPath, rawPath, updatedAt: t });
+  documentStore.upsertDocument({ ...doc, contentPath, rawPath, updatedAt: t, plainText: readability.contentText } as any);
 
   // 6. 追加版本
   let diffSummary: string | null = null;
