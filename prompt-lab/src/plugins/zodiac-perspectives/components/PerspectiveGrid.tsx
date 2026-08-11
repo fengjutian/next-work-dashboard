@@ -53,7 +53,7 @@ export function PerspectiveGrid({
     <section className="space-y-3" aria-label="十二星座视角">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>已完成 {completedCount} / 12</span>
+          <span>已完成 {completedCount} / {cards.length}</span>
           {failedCount > 0 && <span className="text-destructive">· 失败 {failedCount}</span>}
           {outlierSigns.length > 0 && <span>· 差异 {outlierSigns.length}</span>}
         </div>

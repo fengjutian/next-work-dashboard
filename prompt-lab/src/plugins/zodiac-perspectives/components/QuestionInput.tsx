@@ -6,8 +6,9 @@ import { useCallback, useId, useState } from 'react';
 import { Sparkles, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { LENGTH_OPTIONS, MODE_OPTIONS, SCENE_OPTIONS, TONE_OPTIONS } from '../zodiac-data';
-import type { GenerationOptions } from '../zodiac-types';
-import { QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH } from '../zodiac-types';
+import type { GenerationOptions, ZodiacSign } from '../zodiac-types';
+import { QUESTION_MAX_LENGTH, QUESTION_MIN_LENGTH, ZODIAC_SIGNS } from '../zodiac-types';
+import { ZODIAC_META } from '../zodiac-data';
 
 const SAMPLE_QUESTIONS: ReadonlyArray<string> = [
   '我是否应该离开稳定但没有成长的工作？',
@@ -141,6 +142,48 @@ export function QuestionInput({
         )}
       </div>
 
+      <div className="space-y-2 rounded-md border border-border/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-medium">参与视角</span>
+          <span className="text-xs text-muted-foreground">已选 {options.selectedSigns.length} 个，至少 3 个</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(SIGN_PRESETS).map(([id, preset]) => (
+            <Button
+              key={id}
+              type="button"
+              variant={sameSigns(options.selectedSigns, preset.signs) ? 'default' : 'outline'}
+              size="sm"
+              disabled={disabled}
+              onClick={() => onOptionsChange({ ...options, selectedSigns: [...preset.signs] })}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-6">
+          {ZODIAC_SIGNS.map((sign) => {
+            const selected = options.selectedSigns.includes(sign);
+            return (
+              <label key={sign} className="flex cursor-pointer items-center gap-1.5 rounded border border-border/50 px-2 py-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={disabled || (selected && options.selectedSigns.length <= 3)}
+                  onChange={() => onOptionsChange({
+                    ...options,
+                    selectedSigns: selected
+                      ? options.selectedSigns.filter((item) => item !== sign)
+                      : ZODIAC_SIGNS.filter((item) => item === sign || options.selectedSigns.includes(item)),
+                  })}
+                />
+                <span aria-hidden>{ZODIAC_META[sign].glyph}</span>{ZODIAC_META[sign].name.replace('座', '')}
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <OptionGroup
           inputId={modeId}
@@ -200,7 +243,7 @@ export function QuestionInput({
             <span>生成对比总结</span>
           </label>
           <p id={`${synthesisId}-hint`} className="text-xs text-muted-foreground">
-            {options.mode === 'fast' ? '快速模式固定关闭总结' : '关闭后只输出 12 个星座视角'}
+            {options.mode === 'fast' ? '快速模式固定关闭总结' : `关闭后只输出所选的 ${options.selectedSigns.length} 个视角`}
           </p>
         </div>
       </div>
@@ -211,12 +254,12 @@ export function QuestionInput({
             <span className="text-destructive">⚠ 请先在工作台设置中配置 AI 服务（API Key、Base URL、模型）</span>
           )}
           {aiConfigured && (
-            <span>预计 {options.mode === 'fast' ? '1' : options.includeSynthesis ? '14' : '13'} 次基础请求，失败补全/重试时可能增加 · Ctrl/⌘ + Enter 提交</span>
+            <span>预计 {estimateRequests(options)} 次基础请求，失败补全/重试时可能增加 · Ctrl/⌘ + Enter 提交</span>
           )}
         </div>
         <Button onClick={handleSubmit} disabled={!canSubmit} className="gap-2">
           <Sparkles className="h-4 w-4" />
-          让十二星座回答
+          让所选星座回答
         </Button>
       </div>
     </div>
@@ -231,6 +274,23 @@ const GUIDE_QUESTIONS: Record<GenerationOptions['scene'], readonly string[]> = {
   creative: ['目标受众是谁？', '必须传达的信息和限制是什么？', '已有方案为什么不满意？'],
   entertainment: ['希望偏幽默还是偏认真？', '有没有不希望触碰的话题？', '结果用于自己阅读还是分享？'],
 };
+
+const SIGN_PRESETS: Record<string, { label: string; signs: readonly ZodiacSign[] }> = {
+  all: { label: '全部', signs: ZODIAC_SIGNS },
+  action: { label: '行动组', signs: ['aries', 'leo', 'sagittarius'] },
+  stable: { label: '稳健组', signs: ['taurus', 'virgo', 'capricorn'] },
+  relationship: { label: '关系组', signs: ['cancer', 'libra', 'pisces'] },
+  breakthrough: { label: '破局组', signs: ['gemini', 'scorpio', 'aquarius'] },
+};
+
+function sameSigns(left: readonly ZodiacSign[], right: readonly ZodiacSign[]): boolean {
+  return left.length === right.length && left.every((sign) => right.includes(sign));
+}
+
+function estimateRequests(options: GenerationOptions): number {
+  if (options.mode === 'fast') return 1;
+  return 1 + options.selectedSigns.length + (options.includeSynthesis && options.selectedSigns.length >= 4 ? 1 : 0);
+}
 
 interface OptionGroupProps<T extends string> {
   inputId: string;

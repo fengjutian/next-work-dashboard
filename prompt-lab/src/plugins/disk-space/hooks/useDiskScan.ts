@@ -1,0 +1,690 @@
+/**
+ * useDiskScan —— 磁盘空间插件的核心扫描 hook。
+ *
+ * 集中所有非 UI 逻辑：IPC 事件监听、扫描生命周期、TopN 维护、localStorage
+ * 持久化（history / snapshots / results / exclusions / usn-cursors）、USN 游标。
+ * UI 状态（activeTab / selectedDuplicates / modal open 状态 / largeFile 筛选
+ * / specialtyProbes / 诊断）仍由 panel 或 tab 组件自己维护。
+ *
+ * 设计原则：
+ * - 不依赖 store 或 AI（这些由 tab 组件按需注入）。
+ * - 暴露 ref + state + actions；ref 给同步副作用用，state 给渲染用。
+ * - choose() / start() / cancelScan() / togglePause() 等动作幂等且自包含。
+ */
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import type {
+  DiskDirectoryItem,
+  DiskFilePreview,
+  DiskScanEvent,
+  DiskSystemInfo,
+  DiskUsnInfo,
+} from '@/types/electron';
+
+// ---------------- 类型别名 ----------------
+
+export type FileEntry = Extract<DiskScanEvent, { type: 'files' }>['items'][number];
+export type DirectoryEntry = Extract<DiskScanEvent, { type: 'directories' }>['items'][number];
+export type DuplicateGroup = Extract<DiskScanEvent, { type: 'duplicate' }>;
+
+export type DiskHistoryPoint = {
+  timestamp: number;
+  disks: Array<{ path: string; used: number }>;
+};
+export type DirectorySnapshot = {
+  timestamp: number;
+  root: string;
+  directories: Array<{ path: string; size: number }>;
+};
+export type PersistedScanResult = {
+  id: string;
+  root: string;
+  savedAt: number;
+  stats: { files: number; bytes: number; errors: number };
+  directories: DirectoryEntry[];
+  largest: FileEntry[];
+  extensions: Record<string, number>;
+  duplicates: DuplicateGroup[];
+};
+export type ScanErrorItem = {
+  path: string;
+  category: 'permission-denied' | 'not-found' | 'busy' | 'io';
+  message: string;
+};
+export type ScanTelemetry = {
+  currentPath: string;
+  directories: number;
+  files: number;
+  bytes: number;
+  elapsedMs: number;
+};
+export type ScanPhase = 'scanning' | 'hashing';
+
+const SCAN_ERROR_LABELS: Record<ScanErrorItem['category'], string> = {
+  'permission-denied': '拒绝访问',
+  'not-found': '路径失效',
+  busy: '文件占用',
+  io: 'I/O 错误',
+};
+const TOP_FILES = 50;
+const TOP_DIRECTORIES = 500;
+const SCAN_ERROR_CAP = 100;
+const DISK_HISTORY_CAP = 168; // 7 天 × 24 小时
+const SAVED_RESULTS_CAP = 5;
+const SNAPSHOTS_CAP = 20;
+
+// ---------------- TopN 容器 ----------------
+
+/**
+ * 维护 capacity 个最大元素的小顶堆。容量未满 O(log n) push；满后 O(1) 拒绝
+ * 或 O(log n) 替换堆顶。百万级事件下避免每条都 [...arr].sort().slice(0, N)。
+ */
+class TopN<T> {
+  private readonly data: T[] = [];
+  constructor(
+    private readonly capacity: number,
+    private readonly sizeOf: (item: T) => number,
+  ) {}
+  get size(): number {
+    return this.data.length;
+  }
+  push(item: T): void {
+    if (this.data.length < this.capacity) {
+      this.data.push(item);
+      this.bubbleUp(this.data.length - 1);
+      return;
+    }
+    if (this.sizeOf(item) > this.sizeOf(this.data[0]!)) {
+      this.data[0] = item;
+      this.sinkDown(0);
+    }
+  }
+  toSortedDesc(): T[] {
+    return [...this.data].sort((a, b) => this.sizeOf(b) - this.sizeOf(a));
+  }
+  reset(): void {
+    this.data.length = 0;
+  }
+  load(items: T[]): void {
+    this.data.length = 0;
+    for (const item of items) this.push(item);
+  }
+  private bubbleUp(i: number): void {
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      const cur = this.sizeOf(this.data[i]!);
+      const par = this.sizeOf(this.data[parent]!);
+      if (cur < par) {
+        const tmp = this.data[i]!;
+        this.data[i] = this.data[parent]!;
+        this.data[parent] = tmp;
+        i = parent;
+      } else break;
+    }
+  }
+  private sinkDown(i: number): void {
+    const n = this.data.length;
+    while (true) {
+      const l = 2 * i + 1;
+      const r = 2 * i + 2;
+      let smallest = i;
+      if (l < n && this.sizeOf(this.data[l]!) < this.sizeOf(this.data[smallest]!)) smallest = l;
+      if (r < n && this.sizeOf(this.data[r]!) < this.sizeOf(this.data[smallest]!)) smallest = r;
+      if (smallest === i) break;
+      const tmp = this.data[i]!;
+      this.data[i] = this.data[smallest]!;
+      this.data[smallest] = tmp;
+      i = smallest;
+    }
+  }
+}
+
+// ---------------- localStorage 工具 ----------------
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '') as T;
+  } catch {
+    return fallback;
+  }
+}
+function writeJson(key: string, value: unknown): void {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+// ---------------- displayPath 工具 ----------------
+
+/** Windows 长路径前缀 \\?\ 或 \\?\UNC\ 还原成可见形式。 */
+export function displayPath(value: string): string {
+  if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`;
+  return value.startsWith('\\\\?\\') ? value.slice(4) : value;
+}
+
+// ---------------- Hook 接口 ----------------
+
+export interface UseDiskScanResult {
+  // system / history
+  system: DiskSystemInfo | null;
+  diskHistory: DiskHistoryPoint[];
+
+  // root + directory
+  root: string;
+  currentDirectory: string;
+  entries: DiskDirectoryItem[];
+  preview: DiskFilePreview | null;
+  browserLoading: boolean;
+  setPreview: (preview: DiskFilePreview | null) => void;
+  setCurrentDirectory: (path: string) => void;
+
+  // scan lifecycle
+  scanIdRef: MutableRefObject<string>;
+  rootRef: MutableRefObject<string>;
+  running: boolean;
+  paused: boolean;
+  phase: ScanPhase;
+  scanTelemetry: ScanTelemetry;
+  scanErrors: ScanErrorItem[];
+  stats: { files: number; bytes: number; errors: number };
+
+  // results
+  largest: FileEntry[];
+  duplicates: DuplicateGroup[];
+  extensions: Record<string, number>;
+  directories: DirectoryEntry[];
+
+  // history / archive
+  directorySnapshots: DirectorySnapshot[];
+  savedResults: PersistedScanResult[];
+
+  // USN
+  usnInfo: DiskUsnInfo | null;
+  usnDelta: number | null;
+
+  // config
+  exclusionsText: string;
+  setExclusionsText: (value: string) => void;
+
+  // error — 由 hook 内部维护（catch 分支统一写入）
+  error: string;
+  setError: (message: string) => void;
+
+  // actions
+  refreshSystem: () => Promise<void>;
+  choose: () => Promise<void>;
+  start: (focusedScan: boolean) => Promise<void>;
+  cancelScan: () => Promise<void>;
+  togglePause: () => Promise<void>;
+  loadDirectory: (path: string) => Promise<void>;
+  openPreview: (entry: DiskDirectoryItem) => Promise<void>;
+  restoreSavedResult: (saved: PersistedScanResult) => void;
+  removeSavedResult: (id: string) => void;
+  removeDirectorySnapshot: (timestamp: number, snapshotRoot: string) => void;
+  clearHistory: () => void;
+  setRunning: (running: boolean) => void;
+  setPaused: (paused: boolean) => void;
+  setScanErrors: React.Dispatch<React.SetStateAction<ScanErrorItem[]>>;
+}
+
+// ---------------- Hook 实现 ----------------
+
+export function useDiskScan(): UseDiskScanResult {
+  // system / history
+  const [system, setSystem] = useState<DiskSystemInfo | null>(null);
+  const [diskHistory, setDiskHistory] = useState<DiskHistoryPoint[]>(() =>
+    readJson<DiskHistoryPoint[]>('disk-space.history', []),
+  );
+
+  // root + directory
+  const [root, setRoot] = useState('');
+  const rootRef = useRef('');
+  const [currentDirectory, setCurrentDirectory] = useState('');
+  const [entries, setEntries] = useState<DiskDirectoryItem[]>([]);
+  const [preview, setPreview] = useState<DiskFilePreview | null>(null);
+  const [browserLoading, setBrowserLoading] = useState(false);
+
+  // scan lifecycle
+  const scanIdRef = useRef('');
+  const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [phase, setPhase] = useState<ScanPhase>('scanning');
+  const [scanTelemetry, setScanTelemetry] = useState<ScanTelemetry>({
+    currentPath: '',
+    directories: 0,
+    files: 0,
+    bytes: 0,
+    elapsedMs: 0,
+  });
+  const [scanErrors, setScanErrors] = useState<ScanErrorItem[]>([]);
+  const [stats, setStats] = useState({ files: 0, bytes: 0, errors: 0 });
+
+  // results
+  const [largest, setLargest] = useState<FileEntry[]>([]);
+  const largestRef = useRef<FileEntry[]>([]);
+  const largestTopRef = useRef(new TopN<FileEntry>(TOP_FILES, (item) => item.size));
+  const largestDirtyRef = useRef(false);
+  const scannedDirectoriesRef = useRef<DirectoryEntry[]>([]);
+  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([]);
+  const duplicatesRef = useRef<DuplicateGroup[]>([]);
+  const [extensions, setExtensions] = useState<Record<string, number>>({});
+  const extensionsRef = useRef<Record<string, number>>({});
+
+  // archive
+  const [directorySnapshots, setDirectorySnapshots] = useState<DirectorySnapshot[]>(() =>
+    readJson<DirectorySnapshot[]>('disk-space.directory-snapshots', []),
+  );
+  const [savedResults, setSavedResults] = useState<PersistedScanResult[]>(() =>
+    readJson<PersistedScanResult[]>('disk-space.results', []),
+  );
+
+  // USN
+  const [usnInfo, setUsnInfo] = useState<DiskUsnInfo | null>(null);
+  const [usnDelta, setUsnDelta] = useState<number | null>(null);
+
+  // config
+  const [exclusionsText, setExclusionsTextState] = useState(
+    () => localStorage.getItem('disk-space.exclusions') ?? '.git,node_modules,target',
+  );
+  const setExclusionsText = useCallback((value: string) => {
+    setExclusionsTextState(value);
+    localStorage.setItem('disk-space.exclusions', value);
+  }, []);
+
+  // error
+  const [error, setError] = useState('');
+
+  // TopN flush —— 把堆里的 top 50 同步到 state/largestRef
+  const flushLargest = useCallback(() => {
+    largestDirtyRef.current = false;
+    const sorted = largestTopRef.current.toSortedDesc();
+    largestRef.current = sorted;
+    setLargest(sorted);
+  }, []);
+
+  // 一次性副作用：自动轮询 refreshSystem（每 30s）
+  const refreshSystemImpl = useCallback(async (): Promise<void> => {
+    try {
+      const next = await window.electronAPI.diskSpace.systemInfo();
+      setSystem(next);
+      setDiskHistory((current) => {
+        const now = Date.now();
+        const latest = current.at(-1);
+        if (latest && now - latest.timestamp < 60 * 60 * 1000) return current;
+        const history = [
+          ...current,
+          {
+            timestamp: now,
+            disks: next.disks.map((disk) => ({ path: disk.path, used: disk.used })),
+          },
+        ].slice(-DISK_HISTORY_CAP);
+        writeJson('disk-space.history', history);
+        return history;
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+  useEffect(() => {
+    refreshSystemImpl();
+    const timer = window.setInterval(() => {
+      void refreshSystemImpl();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [refreshSystemImpl]);
+
+  // IPC 事件监听：onEvent
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.diskSpace.onEvent((id, event) => {
+      if (id !== scanIdRef.current) return;
+      if (event.type === 'files') {
+        for (const item of event.items) largestTopRef.current.push(item);
+        if (!largestDirtyRef.current) {
+          largestDirtyRef.current = true;
+          requestAnimationFrame(flushLargest);
+        }
+      } else if (event.type === 'directories') {
+        const next = event.items.slice(0, TOP_DIRECTORIES);
+        scannedDirectoriesRef.current = next;
+        setDirectories(next);
+      } else if (event.type === 'duplicate-progress') {
+        setPhase('hashing');
+      } else if (event.type === 'scan-status') {
+        setScanTelemetry(event);
+      } else if (event.type === 'scan-error') {
+        setScanErrors((value) =>
+          [
+            ...value,
+            {
+              path: event.path,
+              category: event.category,
+              message: `【${SCAN_ERROR_LABELS[event.category]}】${event.message}`,
+            },
+          ].slice(-SCAN_ERROR_CAP),
+        );
+      } else if (event.type === 'duplicate') {
+        const next = [...duplicatesRef.current, event];
+        duplicatesRef.current = next;
+        setDuplicates(next);
+      } else if (event.type === 'extension') {
+        const next = { ...extensionsRef.current, [event.extension || '(无扩展名)']: event.size };
+        extensionsRef.current = next;
+        setExtensions(next);
+      } else if (event.type === 'progress' || event.type === 'done') {
+        setStats({ files: event.files, bytes: event.bytes, errors: event.errors });
+        if (event.type === 'done' && rootRef.current) {
+          flushLargest();
+          const saved: PersistedScanResult = {
+            id: crypto.randomUUID(),
+            root: rootRef.current,
+            savedAt: Date.now(),
+            stats: { files: event.files, bytes: event.bytes, errors: event.errors },
+            directories: scannedDirectoriesRef.current.slice(0, TOP_DIRECTORIES),
+            largest: largestRef.current.slice(0, TOP_FILES),
+            extensions: { ...extensionsRef.current },
+            duplicates: duplicatesRef.current.slice(0, 100),
+          };
+          writeJson('disk-space.last-result', saved);
+          setSavedResults((current) => {
+            const next = [...current, saved].slice(-SAVED_RESULTS_CAP);
+            writeJson('disk-space.results', next);
+            return next;
+          });
+          setDirectorySnapshots((current) => {
+            const snapshot: DirectorySnapshot = {
+              timestamp: Date.now(),
+              root: rootRef.current,
+              directories: scannedDirectoriesRef.current.map((item) => ({
+                path: item.path,
+                size: item.size,
+              })),
+            };
+            const next = [...current, snapshot].slice(-SNAPSHOTS_CAP);
+            writeJson('disk-space.directory-snapshots', next);
+            return next;
+          });
+        }
+      }
+    });
+    return unsubscribe;
+  }, [flushLargest]);
+
+  // IPC 事件监听：onExit
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.diskSpace.onExit((id, result) => {
+      if (id !== scanIdRef.current) return;
+      setRunning(false);
+      setPaused(false);
+      if (result.error) setError(result.error);
+    });
+    return unsubscribe;
+  }, []);
+
+  // USN info
+  useEffect(() => {
+    if (!root) {
+      setUsnInfo(null);
+      setUsnDelta(null);
+      return;
+    }
+    let cancelled = false;
+    void window.electronAPI.diskSpace
+      .usnInfo(root)
+      .then((info) => {
+        if (cancelled) return;
+        setUsnInfo(info);
+        if (info.supported && info.volume && info.nextUsn !== undefined) {
+          const cursors = readJson<
+            Record<string, { journalId?: number; nextUsn: number; recordedAt: number }>
+          >('disk-space.usn-cursors', {});
+          const previous = cursors[info.volume];
+          setUsnDelta(
+            previous && previous.journalId === info.journalId
+              ? Math.max(0, info.nextUsn - previous.nextUsn)
+              : null,
+          );
+          cursors[info.volume] = {
+            journalId: info.journalId,
+            nextUsn: info.nextUsn,
+            recordedAt: Date.now(),
+          };
+          writeJson('disk-space.usn-cursors', cursors);
+        }
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setUsnInfo({ supported: false, error: String(cause) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [root]);
+
+  // actions
+  const refreshSystem = refreshSystemImpl;
+  const choose = useCallback(async () => {
+    const previousScanId = scanIdRef.current;
+    if (previousScanId && running) {
+      void window.electronAPI.diskSpace.cancel(previousScanId);
+      scanIdRef.current = '';
+      setRunning(false);
+      setPaused(false);
+    }
+    const chosen = await window.electronAPI.diskSpace.pickRoot();
+    if (!chosen) return;
+    rootRef.current = chosen;
+    setRoot(chosen);
+    setCurrentDirectory(chosen);
+    setPreview(null);
+    setBrowserLoading(true);
+    try {
+      setEntries(await window.electronAPI.diskSpace.listDirectory(chosen, chosen));
+      const saved = readJson<null | {
+        root: string;
+        stats: { files: number; bytes: number; errors: number };
+        directories: DirectoryEntry[];
+        largest: FileEntry[];
+        extensions: Record<string, number>;
+        duplicates?: DuplicateGroup[];
+      }>('disk-space.last-result', null);
+      if (saved && displayPath(saved.root).toLowerCase() === displayPath(chosen).toLowerCase()) {
+        scannedDirectoriesRef.current = saved.directories;
+        largestRef.current = saved.largest;
+        largestTopRef.current.load(saved.largest);
+        largestDirtyRef.current = false;
+        extensionsRef.current = saved.extensions;
+        duplicatesRef.current = saved.duplicates ?? [];
+        setStats(saved.stats);
+        setDirectories(saved.directories);
+        setLargest(saved.largest);
+        setExtensions(saved.extensions);
+        setDuplicates(saved.duplicates ?? []);
+      }
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBrowserLoading(false);
+    }
+  }, [running]);
+
+  const start = useCallback(
+    async (focusedScan: boolean) => {
+      if (!root || running) return;
+      const exclusions = focusedScan
+        ? ['.git']
+        : exclusionsText
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
+      rootRef.current = root;
+      scannedDirectoriesRef.current = [];
+      largestRef.current = [];
+      largestTopRef.current.reset();
+      largestDirtyRef.current = false;
+      extensionsRef.current = {};
+      duplicatesRef.current = [];
+      scanIdRef.current = crypto.randomUUID();
+      setStats({ files: 0, bytes: 0, errors: 0 });
+      setScanTelemetry({ currentPath: root, directories: 0, files: 0, bytes: 0, elapsedMs: 0 });
+      setScanErrors([]);
+      setLargest([]);
+      setExtensions({});
+      setDirectories([]);
+      setDuplicates([]);
+      setPhase('scanning');
+      setError('');
+      setPaused(false);
+      setRunning(true);
+      try {
+        await window.electronAPI.diskSpace.start(scanIdRef.current, root, {
+          exclusions,
+          skipDuplicates: focusedScan,
+        });
+      } catch (cause) {
+        setRunning(false);
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [root, running, exclusionsText],
+  );
+
+  const cancelScan = useCallback(async () => {
+    if (!scanIdRef.current) return;
+    await window.electronAPI.diskSpace.cancel(scanIdRef.current);
+    scanIdRef.current = '';
+    setRunning(false);
+    setPaused(false);
+  }, []);
+
+  const togglePause = useCallback(async () => {
+    if (!scanIdRef.current) return;
+    const success = paused
+      ? await window.electronAPI.diskSpace.resume(scanIdRef.current)
+      : await window.electronAPI.diskSpace.pause(scanIdRef.current);
+    if (success) setPaused(!paused);
+  }, [paused]);
+
+  const loadDirectory = useCallback(
+    async (directory: string) => {
+      if (!root) return;
+      setBrowserLoading(true);
+      setPreview(null);
+      try {
+        setEntries(await window.electronAPI.diskSpace.listDirectory(root, directory));
+        setCurrentDirectory(directory);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBrowserLoading(false);
+      }
+    },
+    [root],
+  );
+
+  const openPreview = useCallback(
+    async (entry: DiskDirectoryItem) => {
+      if (entry.type === 'directory') {
+        await loadDirectory(entry.path);
+        return;
+      }
+      setBrowserLoading(true);
+      try {
+        setPreview(await window.electronAPI.diskSpace.preview(root, entry.path));
+      } catch (cause) {
+        setError(String(cause));
+      } finally {
+        setBrowserLoading(false);
+      }
+    },
+    [root, loadDirectory],
+  );
+
+  const restoreSavedResult = useCallback((saved: PersistedScanResult) => {
+    rootRef.current = saved.root;
+    scannedDirectoriesRef.current = saved.directories;
+    largestRef.current = saved.largest;
+    largestTopRef.current.load(saved.largest);
+    largestDirtyRef.current = false;
+    extensionsRef.current = saved.extensions;
+    duplicatesRef.current = saved.duplicates;
+    setRoot(saved.root);
+    setCurrentDirectory(saved.root);
+    setStats(saved.stats);
+    setDirectories(saved.directories);
+    setLargest(saved.largest);
+    setExtensions(saved.extensions);
+    setDuplicates(saved.duplicates);
+  }, []);
+
+  const removeSavedResult = useCallback((id: string) => {
+    setSavedResults((current) => {
+      const next = current.filter((item) => item.id !== id);
+      writeJson('disk-space.results', next);
+      return next;
+    });
+  }, []);
+
+  const removeDirectorySnapshot = useCallback(
+    (timestamp: number, snapshotRoot: string) => {
+      setDirectorySnapshots((current) => {
+        const next = current.filter(
+          (item) => !(item.timestamp === timestamp && item.root === snapshotRoot),
+        );
+        writeJson('disk-space.directory-snapshots', next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const clearHistory = useCallback(() => {
+    localStorage.removeItem('disk-space.history');
+    localStorage.removeItem('disk-space.directory-snapshots');
+    setDiskHistory([]);
+    setDirectorySnapshots([]);
+  }, []);
+
+  return {
+    system,
+    diskHistory,
+    root,
+    currentDirectory,
+    entries,
+    preview,
+    browserLoading,
+    setPreview,
+    setCurrentDirectory,
+    scanIdRef,
+    rootRef,
+    running,
+    paused,
+    phase,
+    scanTelemetry,
+    scanErrors,
+    stats,
+    largest,
+    duplicates,
+    extensions,
+    directories,
+    directorySnapshots,
+    savedResults,
+    usnInfo,
+    usnDelta,
+    exclusionsText,
+    setExclusionsText,
+    error,
+    setError,
+    refreshSystem,
+    choose,
+    start,
+    cancelScan,
+    togglePause,
+    loadDirectory,
+    openPreview,
+    restoreSavedResult,
+    removeSavedResult,
+    removeDirectorySnapshot,
+    clearHistory,
+    setRunning,
+    setPaused,
+    setScanErrors,
+  };
+}

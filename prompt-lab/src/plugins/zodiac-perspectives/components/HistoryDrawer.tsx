@@ -137,7 +137,7 @@ export function HistoryDrawer({
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                           <span>{new Date(run.updatedAt).toLocaleString('zh-CN')}</span>
                           {run.partial && <span className="text-amber-600">含缺失</span>}
-                          <span>{run.perspectives.length} / 12 视角</span>
+                          <span>{run.perspectives.length} / {run.options.selectedSigns.length} 视角</span>
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-0.5">

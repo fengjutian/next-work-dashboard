@@ -116,9 +116,10 @@ export function buildSunoPrompt(project: LyricProject, options: SunoPromptOption
 
   const styleLine = options.styleHint?.trim() || styleParts.join(', ');
   const arrangementLine = options.arrangement?.trim();
-  const negativeLine = options.negativeTags?.length ? `, avoid: ${options.negativeTags.join(', ')}` : '';
+  const negativeLine = options.negativeTags?.length ? `avoid: ${options.negativeTags.join(', ')}` : '';
 
-  const header = `[Style: ${styleLine}${arrangementLine ? ` | Arrangement: ${arrangementLine}` : ''}${negativeLine}]`;
+  const trailing = [arrangementLine ? `Arrangement: ${arrangementLine}` : null, negativeLine].filter(Boolean).join(' | ');
+  const header = trailing ? `[Style: ${styleLine} | ${trailing}]` : `[Style: ${styleLine}]`;
   const meta = [
     project.title && `# ${project.title}`,
     project.theme && `Theme: ${project.theme}`,

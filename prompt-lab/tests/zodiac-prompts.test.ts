@@ -20,6 +20,7 @@ const BASE_OPTIONS: GenerationOptions = {
   tone: 'gentle',
   includeSynthesis: true,
   mode: 'standard',
+  selectedSigns: [...ZODIAC_SIGNS],
 };
 
 describe('Zodiac prompts', () => {

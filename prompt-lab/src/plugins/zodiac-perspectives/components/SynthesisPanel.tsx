@@ -50,7 +50,7 @@ export function SynthesisPanel({ run, status, synthesis, error, onCopy, onRetry 
       {status === 'running' && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4" />
-          正在基于 12 份视角生成总结…
+          正在基于 {run.perspectives.length} 份视角生成总结…
         </div>
       )}
 
@@ -60,8 +60,8 @@ export function SynthesisPanel({ run, status, synthesis, error, onCopy, onRetry 
 
       {status === 'idle' && run.perspectives.length >= 4 && !synthesis && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-          <span>{run.perspectives.length === 12 ? '视角内容已更新，原总结已失效。' : '等待更多视角完成后生成总结。'}</span>
-          {run.perspectives.length === 12 && onRetry && (
+          <span>{run.perspectives.length === run.options.selectedSigns.length ? '视角内容已更新，原总结已失效。' : '等待更多视角完成后生成总结。'}</span>
+          {run.perspectives.length === run.options.selectedSigns.length && onRetry && (
             <Button variant="outline" size="sm" onClick={onRetry}>重新生成总结</Button>
           )}
         </div>

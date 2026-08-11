@@ -255,7 +255,7 @@ export function ZodiacPerspectivesPanel() {
         if (result.partialSigns.length > 0) {
           toast.warning(`${result.partialSigns.length} 个视角生成失败，可在卡片上点击「重试」补全。`);
         } else {
-          toast.success('十二星座已全部回答完毕。');
+          toast.success(`${options.selectedSigns.length} 个星座视角已全部回答完毕。`);
         }
       } catch (error) {
         const message = describeLlmError(error);
