@@ -18,6 +18,7 @@ import { PerspectiveGrid, type DifferenceFilter, type LayoutMode } from './compo
 import { SynthesisPanel } from './components/SynthesisPanel';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { FollowupDialog } from './components/FollowupDialog';
+import { DecisionSummary } from './components/DecisionSummary';
 import { ZODIAC_SIGNS, ZODIAC_ORDER } from './zodiac-types';
 import type {
   CardStatus,
@@ -130,7 +131,8 @@ export function ZodiacPerspectivesPanel() {
   const [followup, setFollowup] = useState<{ open: boolean; sign: ZodiacSign | null }>({ open: false, sign: null });
   const [running, setRunning] = useState(false);
 
-  const abortRef = useRef<AbortController | null>(null);
+  const generationAbortRef = useRef<AbortController | null>(null);
+  const synthesisAbortRef = useRef<AbortController | null>(null);
   const runIdRef = useRef<string | null>(null);
 
   // 计算差异
@@ -165,8 +167,10 @@ export function ZodiacPerspectivesPanel() {
 
   // 插件切换或组件卸载时终止仍在进行的生成/汇总，避免卸载后更新状态。
   useEffect(() => () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
+    generationAbortRef.current?.abort();
+    synthesisAbortRef.current?.abort();
+    generationAbortRef.current = null;
+    synthesisAbortRef.current = null;
   }, []);
 
   // ── 操作：开始生成 ────────────────────────────────────────────
@@ -178,9 +182,9 @@ export function ZodiacPerspectivesPanel() {
         return;
       }
       // 取消旧任务
-      abortRef.current?.abort();
+      generationAbortRef.current?.abort();
       const controller = new AbortController();
-      abortRef.current = controller;
+      generationAbortRef.current = controller;
 
       const runId = crypto.randomUUID();
       runIdRef.current = runId;
@@ -267,7 +271,7 @@ export function ZodiacPerspectivesPanel() {
         }
       } finally {
         setRunning(false);
-        abortRef.current = null;
+        if (generationAbortRef.current === controller) generationAbortRef.current = null;
       }
     },
     [aiApi, aiConfigured, options],
@@ -276,7 +280,7 @@ export function ZodiacPerspectivesPanel() {
   // ── 操作：取消 ────────────────────────────────────────────────
 
   const handleCancel = useCallback(() => {
-    abortRef.current?.abort();
+    generationAbortRef.current?.abort();
   }, []);
 
   // ── 操作：重试单张卡 ──────────────────────────────────────────
@@ -326,7 +330,8 @@ export function ZodiacPerspectivesPanel() {
     setSynthesisStatus('running');
     setErrorMessage(null);
     const controller = new AbortController();
-    abortRef.current = controller;
+    synthesisAbortRef.current?.abort();
+    synthesisAbortRef.current = controller;
     try {
       const synthesis = await regenerateSynthesis(
         run.question,
@@ -346,7 +351,7 @@ export function ZodiacPerspectivesPanel() {
       setSynthesisStatus('failed');
       toast.error(`总结生成失败：${message}`);
     } finally {
-      abortRef.current = null;
+      if (synthesisAbortRef.current === controller) synthesisAbortRef.current = null;
     }
   }, [aiApi, aiConfigured, run]);
 
@@ -483,6 +488,8 @@ export function ZodiacPerspectivesPanel() {
               )}
             </div>
           </div>
+
+          {run.synthesis && <DecisionSummary synthesis={run.synthesis} />}
 
           {run.perspectives.length > 0 && (
             <PerspectiveGrid

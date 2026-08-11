@@ -583,13 +583,20 @@ export async function generateFollowup(
   }
   messages.push({ role: 'user', content: newUserMessage.trim() });
 
-  const provider = createOpenAIProvider({ apiKey: ctx.apiKey, baseUrl: ctx.baseUrl });
   let raw = '';
-  for await (const chunk of provider.chat(messages, { model: ctx.model, temperature: 0.8, maxTokens: 600, signal, stream: true })) {
-    if (chunk.delta) raw += chunk.delta;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      raw = await collectStream(messages, { model: ctx.model, temperature: 0.8, maxTokens: 600, signal }, ctx);
+      break;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
+      if (attempt === 0 && isTransientLlmError(error)) await waitForRetry(attempt, signal);
+    }
   }
   const cleaned = sanitizeText(raw);
-  if (!cleaned) throw new Error(`${meta.name} 视角没有返回内容，请重试`);
+  if (!cleaned) throw (lastError instanceof Error ? lastError : new Error(`${meta.name} 视角没有返回内容，请重试`));
   return cleaned;
 }
 

@@ -179,14 +179,15 @@ export function gateQuality(sections: LyricSection[], bpm: number): QualityRepor
   // --- rhyme: AABB / AAAA pattern + per-section primary rhyme ---
   sections.forEach((section) => {
     const lines = section.lyrics.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    if (lines.length < 4) return;
+    if (lines.length < 2) return;
     const rhymes = lines.map(detectRhyme).filter((value) => value !== '—' && value !== '未知');
     if (rhymes.length < 2) return;
     const counts = rhymes.reduce<Record<string, number>>((map, value) => ({ ...map, [value]: (map[value] ?? 0) + 1 }), {});
     const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
     if (top && top[1] / rhymes.length < 0.4) {
       issues.push({ sectionId: section.id, sectionTitle: section.title, line: lines[0], lineIndex: 0, category: 'rhyme', severity: 'warning', message: `本段主韵较分散（最常用的“${top[0]}”只占 ${Math.round(top[1] / rhymes.length * 100)}%），建议在段落设置里锁定一个韵脚。` });
-    } else if (top && section.rhyme && section.rhyme !== '自由' && !rhymes.includes(section.rhyme.toLowerCase())) {
+    }
+    if (section.rhyme && section.rhyme !== '自由' && !rhymes.includes(section.rhyme.toLowerCase())) {
       issues.push({ sectionId: section.id, sectionTitle: section.title, line: lines[lines.length - 1], lineIndex: lines.length - 1, category: 'rhyme', severity: 'info', message: `本段设置了主韵“${section.rhyme}”，但歌词中没检测到匹配。` });
     }
     // 连续 3 行同韵 (AAAA) 在主歌里通常需要变化

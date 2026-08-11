@@ -222,6 +222,9 @@ export interface UseDiskScanResult {
   setRunning: (running: boolean) => void;
   setPaused: (paused: boolean) => void;
   setScanErrors: React.Dispatch<React.SetStateAction<ScanErrorItem[]>>;
+  setBrowserLoading: (loading: boolean) => void;
+  setEntries: (entries: DiskDirectoryItem[]) => void;
+  setDuplicates: React.Dispatch<React.SetStateAction<DuplicateGroup[]>>;
 }
 
 // ---------------- Hook 实现 ----------------
@@ -686,5 +689,8 @@ export function useDiskScan(): UseDiskScanResult {
     setRunning,
     setPaused,
     setScanErrors,
+    setBrowserLoading,
+    setEntries,
+    setDuplicates,
   };
 }

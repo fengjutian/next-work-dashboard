@@ -155,7 +155,7 @@ export function QuestionInput({
               variant={sameSigns(options.selectedSigns, preset.signs) ? 'default' : 'outline'}
               size="sm"
               disabled={disabled}
-              onClick={() => onOptionsChange({ ...options, selectedSigns: [...preset.signs] })}
+              onClick={() => onOptionsChange(withSelectedSigns(options, preset.signs))}
             >
               {preset.label}
             </Button>
@@ -170,12 +170,12 @@ export function QuestionInput({
                   type="checkbox"
                   checked={selected}
                   disabled={disabled || (selected && options.selectedSigns.length <= 3)}
-                  onChange={() => onOptionsChange({
-                    ...options,
-                    selectedSigns: selected
+                  onChange={() => onOptionsChange(withSelectedSigns(
+                    options,
+                    selected
                       ? options.selectedSigns.filter((item) => item !== sign)
                       : ZODIAC_SIGNS.filter((item) => item === sign || options.selectedSigns.includes(item)),
-                  })}
+                  ))}
                 />
                 <span aria-hidden>{ZODIAC_META[sign].glyph}</span>{ZODIAC_META[sign].name.replace('座', '')}
               </label>
@@ -236,14 +236,18 @@ export function QuestionInput({
               type="checkbox"
               checked={options.includeSynthesis}
               onChange={(event) => onOptionsChange({ ...options, includeSynthesis: event.target.checked })}
-              disabled={disabled || options.mode === 'fast'}
+              disabled={disabled || options.mode === 'fast' || options.selectedSigns.length < 4}
               aria-describedby={`${synthesisId}-hint`}
               className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
             />
             <span>生成对比总结</span>
           </label>
           <p id={`${synthesisId}-hint`} className="text-xs text-muted-foreground">
-            {options.mode === 'fast' ? '快速模式固定关闭总结' : `关闭后只输出所选的 ${options.selectedSigns.length} 个视角`}
+            {options.mode === 'fast'
+              ? '快速模式固定关闭总结'
+              : options.selectedSigns.length < 4
+                ? '至少选择 4 个视角才能生成总结'
+                : `关闭后只输出所选的 ${options.selectedSigns.length} 个视角`}
           </p>
         </div>
       </div>
@@ -290,6 +294,15 @@ function sameSigns(left: readonly ZodiacSign[], right: readonly ZodiacSign[]): b
 function estimateRequests(options: GenerationOptions): number {
   if (options.mode === 'fast') return 1;
   return 1 + options.selectedSigns.length + (options.includeSynthesis && options.selectedSigns.length >= 4 ? 1 : 0);
+}
+
+function withSelectedSigns(options: GenerationOptions, signs: readonly ZodiacSign[]): GenerationOptions {
+  const selectedSigns = ZODIAC_SIGNS.filter((sign) => signs.includes(sign));
+  return {
+    ...options,
+    selectedSigns,
+    includeSynthesis: selectedSigns.length < 4 ? false : options.includeSynthesis,
+  };
 }
 
 interface OptionGroupProps<T extends string> {

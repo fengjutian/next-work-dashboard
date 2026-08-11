@@ -54,6 +54,8 @@ export function FollowupDialog({
   // 载入历史追问
   useEffect(() => {
     if (!open || !run || !sign) {
+      abortRef.current?.abort();
+      abortRef.current = null;
       setMessages([]);
       setError(null);
       setHighRisk(null);
@@ -61,6 +63,11 @@ export function FollowupDialog({
     }
     setMessages(loadFollowupMessages(run.id).filter((m) => m.sign === sign) as unknown as ZodiacFollowupMessage[]);
   }, [open, run, sign]);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
 
   // 自动滚到底
   useEffect(() => {

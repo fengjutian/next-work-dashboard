@@ -75,11 +75,12 @@ export function suggestBeatMarks(
       const beatPosition = Math.round(beat) % 4 || 4;
       const isLastChar = charIndex === chars.length - 1;
       const isFirstLineFirstChar = lineIndex === 0 && charIndex === 0;
-      const isPrecedingPunct = char === '，' || char === '。' || char === ',' || char === '.' || char === '、' || char === '；';
+      const nextChar = chars[charIndex + 1];
+      const isPausingAfterThis = nextChar === '，' || nextChar === '。' || nextChar === ',' || nextChar === '.' || nextChar === '、' || nextChar === '；';
       if (isLastChar) suggestions[key] = 'accent';
       else if (isFirstLineFirstChar && beatPosition !== 1) suggestions[key] = 'pickup';
+      else if (isPausingAfterThis) suggestions[key] = 'hold';
       else if (beatPosition === 1 || beatPosition === 3) suggestions[key] = 'accent';
-      else if (isPrecedingPunct) suggestions[key] = 'hold';
       else if (charIndex === 0) suggestions[key] = 'pickup';
       // else: leave un-marked; user can fill in
     });

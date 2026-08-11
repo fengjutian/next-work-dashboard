@@ -4,7 +4,7 @@ import { ZODIAC_SIGNS } from '../src/plugins/zodiac-perspectives/zodiac-types';
 import type { GenerationOptions } from '../src/plugins/zodiac-perspectives/zodiac-types';
 
 const OPTIONS: GenerationOptions = {
-  scene: 'decision', length: 'standard', tone: 'gentle', includeSynthesis: true, mode: 'standard',
+  scene: 'decision', length: 'standard', tone: 'gentle', includeSynthesis: true, mode: 'standard', selectedSigns: [...ZODIAC_SIGNS],
 };
 
 describe('zodiac prompt quality regression', () => {
@@ -20,7 +20,7 @@ describe('zodiac prompt quality regression', () => {
   it('requires fast mode to return all twelve ordered signs in one JSON object', () => {
     const prompt = buildFastBatchUserPrompt('测试问题', { ...OPTIONS, mode: 'fast' });
     for (const sign of ZODIAC_SIGNS) expect(prompt).toContain(sign);
-    expect(prompt).toContain('全部 12 个');
+    expect(prompt).toContain('一次性返回 12 个');
     expect(prompt).toContain('一次性返回');
   });
 });

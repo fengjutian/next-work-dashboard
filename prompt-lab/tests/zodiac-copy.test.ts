@@ -11,7 +11,7 @@ const baseRun: ZodiacRun = {
   id: 'run-1',
   question: '我应该换工作吗？',
   title: '我应该换工作吗？',
-  options: { scene: 'decision', length: 'standard', tone: 'gentle', includeSynthesis: true, mode: 'standard' },
+  options: { scene: 'decision', length: 'standard', tone: 'gentle', includeSynthesis: true, mode: 'standard', selectedSigns: [...ZODIAC_SIGNS] },
   perspectives: ZODIAC_SIGNS.map((sign) => ({
     sign,
     interpretation: `${sign} 的理解`,

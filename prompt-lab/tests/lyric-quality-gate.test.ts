@@ -32,7 +32,7 @@ describe('lyric quality gate', () => {
         id: 'c1',
         kind: 'Chorus',
         title: 'Chorus',
-        lyrics: ['撕心裂肺的痛', '爱到永远'], // has clichés, both lines rhyme ong/ang
+        lyrics: ['撕心裂肺的痛', '爱到永远'].join('\n'),
       }),
     ];
     const report = gateQuality(sections, 90);
