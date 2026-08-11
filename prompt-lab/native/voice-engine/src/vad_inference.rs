@@ -16,16 +16,16 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
-use ndarray::{Array2, Array3};
+use ndarray::Array3;
 use ort::session::Session;
-use ort::value::Value;
+use ort::value::Tensor;
 use std::path::Path;
 use std::sync::Mutex;
 
 /// Number of samples per inference window at 16 kHz (32 ms).
 pub const WINDOW_SAMPLES: usize = 512;
 /// Hidden/cell state shape (LSTM has 2 layers, 1 direction, 64 cells).
-const HC_SHAPE: [usize; 3] = [2, 1, 64];
+const HC_SHAPE: [i64; 3] = [2, 1, 64];
 
 pub struct SileroVad {
     session: Mutex<Session>,
@@ -41,8 +41,8 @@ impl SileroVad {
             .with_context(|| format!("failed to load ONNX model from {}", model_path.display()))?;
         Ok(Self {
             session: Mutex::new(session),
-            h: Array3::zeros(HC_SHAPE),
-            c: Array3::zeros(HC_SHAPE),
+            h: Array3::zeros([2, 1, 64]),
+            c: Array3::zeros([2, 1, 64]),
         })
     }
 
@@ -57,59 +57,92 @@ impl SileroVad {
     /// Run inference on a 512-sample window. Returns the speech
     /// probability in [0, 1].
     pub fn predict_window(&mut self, window: &[f32; WINDOW_SAMPLES]) -> Result<f32> {
-        let input = Array2::from_shape_vec((1, WINDOW_SAMPLES), window.to_vec())
-            .context("VAD window size mismatch")?;
-        let sr: i64 = 16_000;
-        let sr_array = ndarray::arr0(sr);
-
-        let input_val = Value::from_array(input)?;
-        let sr_val = Value::from_array(sr_array)?;
-        let h_val = Value::from_array(self.h.clone())?;
-        let c_val = Value::from_array(self.c.clone())?;
+        // Input window: 1xN f32 tensor. Use the raw (shape, data) form
+        // to avoid copying the array twice. Ndarray is also fine, but
+        // this is the simplest portable shape across ort feature flags.
+        let input_tensor = Tensor::from_array(([1_i64, WINDOW_SAMPLES as i64], window.to_vec().into_boxed_slice()))
+            .context("create VAD input tensor")?;
+        // Sample-rate scalar (ort wants a 0-D i64 tensor).
+        let sr_tensor = Tensor::from_array(((), vec![16_000_i64]))
+            .context("create VAD sr tensor")?;
+        // Hidden / cell state: 2x1x64 f32 tensors. We carry the previous
+        // state inside `self.h` / `self.c` and feed it in; the model
+        // returns the updated `hn` / `cn` for the next call.
+        let h_data: Box<[f32]> = self
+            .h
+            .as_slice()
+            .context("VAD h not contiguous")?
+            .to_vec()
+            .into_boxed_slice();
+        let h_tensor = Tensor::from_array((HC_SHAPE, h_data))
+            .context("create VAD h tensor")?;
+        let c_data: Box<[f32]> = self
+            .c
+            .as_slice()
+            .context("VAD c not contiguous")?
+            .to_vec()
+            .into_boxed_slice();
+        let c_tensor = Tensor::from_array((HC_SHAPE, c_data))
+            .context("create VAD c tensor")?;
 
         let mut session = self.session.lock().expect("VAD session poisoned");
         let outputs = session
-            .run(ort::inputs!["input" => input_val, "sr" => sr_val, "h" => h_val, "c" => c_val])
+            .run(ort::inputs![
+                "input" => input_tensor,
+                "sr" => sr_tensor,
+                "h" => h_tensor,
+                "c" => c_tensor,
+            ]?)
             .context("VAD inference failed")?;
 
-        // output: scalar (1,) f32
-        let (out_shape, out_data) = outputs["output"]
-            .try_extract_tensor::<f32>()
-            .context("VAD output not a tensor")?;
-        let prob = if out_shape.is_empty() {
-            // Some ort versions wrap scalars as [].
-            out_data.first().copied().unwrap_or(0.0)
-        } else {
-            out_data.first().copied().unwrap_or(0.0)
-        };
+        // output: scalar f32 probability. The model declares it as a
+        // 0-D tensor; `try_extract_scalar` handles that explicitly.
+        let prob: f32 = outputs["output"]
+            .try_extract_scalar::<f32>()
+            .context("VAD output is not a scalar f32")?;
 
-        // hn, cn: [2, 1, 64]
-        let (hn_shape, hn_data) = outputs["hn"].try_extract_tensor::<f32>()?;
-        let (cn_shape, cn_data) = outputs["cn"].try_extract_tensor::<f32>()?;
-        if hn_shape == HC_SHAPE.as_slice() {
-            self.h = Array3::from_shape_vec(HC_SHAPE, hn_data.to_vec())
-                .context("VAD hn shape mismatch")?;
+        // hn / cn: 2x1x64 f32. `try_extract_raw_tensor` gives us
+        // `(&[i64], &[f32])` so we can both sanity-check the shape and
+        // copy the data back into the ndarray state.
+        let (hn_shape, hn_data) = outputs["hn"]
+            .try_extract_raw_tensor::<f32>()
+            .context("VAD hn not a raw f32 tensor")?;
+        if shape_matches(hn_shape, &HC_SHAPE) {
+            self.h = Array3::from_shape_vec([2, 1, 64], hn_data.to_vec())
+                .context("VAD hn shape mismatch on copy")?;
         } else {
-            // Defensive: if ort returns a different layout, fall back to zeros
-            // rather than panic. The next call's state will be off, but we
-            // won't crash the daemon.
-            warn_shape_mismatch("hn", hn_shape, HC_SHAPE.as_slice());
-            self.h = Array3::zeros(HC_SHAPE);
+            warn_shape_mismatch("hn", hn_shape, &HC_SHAPE);
+            self.h = Array3::zeros([2, 1, 64]);
         }
-        if cn_shape == HC_SHAPE.as_slice() {
-            self.c = Array3::from_shape_vec(HC_SHAPE, cn_data.to_vec())
-                .context("VAD cn shape mismatch")?;
+
+        let (cn_shape, cn_data) = outputs["cn"]
+            .try_extract_raw_tensor::<f32>()
+            .context("VAD cn not a raw f32 tensor")?;
+        if shape_matches(cn_shape, &HC_SHAPE) {
+            self.c = Array3::from_shape_vec([2, 1, 64], cn_data.to_vec())
+                .context("VAD cn shape mismatch on copy")?;
         } else {
-            warn_shape_mismatch("cn", cn_shape, HC_SHAPE.as_slice());
-            self.c = Array3::zeros(HC_SHAPE);
+            warn_shape_mismatch("cn", cn_shape, &HC_SHAPE);
+            self.c = Array3::zeros([2, 1, 64]);
         }
-        let _ = (out_shape, cn_shape);
 
         Ok(prob)
     }
 }
 
-fn warn_shape_mismatch(name: &str, got: &[i64], expected: &[usize]) {
+fn shape_matches(got: &[i64], expected: &[i64]) -> bool {
+    if got.len() != expected.len() {
+        return false;
+    }
+    for (a, b) in got.iter().zip(expected.iter()) {
+        if *a != *b {
+            return false;
+        }
+    }
+    true
+}
+
+fn warn_shape_mismatch(name: &str, got: &[i64], expected: &[i64]) {
     tracing::warn!(
         vad_tensor = name,
         got = ?got,

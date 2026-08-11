@@ -48,7 +48,7 @@ pub struct VadProcessor {
 }
 
 impl VadProcessor {
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         let mut vad = SileroVad::load(&self.model_path)
             .with_context(|| format!("load VAD model {}", self.model_path.display()))?;
         info!(model = %self.model_path.display(), "VAD ready");

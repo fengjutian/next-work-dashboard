@@ -119,7 +119,7 @@ pub async fn run() -> Result<()> {
                 continue;
             }
         };
-        if let Err(e) = handle_request(req, &event_tx, &state) {
+        if let Err(e) = handle_request(req, &event_tx, &state).await {
             error!("request handler failed: {e:#}");
             let _ = event_tx.send(Event::new(
                 "error",
@@ -134,7 +134,7 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
-fn handle_request(
+async fn handle_request(
     req: Request,
     event_tx: &mpsc::UnboundedSender<Event>,
     state: &Arc<Mutex<State>>,
@@ -178,7 +178,7 @@ fn handle_request(
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32)
                 .unwrap_or(5);
-            run_recording_vad(duration_secs, event_tx, state.clone())?;
+            run_recording_vad(duration_secs, event_tx, state.clone()).await?;
         }
         "recording.raw" => {
             // W1-style raw recorder. Kept for debug + smoke tests.
@@ -188,7 +188,7 @@ fn handle_request(
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32)
                 .unwrap_or(5);
-            run_recording_raw(duration_secs, event_tx, state.clone())?;
+            run_recording_raw(duration_secs, event_tx, state.clone()).await?;
         }
         _ => {
             warn!("unknown request type: {}", req.kind);
@@ -211,10 +211,11 @@ fn writer_send(
     kind: &str,
     payload: serde_json::Value,
 ) -> Option<Event> {
-    tx.send(Event::new(kind, payload)).ok()
+    let event = Event::new(kind, payload);
+    tx.send(event.clone()).ok().map(|_| event)
 }
 
-fn run_recording_vad(
+async fn run_recording_vad(
     _duration_secs: u32,
     event_tx: &mpsc::UnboundedSender<Event>,
     state: Arc<Mutex<State>>,
@@ -262,7 +263,7 @@ fn run_recording_vad(
     };
 
     // Runs synchronously on this task — cpal::Stream is `!Send`.
-    let result = processor.run();
+    let result = processor.run().await;
     capture.stop();
     state.lock().unwrap().recording = false;
     if let Err(e) = result {
@@ -271,7 +272,7 @@ fn run_recording_vad(
     Ok(())
 }
 
-fn run_recording_raw(
+async fn run_recording_raw(
     duration_secs: u32,
     event_tx: &mpsc::UnboundedSender<Event>,
     state: Arc<Mutex<State>>,
