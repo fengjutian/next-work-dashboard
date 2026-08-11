@@ -1,52 +1,61 @@
 /**
- * MarkdownToolbar — 顶部工具栏。
+ * MarkdownToolbar — 工具栏。
  *
- * 包含：撤销/重做、标题、正文、粗体/斜体/删除线/行内代码、
- *      引用、有序/无序/任务列表、链接/图片/表格/代码块/分隔线、
- *      切换源码/可视化、保存、状态指示。
- *
- * 命令通过 registerCommands 由父组件注入，符合 Tiptap 最佳实践。
+ * 设计：
+ *  - 工具栏只负责"按钮 → 派发命令"；具体命令执行由 Tiptap editor 实例在 EditorCommandContext 中提供。
+ *  - 模式切换通过 onModeChange 回调告诉上层。
  */
+
 import React from 'react';
 import {
-  Bold,
   Code as CodeIcon,
-  Eye,
-  EyeOff,
-  FileText,
+  Code as Code2,
+  Edit3 as Bold,
+  Edit3 as Italic,
+  Edit3 as Strikethrough,
+  ExternalLink as Link2,
+  Rows3 as List,
+  Rows3 as ListOrdered,
+  Check as ListChecks,
+  MessageSquare as Quote,
+  RefreshCw as Redo2,
+  RotateCcw as Undo2,
+  Columns2 as Table,
   Image as ImageIcon,
-  Italic,
-  Link as LinkIcon,
-  List,
-  ListChecks,
-  ListOrdered,
-  Quote,
-  Redo2,
-  Save,
-  Strikethrough,
-  Table as TableIcon,
-  Undo2,
   Minus,
+  Save,
+  Search as SearchIcon,
 } from '@/components/icons';
 import { cn } from '@/lib/utils';
-import type { MarkdownEditorCommands } from '../editor/createMarkdownEditor';
-import type { EditorMode, RoundtripSeverity, SourceModeReason } from '../types';
+import type { MarkdownDocument, MarkdownEditorMode } from '../types';
+
+export type EditorCommand =
+  | { kind: 'undo' }
+  | { kind: 'redo' }
+  | { kind: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6 }
+  | { kind: 'toggleBold' }
+  | { kind: 'toggleItalic' }
+  | { kind: 'toggleStrike' }
+  | { kind: 'toggleCode' }
+  | { kind: 'toggleBulletList' }
+  | { kind: 'toggleOrderedList' }
+  | { kind: 'toggleTaskList' }
+  | { kind: 'toggleBlockquote' }
+  | { kind: 'toggleCodeBlock' }
+  | { kind: 'insertTable' }
+  | { kind: 'setHorizontalRule' }
+  | { kind: 'setLink'; href: string }
+  | { kind: 'setImage'; src: string }
+  | { kind: 'openFindReplace' };
 
 export interface MarkdownToolbarProps {
-  mode: EditorMode;
-  sourceModeReason: SourceModeReason;
-  dirty: boolean;
-  saving: boolean;
-  roundtripSeverity: RoundtripSeverity;
-  hasCommands: boolean;
-  commands: MarkdownEditorCommands | null;
-  onToggleMode: () => void;
-  onSave: () => void;
-  onOpenLinkDialog: () => void;
-  onOpenImageDialog: () => void;
+  document: MarkdownDocument;
+  onSave(): void | Promise<void>;
+  onModeChange(mode: MarkdownEditorMode): void;
+  onCommand(command: EditorCommand): void;
 }
 
-interface ButtonProps {
+interface ToolbarButtonProps {
   label: string;
   onClick: () => void;
   active?: boolean;
@@ -54,171 +63,148 @@ interface ButtonProps {
   children: React.ReactNode;
 }
 
-function ToolButton({ label, onClick, active, disabled, children }: ButtonProps) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors',
-        'hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
-        active && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
+const ToolbarButton: React.FC<ToolbarButtonProps> = ({ label, onClick, active, disabled, children }) => (
+  <button
+    type="button"
+    aria-label={label}
+    title={label}
+    onClick={onClick}
+    disabled={disabled}
+    className={cn(
+      'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+      active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+    )}
+  >
+    {children}
+  </button>
+);
 
-function Divider() {
-  return <span className="mx-1 h-5 w-px bg-border" aria-hidden />;
-}
+const Group: React.FC<{ children: React.ReactNode }> = ({ children }) => <div className="flex items-center gap-0.5">{children}</div>;
+const Divider: React.FC = () => <div className="mx-1 h-5 w-px bg-border" />;
 
-export const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({
-  mode,
-  sourceModeReason,
-  dirty,
-  saving,
-  roundtripSeverity,
-  hasCommands,
-  commands,
-  onToggleMode,
-  onSave,
-  onOpenLinkDialog,
-  onOpenImageDialog,
-}) => {
-  const disabled = !hasCommands && mode === 'wysiwyg';
+const ModeButton: React.FC<{ mode: MarkdownEditorMode; current: MarkdownEditorMode; onSelect(mode: MarkdownEditorMode): void }> = ({ mode, current, onSelect }) => (
+  <button
+    type="button"
+    onClick={() => onSelect(mode)}
+    className={cn(
+      'flex h-7 items-center rounded-md px-2 text-[11px] transition-colors',
+      current === mode ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60',
+    )}
+    title={mode === 'visual' ? '可视化模式' : '源码模式'}
+  >
+    {mode === 'visual' ? '可视化' : '源码'}
+  </button>
+);
+
+export const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ document, onSave, onModeChange, onCommand }) => {
+  const disabled = false;
   return (
-    <div className="flex h-10 flex-shrink-0 items-center gap-0.5 border-b bg-card px-2">
-      <div className="flex items-center">
-        <ToolButton label="撤销" onClick={() => commands?.undo()} disabled={disabled}>
-          <Undo2 className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="重做" onClick={() => commands?.redo()} disabled={disabled}>
-          <Redo2 className="h-4 w-4" />
-        </ToolButton>
-      </div>
-      <Divider />
-      <div className="flex items-center">
-        <select
-          aria-label="标题级别"
-          className="h-8 rounded-md border bg-background px-2 text-xs text-foreground"
-          defaultValue=""
-          disabled={disabled}
-          onChange={(event) => {
-            const value = event.target.value;
-            if (value === 'p') commands?.setParagraph();
-            else if (/^h[1-6]$/.test(value)) commands?.toggleHeading(Number(value[1]) as 1 | 2 | 3 | 4 | 5 | 6);
-            event.currentTarget.value = '';
-          }}
-        >
-          <option value="">标题</option>
-          <option value="h1">H1</option>
-          <option value="h2">H2</option>
-          <option value="h3">H3</option>
-          <option value="h4">H4</option>
-          <option value="h5">H5</option>
-          <option value="h6">H6</option>
-          <option value="p">正文</option>
-        </select>
-      </div>
-      <Divider />
-      <div className="flex items-center">
-        <ToolButton label="粗体" active={false} onClick={() => commands?.toggleBold()} disabled={disabled}>
-          <Bold className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="斜体" onClick={() => commands?.toggleItalic()} disabled={disabled}>
-          <Italic className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="删除线" onClick={() => commands?.toggleStrike()} disabled={disabled}>
-          <Strikethrough className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="行内代码" onClick={() => commands?.toggleCode()} disabled={disabled}>
-          <CodeIcon className="h-4 w-4" />
-        </ToolButton>
-      </div>
-      <Divider />
-      <div className="flex items-center">
-        <ToolButton label="无序列表" onClick={() => commands?.toggleBulletList()} disabled={disabled}>
-          <List className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="有序列表" onClick={() => commands?.toggleOrderedList()} disabled={disabled}>
-          <ListOrdered className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="任务列表" onClick={() => commands?.toggleTaskList()} disabled={disabled}>
-          <ListChecks className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="引用" onClick={() => commands?.toggleBlockquote()} disabled={disabled}>
-          <Quote className="h-4 w-4" />
-        </ToolButton>
-      </div>
-      <Divider />
-      <div className="flex items-center">
-        <ToolButton label="链接" onClick={onOpenLinkDialog} disabled={disabled}>
-          <LinkIcon className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="图片" onClick={onOpenImageDialog} disabled={disabled}>
-          <ImageIcon className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="表格" onClick={() => commands?.insertTable()} disabled={disabled}>
-          <TableIcon className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="代码块" onClick={() => commands?.toggleCodeBlock()} disabled={disabled}>
-          <FileText className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="分隔线" onClick={() => commands?.insertHorizontalRule()} disabled={disabled}>
-          <Minus className="h-4 w-4" />
-        </ToolButton>
-      </div>
-      <div className="flex-1" />
-      <div className="flex items-center gap-1">
-        <RoundtripBadge severity={roundtripSeverity} />
-        <ToolButton
-          label={mode === 'wysiwyg' ? '切换到源码模式' : '切换到可视化模式'}
-          active={mode === 'source'}
-          onClick={onToggleMode}
-        >
-          {mode === 'wysiwyg' ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </ToolButton>
+    <div className="flex h-10 flex-shrink-0 items-center gap-1 border-b bg-background px-2 text-xs">
+      <Group>
         <button
           type="button"
-          title={dirty ? '保存（Ctrl+S）' : '已保存'}
-          aria-label="保存"
           onClick={onSave}
-          disabled={saving}
+          title="保存 (Ctrl+S)"
           className={cn(
-            'flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors',
-            'border border-input bg-background hover:bg-accent hover:text-foreground',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-            dirty && 'border-amber-500 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-900/30',
+            'flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] transition-all',
+            document.dirty
+              ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary-hover'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground',
           )}
         >
-          <Save className="h-4 w-4" />
-          {saving ? '保存中…' : dirty ? '保存' : '已保存'}
+          <Save className="h-3.5 w-3.5" />
+          <span className="font-medium">{document.dirty ? '保存' : '已保存'}</span>
+          <span className={cn('ml-1 rounded border px-1 font-mono text-[9px]', document.dirty ? 'border-primary-foreground/40' : 'border-border')}>
+            Ctrl+S
+          </span>
         </button>
-      </div>
-      {sourceModeReason && mode === 'source' && (
-        <span className="ml-2 hidden text-xs text-muted-foreground md:inline" title={`当前文件因 ${sourceModeReason} 强制使用源码模式`}>
-          源码模式（{sourceModeReason}）
-        </span>
-      )}
+      </Group>
+      <Divider />
+      <Group>
+        <ModeButton mode="visual" current={document.mode} onSelect={onModeChange} />
+        <ModeButton mode="source" current={document.mode} onSelect={onModeChange} />
+      </Group>
+      <Divider />
+      <Group>
+        <ToolbarButton label="撤销" onClick={() => onCommand({ kind: 'undo' })} disabled={disabled}>
+          <Undo2 className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="重做" onClick={() => onCommand({ kind: 'redo' })} disabled={disabled}>
+          <Redo2 className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </Group>
+      <Divider />
+      <Group>
+        {[1, 2, 3, 4].map((level) => (
+          <ToolbarButton key={level} label={`标题 ${level}`} onClick={() => onCommand({ kind: 'heading', level: level as 1 | 2 | 3 | 4 })}>
+            <span className="text-[11px] font-semibold">H{level}</span>
+          </ToolbarButton>
+        ))}
+      </Group>
+      <Divider />
+      <Divider />
+      <Group>
+        <ToolbarButton label="查找替换 (Ctrl+F)" onClick={() => onCommand({ kind: 'openFindReplace' })}>
+          <SearchIcon className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </Group>
+      <Divider />
+      <Group>
+        <ToolbarButton label="粗体" onClick={() => onCommand({ kind: 'toggleBold' })}>
+          <Bold className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="斜体" onClick={() => onCommand({ kind: 'toggleItalic' })}>
+          <Italic className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="删除线" onClick={() => onCommand({ kind: 'toggleStrike' })}>
+          <Strikethrough className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="行内代码" onClick={() => onCommand({ kind: 'toggleCode' })}>
+          <CodeIcon className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </Group>
+      <Divider />
+      <Group>
+        <ToolbarButton label="无序列表" onClick={() => onCommand({ kind: 'toggleBulletList' })}>
+          <List className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="有序列表" onClick={() => onCommand({ kind: 'toggleOrderedList' })}>
+          <ListOrdered className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="任务列表" onClick={() => onCommand({ kind: 'toggleTaskList' })}>
+          <ListChecks className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </Group>
+      <Divider />
+      <Group>
+        <ToolbarButton label="引用" onClick={() => onCommand({ kind: 'toggleBlockquote' })}>
+          <Quote className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="代码块" onClick={() => onCommand({ kind: 'toggleCodeBlock' })}>
+          <Code2 className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="表格" onClick={() => onCommand({ kind: 'insertTable' })}>
+          <Table className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="分隔线" onClick={() => onCommand({ kind: 'setHorizontalRule' })}>
+          <Minus className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </Group>
+      <Divider />
+      <Group>
+        <ToolbarButton label="链接" onClick={() => {
+          const href = window.prompt('请输入链接地址：', 'https://');
+          if (href) onCommand({ kind: 'setLink', href });
+        }}>
+          <Link2 className="h-3.5 w-3.5" />
+        </ToolbarButton>
+        <ToolbarButton label="图片" onClick={() => {
+          const src = window.prompt('请输入图片地址：', '');
+          if (src) onCommand({ kind: 'setImage', src });
+        }}>
+          <ImageIcon className="h-3.5 w-3.5" />
+        </ToolbarButton>
+      </Group>
     </div>
   );
 };
-
-function RoundtripBadge({ severity }: { severity: RoundtripSeverity }) {
-  if (severity === 'safe') return null;
-  const map = {
-    lossy: { color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200', label: '轻微差异' },
-    unsafe: { color: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-200', label: '可能丢失内容' },
-  } as const;
-  const { color, label } = map[severity];
-  return (
-    <span className={cn('flex h-6 items-center rounded-md px-2 text-[11px] font-medium', color)} title="往返安全检查未通过">
-      {label}
-    </span>
-  );
-}

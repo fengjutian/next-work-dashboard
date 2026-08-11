@@ -63,7 +63,7 @@ func newTestHandler(t *testing.T) *handler.Handler {
 			_ = sqlDB.Close()
 		}
 	})
-	return handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)))
+	return handler.New(service.NewPluginService(repository.NewPluginRepository(gormDB)), nil)
 }
 
 func newTestVerifier(t *testing.T, password string) *auth.Verifier {
@@ -106,7 +106,7 @@ func basicHeader(user, pass string) string {
 
 func TestUntrustedModeAllowsWrites(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, nil)
+	router := NewRouter(h, Options{})
 
 	// List returns empty.
 	rr := httptest.NewRecorder()
@@ -125,7 +125,7 @@ func TestUntrustedModeAllowsWrites(t *testing.T) {
 
 func TestWriteRequiresAuth(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, newTestVerifier(t, "s3cret"))
+	router := NewRouter(h, Options{Verifier: newTestVerifier(t, "s3cret")})
 
 	// Unauthenticated POST is rejected.
 	rr := httptest.NewRecorder()
@@ -147,7 +147,7 @@ func TestWriteRequiresAuth(t *testing.T) {
 
 func TestWriteAcceptsValidCreds(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, newTestVerifier(t, "s3cret"))
+	router := NewRouter(h, Options{Verifier: newTestVerifier(t, "s3cret")})
 
 	req := uploadRequest(t)
 	req.Header.Set("Authorization", basicHeader("admin", "s3cret"))
@@ -160,7 +160,7 @@ func TestWriteAcceptsValidCreds(t *testing.T) {
 
 func TestWriteRejectsBadCreds(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, newTestVerifier(t, "s3cret"))
+	router := NewRouter(h, Options{Verifier: newTestVerifier(t, "s3cret")})
 
 	req := uploadRequest(t)
 	req.Header.Set("Authorization", basicHeader("admin", "wrong"))
@@ -173,7 +173,7 @@ func TestWriteRejectsBadCreds(t *testing.T) {
 
 func TestReadEndpointsStayPublic(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, newTestVerifier(t, "s3cret"))
+	router := NewRouter(h, Options{Verifier: newTestVerifier(t, "s3cret")})
 
 	cases := []struct {
 		method, path string
@@ -196,7 +196,7 @@ func TestReadEndpointsStayPublic(t *testing.T) {
 
 func TestSecurityHeadersApplied(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, nil)
+	router := NewRouter(h, Options{})
 
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/plugins", nil))
@@ -219,7 +219,7 @@ func TestSecurityHeadersApplied(t *testing.T) {
 
 func TestFullUploadAndDownloadFlow(t *testing.T) {
 	h := newTestHandler(t)
-	router := NewRouter(h, newTestVerifier(t, "s3cret"))
+	router := NewRouter(h, Options{Verifier: newTestVerifier(t, "s3cret")})
 
 	// Upload as admin.
 	req := uploadRequest(t)

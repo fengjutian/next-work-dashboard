@@ -1,121 +1,101 @@
 /**
- * BacklinksPanel — 展示当前文档的 Backlink（来自 knowledge-workspace）。
+ * BacklinksPanel — 显示当前文档的反向引用。
  *
- * 复用 activeKnowledgeWorkspace.backlinks(path) — 不维护独立索引。
+ * 通过 `activeKnowledgeWorkspace.backlinks(relativePath)` 拉取结果。
+ * 仅在文档属于工作区（rootPath !== null）时生效。
  */
-import React, { useEffect, useState } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Info } from '@/components/icons';
-import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
+
+import React, { useCallback, useEffect, useState } from 'react';
+import { Network, ExternalLink } from '@/components/icons';
 import { cn } from '@/lib/utils';
+import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
+import type { MarkdownDocument } from '../types';
 
 export interface BacklinksPanelProps {
-  rootPath: string | null;
-  relativePath: string;
-  onJump: (request: { path: string; line: number }) => void;
+  document: MarkdownDocument;
 }
 
-interface BacklinkEntry {
-  sourceUri: string;
+interface BacklinkRow {
   sourcePath?: string;
   sourceTitle?: string;
   line: number;
   target: string;
 }
 
-export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({ rootPath, relativePath, onJump }) => {
-  const [entries, setEntries] = useState<BacklinkEntry[]>([]);
+export const BacklinksPanel: React.FC<BacklinksPanelProps> = ({ document }) => {
+  const [rows, setRows] = useState<BacklinkRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let disposed = false;
-    setEntries([]);
-    if (!rootPath) {
-      setError('未打开任何知识工作区');
-      return () => {
-        disposed = true;
-      };
+  const refresh = useCallback(async () => {
+    if (!document.rootPath) {
+      setRows([]);
+      return;
     }
     setLoading(true);
     setError(null);
-    activeKnowledgeWorkspace
-      .backlinks(relativePath)
-      .then((hits) => {
-        if (disposed) return;
-        setEntries(
-          hits.map((hit) => ({
-            sourceUri: hit.sourceUri,
-            sourcePath: hit.sourcePath,
-            sourceTitle: hit.sourceTitle,
-            line: hit.line,
-            target: hit.target,
-          })),
-        );
-      })
-      .catch((err: unknown) => {
-        if (disposed) return;
-        setError(err instanceof Error ? err.message : 'Backlink 查询失败');
-      })
-      .finally(() => {
-        if (disposed) return;
-        setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [rootPath, relativePath]);
+    try {
+      const results = await activeKnowledgeWorkspace.backlinks(document.relativePath);
+      setRows(results.map((item) => ({
+        sourcePath: item.sourcePath,
+        sourceTitle: item.sourceTitle,
+        line: item.line,
+        target: item.target,
+      })));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [document.rootPath, document.relativePath]);
 
-  if (!rootPath) {
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (!document.rootPath) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-        <Info className="h-5 w-5 opacity-50" />
-        <span>知识工作区未激活</span>
-        <span className="text-[10px]">Backlink 由知识工作区扫描提供</span>
-      </div>
+      <section>
+        <header className="flex h-9 items-center gap-2 border-b px-3 text-xs font-semibold text-muted-foreground">
+          <Network className="h-3.5 w-3.5" />
+          <span>反向引用</span>
+        </header>
+        <p className="px-3 py-3 text-xs text-muted-foreground">当前文档不在知识工作区中，无法解析 Backlink</p>
+      </section>
     );
   }
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">加载 Backlink 中…</div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-        <Info className="h-5 w-5 opacity-50" />
-        <span>{error}</span>
-      </div>
-    );
-  }
-  if (entries.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-        <Info className="h-5 w-5 opacity-50" />
-        <span>暂无 Backlink</span>
-        <span className="text-[10px]">其他文档引用此页面时会显示在这里</span>
-      </div>
-    );
-  }
+
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-1 p-2">
-        {entries.map((entry) => (
-          <button
-            key={`${entry.sourceUri}:${entry.line}`}
-            type="button"
-            onClick={() => entry.sourcePath && onJump({ path: entry.sourcePath, line: entry.line })}
-            disabled={!entry.sourcePath}
-            className={cn(
-              'flex flex-col items-start gap-0.5 rounded-md border bg-card px-2.5 py-1.5 text-left text-xs',
-              'hover:border-primary/40 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50',
-            )}
-          >
-            <span className="font-medium">{entry.sourceTitle ?? entry.sourcePath ?? entry.sourceUri}</span>
-            <span className="font-mono text-[10px] text-muted-foreground">第 {entry.line} 行 · {entry.target}</span>
-          </button>
-        ))}
-      </div>
-    </ScrollArea>
+    <section>
+      <header className="flex h-9 items-center gap-2 border-b px-3 text-xs font-semibold text-muted-foreground">
+        <Network className="h-3.5 w-3.5" />
+        <span>反向引用</span>
+        <span className="ml-auto text-[10px] font-normal">{rows.length} 条</span>
+      </header>
+      {loading ? (
+        <p className="px-3 py-3 text-xs text-muted-foreground">正在扫描…</p>
+      ) : error ? (
+        <p className="px-3 py-3 text-xs text-rose-500">{error}</p>
+      ) : rows.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-muted-foreground">没有其他文档引用本页</p>
+      ) : (
+        <ul className="divide-y">
+          {rows.map((row, index) => (
+            <li key={`${row.sourcePath}-${row.line}-${index}`} className="flex items-center gap-2 px-3 py-2 text-xs">
+              <ExternalLink className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-foreground">{row.sourceTitle ?? row.sourcePath}</div>
+                <div className="truncate text-muted-foreground">
+                  L{row.line} · {row.target}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 };
+
+// re-export classnames helper for consumers that use cn
+export { cn };

@@ -1,85 +1,76 @@
 /**
- * MarkdownTabBar — 多标签页。
+ * MarkdownTabBar — 文档标签栏。
  *
- * 简化设计：最多展示已打开文档的文件名 + dirty 圆点。
- * 超出宽度时横向滚动。
+ * 设计：
+ *  - 每个标签显示文件名 + dirty 状态点。
+ *  - 中键点击关闭；右键弹出关闭菜单。
+ *  - 滚动溢出时保持当前激活标签可见。
  */
-import React from 'react';
-import { X } from '@/components/icons';
+
+import React, { useRef } from 'react';
+import { CheckCircle as CircleCheck, X } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { MarkdownDocument } from '../types';
 
 export interface MarkdownTabBarProps {
   documents: MarkdownDocument[];
-  activeId: string | null;
-  onActivate: (id: string) => void;
-  onClose: (id: string) => void;
-  onCloseOthers: (id: string) => void;
-  onCloseAll: () => void;
+  activeDocumentId: string | null;
+  onSelect(documentId: string): void;
+  onClose(documentId: string): void;
 }
 
-export const MarkdownTabBar: React.FC<MarkdownTabBarProps> = ({
-  documents,
-  activeId,
-  onActivate,
-  onClose,
-  onCloseOthers,
-  onCloseAll,
-}) => {
+export const MarkdownTabBar: React.FC<MarkdownTabBarProps> = ({ documents, activeDocumentId, onSelect, onClose }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
   if (documents.length === 0) return null;
+
   return (
-    <div className="flex h-9 flex-shrink-0 items-stretch border-b bg-muted/40 overflow-x-auto">
+    <div ref={containerRef} className="flex h-9 flex-shrink-0 items-end gap-1 overflow-x-auto border-b bg-muted/20 px-2 pt-1.5">
       {documents.map((doc) => {
-        const isActive = doc.id === activeId;
+        const isActive = doc.id === activeDocumentId;
         return (
-          <div
+          <button
             key={doc.id}
-            role="tab"
-            aria-selected={isActive}
-            className={cn(
-              'group flex h-full min-w-[120px] max-w-[240px] cursor-pointer items-center gap-2 border-r px-3 text-xs',
-              isActive
-                ? 'bg-background text-foreground'
-                : 'bg-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground',
-            )}
-            onClick={() => onActivate(doc.id)}
+            type="button"
+            onClick={() => onSelect(doc.id)}
             onAuxClick={(event) => {
               if (event.button === 1) {
                 event.preventDefault();
                 onClose(doc.id);
               }
             }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              const choice = window.prompt('操作：close / others / all', 'close');
-              if (choice === 'others') onCloseOthers(doc.id);
-              else if (choice === 'all') onCloseAll();
-            }}
-          >
-            <span
-              className={cn(
-                'h-1.5 w-1.5 flex-shrink-0 rounded-full',
-                doc.dirty ? 'bg-amber-500' : 'bg-emerald-500/0',
-              )}
-              aria-label={doc.dirty ? '未保存' : '已保存'}
-            />
-            <span className="truncate font-medium">{doc.fileName}</span>
-            {doc.mode === 'source' && (
-              <span className="rounded-sm bg-muted px-1 text-[10px] text-muted-foreground">源码</span>
+            className={cn(
+              'group flex h-7 max-w-[240px] flex-shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 text-xs transition-colors',
+              isActive
+                ? 'border-border bg-background text-foreground'
+                : 'border-transparent text-muted-foreground hover:bg-background/60 hover:text-foreground',
             )}
-            <button
-              type="button"
-              aria-label="关闭标签"
-              title="关闭"
+            title={doc.relativePath}
+          >
+            {doc.dirty ? (
+              <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500" />
+            ) : (
+              <CircleCheck className="h-3 w-3 flex-shrink-0 text-emerald-500" />
+            )}
+            <span className="truncate">{doc.displayName}</span>
+            <span
+              role="button"
+              tabIndex={-1}
               onClick={(event) => {
                 event.stopPropagation();
                 onClose(doc.id);
               }}
-              className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onClose(doc.id);
+                }
+              }}
+              className="ml-1 flex h-4 w-4 flex-shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <X className="h-3 w-3" />
-            </button>
-          </div>
+            </span>
+          </button>
         );
       })}
     </div>

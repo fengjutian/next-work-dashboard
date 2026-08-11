@@ -31,7 +31,10 @@ fn build_daemon_info(cfg: &Config) -> DaemonInfo {
         platform: cfg.platform.clone(),
         bind_addr: cfg.bind_addr.to_string(),
         http_port: cfg.http_port,
-        ws_port: cfg.ws_port,
+        // WebSocket is served on the same axum server as HTTP, so the
+        // advertised ws_port always equals http_port. Kept as a separate
+        // field for clarity in clients and for future split.
+        ws_port: cfg.http_port,
         mdns_enabled: cfg.mdns_enabled,
         version: env!("CARGO_PKG_VERSION").to_string(),
         lan_addr,

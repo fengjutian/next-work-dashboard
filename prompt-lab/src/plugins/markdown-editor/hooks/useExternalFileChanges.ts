@@ -1,52 +1,54 @@
 /**
- * useExternalFileChanges — 监听工作区文件变化，转发给当前打开的文档。
+ * 外部文件变化监听 hook — 利用 workspace.onFileChanged 检测打开中的 .md 是否被外部修改。
  *
- * 复用 electronAPI.workspace.onFileChanged 全局事件，
- * 过滤出当前 rootPath 下的 markdown 文件并比对。
+ * 行为：
+ *  - 当工作区通知某个相对路径变化，查找是否在打开的 documents 里有匹配。
+ *  - 如果有且文档未 dirty（savedContent == 当前内容），自动 reload。
+ *  - 如果有但文档 dirty，标记 hasExternalChange=true，由 UI 提示用户选择 reload/discard/keep。
+ *  - 文件被删除时只标记状态，不主动关闭（用户可以再选择）。
  */
-import { useEffect } from 'react';
+
+import { useCallback, useEffect, useRef } from 'react';
 import type { MarkdownDocument } from '../types';
 
-export interface ExternalChangesHandler {
-  onChange(relativePath: string, incomingContent: string, modifiedAt: number, type: 'change' | 'rename'): void;
-  /** 询问根路径是否处于 watch 状态；false 时跳过全部事件 */
-  isWatching(rootPath: string): boolean;
+export interface ExternalChangeHandler {
+  /** 外部文件发生变化的文档列表。 */
+  pendingChanges: Set<string>;
+  /** 用户确认 reload 后的回调。 */
+  reloadDocument(document: MarkdownDocument): void;
+  /** 用户确认放弃本地修改。 */
+  discardLocalChanges(documentId: string): void;
 }
 
-export function useExternalFileChanges(rootPath: string | null, handler: ExternalChangesHandler): void {
-  useEffect(() => {
-    if (!rootPath) return;
-    if (!handler.isWatching(rootPath)) return;
-    const unsubscribe = window.electronAPI.workspace.onFileChanged((event) => {
-      if (!event || typeof event.path !== 'string') return;
-      const normalized = event.path.replace(/\\/g, '/');
-      // 跳过非 markdown
-      if (!/\.(md|markdown)$/i.test(normalized)) return;
-      const relative = normalized;
-      // 异步读取最新内容
-      void (async () => {
-        const result = await window.electronAPI.workspace.readTextFile(rootPath, relative);
-        if (!result.success || !result.data) return;
-        handler.onChange(relative, result.data.content, result.data.modifiedAt, event.type);
-      })();
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [rootPath, handler]);
-}
-
-/**
- * 判断打开的文档中是否有任意一篇正在被外部修改（用于触发关闭保护等场景）。
- */
-export function findDocumentByPath(
+export function useExternalFileChanges(
   documents: MarkdownDocument[],
-  rootPath: string,
-  relativePath: string,
-): MarkdownDocument | null {
-  return (
-    documents.find(
-      (doc) => doc.rootPath === rootPath && doc.relativePath.replace(/\\/g, '/') === relativePath.replace(/\\/g, '/'),
-    ) ?? null
-  );
+  handlers: {
+    onPendingChange: (documentId: string, path: string) => void;
+    onPendingResolve: (documentId: string) => void;
+    reloadDocument: (document: MarkdownDocument) => void | Promise<void>;
+    discardLocalChanges: (documentId: string) => void;
+  },
+): void {
+  const documentsRef = useRef(documents);
+  documentsRef.current = documents;
+
+  const matchDocument = useCallback((path: string): MarkdownDocument | null => {
+    const normalized = path.replace(/\\/g, '/');
+    return documentsRef.current.find((doc) => doc.relativePath.replace(/\\/g, '/') === normalized) ?? null;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.workspace.onFileChanged((event) => {
+      if (event.type !== 'change') return;
+      const document = matchDocument(event.path);
+      if (!document) return;
+      if (!document.dirty) {
+        void handlers.reloadDocument(document);
+        handlers.onPendingResolve(document.id);
+      } else {
+        handlers.onPendingChange(document.id, event.path);
+      }
+    });
+    return () => unsubscribe();
+  }, [matchDocument, handlers]);
 }

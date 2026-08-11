@@ -1,0 +1,11 @@
+import { describe, it } from 'vitest';
+import { roundtripGuard, joinSegmentsWithPlaceholders } from './src/plugins/markdown-editor/editor/roundtrip-guard';
+
+describe('debug', () => {
+  it('import detection', () => {
+    const result = roundtripGuard('before\n\nimport x from "y"\n\nafter');
+    console.log('SEGMENTS:', JSON.stringify(result.segments, null, 2));
+    console.log('PROTECTED BLOCKS:', JSON.stringify(result.protectedBlocks, null, 2));
+    console.log('JOINED:', JSON.stringify(joinSegmentsWithPlaceholders(result.segments)));
+  });
+});

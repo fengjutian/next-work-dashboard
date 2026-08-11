@@ -204,6 +204,9 @@ class CastingService extends ChangeNotifier {
     } catch (e) {
       debugPrint('startScreenCapture native call failed: $e');
     }
+    // MVP PLACEHOLDER: feeds the front camera into libwebrtc so the signaling
+    // / SDP / ICE pipeline is exercised end-to-end. Real MediaProjection
+    // frames → libwebrtc is Phase 2 and needs C++ JNI glue on Android.
     final stream = await Helper.openCamera(<String, dynamic>{
       'audio': false,
       'video': {

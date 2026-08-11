@@ -1,84 +1,69 @@
 /**
- * FrontmatterPanel — 展示当前文档的 YAML frontmatter 属性。
+ * FrontmatterPanel — 显示文档的 YAML frontmatter。
  *
- * P0 设计：
- *  - 只读展示。修改通过源码模式或保存时的文本编辑。
- *  - 若无 frontmatter，给出"无 frontmatter"占位。
- *  - title / tags / aliases / type 字段会高亮显示。
+ * 第一版只读展示 + 复制原文。
+ * 编辑能力留给 P1（直接编辑 YAML 文本需要小心空格、键名冲突等问题）。
  */
-import React from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Info } from '@/components/icons';
-import type { FrontmatterAttributes } from '../types';
+
+import React, { useMemo } from 'react';
+import { Copy, FileText } from '@/components/icons';
+import { Button } from '@/components/ui/button';
+import { splitFrontmatter } from '../editor/markdown-codec';
+import type { MarkdownDocument } from '../types';
 
 export interface FrontmatterPanelProps {
-  frontmatter: FrontmatterAttributes | null;
-  fileName: string;
-  encoding: string;
-  lineEnding: 'lf' | 'crlf';
-  size: number;
+  document: MarkdownDocument;
 }
 
-const HIGHLIGHT_KEYS = new Set(['title', 'type', 'tags', 'aliases']);
+export const FrontmatterPanel: React.FC<FrontmatterPanelProps> = ({ document }) => {
+  const { attributes, frontmatter } = useMemo(() => splitFrontmatter(document.content), [document.content]);
+  const entries = Object.entries(attributes);
 
-function renderValue(value: unknown): string {
-  if (value === null || value === undefined) return '—';
-  if (Array.isArray(value)) return value.map((v) => String(v)).join(', ');
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
-}
-
-export const FrontmatterPanel: React.FC<FrontmatterPanelProps> = ({ frontmatter, fileName, encoding, lineEnding, size }) => {
-  if (!frontmatter || !frontmatter.present) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-        <Info className="h-5 w-5 opacity-50" />
-        <span>当前文档没有 frontmatter</span>
-        <span className="text-[10px]">使用源码模式可在顶部添加 --- YAML --- 块</span>
-      </div>
-    );
-  }
-  const entries = Object.entries(frontmatter.attributes);
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-3 p-3 text-xs">
-        <section className="rounded-md border bg-card p-2">
-          <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">文档信息</h3>
-          <dl className="space-y-1">
-            <Row label="文件名" value={fileName} />
-            <Row label="编码" value={encoding} />
-            <Row label="换行符" value={lineEnding.toUpperCase()} />
-            <Row label="大小" value={formatSize(size)} />
-          </dl>
-        </section>
-        <section className="rounded-md border bg-card p-2">
-          <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Frontmatter</h3>
-          {entries.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">（空 frontmatter 块）</p>
-          ) : (
-            <dl className="space-y-1">
-              {entries.map(([key, value]) => (
-                <Row key={key} label={key} value={renderValue(value)} highlight={HIGHLIGHT_KEYS.has(key)} />
-              ))}
-            </dl>
-          )}
-        </section>
-      </div>
-    </ScrollArea>
+    <section className="border-b">
+      <header className="flex h-9 items-center gap-2 border-b px-3 text-xs font-semibold text-muted-foreground">
+        <FileText className="h-3.5 w-3.5" />
+        <span>Frontmatter</span>
+        <span className="ml-auto text-[10px] font-normal">{entries.length} 个字段</span>
+      </header>
+      {!frontmatter ? (
+        <p className="px-3 py-3 text-xs text-muted-foreground">当前文档没有 Frontmatter</p>
+      ) : (
+        <div className="px-3 py-2">
+          <ul className="space-y-1 text-xs">
+            {entries.map(([key, value]) => (
+              <li key={key} className="flex items-baseline gap-2">
+                <span className="font-mono text-foreground">{key}</span>
+                <span className="text-muted-foreground">:</span>
+                <span className="flex-1 truncate font-mono text-foreground/90" title={stringifyValue(value)}>
+                  {stringifyValue(value)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex justify-end">
+            <Button size="sm" variant="ghost" onClick={() => copyToClipboard(frontmatter)}>
+              <Copy className="mr-1 h-3 w-3" />
+              复制原文
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 };
 
-function Row({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className="grid grid-cols-[80px_1fr] items-baseline gap-2">
-      <dt className="font-mono text-[11px] text-muted-foreground">{label}</dt>
-      <dd className={`break-words text-xs ${highlight ? 'font-medium text-foreground' : 'text-foreground/90'}`}>{value}</dd>
-    </div>
-  );
+function stringifyValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.join(', ')}]`;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  return String(value);
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    /* ignore */
+  }
 }

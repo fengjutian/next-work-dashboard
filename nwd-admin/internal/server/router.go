@@ -1,18 +1,31 @@
 // Package server wires the HTTP router for nwd-admin.
 //
 // Extracted from main.go so the route layout (and the exact
-// placement of the auth middleware) can be exercised by integration
-// tests without standing up a real listener.
+// placement of auth, rate limit, and audit middlewares) can be
+// exercised by integration tests without standing up a real
+// listener.
 package server
 
 import (
 	"net/http"
 
+	"github.com/fjutian/nwd-admin/internal/audit"
 	"github.com/fjutian/nwd-admin/internal/auth"
 	"github.com/fjutian/nwd-admin/internal/handler"
+	"github.com/fjutian/nwd-admin/internal/ratelimit"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
+
+// Options bundles every middleware factory the router needs.
+// Each field is optional; nil values are treated as no-op.
+type Options struct {
+	Verifier   *auth.Verifier
+	ReadLimit  *ratelimit.Limiter
+	WriteLimit *ratelimit.Limiter
+	AdminLimit *ratelimit.Limiter
+	Recorder   *audit.Recorder
+}
 
 // NewRouter builds the application HTTP handler.
 //
@@ -25,27 +38,54 @@ import (
 // Admin routes (require Basic auth when a verifier is configured):
 //   - POST   /api/plugins                     upload
 //   - DELETE /api/plugins/{id}                delete
-//
-// The verifier is optional; when nil, the service runs in
-// trusted-local mode and write endpoints are unprotected.
-func NewRouter(h *handler.Handler, verifier *auth.Verifier) http.Handler {
+//   - GET    /audit                           audit log page
+//   - GET    /api/audit-logs                  audit log JSON
+func NewRouter(h *handler.Handler, opts Options) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(securityHeaders)
 
+	// Public read endpoints. Recorder is global so it captures
+	// status / duration regardless of which middleware short-
+	// circuits later in the chain.
+	if opts.Recorder != nil {
+		r.Use(opts.Recorder.Middleware)
+	}
+	if opts.ReadLimit != nil {
+		r.Use(opts.ReadLimit.Middleware)
+	}
 	r.Get("/", h.HomePage)
 	r.Get("/plugins", h.PluginsPage)
 	r.Get("/api/plugins", h.ListPlugins)
 	r.Get("/api/plugins/{id}/download", h.DownloadPlugin)
+	r.Get("/api/plugins/{id}/versions", h.ListPluginVersions)
 
+	// Write endpoints: stricter per-IP throttling and admin auth.
 	r.Group(func(r chi.Router) {
-		if verifier != nil {
-			r.Use(verifier.Middleware)
+		if opts.WriteLimit != nil {
+			r.Use(opts.WriteLimit.Middleware)
+		}
+		if opts.Verifier != nil {
+			r.Use(opts.Verifier.Middleware)
 		}
 		r.Post("/api/plugins", h.UploadPlugin)
 		r.Delete("/api/plugins/{id}", h.DeletePlugin)
+	})
+
+	// Admin UI surface (audit log viewing). Requires admin auth
+	// like the write endpoints, with its own per-IP bucket so a
+	// busy admin tab cannot starve the write path.
+	r.Group(func(r chi.Router) {
+		if opts.AdminLimit != nil {
+			r.Use(opts.AdminLimit.Middleware)
+		}
+		if opts.Verifier != nil {
+			r.Use(opts.Verifier.Middleware)
+		}
+		r.Get("/audit", h.AuditPage)
+		r.Get("/api/audit-logs", h.ListAuditLogs)
 	})
 
 	return r

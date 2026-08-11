@@ -29,35 +29,108 @@
         <form id="upload-element" action="/api/plugins" method="POST" enctype="multipart/form-data">
             <label class="field-label" for="bundle">插件包 (.nwd)</label>
             <input id="bundle" class="file-input" type="file" name="bundle" accept=".nwd,application/json" required>
-            <p class="form-help">仅接受 nwd-v1、Sandbox 运行时，文件大小不超过 2 MB。</p>
+            <p class="form-help">仅接受 nwd-v1、Sandbox 运行时，文件大小不超过 2 MB。同 ID 新版本会保留历史版本并切换 latest。</p>
             <div class="form-actions"><button type="submit" class="btn btn-primary">上传并发布</button><button id="upload-cancel" type="button" class="btn">取消</button></div>
         </form>
     </div>
 
+    <form method="GET" class="panel filter-bar">
+        <div class="filter-row">
+            <input class="text-input filter-search" type="search" name="q" value="{{.Q}}" placeholder="搜索名称 / ID / 作者 / 描述">
+            {{if .Tag}}<input type="hidden" name="tag" value="{{.Tag}}">{{end}}
+            <button class="btn btn-primary" type="submit">搜索</button>
+            {{if or .Q .Tag}}<a class="btn" href="/plugins">重置</a>{{end}}
+        </div>
+        {{if .Tag}}
+        <div class="filter-row">
+            <span class="active-tag">当前标签：<strong>{{.Tag}}</strong> <a href="?q={{.Q}}">移除</a></span>
+        </div>
+        {{end}}
+    </form>
+
     {{if .Plugins}}
     <div class="panel table-wrap">
         <table>
-            <thead><tr><th>插件</th><th>版本</th><th>作者</th><th>下载</th><th>最近更新</th><th class="actions-cell">操作</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>插件</th>
+                    <th>标签</th>
+                    <th>版本</th>
+                    <th>下载</th>
+                    <th>最近更新</th>
+                    <th class="actions-cell">操作</th>
+                </tr>
+            </thead>
             <tbody>
                 {{range .Plugins}}
                 <tr>
-                    <td><div class="plugin-cell"><span class="plugin-icon">{{.IconEmoji}}</span><div><strong>{{.Name}}</strong><small>{{.ID}}</small></div></div></td>
-                    <td>v{{.Version}}</td><td>{{if .Author}}{{.Author}}{{else}}—{{end}}</td><td>{{.Downloads}}</td><td>{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
-                    <td class="actions-cell"><a href="/api/plugins/{{.ID}}/download" class="text-link">下载</a>&nbsp;&nbsp;<button type="button" class="danger-link" data-delete-id="{{.ID}}" data-delete-name="{{.Name}}">删除</button></td>
+                    <td>
+                        <div class="plugin-cell">
+                            <span class="plugin-icon">{{.IconEmoji}}</span>
+                            <div>
+                                <strong>{{.Name}}</strong>
+                                <small>{{.ID}}{{if .Author}} · {{.Author}}{{end}}</small>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="tag-cell">
+                            {{$tags := splitTags .Tags}}
+                            {{if $tags}}
+                                {{range $tags}}
+                                <a class="tag" href="?tag={{.}}">{{.}}</a>
+                                {{end}}
+                            {{else}}<span class="muted">—</span>{{end}}
+                        </div>
+                    </td>
+                    <td>
+                        <span class="version-pill" title="最新版本">v{{.LatestVersion}}</span>
+                        <small class="muted">共 {{.VersionCount}} 个</small>
+                    </td>
+                    <td>{{.TotalDownloads}}</td>
+                    <td>{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
+                    <td class="actions-cell">
+                        <a href="/api/plugins/{{.ID}}/download" class="text-link">下载</a>
+                        <button type="button" class="text-link link-button" data-versions-id="{{.ID}}">版本</button>
+                        <button type="button" class="danger-link" data-delete-id="{{.ID}}" data-delete-version="{{.LatestVersion}}" data-delete-name="{{.Name}}">删除</button>
+                    </td>
                 </tr>
                 {{end}}
             </tbody>
         </table>
     </div>
+    <nav class="pagination" aria-label="插件分页">
+        <span class="pagination-info">共 {{.Total}} 条 · 第 {{.Page}} / {{.PageCount}} 页</span>
+        <div class="pagination-buttons">
+            {{if gt .Page 1}}<a class="btn" href="?page={{subtract .Page 1}}&q={{.Q}}&tag={{.Tag}}&size={{.Size}}">‹ 上一页</a>{{end}}
+            {{if lt .Page .PageCount}}<a class="btn" href="?page={{add .Page 1}}&q={{.Q}}&tag={{.Tag}}&size={{.Size}}">下一页 ›</a>{{end}}
+        </div>
+    </nav>
     {{else}}
-    <div class="panel empty"><div class="empty-icon">📭</div><p>暂无插件，上传第一个 .nwd 插件包开始使用。</p></div>
+    <div class="panel empty">
+        <div class="empty-icon">📭</div>
+        <p>{{if or .Q .Tag}}没有匹配的插件，试试调整搜索条件。{{else}}暂无插件，上传第一个 .nwd 插件包开始使用。{{end}}</p>
+    </div>
     {{end}}
 </div>
+
+<!-- 版本列表弹层 -->
+<div id="versions-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="versions-title">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-panel">
+        <div class="modal-head">
+            <h2 id="versions-title">版本列表</h2>
+            <button class="btn" data-close-modal>关闭</button>
+        </div>
+        <div class="modal-body" id="versions-body">加载中…</div>
+    </div>
+</div>
+
 <script>
 (() => {
     const STORAGE_KEY = 'nwd-admin-credentials';
 
-    // ── Credentials management ────────────────────────────────────────
+    // ── Credentials ───────────────────────────────────────────────────
     const credsPanel = document.getElementById('creds-panel');
     const credsToggle = document.getElementById('creds-toggle');
     const credsUser = document.getElementById('creds-username');
@@ -98,9 +171,6 @@
         const header = buildAuthHeader();
         if (!header) { setStatus('请填写账号和密码', 'error'); return; }
         setStatus('验证中…', 'pending');
-        // Probe the DELETE endpoint with an obviously-invalid id; we
-        // only care about 401 vs everything else. 401 means creds
-        // are wrong; 400/404/405 means the server accepted auth.
         try {
             const probe = await fetch('/api/plugins/__probe__', { method: 'DELETE', headers: { 'Authorization': header } });
             if (probe.status === 401) { setStatus('凭证无效', 'error'); return; }
@@ -119,7 +189,7 @@
         setStatus('已清除', 'ok');
     });
 
-    // ── Upload form ───────────────────────────────────────────────────
+    // ── Upload ───────────────────────────────────────────────────────
     const form = document.getElementById('upload-form');
     const toggle = document.getElementById('upload-toggle');
     const setOpen = (open) => { form.classList.toggle('hidden', !open); toggle.setAttribute('aria-expanded', String(open)); if (open) document.getElementById('bundle').focus(); };
@@ -131,7 +201,6 @@
         const header = buildAuthHeader();
         if (!header) {
             if (!confirm('尚未保存管理员凭证，是否使用浏览器原生 Basic 弹窗？')) return;
-            // Fall back to native form submit (browser shows its own auth dialog).
             event.target.submit();
             return;
         }
@@ -141,36 +210,97 @@
             alert('管理员凭证无效，请先在上方"管理员凭证"中重新保存。');
             return;
         }
-        if (response.redirected) {
-            location.href = response.url;
-            return;
-        }
-        if (response.ok) {
-            location.href = '/plugins';
-            return;
-        }
+        if (response.redirected) { location.href = response.url; return; }
+        if (response.ok) { location.href = '/plugins'; return; }
         const text = await response.text();
         alert('上传失败：' + text);
     });
 
-    // ── Delete buttons ────────────────────────────────────────────────
-    document.querySelectorAll('[data-delete-id]').forEach((button) => button.addEventListener('click', async () => {
-        if (!confirm(`确定删除 ${button.dataset.deleteName}？此操作不可撤销。`)) return;
+    // ── Versions modal ───────────────────────────────────────────────
+    const modal = document.getElementById('versions-modal');
+    const modalBody = document.getElementById('versions-body');
+    const modalTitle = document.getElementById('versions-title');
+    document.querySelectorAll('[data-close-modal]').forEach((el) => el.addEventListener('click', () => modal.classList.add('hidden')));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.add('hidden'); });
+
+    document.querySelectorAll('[data-versions-id]').forEach((btn) => btn.addEventListener('click', async () => {
+        const id = btn.dataset.versionsId;
+        modalTitle.textContent = `版本列表：${id}`;
+        modalBody.textContent = '加载中…';
+        modal.classList.remove('hidden');
         const header = buildAuthHeader();
-        if (!header) {
-            alert('请先在上方"管理员凭证"中保存凭证。');
-            return;
+        const response = await fetch('/api/plugins/' + encodeURIComponent(id) + '/versions', { headers: header ? { 'Authorization': header } : {} });
+        if (!response.ok) { modalBody.textContent = '加载失败：' + response.status; return; }
+        const data = await response.json();
+        if (!data.versions || data.versions.length === 0) { modalBody.textContent = '没有版本'; return; }
+        const table = document.createElement('table');
+        table.innerHTML = '<thead><tr><th>版本</th><th>大小</th><th>下载</th><th>时间</th><th class="actions-cell">操作</th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        for (const v of data.versions) {
+            const tr = document.createElement('tr');
+            const created = new Date(v.created_at).toLocaleString();
+            tr.innerHTML = `
+                <td>v${v.version}</td>
+                <td>${formatBytes(v.size_bytes)}</td>
+                <td>${v.downloads}</td>
+                <td>${created}</td>
+                <td class="actions-cell">
+                    <a class="text-link" href="/api/plugins/${encodeURIComponent(id)}/download?version=${encodeURIComponent(v.version)}">下载</a>
+                    <button type="button" class="danger-link" data-delete-version-id="${id}" data-delete-version="${v.version}" data-delete-name="${data.plugin_id} v${v.version}">删除</button>
+                </td>`;
+            tbody.appendChild(tr);
         }
-        const response = await fetch('/api/plugins/' + encodeURIComponent(button.dataset.deleteId), {
-            method: 'DELETE',
-            headers: { 'Authorization': header },
-        });
-        if (response.status === 401) {
-            alert('管理员凭证无效，请重新保存后再试。');
-            return;
+        table.appendChild(tbody);
+        modalBody.replaceChildren(table);
+        bindVersionDeleteButtons();
+    }));
+
+    function bindVersionDeleteButtons() {
+        modalBody.querySelectorAll('[data-delete-version-id]').forEach((btn) => btn.addEventListener('click', async () => {
+            const id = btn.dataset.deleteVersionId;
+            const ver = btn.dataset.deleteVersion;
+            const name = btn.dataset.deleteName;
+            if (!confirm(`确定删除 ${name}？此操作不可撤销。`)) return;
+            const header = buildAuthHeader();
+            if (!header) { alert('请先保存管理员凭证。'); return; }
+            const response = await fetch('/api/plugins/' + encodeURIComponent(id) + '?version=' + encodeURIComponent(ver), { method: 'DELETE', headers: { 'Authorization': header } });
+            if (response.status === 401) { alert('管理员凭证无效。'); return; }
+            if (response.ok) { location.reload(); return; }
+            const text = await response.text();
+            alert('删除失败：' + text);
+        }));
+    }
+
+    function formatBytes(n) {
+        if (!n) return '0 B';
+        const units = ['B', 'KB', 'MB'];
+        let i = 0;
+        let v = n;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return v.toFixed(v >= 100 ? 0 : 1) + ' ' + units[i];
+    }
+
+    // ── Row delete (latest) ──────────────────────────────────────────
+    document.querySelectorAll('[data-delete-id][data-delete-version]').forEach((btn) => btn.addEventListener('click', async () => {
+        const id = btn.dataset.deleteId;
+        const ver = btn.dataset.deleteVersion;
+        const name = btn.dataset.deleteName;
+        const dropAll = confirm(`确定删除 ${name} 的 v${ver}？\n\n确定 = 仅删除该版本（latest 会自动升级到上一个版本）\n取消 = 再问你是否删除整个插件`);
+        if (dropAll === null) return;
+        const header = buildAuthHeader();
+        if (!header) { alert('请先保存管理员凭证。'); return; }
+        let url, body;
+        if (dropAll) {
+            url = '/api/plugins/' + encodeURIComponent(id) + '?version=' + encodeURIComponent(ver);
+        } else {
+            if (!confirm(`确认删除整个插件 ${name}（所有版本）？此操作不可撤销。`)) return;
+            url = '/api/plugins/' + encodeURIComponent(id) + '?all=true';
         }
-        if (response.ok) location.reload();
-        else alert('删除失败，请稍后重试。');
+        const response = await fetch(url, { method: 'DELETE', headers: { 'Authorization': header } });
+        if (response.status === 401) { alert('管理员凭证无效。'); return; }
+        if (response.ok) { location.reload(); return; }
+        const text = await response.text();
+        alert('删除失败：' + text);
     }));
 })();
 </script>

@@ -338,6 +338,36 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'markdown-editor',
+    name: 'Markdown 编辑',
+    icon: FileText,
+    component: MarkdownEditorPanel,
+    enabled: true,
+    order: 18,
+    keepAlive: true,
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('markdown-editor.open', () => {
+        window.dispatchEvent(new CustomEvent('markdown-editor:command', { detail: { command: 'open' } }));
+      }));
+    },
+    contributions: {
+      commands: [
+        { id: 'markdown-editor.open', title: '打开 Markdown 文件', category: 'Markdown 编辑' },
+        { id: 'markdown-editor.save', title: '保存当前 Markdown', category: 'Markdown 编辑' },
+        { id: 'markdown-editor.toggleMode', title: '切换可视化 / 源码', category: 'Markdown 编辑' },
+      ],
+      views: [{ id: 'markdown-editor.main', title: 'Markdown 编辑', component: MarkdownEditorPanel, location: 'main' }],
+      fileEditors: [{ id: 'markdown-editor.default', extensions: ['.md', '.markdown'], viewId: 'markdown-editor.main', priority: 100 }],
+      menus: [{ id: 'markdown-editor.open.menu', label: '打开 Markdown 文件', command: 'markdown-editor.open', location: 'file', order: 21 }],
+      settings: [
+        { key: 'markdown-editor.autoSave', label: '自动保存', type: 'boolean', default: false },
+        { key: 'markdown-editor.showOutline', label: '显示大纲', type: 'boolean', default: true },
+        { key: 'markdown-editor.showBacklinks', label: '显示反向引用', type: 'boolean', default: true },
+        { key: 'markdown-editor.showFrontmatter', label: '显示 Frontmatter', type: 'boolean', default: true },
+      ],
+    },
+  },
+  {
     id: 'document-knowledge',
     name: '文档知识库',
     icon: FileSearch,

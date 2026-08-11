@@ -1,0 +1,11 @@
+const MDX_IMPORT_PATTERN = /^\s*import\s+.+\s+from\s+['"][^'"]+['"]\s*;?\s*$/;
+const inputs = [
+  'import x from "y"',
+  'import {Chart} from "./chart"',
+  'before',
+  'import x from "y"\n',
+  'import x from "y";\n',
+];
+for (const i of inputs) {
+  console.log(JSON.stringify(i), '=>', MDX_IMPORT_PATTERN.test(i));
+}

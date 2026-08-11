@@ -7,22 +7,19 @@
 
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import Table from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableHeader from '@tiptap/extension-table-header';
-import TableCell from '@tiptap/extension-table-cell';
+import { TableKit } from '@tiptap/extension-table';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import { common, createLowlight } from 'lowlight';
+import { createLowlight } from 'lowlight';
+import { grammars as commonGrammars } from 'lowlight/lib/common';
 import { Markdown } from '@tiptap/markdown';
 import type { AnyExtension } from '@tiptap/core';
+import { SearchReplaceExtension } from '../extensions/search-replace';
+import { SlashCommandExtension } from '../extensions/slash-command';
+import { WikiLinkExtension } from '../extensions/wiki-link';
 
-/**
- * 注册在 Tiptap 中的常用语法高亮语言清单。
- * 不一次性加载全部语言，避免首屏体积膨胀。
- */
 const SUPPORTED_LANGUAGES: ReadonlyArray<string> = [
   'plaintext',
   'javascript',
@@ -61,12 +58,11 @@ const SUPPORTED_LANGUAGES: ReadonlyArray<string> = [
   'graphql',
 ];
 
-const lowlight = createLowlight(common);
+const lowlight = createLowlight(commonGrammars);
 
 export function getCommonExtensions(options: { placeholder?: string; editable?: boolean } = {}): AnyExtension[] {
   return [
     StarterKit.configure({
-      // 启用 Markdown 双向转换需要 codeBlock 由低亮接管，故关闭内置的 codeBlock。
       codeBlock: false,
       heading: { levels: [1, 2, 3, 4, 5, 6] },
       link: { openOnClick: false, autolink: true, protocols: ['http', 'https', 'mailto'] },
@@ -76,10 +72,9 @@ export function getCommonExtensions(options: { placeholder?: string; editable?: 
       markedOptions: { gfm: true, breaks: false },
     }),
     Placeholder.configure({ placeholder: options.placeholder ?? '开始输入 Markdown…' }),
-    Table.configure({ resizable: true, allowTableNodeSelection: true }),
-    TableRow,
-    TableHeader,
-    TableCell,
+    TableKit.configure({
+      table: { resizable: true, allowTableNodeSelection: true, renderWrapper: true },
+    }),
     TaskList,
     TaskItem.configure({ nested: true }),
     Image.configure({ inline: false, allowBase64: true }),
@@ -88,8 +83,10 @@ export function getCommonExtensions(options: { placeholder?: string; editable?: 
       defaultLanguage: 'plaintext',
       HTMLAttributes: { class: 'md-code-block' },
     }),
+    SearchReplaceExtension,
+    SlashCommandExtension,
+    WikiLinkExtension,
   ];
 }
 
-/** 暴露给 UI 的高亮语言清单（用于代码块语言选择器）。 */
 export const SUPPORTED_CODE_LANGUAGES = SUPPORTED_LANGUAGES;

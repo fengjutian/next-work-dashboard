@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -14,7 +15,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/fjutian/nwd-admin/internal/model"
+	"github.com/fjutian/nwd-admin/internal/audit"
+	"github.com/fjutian/nwd-admin/internal/repository"
 	"github.com/fjutian/nwd-admin/internal/service"
 	viewfiles "github.com/fjutian/nwd-admin/internal/view"
 )
@@ -44,7 +46,19 @@ func init() {
 	if err != nil {
 		panic(fmt.Sprintf("embed layout: %v", err))
 	}
-	baseLayout = template.Must(template.New("layout").Parse(string(layoutBytes)))
+	funcs := template.FuncMap{
+		"add":      func(a, b int) int { return a + b },
+		"subtract": func(a, b int) int { return a - b },
+		"splitTags": func(raw string) []string {
+			var out []string
+			if raw == "" {
+				return out
+			}
+			_ = json.Unmarshal([]byte(raw), &out)
+			return out
+		},
+	}
+	baseLayout = template.Must(template.New("layout").Funcs(funcs).Parse(string(layoutBytes)))
 	componentsBytes, err := viewfiles.FS.ReadFile("components.html")
 	if err != nil {
 		panic(fmt.Sprintf("embed components: %v", err))
@@ -54,10 +68,21 @@ func init() {
 
 type Handler struct {
 	plugins *service.PluginService
+	audits  audit.Repository
 }
 
-func New(pluginSvc *service.PluginService) *Handler {
-	return &Handler{plugins: pluginSvc}
+// New builds a Handler. The audit repository is optional; when nil
+// the audit log endpoints return 503 so the UI degrades gracefully
+// instead of crashing.
+func New(pluginSvc *service.PluginService, auditRepo audit.Repository) *Handler {
+	return &Handler{plugins: pluginSvc, audits: auditRepo}
+}
+
+// AuditRepo returns the audit repository, which is also the right
+// handle to give to the audit.Recorder middleware and to the
+// background prune goroutine.
+func (h *Handler) AuditRepo() audit.Repository {
+	return h.audits
 }
 
 // ── Pages ──
@@ -74,26 +99,70 @@ func (h *Handler) HomePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) PluginsPage(w http.ResponseWriter, r *http.Request) {
-	plugins, err := h.plugins.List()
+	page, size := parsePluginPagination(r)
+	query := buildPluginListQuery(r, page, size)
+	plugins, total, err := h.plugins.List(query)
 	if err != nil {
 		slog.Error("list plugins", "err", err)
 	}
 	h.render(w, "plugins.html", map[string]any{
-		"Version": buildVersion,
-		"Plugins": plugins,
+		"Version":   buildVersion,
+		"Plugins":   plugins,
+		"Page":      page,
+		"Size":      size,
+		"Total":     total,
+		"PageCount": pageCount(total, size),
+		"Q":         query.Q,
+		"Tag":       query.Tag,
 	})
 }
 
 // ── API ──
 
+// ListPlugins returns plugins as JSON, paginated and filterable.
+//
+// Query parameters:
+//   - q       : substring search across id, name, author, description
+//   - tag     : filter to plugins containing the tag
+//   - page    : 1-based page number (default 1)
+//   - size    : page size (default 20, max 200)
 func (h *Handler) ListPlugins(w http.ResponseWriter, r *http.Request) {
-	plugins, err := h.plugins.List()
+	page, size := parsePluginPagination(r)
+	query := buildPluginListQuery(r, page, size)
+	plugins, total, err := h.plugins.List(query)
 	if err != nil {
 		slog.Error("list plugins api", "err", err)
 		writeJSON(w, 500, map[string]string{"error": "internal error"})
 		return
 	}
-	writeJSON(w, 200, plugins)
+	writeJSON(w, 200, map[string]any{
+		"plugins":   plugins,
+		"page":      page,
+		"size":      size,
+		"total":     total,
+		"pageCount": pageCount(total, size),
+		"q":         query.Q,
+		"tag":       query.Tag,
+	})
+}
+
+// ListPluginVersions returns the version history of a single plugin.
+func (h *Handler) ListPluginVersions(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !pluginIDRegex.MatchString(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的插件 ID"})
+		return
+	}
+	versions, err := h.plugins.Versions(id)
+	if err != nil {
+		slog.Error("list versions", "id", id, "err", err)
+		writeJSON(w, 500, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"plugin_id": id,
+		"versions":  versions,
+	})
 }
 
 func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
@@ -131,18 +200,17 @@ func (h *Handler) UploadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := &model.Plugin{
+	if err := h.plugins.Publish(service.PublishInput{
 		ID:          meta.ID,
 		Name:        meta.Name,
 		Version:     meta.Version,
 		Author:      meta.Author,
 		Description: meta.Description,
 		IconEmoji:   meta.IconEmoji,
+		Tags:        meta.Tags,
 		Bundle:      bundle,
-		SizeBytes:   int64(len(bundle)),
-	}
-	if err := h.plugins.Publish(p); err != nil {
-		slog.Error("publish plugin", "id", p.ID, "err", err)
+	}); err != nil {
+		slog.Error("publish plugin", "id", meta.ID, "version", meta.Version, "err", err)
 		http.Error(w, "保存失败", 500)
 		return
 	}
@@ -157,18 +225,23 @@ func (h *Handler) DownloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, err := h.plugins.Download(id)
+	requestedVersion := r.URL.Query().Get("version")
+	plugin, version, err := h.plugins.Download(id, requestedVersion)
 	if err != nil {
-		slog.Warn("download plugin", "id", id, "err", err)
-		http.NotFound(w, r)
+		if errors.Is(err, service.ErrVersionNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		slog.Warn("download plugin", "id", id, "version", requestedVersion, "err", err)
+		http.Error(w, "下载失败", http.StatusInternalServerError)
 		return
 	}
 
-	filename := sanitizeFilename(fmt.Sprintf("%s-%s.nwd", p.Name, p.Version))
+	filename := sanitizeFilename(fmt.Sprintf("%s-%s.nwd", plugin.Name, version.Version))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.Header().Set("Content-Length", strconv.Itoa(len(p.Bundle)))
-	w.Write(p.Bundle)
+	w.Header().Set("Content-Length", strconv.Itoa(len(version.Bundle)))
+	w.Write(version.Bundle)
 }
 
 func (h *Handler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
@@ -177,12 +250,142 @@ func (h *Handler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的插件 ID"})
 		return
 	}
-	if err := h.plugins.Remove(id); err != nil {
-		slog.Error("delete plugin", "id", id, "err", err)
-		writeJSON(w, 500, map[string]string{"error": "删除失败"})
+	opts := service.RemoveOptions{
+		AllVersions: r.URL.Query().Get("all") == "true",
+		Version:     r.URL.Query().Get("version"),
+	}
+	if err := h.plugins.Remove(id, opts); err != nil {
+		switch {
+		case errors.Is(err, service.ErrVersionRequired):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "需要指定 version 或 all=true"})
+		case errors.Is(err, service.ErrVersionNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "插件或版本不存在"})
+		default:
+			slog.Error("delete plugin", "id", id, "opts", opts, "err", err)
+			writeJSON(w, 500, map[string]string{"error": "删除失败"})
+		}
 		return
 	}
 	writeJSON(w, 200, map[string]string{"ok": "deleted"})
+}
+
+// ── Audit log ──
+
+const (
+	auditPageSize    = 50
+	auditMaxPageSize = 500
+)
+
+// AuditPage renders the audit log page. Pagination is read from
+// ?page=N (1-based) and ?size=N.
+func (h *Handler) AuditPage(w http.ResponseWriter, r *http.Request) {
+	if h.audits == nil {
+		http.Error(w, "审计日志未启用", http.StatusServiceUnavailable)
+		return
+	}
+	page, size := parseAuditPagination(r)
+	offset := (page - 1) * size
+
+	entries, err := h.audits.List(r.Context(), size, offset)
+	if err != nil {
+		slog.Error("list audit logs", "err", err)
+		http.Error(w, "读取审计日志失败", http.StatusInternalServerError)
+		return
+	}
+	total, err := h.audits.Count(r.Context())
+	if err != nil {
+		slog.Warn("count audit logs", "err", err)
+		total = 0
+	}
+
+	h.render(w, "audit.html", map[string]any{
+		"Entries":   entries,
+		"Page":      page,
+		"Size":      size,
+		"Total":     total,
+		"PageCount": pageCount(total, size),
+	})
+}
+
+// ListAuditLogs returns the audit log as JSON, paginated.
+func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	if h.audits == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "审计日志未启用"})
+		return
+	}
+	page, size := parseAuditPagination(r)
+	offset := (page - 1) * size
+
+	entries, err := h.audits.List(r.Context(), size, offset)
+	if err != nil {
+		slog.Error("list audit logs json", "err", err)
+		writeJSON(w, 500, map[string]string{"error": "读取失败"})
+		return
+	}
+	total, _ := h.audits.Count(r.Context())
+	writeJSON(w, 200, map[string]any{
+		"entries":   entries,
+		"page":      page,
+		"size":      size,
+		"total":     total,
+		"pageCount": pageCount(total, size),
+	})
+}
+
+func parseAuditPagination(r *http.Request) (page, size int) {
+	page = 1
+	size = auditPageSize
+	if v, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && v > 0 {
+		page = v
+	}
+	if v, err := strconv.Atoi(r.URL.Query().Get("size")); err == nil && v > 0 {
+		size = v
+	}
+	if size > auditMaxPageSize {
+		size = auditMaxPageSize
+	}
+	return
+}
+
+func pageCount(total int64, size int) int {
+	if size <= 0 || total <= 0 {
+		return 0
+	}
+	n := int((total + int64(size) - 1) / int64(size))
+	return n
+}
+
+// ── Plugin list query / pagination helpers ──────────────────────────
+
+const (
+	pluginPageSize    = 20
+	pluginMaxPageSize = 200
+)
+
+func parsePluginPagination(r *http.Request) (page, size int) {
+	page = 1
+	size = pluginPageSize
+	if v, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && v > 0 {
+		page = v
+	}
+	if v, err := strconv.Atoi(r.URL.Query().Get("size")); err == nil && v > 0 {
+		size = v
+	}
+	if size > pluginMaxPageSize {
+		size = pluginMaxPageSize
+	}
+	return
+}
+
+func buildPluginListQuery(r *http.Request, page, size int) repository.PluginListQuery {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	return repository.PluginListQuery{
+		Q:    q,
+		Tag:  tag,
+		Page: page,
+		Size: size,
+	}
 }
 
 // ── render ──
@@ -230,6 +433,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 type nwdMeta struct {
 	ID, Name, Version, Author, Description, IconEmoji string
+	Tags                                              []string
 }
 
 func parseNWDMeta(bundle []byte) (nwdMeta, error) {
@@ -242,6 +446,7 @@ func parseNWDMeta(bundle []byte) (nwdMeta, error) {
 			Author      string   `json:"author"`
 			Description string   `json:"description"`
 			IconEmoji   string   `json:"iconEmoji"`
+			Tags        []string `json:"tags"`
 			APIVersion  string   `json:"apiVersion"`
 			Runtime     string   `json:"runtime"`
 			Permissions []string `json:"permissions"`
@@ -301,6 +506,7 @@ func parseNWDMeta(bundle []byte) (nwdMeta, error) {
 	return nwdMeta{
 		ID: id, Name: raw.Manifest.Name, Version: raw.Manifest.Version,
 		Author: strings.TrimSpace(raw.Manifest.Author), Description: strings.TrimSpace(raw.Manifest.Description), IconEmoji: icon,
+		Tags: raw.Manifest.Tags,
 	}, nil
 }
 

@@ -79,7 +79,9 @@ class _CastingPageState extends State<CastingPage> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
           _StatusCard(status: status, error: casting.error),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          const _MvpPlaceholderBanner(),
+          const SizedBox(height: 12),
           _LocalPreview(renderer: casting.localRenderer, active: isActive),
           const SizedBox(height: 16),
           _QualitySelector(
@@ -189,6 +191,54 @@ class _StatusCard extends StatelessWidget {
         CastingStatus.stopped => Icons.stop,
         CastingStatus.error => Icons.error_outline,
       };
+}
+
+/// MVP 阶段的临时提示：当前画面是前置摄像头占位，不是真屏幕投屏。
+/// 真实 MediaProjection → libwebrtc 桥是 Phase 2 工作。
+/// 保留这个横幅是为了避免 demo 时被吐槽"为什么我看到的是自拍"。
+class _MvpPlaceholderBanner extends StatelessWidget {
+  const _MvpPlaceholderBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Colors.amber.shade50,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.amber.shade300, width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.science_outlined, color: Colors.amber.shade800, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '测试模式 · 前置摄像头占位',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.amber.shade900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '当前画面是前置摄像头，用于验证 WebRTC 信令 / SDP / ICE 管道。'
+                    '真实屏幕投屏（MediaProjection → libwebrtc）属于 Phase 2 工作。',
+                    style: TextStyle(fontSize: 12, color: Colors.amber.shade900, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _LocalPreview extends StatelessWidget {

@@ -58,6 +58,7 @@ title: "Next Work Dashboard 文档中心"
 | 磁盘空间 | [Rust 插件说明](./disk-space-plugin.html) | — |
 | Office | [Office Studio](./office-studio.html) | — |
 | 千问 | [API 接入](./qwen-api-integration.html) | — |
+| MyCast 投屏 | [MyCast 插件文档](./mycast-plugin.html) | [未完成功能交接单](./mycast-remaining-features.html) |
 
 ## 项目级资料
 

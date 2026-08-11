@@ -1590,6 +1590,28 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:writeBinaryFile', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+    content: string,
+    options?: { expectedModifiedAt?: number; force?: boolean },
+  ) => {
+    try {
+      const target = resolveNewWorkspacePath(rootPath, relativePath);
+      // 不强制覆盖；如果已存在则报错（除非 force）。
+      if (fs.existsSync(target) && !options?.force) {
+        return { success: false, error: 'ALREADY_EXISTS' };
+      }
+      const buffer = Buffer.from(content, 'base64');
+      fs.writeFileSync(target, buffer);
+      const stat = fs.statSync(target);
+      return { success: true, data: { size: stat.size, modifiedAt: stat.mtimeMs } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:listTasks', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);

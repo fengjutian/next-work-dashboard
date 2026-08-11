@@ -419,7 +419,6 @@ async fn ws_upgrade(
         .and_then(|v| v.to_str().ok())
         .and_then(|p| p.split(',').nth(1).map(|s| s.trim().to_string()));
     let token = auth_token.or(proto_token);
-    tracing::info!(target: "mycast.ws", token_present = token.is_some(), "ws upgrade");
     if let Some(t) = token.as_deref() {
         if !t.is_empty() && state.shared.tokens.validate_session(t).is_none() {
             return Err(ApiError::unauthorized("session token 无效"));

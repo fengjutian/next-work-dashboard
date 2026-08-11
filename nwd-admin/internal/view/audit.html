@@ -1,0 +1,58 @@
+{{define "content"}}
+<div class="shell admin-page">
+    <div class="page-head">
+        <div>
+            <h1>审计日志</h1>
+            <p class="section-copy">所有写操作、认证失败和限流事件，按时间倒序展示。</p>
+        </div>
+        <div class="page-head-actions">
+            <a href="/api/audit-logs?size={{.Size}}" class="btn">导出 JSON</a>
+        </div>
+    </div>
+
+    {{if .Entries}}
+    <div class="panel table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>时间</th>
+                    <th>操作</th>
+                    <th>操作者</th>
+                    <th>来源 IP</th>
+                    <th>目标</th>
+                    <th>状态</th>
+                    <th>耗时</th>
+                    <th>说明</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .Entries}}
+                <tr>
+                    <td><span class="mono">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span></td>
+                    <td><span class="action-tag action-{{.Action}}">{{.Action}}</span></td>
+                    <td>{{.Actor}}</td>
+                    <td><span class="mono">{{.ActorIP}}</span></td>
+                    <td><span class="mono">{{.Target}}</span></td>
+                    <td><span class="status-pill status-{{if eq .HTTPStatus 0}}unknown{{else if lt .HTTPStatus 400}}ok{{else if lt .HTTPStatus 500}}warn{{else}}err{{end}}">{{.HTTPStatus}}</span></td>
+                    <td>{{.DurationMS}} ms</td>
+                    <td><span class="cell-truncate" title="{{.Message}}">{{.Message}}</span></td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+    <nav class="pagination" aria-label="审计日志分页">
+        <span class="pagination-info">共 {{.Total}} 条 · 第 {{.Page}} / {{.PageCount}} 页</span>
+        <div class="pagination-buttons">
+            {{if gt .Page 1}}<a class="btn" href="?page={{subtract .Page 1}}&size={{.Size}}">‹ 上一页</a>{{end}}
+            {{if lt .Page .PageCount}}<a class="btn" href="?page={{add .Page 1}}&size={{.Size}}">下一页 ›</a>{{end}}
+        </div>
+    </nav>
+    {{else}}
+    <div class="panel empty">
+        <div class="empty-icon">📜</div>
+        <p>暂无审计记录。一旦有上传、删除或认证事件，会出现在这里。</p>
+    </div>
+    {{end}}
+</div>
+{{end}}

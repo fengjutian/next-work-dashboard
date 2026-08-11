@@ -1,19 +1,17 @@
 /**
- * MarkdownOutline — 大纲视图，从 markdown 正文提取 # ~ ###### 标题。
+ * MarkdownOutline — 文档大纲。
  *
- * 实时根据 active document.body 计算。
- * 选中某项会通知父组件滚动到对应行。
+ * 从 Markdown 文本里提取 #/##/### 标题，按层级展示。
+ * 点击跳转到对应行（源码模式下直接定位；可视化模式下发出滚动请求由 Tiptap 处理）。
  */
+
 import React, { useMemo } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { List } from '@/components/icons';
+import { Rows3 as List } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import type { MarkdownDocument } from '../types';
 
 export interface MarkdownOutlineProps {
-  document: MarkdownDocument | null;
-  activeLine: number;
-  onJump: (line: number) => void;
+  activeDocument: MarkdownDocument | null;
 }
 
 interface OutlineItem {
@@ -22,59 +20,63 @@ interface OutlineItem {
   line: number;
 }
 
-function extractOutline(body: string): OutlineItem[] {
+function extractOutline(content: string): OutlineItem[] {
   const items: OutlineItem[] = [];
-  const lines = body.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!match) continue;
-    items.push({ level: match[1].length, text: match[2].trim(), line: i + 1 });
-  }
+  const lines = content.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (match) {
+      items.push({ level: match[1].length, text: match[2], line: index + 1 });
+    }
+  });
   return items;
 }
 
-export const MarkdownOutline: React.FC<MarkdownOutlineProps> = ({ document, activeLine, onJump }) => {
-  const items = useMemo(() => (document ? extractOutline(document.body) : []), [document]);
-  if (!document) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-        <List className="h-5 w-5 opacity-50" />
-        <span>未打开任何文档</span>
-      </div>
-    );
-  }
-  if (items.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-        <List className="h-5 w-5 opacity-50" />
-        <span>当前文档没有标题</span>
-      </div>
-    );
-  }
+export const MarkdownOutline: React.FC<MarkdownOutlineProps> = ({ activeDocument }) => {
+  const items = useMemo(() => (activeDocument ? extractOutline(activeDocument.content) : []), [activeDocument]);
+
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-0.5 p-2">
-        {items.map((item, index) => {
-          const isActive = activeLine >= item.line && (index === items.length - 1 || activeLine < items[index + 1].line);
-          return (
-            <button
-              key={`${item.line}-${item.text}`}
-              type="button"
-              onClick={() => onJump(item.line)}
-              className={cn(
-                'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs hover:bg-accent hover:text-foreground',
-                isActive && 'bg-accent/70 text-foreground',
-              )}
-              style={{ paddingLeft: `${(item.level - 1) * 10 + 8}px` }}
-              title={`第 ${item.line} 行`}
-            >
-              <span className="font-mono text-[10px] text-muted-foreground/80">H{item.level}</span>
-              <span className="truncate">{item.text}</span>
-            </button>
-          );
-        })}
+    <div className="flex h-full flex-col overflow-hidden">
+      <header className="flex h-9 flex-shrink-0 items-center gap-2 border-b px-3 text-xs font-semibold text-muted-foreground">
+        <List className="h-3.5 w-3.5" />
+        <span>大纲</span>
+        <span className="ml-auto text-[10px] font-normal">{items.length} 项</span>
+      </header>
+      <div className="flex-1 overflow-auto px-2 py-2 text-sm">
+        {items.length === 0 ? (
+          <p className="px-2 py-3 text-xs text-muted-foreground">当前文档暂无标题</p>
+        ) : (
+          <ul className="space-y-0.5">
+            {items.map((item, index) => (
+              <li key={`${item.line}-${index}`}>
+                <button
+                  type="button"
+                  onClick={() => jumpTo(item.line)}
+                  className={cn(
+                    'flex w-full items-center rounded-md px-2 py-1 text-left text-xs hover:bg-accent',
+                    item.level === 1 && 'font-semibold',
+                    item.level === 2 && 'pl-4',
+                    item.level === 3 && 'pl-6',
+                    item.level >= 4 && 'pl-8 text-muted-foreground',
+                  )}
+                  title={`第 ${item.line} 行`}
+                >
+                  <span className="mr-2 text-[10px] text-muted-foreground">H{item.level}</span>
+                  <span className="truncate">{item.text}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-    </ScrollArea>
+    </div>
   );
 };
+
+function jumpTo(line: number): void {
+  const element = document.querySelector('.markdown-editor-surface') as HTMLElement | null;
+  if (!element) return;
+  // 简化版：按行数估算滚动位置。每行 ~24px（含行高）。
+  const targetTop = (line - 1) * 24;
+  element.scrollTo({ top: targetTop, behavior: 'smooth' });
+}

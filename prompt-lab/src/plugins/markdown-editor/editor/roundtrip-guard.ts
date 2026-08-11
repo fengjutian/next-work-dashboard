@@ -55,8 +55,22 @@ export function roundtripGuard(body: string): GuardedMarkdown {
 
   const flushSafe = () => {
     if (safeBuffer.length === 0) return;
-    segments.push({ kind: 'safe', text: safeBuffer.join('\n') });
+    // 去掉首尾空行：占位 token 自身会作为独立 paragraph 存在，前后用 '\n\n' 分隔。
+    let start = 0;
+    let end = safeBuffer.length;
+    while (start < end && safeBuffer[start].trim() === '') start += 1;
+    while (end > start && safeBuffer[end - 1].trim() === '') end -= 1;
+    if (start < end) {
+      segments.push({ kind: 'safe', text: safeBuffer.slice(start, end).join('\n') });
+    }
     safeBuffer = [];
+  };
+
+  const pushProtected = (raw: string, reason: ProtectedBlockReason, startLine: number) => {
+    const index = state.blocks.length;
+    state.blocks.push({ index, raw, reason, startLine });
+    state.reasons.add(reason);
+    segments.push({ kind: 'protected', index });
   };
 
   let i = 0;
@@ -84,7 +98,7 @@ export function roundtripGuard(body: string): GuardedMarkdown {
         }
       }
       flushSafe();
-      pushProtectedBlock(state, collected.join('\n'), 'html-block', startLine); // 复用 html-block 标识
+      pushProtected(collected.join('\n'), 'html-block', startLine);
       i = j;
       continue;
     }
@@ -92,7 +106,7 @@ export function roundtripGuard(body: string): GuardedMarkdown {
     // 2) MDX import
     if (MDX_IMPORT_PATTERN.test(line)) {
       flushSafe();
-      pushProtectedBlock(state, line + '\n', 'mdx-import', lineNo);
+      pushProtected(line, 'mdx-import', lineNo);
       i += 1;
       continue;
     }
@@ -100,7 +114,7 @@ export function roundtripGuard(body: string): GuardedMarkdown {
     // 3) MDX export
     if (MDX_EXPORT_PATTERN.test(line)) {
       flushSafe();
-      pushProtectedBlock(state, line + '\n', 'mdx-export', lineNo);
+      pushProtected(line, 'mdx-export', lineNo);
       i += 1;
       continue;
     }
@@ -108,7 +122,7 @@ export function roundtripGuard(body: string): GuardedMarkdown {
     // 4) MDX 表达式（单行）
     if (MDX_EXPRESSION_PATTERN.test(line) && /^\{.*\}$/.test(line.trim())) {
       flushSafe();
-      pushProtectedBlock(state, line + '\n', 'mdx-expression', lineNo);
+      pushProtected(line, 'mdx-expression', lineNo);
       i += 1;
       continue;
     }
@@ -116,16 +130,25 @@ export function roundtripGuard(body: string): GuardedMarkdown {
     // 5) 未知指令
     if (DIRECTIVE_PATTERN.test(line.trim())) {
       flushSafe();
-      pushProtectedBlock(state, line + '\n', 'directive-unknown', lineNo);
+      pushProtected(line, 'directive-unknown', lineNo);
       i += 1;
       continue;
     }
 
-    // 6) HTML 注释
-    if (HTML_COMMENT_PATTERN.test(line)) {
+    // 6) HTML 注释（多行：扫描直到 `-->`）
+    if (/<!--/.test(line)) {
+      const collected = [line];
+      let j = i + 1;
+      let closed = line.includes('-->');
+      while (j < lines.length && !closed) {
+        collected.push(lines[j]);
+        if (lines[j].includes('-->')) closed = true;
+        j += 1;
+        if (j - i > 50) break;
+      }
       flushSafe();
-      pushProtectedBlock(state, line + '\n', 'html-comment', lineNo);
-      i += 1;
+      pushProtected(collected.join('\n'), 'html-comment', lineNo);
+      i = j;
       continue;
     }
 
@@ -145,7 +168,7 @@ export function roundtripGuard(body: string): GuardedMarkdown {
         if (j - i > 50) break; // 防御：HTML 块不超过 50 行
       }
       flushSafe();
-      pushProtectedBlock(state, collected.join('\n'), 'html-block', startLine);
+      pushProtected(collected.join('\n'), 'html-block', startLine);
       i = j;
       continue;
     }

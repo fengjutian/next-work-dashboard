@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/fjutian/nwd-admin/internal/audit"
 	"github.com/fjutian/nwd-admin/internal/config"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -52,35 +53,22 @@ var (
 // Verify checks the supplied Basic auth header value against the
 // configured credentials. The header value is expected to be the raw
 // payload (without the "Basic " prefix). Returns nil on success.
+//
+// Deprecated: use Authenticate, which also returns the username so
+// downstream middleware can stamp the actor on audit log rows.
 func (v *Verifier) Verify(header string) error {
-	if v == nil {
-		return ErrNotConfigured
-	}
-	username, password, err := parseBasic(header)
-	if err != nil {
-		return err
-	}
-	// Constant-time username comparison to avoid user enumeration via
-	// timing differences. Length leak is acceptable for fixed-format
-	// admin usernames.
-	if subtle.ConstantTimeCompare([]byte(username), []byte(v.username)) != 1 {
-		return ErrInvalidCreds
-	}
-	if err := bcrypt.CompareHashAndPassword(v.passwordHash, []byte(password)); err != nil {
-		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			return ErrInvalidCreds
-		}
-		// Any other error (malformed stored hash, etc.) is a server
-		// problem, not a client problem.
-		slog.Error("verify admin password", "err", err)
-		return ErrMalformedHash
-	}
-	return nil
+	_, err := v.Authenticate(header)
+	return err
 }
 
 // Middleware returns an http.Handler middleware that requires a valid
 // Basic auth header on every request. On failure it short-circuits
 // with 401 and a WWW-Authenticate challenge.
+//
+// On success the middleware stores the authenticated username in
+// the request context via audit.WithActor so downstream middleware
+// (notably the audit recorder) can stamp it on the resulting log
+// row without re-parsing the Authorization header.
 //
 // The middleware is no-op when no Verifier is configured, which
 // matches the trusted-local fallback. Callers should NOT mount this
@@ -92,23 +80,48 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := v.Verify(r.Header.Get("Authorization")); err != nil {
+		username, headerErr := v.Authenticate(r.Header.Get("Authorization"))
+		if headerErr != nil {
 			challenge := `Basic realm="` + v.realm + `", charset="UTF-8"`
 			w.Header().Set("WWW-Authenticate", challenge)
-			if errors.Is(err, ErrInvalidFormat) {
+			switch {
+			case errors.Is(headerErr, ErrInvalidFormat):
 				http.Error(w, "需要 Basic 认证", http.StatusUnauthorized)
-				return
-			}
-			if errors.Is(err, ErrInvalidCreds) {
+			case errors.Is(headerErr, ErrInvalidCreds):
 				http.Error(w, "管理员凭证无效", http.StatusUnauthorized)
-				return
+			default:
+				// Malformed stored hash or other server-side problem.
+				http.Error(w, "管理员认证配置异常", http.StatusInternalServerError)
 			}
-			// Malformed stored hash or other server-side problem.
-			http.Error(w, "管理员认证配置异常", http.StatusInternalServerError)
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := audit.WithActor(r.Context(), username)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// Authenticate verifies the Basic auth header and, on success,
+// returns the username. It exists separately from Middleware so
+// other callers (e.g. tests) can reuse the credential check.
+func (v *Verifier) Authenticate(header string) (string, error) {
+	if v == nil {
+		return "", ErrNotConfigured
+	}
+	username, password, err := parseBasic(header)
+	if err != nil {
+		return "", err
+	}
+	if subtle.ConstantTimeCompare([]byte(username), []byte(v.username)) != 1 {
+		return "", ErrInvalidCreds
+	}
+	if err := bcrypt.CompareHashAndPassword(v.passwordHash, []byte(password)); err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return "", ErrInvalidCreds
+		}
+		slog.Error("verify admin password", "err", err)
+		return "", ErrMalformedHash
+	}
+	return username, nil
 }
 
 // HashPassword wraps bcrypt for use by the gen-password command.

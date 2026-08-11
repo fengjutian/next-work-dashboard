@@ -14,7 +14,7 @@
  */
 
 import { parseFrontmatter as parseKnowledgeFrontmatter } from '@/core/knowledge/markdown';
-import { roundtripGuard, type GuardedMarkdown } from './roundtrip-guard';
+import { joinSegmentsWithPlaceholders, roundtripGuard, type GuardedMarkdown } from './roundtrip-guard';
 import { createProtectedBlockToken, parseProtectedBlockTokens, type ProtectedBlock } from './protected-blocks';
 
 /**
@@ -138,3 +138,6 @@ export {
   parseProtectedBlockTokens,
 } from './protected-blocks';
 export type { ProtectedBlock, ProtectedBlockToken } from './protected-blocks';
+
+/** 把 segments 拼回"含占位 token"的 Markdown 文本（re-export）。 */
+export { joinSegmentsWithPlaceholders } from './roundtrip-guard';
