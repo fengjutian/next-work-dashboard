@@ -1,7 +1,7 @@
 /**
  * SavePageDialog — 保存页面确认弹窗
  */
-import { Modal, Form, Input, Select, Typography, Alert } from 'antd';
+import { Modal, Form, Input, Select, Typography, Alert } from '../ui';
 
 export interface SavePageDialogProps {
   open: boolean;

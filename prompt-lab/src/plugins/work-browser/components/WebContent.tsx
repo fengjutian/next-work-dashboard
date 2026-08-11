@@ -7,7 +7,7 @@
  *  - 选中文字后弹出 Annotation 浮动菜单
  *  - 净化走"网络层 session.webRequest" + "webview preload 注入 CSS/JS"双层
  */
-import { Empty, Alert, Tag, Tooltip, Button, Space, Typography } from 'antd';
+import { Empty, Alert, Tag, Tooltip, Button, Space, Typography } from '../ui';
 import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';

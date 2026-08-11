@@ -11,7 +11,7 @@
  * 4 档 context 注入：🌐无 / 📁Workspace / 📄当前页 / 📑指定文档
  */
 import { useState, useMemo } from 'react';
-import { Alert, Button, Checkbox, Empty, Input, Modal, Segmented, Space, Spin, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Empty, Input, Modal, Segmented, Space, Spin, Tag, Typography, message } from '../ui';
 import { Bot, Send, ShieldAlert, Wrench, FileText } from 'lucide-react';
 import type { Document, Tab } from '../../../core/work-browser/types';
 

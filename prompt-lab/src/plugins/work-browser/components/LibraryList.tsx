@@ -1,7 +1,7 @@
 /**
  * LibraryList — 右侧 Library（已保存文档 + 搜索历史）
  */
-import { Tabs, List, Typography, Empty, Space, Tag } from 'antd';
+import { Tabs, List, Typography, Empty, Space, Tag } from '../ui';
 import { FileText, Search } from 'lucide-react';
 import type { Document, SearchHistoryEntry } from '../../../core/work-browser/types';
 

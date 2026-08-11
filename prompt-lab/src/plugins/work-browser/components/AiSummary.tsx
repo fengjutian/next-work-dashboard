@@ -1,7 +1,7 @@
 /**
  * AiSummaryCard — AI 摘要展示
  */
-import { Card, Typography, Space, Tag } from 'antd';
+import { Card, Typography, Space, Tag } from '../ui';
 import { Sparkles } from 'lucide-react';
 
 export interface AiSummaryCardProps {

@@ -6,7 +6,7 @@
  *  - 📝 添加笔记
  *  - ❌ 取消
  */
-import { Card, Input, Space, Button, Tooltip } from 'antd';
+import { Card, Input, Space, Button, Tooltip } from '../ui';
 import { Highlighter, Notebook, X } from 'lucide-react';
 import { useState } from 'react';
 

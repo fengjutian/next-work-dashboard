@@ -1,7 +1,7 @@
 /**
  * TaskList — Workspace 内 Task 列表（按状态分组）
  */
-import { Card, List, Tag, Space, Typography, Empty, Button, Tooltip, Progress, Drawer, Steps, Select, Input, message, Popconfirm, Alert } from 'antd';
+import { Card, List, Tag, Space, Typography, Empty, Button, Tooltip, Progress, Drawer, Steps, Select, Input, message, Popconfirm, Alert } from '../ui';
 import { Plus, ListTodo, ChevronRight, Play, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import type { Task, TaskStatus, TaskStep, TaskStepStatus, WorkspaceId } from '../../../core/work-browser/types';

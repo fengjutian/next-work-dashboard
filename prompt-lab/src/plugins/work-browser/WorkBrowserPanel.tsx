@@ -14,7 +14,8 @@
  * │          │                                  │          │
  * └──────────┴──────────────────────────────────┴──────────┘
  */
-import { Layout, message, Space, Typography, Empty, Tabs } from 'antd';
+import { message, Space, Typography, Empty, Tabs, ToastHost } from './ui';
+import { Bot, BookOpen, GitFork, ListTodo } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type {
   Workspace, Tab, Document, Annotation, SearchHistoryEntry,
@@ -33,8 +34,6 @@ import { ResearchDrawer } from './components/ResearchDrawer';
 import { useWorkspaces } from './hooks/useWorkspace';
 import { useSearch } from './hooks/useSearch';
 import { STORAGE_KEYS } from './constants';
-
-const { Sider, Content } = Layout;
 
 export function WorkBrowserPanel() {
   const { workspaces, create: createWorkspace } = useWorkspaces(false);
@@ -158,8 +157,9 @@ export function WorkBrowserPanel() {
   }, [handleAddTab]);
 
   return (
-    <Layout style={{ height: '100%' }}>
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+      <ToastHost />
+      <header className="relative z-10 shrink-0 border-b border-border/70 bg-card/90 px-4 py-3 shadow-[0_1px_12px_hsl(var(--foreground)/0.035)] backdrop-blur-xl">
         <Space direction="vertical" style={{ width: '100%' }} size="small">
           <SearchBar
             onSearch={handleSearch}
@@ -170,22 +170,23 @@ export function WorkBrowserPanel() {
             loading={searchLoading}
           />
           {activeWorkspace && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {activeWorkspace.icon} {activeWorkspace.name} · {tabs.length} 个 Tab · {documents.length} 篇文档
+            <Typography.Text type="secondary" className="flex items-center gap-2 text-[11px]">
+              <span className="rounded-md bg-primary-light px-2 py-0.5 text-primary">{activeWorkspace.icon} {activeWorkspace.name}</span>
+              <span>{tabs.length} 个标签页</span><span className="text-border">•</span><span>{documents.length} 篇文档</span>
             </Typography.Text>
           )}
         </Space>
-      </div>
-      <Layout style={{ height: 'calc(100% - 70px)' }}>
-        <Sider width={220} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
+      </header>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(180px,220px)_minmax(360px,1fr)_minmax(240px,300px)] max-[1080px]:grid-cols-[190px_minmax(320px,1fr)_250px]">
+        <aside className="min-h-0 border-r border-border/70 bg-card/55">
           <WorkspaceList
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
             onSelect={setActiveWorkspace}
             onCreate={async (input) => { await createWorkspace(input); }}
           />
-        </Sider>
-        <Content style={{ display: 'flex', flexDirection: 'column' }}>
+        </aside>
+        <main className="flex min-h-0 min-w-0 flex-col bg-[radial-gradient(circle_at_50%_0%,hsl(var(--primary-light)/0.45),transparent_32rem)]">
           {activeWorkspace ? (
             <>
               <TabBar
@@ -208,12 +209,12 @@ export function WorkBrowserPanel() {
               </div>
             </>
           ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Empty description="选择或新建 Workspace 开始" />
+            <div className="flex flex-1 items-center justify-center">
+              <Empty description="选择或新建工作区，开始整理你的研究资料" />
             </div>
           )}
-        </Content>
-        <Sider width={280} theme="light" style={{ borderLeft: '1px solid #f0f0f0' }}>
+        </main>
+        <aside className="min-h-0 overflow-hidden border-l border-border/70 bg-card/75">
           {activeWorkspace ? (
             <Tabs
               size="small"
@@ -221,7 +222,7 @@ export function WorkBrowserPanel() {
               items={[
                 {
                   key: 'library',
-                  label: 'Library',
+                  label: <span className="flex items-center gap-1"><BookOpen size={13} />资料库</span>,
                   children: (
                     <LibraryList
                       documents={documents}
@@ -233,12 +234,12 @@ export function WorkBrowserPanel() {
                 },
                 {
                   key: 'tasks',
-                  label: 'Tasks',
+                  label: <span className="flex items-center gap-1"><ListTodo size={13} />任务</span>,
                   children: <TaskList workspaceId={activeWorkspace.id} />,
                 },
                 {
                   key: 'graph',
-                  label: '🔗 Graph',
+                  label: <span className="flex items-center gap-1"><GitFork size={13} />图谱</span>,
                   children: (
                     <GraphView
                       workspaceId={activeWorkspace.id}
@@ -251,7 +252,7 @@ export function WorkBrowserPanel() {
                 },
                 {
                   key: 'agent',
-                  label: '🤖 Agent',
+                  label: <span className="flex items-center gap-1"><Bot size={13} />助手</span>,
                   children: (
                     <AgentPanel
                       workspaceId={activeWorkspace.id}
@@ -265,8 +266,8 @@ export function WorkBrowserPanel() {
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Library 暂不可用" style={{ marginTop: 24 }} />
           )}
-        </Sider>
-      </Layout>
+        </aside>
+      </div>
       <SearchResults
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -291,6 +292,6 @@ export function WorkBrowserPanel() {
         defaultTopic={researchTopic}
         onCompleted={() => { if (activeWorkspace) void refreshDocuments(activeWorkspace.id); }}
       />
-    </Layout>
+    </div>
   );
 }

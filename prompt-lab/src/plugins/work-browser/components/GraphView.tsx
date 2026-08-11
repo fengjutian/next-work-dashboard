@@ -18,7 +18,7 @@
  *  - 边 hover 显示 kind + weight
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Empty, Select, Space, Tag, Typography, Button, Tooltip } from 'antd';
+import { Alert, Empty, Select, Space, Tag, Typography, Button, Tooltip } from '../ui';
 import { RotateCw, Maximize2, Highlighter, FileText, Globe } from 'lucide-react';
 import cytoscape, { type Core, type ElementDefinition } from 'cytoscape';
 import fcose from 'cytoscape-fcose';

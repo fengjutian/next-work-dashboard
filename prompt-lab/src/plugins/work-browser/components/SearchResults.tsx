@@ -1,7 +1,7 @@
 /**
  * SearchResults — 搜索结果弹层
  */
-import { Card, List, Tag, Space, Typography, Empty, Spin, Button, Drawer, Tag as AntTag } from 'antd';
+import { Card, List, Tag, Space, Typography, Empty, Spin, Button, Drawer, Tag as AntTag } from '../ui';
 import { Globe, BookMarked, BookOpen } from 'lucide-react';
 import type { AggregatedSearchResponse } from '../../../core/work-browser/types';
 import { AiSummaryCard } from './AiSummary';
