@@ -10,7 +10,8 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: ['node-pty', '@lancedb/lancedb'],
+      // better-sqlite3 是 native 模块，由 electron-rebuild 单独处理；rollup 不打包它
+      external: ['node-pty', '@lancedb/lancedb', 'better-sqlite3'],
     },
   },
 });
