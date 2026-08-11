@@ -20,7 +20,6 @@ import type {
   TranscribeRequest,
   TranscribeResult,
   VoiceEvent,
-  VoiceSegment,
   VoiceState,
 } from './backend/voice-types';
 

@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { notification, Select, Tooltip } from 'antd';
-import { ChevronDown, Copy, ExternalLink, FileText, FolderOpen, Image, Loader2, Square } from '@/components/icons';
+import { ChevronDown, Copy, ExternalLink, FileText, FolderOpen, Image, Loader2, Search, Square, X } from '@/components/icons';
 import type { DiskDirectoryItem, DiskFilePreview } from '@/types/electron';
 import { displayPath, type UseDiskScanResult } from '../hooks/useDiskScan';
 import { EmptyState } from './components';
@@ -30,8 +30,29 @@ export interface BrowserTabProps {
   choose: (drive: string) => Promise<void>;
 }
 
+function fuzzyScore(value: string, query: string): number | null {
+  const text = value.toLocaleLowerCase();
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return 0;
+  const exactIndex = text.indexOf(needle);
+  if (exactIndex >= 0) return exactIndex * 2 + (text.length - needle.length) * 0.01;
+
+  let cursor = 0;
+  let first = -1;
+  let gaps = 0;
+  for (const character of needle) {
+    const index = text.indexOf(character, cursor);
+    if (index < 0) return null;
+    if (first < 0) first = index;
+    gaps += index - cursor;
+    cursor = index + 1;
+  }
+  return 100 + first + gaps * 2 + (text.length - needle.length) * 0.01;
+}
+
 export function BrowserTab(props: BrowserTabProps) {
   const [notice, noticeHolder] = notification.useNotification();
+  const [searchQuery, setSearchQuery] = useState('');
   const { scan, preview, setPreview, openPreview, parentDirectory, loadDirectory, showAnalysisControls, isFocusedTab, start, cancelScan, choose } = props;
   const { root, currentDirectory, entries, browserLoading, scanIdRef, running, exclusionsText, setExclusionsText, system } = scan;
 
@@ -44,6 +65,12 @@ export function BrowserTab(props: BrowserTabProps) {
       })),
     [system.disks],
   );
+
+  const filteredEntries = useMemo(() => entries
+    .map((entry) => ({ entry, score: fuzzyScore(entry.name, searchQuery) }))
+    .filter((item): item is { entry: DiskDirectoryItem; score: number } => item.score !== null)
+    .sort((left, right) => left.score - right.score || left.entry.name.localeCompare(right.entry.name, 'zh-CN'))
+    .map((item) => item.entry), [entries, searchQuery]);
 
   const copyCurrentPath = async () => {
     try {
@@ -89,8 +116,20 @@ export function BrowserTab(props: BrowserTabProps) {
             disabled={running}
             suffixIcon={<FolderOpen className="h-4 w-4" />}
           />
-          <div className="min-w-0 flex-1 truncate rounded-md border bg-muted/30 px-3 py-2 text-sm" title={root}>
-            {root || '选择目录后可浏览与分析'}
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              className="w-full rounded-md border bg-background py-2 pl-9 pr-9 text-sm outline-none focus:border-primary"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="模糊搜索当前目录中的文件或文件夹"
+              aria-label="模糊搜索文件"
+            />
+            {searchQuery && (
+              <button className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-accent" onClick={() => setSearchQuery('')} aria-label="清空搜索">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           {showAnalysisControls && (
             running ? (
@@ -131,7 +170,7 @@ export function BrowserTab(props: BrowserTabProps) {
                   <Copy className="h-4 w-4" />
                 </button>
               </Tooltip>
-              <span className="text-xs text-muted-foreground">{entries.length} 项</span>
+              <span className="text-xs text-muted-foreground">{searchQuery ? `${filteredEntries.length} / ${entries.length}` : entries.length} 项</span>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
               {browserLoading && !preview ? (
@@ -139,7 +178,9 @@ export function BrowserTab(props: BrowserTabProps) {
                   <Loader2 className="mr-2 h-4 w-4" />加载中
                 </EmptyState>
               ) : (
-                entries.map((entry: DiskDirectoryItem) => (
+                filteredEntries.length === 0 && searchQuery ? (
+                  <EmptyState>没有匹配“{searchQuery}”的文件或文件夹</EmptyState>
+                ) : filteredEntries.map((entry: DiskDirectoryItem) => (
                   <div
                     key={entry.path}
                     className={`grid w-full grid-cols-[minmax(0,1fr)_36px] items-center border-b text-sm hover:bg-muted/40 ${preview?.path === entry.path ? 'bg-primary/5' : ''}`}

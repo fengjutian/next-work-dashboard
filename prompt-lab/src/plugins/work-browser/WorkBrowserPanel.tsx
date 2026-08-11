@@ -25,6 +25,8 @@ import { TabBar } from './components/TabBar';
 import { WebContent } from './components/WebContent';
 import { LibraryList } from './components/LibraryList';
 import { TaskList } from './components/TaskList';
+import { GraphView } from './components/GraphView';
+import { AgentPanel } from './components/AgentPanel';
 import { SearchResults } from './components/SearchResults';
 import { SavePageDialog } from './components/SavePageDialog';
 import { ResearchDrawer } from './components/ResearchDrawer';
@@ -226,6 +228,22 @@ export function WorkBrowserPanel() {
                   key: 'tasks',
                   label: 'Tasks',
                   children: <TaskList workspaceId={activeWorkspace.id} />,
+                },
+                {
+                  key: 'graph',
+                  label: '🔗 Graph',
+                  children: (
+                    <GraphView
+                      workspaceId={activeWorkspace.id}
+                      documents={documents}
+                      onOpenDocument={(url) => void handleAddTab(url)}
+                    />
+                  ),
+                },
+                {
+                  key: 'agent',
+                  label: '🤖 Agent',
+                  children: <AgentPanel workspaceId={activeWorkspace.id} />,
                 },
               ]}
             />

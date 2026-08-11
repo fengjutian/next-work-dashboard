@@ -54,5 +54,16 @@ export function useTasks(workspaceId: WorkspaceId | null) {
     return task;
   }, [workspaceId, refresh]);
 
-  return { tasks, loading, error, refresh, upsert, setStatus, updateStep, createFromTemplate };
+  const runAuto = useCallback(async (taskId: string): Promise<Task | null> => {
+    try {
+      const final = (await window.electronAPI.workBrowser.task.runAuto(taskId)) as Task;
+      await refresh();
+      return final;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  }, [refresh]);
+
+  return { tasks, loading, error, refresh, upsert, setStatus, updateStep, createFromTemplate, runAuto };
 }
