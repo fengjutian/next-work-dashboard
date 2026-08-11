@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Monitor, Network, Phone, RefreshCw, RotateCcw, Video, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { notification } from 'antd';
+import { Alert, notification } from 'antd';
 import QRCode from 'qrcode';
 
 import type { MyCastEvent, MyCastState, SessionInfo, TransferInfo } from './backend/mycast-types';
@@ -35,6 +35,14 @@ const humanTime = (ms: number) => {
   if (!ms) return '—';
   const d = new Date(ms);
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
+const userFacingError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("No handler registered for 'mycast:open-transfer'")) {
+    return '打开文件功能尚未加载，请重新构建并完整重启桌面应用';
+  }
+  return message || '操作失败';
 };
 
 interface DeviceEntry {
@@ -286,6 +294,19 @@ export const MyCastPanel: React.FC = () => {
   }, []);
   const pairRemaining = pairExpiresAt ? Math.max(0, Math.floor((pairExpiresAt - now) / 1000)) : 0;
 
+  const openTransfer = useCallback(async (id: string) => {
+    try {
+      const api = window.electronAPI.mycast.openTransfer;
+      if (typeof api !== 'function') {
+        throw new Error('打开文件功能尚未加载，请完全退出并重启应用');
+      }
+      const result = await api(id);
+      if (!result.success) setError(result.error ?? '无法打开文件');
+    } catch (error) {
+      setError(userFacingError(error));
+    }
+  }, []);
+
   return (
     <div className="flex h-full flex-col bg-background">
       {holder}
@@ -332,16 +353,21 @@ export const MyCastPanel: React.FC = () => {
 
       <main className="flex-1 overflow-auto p-5">
         {error && (
-          <div className="mb-3 flex items-center justify-between rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            <span>⚠ {error}</span>
-            <button onClick={() => setError(null)}><X className="h-3.5 w-3.5" /></button>
-          </div>
+          <Alert
+            className="mb-3"
+            type="error"
+            showIcon
+            closable
+            message="操作失败"
+            description={userFacingError(error)}
+            onClose={() => setError(null)}
+          />
         )}
 
         {tab === 'home' && <HomeTab state={state} pairCode={pairCode} pairRemaining={pairRemaining} qrSvg={qrSvg} onIssue={issuePairing} starting={starting} />}
         {tab === 'devices' && <DevicesTab devices={devices} sessions={sessions} onEndSession={async (id) => { await window.electronAPI.mycast.endSession(id); await refreshAll(); }} />}
         {tab === 'screen' && <ScreenTab videoRef={videoRef} activeScreen={activeScreen} streamStats={streamStats} onStop={teardownScreen} state={state} />}
-        {tab === 'files' && <FilesTab transfers={transfers} onCancel={async (id) => { await window.electronAPI.mycast.cancelTransfer(id); await refreshAll(); }} onOpen={async (id) => { const result = await window.electronAPI.mycast.openTransfer(id); if (!result.success) setError(result.error ?? '无法打开文件'); }} onRefresh={refreshAll} />}
+        {tab === 'files' && <FilesTab transfers={transfers} onCancel={async (id) => { await window.electronAPI.mycast.cancelTransfer(id); await refreshAll(); }} onOpen={openTransfer} onRefresh={refreshAll} />}
       </main>
     </div>
   );

@@ -21,7 +21,7 @@ export interface TaskAutoSearch {
 }
 
 export interface TaskAutoRag {
-  query(input: { query: string; workspaceId?: string; topK?: number }): Promise<{
+  run(input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }): Promise<{
     systemPrompt: string;
     citations: Array<{ documentId: string; url: string; title: string; excerpt: string }>;
     chunks: Array<{ documentId: string; content: string; sectionTitle: string | null; page: number; fusedScore: number }>;
@@ -91,13 +91,13 @@ const INVESTIGATION_HANDLERS: Record<string, TaskStepHandler> = {
 
   '按可能性从高到低排列根因': async (step, task, ctx) => {
     const query = step.evidence || `列出"${task.title}"的可能根因，按可能性从高到低排序`;
-    const out = await ctx.rag.query({ query, workspaceId: ctx.workspaceId || undefined, topK: 6 });
+    const out = await ctx.rag.run({ query, workspaceId: ctx.workspaceId || undefined, topK: 6 });
     return `# 假设列表\n\n${formatRagCitations(out.citations)}\n\n（基于本地知识库 + 工作区 RAG 召回）`;
   },
 
   '从 Workspace 文档、笔记、命令输出取证': async (step, task, ctx) => {
     const query = step.evidence || `收集"${task.title}"的证据：相关文档、配置、命令输出`;
-    const out = await ctx.rag.query({ query, workspaceId: ctx.workspaceId || undefined, topK: 8 });
+    const out = await ctx.rag.run({ query, workspaceId: ctx.workspaceId || undefined, topK: 8 });
     return `# 证据集合\n\n${formatRagCitations(out.citations)}`;
   },
 
@@ -133,14 +133,14 @@ const RESEARCH_HANDLERS: Record<string, TaskStepHandler> = {
 
   'AI 聚合分析': async (step, task, ctx) => {
     const query = step.evidence || task.title;
-    const out = await ctx.rag.query({ query, workspaceId: ctx.workspaceId || undefined, topK: 10 });
+    const out = await ctx.rag.run({ query, workspaceId: ctx.workspaceId || undefined, topK: 10 });
     return `# 核心结论 / 争议 / 推荐\n\n${formatRagCitations(out.citations)}\n\n${out.systemPrompt.slice(0, 600)}…`;
   },
 
   '输出报告': async (step, _task, ctx) => {
     if (ctx.summarize) {
       const sys = `你是研究报告撰写助手。基于所有前序 step 收集的来源 + 本地知识库引用，生成结构化研究报告。\n格式：\n# Executive Summary\n# Background\n# Key Findings\n# Evidence\n# Different Opinions\n# Technical Details\n# Recommendations\n# References`;
-      const text = await ctx.summarize({ systemPrompt: sys, userPrompt: step.evidence || task.description });
+      const text = await ctx.summarize({ systemPrompt: sys, userPrompt: step.evidence || _task.description });
       if (text) return text;
     }
     return `# 研究报告草稿\n\n（启用 AI 总结 workBrowser.ai.* 后自动生成）\n\n## 已知引用\n${step.evidence || '_（无）_'}`;

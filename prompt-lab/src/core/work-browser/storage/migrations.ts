@@ -19,6 +19,30 @@ const ALL_MIGRATIONS: Migration[] = [
     },
   },
   {
+    version: 3,
+    description: 'Research Graph: page_edges table (cited-by / similar-to / searched-from / opened-from / saved-with)',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS page_edges (
+          id            TEXT PRIMARY KEY,
+          kind          TEXT NOT NULL,
+          workspace_id  TEXT NOT NULL,
+          from_type     TEXT NOT NULL,
+          from_id       TEXT NOT NULL,
+          to_type       TEXT NOT NULL,
+          to_id         TEXT NOT NULL,
+          weight        REAL NOT NULL DEFAULT 1.0,
+          metadata      TEXT NOT NULL DEFAULT '{}',
+          created_at    INTEGER NOT NULL,
+          UNIQUE (kind, from_type, from_id, to_type, to_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_edges_workspace ON page_edges(workspace_id, kind);
+        CREATE INDEX IF NOT EXISTS idx_edges_from ON page_edges(from_type, from_id);
+        CREATE INDEX IF NOT EXISTS idx_edges_to ON page_edges(to_type, to_id);
+      `);
+    },
+  },
+  {
     version: 2,
     description: 'FTS5: documents_fts + notes_fts + plain_text column + triggers',
     up: (db) => {

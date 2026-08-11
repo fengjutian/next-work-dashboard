@@ -451,6 +451,7 @@ export interface ElectronAPI {
       upsert: (task: any) => Promise<void>;
       templates: () => Promise<Array<{ id: string; name: string; description: string; stepCount: number }>>;
       createFromTemplate: (input: { workspaceId: string; templateId: string; title?: string }) => Promise<unknown>;
+      runAuto: (taskId: string) => Promise<unknown>;
     };
     conversation: {
       list: (workspaceId: string) => Promise<unknown[]>;
@@ -476,6 +477,17 @@ export interface ElectronAPI {
     };
     rag: {
       query: (input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) => Promise<{ systemPrompt: string; citations: any[]; chunks: any[]; context: any }>;
+    };
+    research: {
+      run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) => Promise<{ taskId: string; report: string; citations: any[]; reportPath?: string; took: number }>;
+    };
+    agent: {
+      run: (input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean }) => Promise<{ answer: string; iterations: number; toolCalls: any[]; steps: any[]; availableTools: string[] }>;
+    };
+    graph: {
+      listByDocument: (documentId: string, kinds?: string[]) => Promise<unknown[]>;
+      listByWorkspace: (workspaceId: string, kind?: string) => Promise<unknown[]>;
+      recordSavedWith: (workspaceId: string, documentIds: string[]) => Promise<number>;
     };
     settings: {
       get: (key: string) => Promise<string | null>;

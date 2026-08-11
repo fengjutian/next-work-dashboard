@@ -22,12 +22,10 @@ import { embed } from '../../core/work-browser/embedding/embedder';
 import { searchLanceDocuments } from '../lancedb-memory';
 import { DEFAULT_MODEL_ID } from '../../core/work-browser/embedding/embedder';
 import { summarizeResults, loadAIConfig } from '../../core/work-browser/ai/summarizer';
+import { GraphStore } from '../../core/work-browser/graph/edges';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
-
-// 用 listTasks(WorkspaceId) 需要 workspaceId；为了按 id 查 task，临时从所有 workspace 找
-const ALL_WORKSPACE_SENTINEL = '__all__' as any;
 
 let initialized = false;
 
@@ -42,6 +40,7 @@ export function setupWorkBrowserIPC(): void {
   const workspaces = new WorkspaceStore(db);
   const documents = new DocumentStore(db);
   const search = new SearchRouter(workspaces, db);
+  const graph = new GraphStore(db);
 
   // ── Workspace ──
 
@@ -85,18 +84,170 @@ export function setupWorkBrowserIPC(): void {
     return task;
   });
 
+  // AI Agent — 单轮 tool calling
+  ipcMain.handle('work-browser:agent:run', async (_e, input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean }) => {
+    const { runAgent, BUILTIN_TOOLS } = await import('../../core/work-browser/agent/runner');
+    const cfg = await loadAIConfig(async (k) => workspaces.getSetting(k));
+    if (!cfg.apiKey && !cfg.local) {
+      throw new Error('AI 未配置 baseUrl / apiKey');
+    }
+    const steps: any[] = [];
+    const result = await runAgent({
+      userMessage: input.userMessage,
+      systemPrompt: input.systemPrompt,
+      config: {
+        baseUrl: cfg.baseUrl,
+        apiKey: cfg.apiKey,
+        model: cfg.model,
+        maxSteps: input.maxSteps ?? 5,
+        timeoutMs: 90000,
+      },
+      toolContext: {
+        workspaceId: (input.workspaceId as any) || null,
+        search: {
+          async run(inp) {
+            const r = await search.runSearch({ text: inp.query, workspaceId: inp.workspaceId, scope: inp.scope });
+            return {
+              results: r.results.map((x) => ({ title: x.title, url: x.url, snippet: x.snippet, source: x.source })),
+              summary: r.aiSummary,
+            };
+          },
+        },
+        rag: {
+          async run(inp) {
+            const bundle = await search.runRag({ query: inp.query, workspaceId: inp.workspaceId, topK: inp.topK });
+            return {
+              systemPrompt: bundle.systemPrompt,
+              citations: bundle.citations,
+              chunks: bundle.chunks,
+            };
+          },
+        },
+        document: {
+          async save(params) {
+            const r = await savePageAsMarkdown(params, workspaces, documents);
+            return { documentId: r.documentId, wordCount: r.wordCount };
+          },
+        },
+        tab: {
+          async create(params) { return await workspaces.createTab(params); },
+        },
+        annotation: {
+          async create(params) { return await documents.createAnnotation(params); },
+        },
+        confirmDanger: async ({ toolName, args, reason }) => {
+          if (input.autoApproveDanger) return true;
+          // Phase 3.5: 通过 IPC 弹 dialog 真实确认；本轮默认拒绝危险
+          console.warn(`[work-browser:agent] dangerous tool call requires confirm: ${toolName}`, args);
+          return false;
+        },
+      },
+      onStep: (s) => { steps.push(s); },
+    });
+    return { ...result, steps, availableTools: BUILTIN_TOOLS.map((t) => t.name) };
+  });
+
+  // Research Mode 一站式：构造 task + run auto + 保存报告
+  ipcMain.handle('work-browser:research:run', async (_e, input: { topic: string; workspaceId: WorkspaceId; autoSave?: boolean }) => {
+    // 复用 task:run-auto 的 ctx 构造（不重写）
+    const buildCtx = () => {
+      const ctx: TaskAutoContext = {
+        workspaceId: input.workspaceId,
+        search: {
+          async run(inp) {
+            const r = await search.runSearch({ text: inp.query, workspaceId: inp.workspaceId, scope: inp.scope });
+            return {
+              results: r.results.map((x) => ({ title: x.title, url: x.url, snippet: x.snippet, source: x.source })),
+              summary: r.aiSummary,
+            };
+          },
+        },
+        rag: {
+          async run(inp) {
+            const bundle = await search.runRag({ query: inp.query, workspaceId: inp.workspaceId, topK: inp.topK, scope: inp.scope });
+            return {
+              systemPrompt: bundle.systemPrompt,
+              citations: bundle.citations,
+              chunks: bundle.chunks.map((c) => ({
+                documentId: c.documentId, content: c.content, sectionTitle: c.sectionTitle, page: c.page, fusedScore: c.fusedScore,
+              })),
+            };
+          },
+        },
+        summarize: undefined,
+      };
+      return ctx;
+    };
+    const { runResearch } = await import('../../core/work-browser/research/mode');
+    const ctx = buildCtx();
+    const result = await runResearch(
+      { topic: input.topic, workspaceId: input.workspaceId, autoSave: input.autoSave ?? true },
+      ctx,
+      {
+        saveDocument: async (params: { workspaceId: WorkspaceId; title: string; url: string; markdown: string }) => {
+          try {
+            const ws = workspaces.getWorkspace(params.workspaceId);
+            if (!ws) return undefined;
+            const { computeContentHash, newDocument, newDocumentVersion } = await import('../../core/work-browser/document/version');
+            const t = Date.now();
+            const id = newDocument({
+              workspaceId: params.workspaceId,
+              title: params.title,
+              url: params.url,
+              sourceType: 'note',
+              contentPath: '',
+              rawPath: '',
+              contentHash: computeContentHash(params.markdown),
+              wordCount: params.markdown.split(/\s+/).filter(Boolean).length,
+              summary: params.markdown.slice(0, 240),
+            });
+            const contentPath = `${ws.storagePath || `app://userData/work-browser-documents/${params.workspaceId}`}/documents/${id.id}.md`;
+            const rawPath = `${ws.storagePath || `app://userData/work-browser-documents/${params.workspaceId}`}/raw/${id.id}-${t}.md`;
+            const fs = await import('node:fs/promises');
+            const path = await import('node:path');
+            await fs.mkdir(path.dirname(contentPath), { recursive: true });
+            await fs.writeFile(contentPath, params.markdown, 'utf8');
+            await fs.mkdir(path.dirname(rawPath), { recursive: true });
+            await fs.writeFile(rawPath, params.markdown, 'utf8');
+            documents.upsertDocument({ ...id, contentPath, rawPath, plainText: params.markdown, updatedAt: t } as any);
+            documents.appendVersion(newDocumentVersion({ documentId: id.id, contentHash: id.contentHash, rawPath, prevWordCount: 0, wordCount: id.wordCount }));
+            return contentPath;
+          } catch (e) {
+            console.error('[work-browser] research save failed:', e);
+            return undefined;
+          }
+        },
+      },
+    );
+    return {
+      taskId: result.task.id,
+      report: result.report,
+      citations: result.citations,
+      reportPath: result.reportPath,
+      took: result.took,
+    };
+  });
+
   // Task 自动编排：跑一个 task 的所有 step，用 auto-handler 链
   ipcMain.handle('work-browser:task:run-auto', async (_e, taskId: TaskId) => {
-    // 从 SQLite 找 task
-    const allTasks = workspaces.listTasks(ALL_WORKSPACE_SENTINEL);
-    const task = allTasks.find((t) => t.id === taskId);
+    // 从 SQLite 找 task — 用临时遍历所有 workspace
+    let task: Task | null = null;
+    for (const ws of workspaces.listWorkspaces(false)) {
+      const list = workspaces.listTasks(ws.id);
+      const found = list.find((t) => t.id === taskId);
+      if (found) { task = found; break; }
+    }
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
     const ctx: TaskAutoContext = {
       workspaceId: task.workspaceId,
       search: {
         async run(input) {
-          const r = await search.runSearch(input);
+          const r = await search.runSearch({
+            text: input.query,
+            workspaceId: input.workspaceId,
+            scope: input.scope,
+          });
           return {
             results: r.results.map((x) => ({ title: x.title, url: x.url, snippet: x.snippet, source: x.source })),
             summary: r.aiSummary,
@@ -105,7 +256,12 @@ export function setupWorkBrowserIPC(): void {
       },
       rag: {
         async run(input) {
-          const bundle = await search.runRag(input);
+          const bundle = await search.runRag({
+            query: input.query,
+            workspaceId: input.workspaceId,
+            topK: input.topK,
+            scope: input.scope,
+          });
           return {
             systemPrompt: bundle.systemPrompt,
             citations: bundle.citations,
@@ -122,7 +278,6 @@ export function setupWorkBrowserIPC(): void {
       summarize: async ({ systemPrompt, userPrompt }) => {
         const cfg = await loadAIConfig(async (k) => workspaces.getSetting(k));
         if (!cfg.apiKey && !cfg.local) return null;
-        // 用 summarizer 的内部分支：直接拿 systemPrompt + userPrompt 调 chat/completions
         const res = await fetch(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -148,12 +303,8 @@ export function setupWorkBrowserIPC(): void {
     const handle = runTask(task, {
       handlers: buildAutoHandlers() as unknown as Record<string, TaskStepHandler>,
       onEvent: (e) => {
-        // 同步每个 step 的更新到 SQLite
-        if (e.kind === 'step-done' || e.kind === 'step-failed' || e.kind === 'step-start' || e.kind === 'task-done' || e.kind === 'task-failed') {
-          // 重读 task 状态
-          const updated = e.kind === 'task-done' || e.kind === 'task-failed' ? e.task : applyStepUpdateLocal(e);
-          try { workspaces.upsertTask(updated); } catch { /* 静默 */ }
-        }
+        // 每个 step 事件后同步当前 task 到 SQLite
+        try { workspaces.upsertTask(handle.getCurrent()); } catch { /* 静默 */ }
       },
     });
     const final = await handle.promise;
@@ -181,6 +332,34 @@ export function setupWorkBrowserIPC(): void {
   ipcMain.handle('work-browser:cleaner:payload', (_e, options?: any) => getCleanerPayload(options));
   ipcMain.handle('work-browser:cleaner:webview-payload', () => getCleanerPayload());
   ipcMain.handle('work-browser:cleaner:webview-preload-path', () => getWebviewCleanerPreloadPath());
+
+  // ── Research Graph ──
+
+  ipcMain.handle('work-browser:graph:list-by-document', (_e, documentId: DocumentId, kinds?: string[]) => {
+    return graph.listByDocument(documentId, kinds as any);
+  });
+  ipcMain.handle('work-browser:graph:list-by-workspace', (_e, workspaceId: WorkspaceId, kind?: string) => {
+    return graph.listByWorkspace(workspaceId, kind as any);
+  });
+  // 自动记录 save 边：saved-with
+  ipcMain.handle('work-browser:graph:record-saved-with', (_e, workspaceId: WorkspaceId, documentIds: DocumentId[]) => {
+    // 同一 workspace 内两两产生 saved-with 边
+    for (let i = 0; i < documentIds.length; i++) {
+      for (let j = i + 1; j < documentIds.length; j++) {
+        graph.recordEdge({
+          kind: 'saved-with',
+          workspaceId,
+          fromType: 'document',
+          fromId: documentIds[i],
+          toType: 'document',
+          toId: documentIds[j],
+          weight: 1,
+          metadata: '{}',
+        });
+      }
+    }
+    return documentIds.length;
+  });
 
   // ── Annotation ──
 

@@ -18,6 +18,10 @@ ort = { version = "=2.0.0-rc.9", default-features = false, features = ["download
 ort-sys = "=2.0.0-rc.9"
 # ndarray is what ort 1.x uses for tensor IO.
 ndarray = "0.15"
+# ASR — sherpa-onnx streaming-zipformer-bilingual-zh-en-2023-02-20.
+# sherpa-rs is a thin safe wrapper around sherpa-rs-sys which downloads
+# prebuilt sherpa-onnx C-libraries (no local C++ compile).
+sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries"] }
 # HTTP client for first-run VAD model download.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 # WAV writer so we can persist a smoke-test recording to disk.

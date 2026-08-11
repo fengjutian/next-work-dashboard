@@ -38,6 +38,7 @@ export const workBrowserBridge = {
     upsert: (task: any) => ipcRenderer.invoke('work-browser:task:upsert', task),
     templates: () => ipcRenderer.invoke('work-browser:task:templates'),
     createFromTemplate: (input: { workspaceId: string; templateId: string; title?: string }) => ipcRenderer.invoke('work-browser:task:create-from-template', input),
+    runAuto: (taskId: string) => ipcRenderer.invoke('work-browser:task:run-auto', taskId),
   },
   conversation: {
     list: (workspaceId: string) => ipcRenderer.invoke('work-browser:conversation:list', workspaceId),
@@ -65,6 +66,19 @@ export const workBrowserBridge = {
   rag: {
     query: (input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) =>
       ipcRenderer.invoke('work-browser:rag:query', input),
+  },
+  research: {
+    run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) =>
+      ipcRenderer.invoke('work-browser:research:run', input),
+  },
+  agent: {
+    run: (input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean }) =>
+      ipcRenderer.invoke('work-browser:agent:run', input),
+  },
+  graph: {
+    listByDocument: (documentId: string, kinds?: string[]) => ipcRenderer.invoke('work-browser:graph:list-by-document', documentId, kinds),
+    listByWorkspace: (workspaceId: string, kind?: string) => ipcRenderer.invoke('work-browser:graph:list-by-workspace', workspaceId, kind),
+    recordSavedWith: (workspaceId: string, documentIds: string[]) => ipcRenderer.invoke('work-browser:graph:record-saved-with', workspaceId, documentIds),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),

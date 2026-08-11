@@ -43,11 +43,13 @@ export function runTask(task: Task, options: RunTaskOptions): TaskRunHandle {
 
   const promise = (async (): Promise<Task> => {
     const updated: Task = { ...task, status: 'investigating', updatedAt: Date.now() };
+    syncCurrent(updated);
     emit({ kind: 'step-start', taskId: updated.id, step: updated.steps[0] });
 
     for (let i = 0; i < updated.steps.length; i++) {
       if (cancelled || ac.signal.aborted) {
         updated.status = 'blocked';
+        syncCurrent(updated);
         emit({ kind: 'task-failed', taskId: updated.id, task: updated, error: 'cancelled' });
         return updated;
       }
@@ -64,13 +66,15 @@ export function runTask(task: Task, options: RunTaskOptions): TaskRunHandle {
         const result = await handler(step, updated, emit);
         step.status = 'done';
         step.result = result;
+        syncCurrent(updated);
         emit({ kind: 'step-done', taskId: updated.id, step, result });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         step.status = 'failed';
         step.result = msg;
-        emit({ kind: 'step-failed', taskId: updated.id, step, error: msg });
         updated.status = 'blocked';
+        syncCurrent(updated);
+        emit({ kind: 'step-failed', taskId: updated.id, step, error: msg });
         emit({ kind: 'task-failed', taskId: updated.id, task: updated, error: msg });
         return updated;
       }
@@ -79,28 +83,15 @@ export function runTask(task: Task, options: RunTaskOptions): TaskRunHandle {
     updated.status = 'resolved';
     updated.resolvedAt = Date.now();
     updated.updatedAt = updated.resolvedAt;
+    syncCurrent(updated);
     emit({ kind: 'task-done', taskId: updated.id, task: updated });
     return updated;
   })();
 
   // 内部引用：让外部能实时拿 task 状态
   let currentRef: Task = task;
-  const trackedEmit = (e: TaskRunEvent) => {
-    if ('task' in e) currentRef = e.task;
-    else if (e.kind === 'step-done' || e.kind === 'step-failed') {
-      // 局部更新 currentRef 的对应 step
-      currentRef = {
-        ...currentRef,
-        steps: currentRef.steps.map((s) => s.id === e.step.id ? { ...s, status: e.step.status, result: e.step.result } : s),
-        status: e.kind === 'step-failed' ? 'blocked' : currentRef.status,
-        updatedAt: Date.now(),
-      };
-    }
-    options.onEvent?.(e);
-  };
+  function syncCurrent(t: Task) { currentRef = t; }
 
-  // 重新发起 promise 用 trackedEmit
-  // （简化：直接在 promise 内用 options.onEvent 已有的引用）
   return {
     cancel() { cancelled = true; ac.abort(); },
     promise,
