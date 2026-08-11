@@ -2,7 +2,7 @@
  * StackOverflow provider（公共 API，无需 key）
  * - 端点：https://api.stackexchange.com/2.3/search/advanced?q=...&site=stackoverflow
  */
-import type { SearchProvider, SearchQuery, SearchResult } from '../types';
+import type { SearchProvider, SearchQuery, SearchResult } from '../../types';
 import { fetchJson, makeResult } from './_shared';
 
 interface SoResponse {

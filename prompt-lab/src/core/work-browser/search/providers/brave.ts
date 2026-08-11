@@ -4,7 +4,7 @@
  * - 公共页面可访问，但可能触发反爬；尽量带 UA
  * - 解析搜索结果列表
  */
-import type { SearchProvider, SearchQuery, SearchResult } from '../types';
+import type { SearchProvider, SearchQuery, SearchResult } from '../../types';
 import { fetchHtml, DOMParser, makeResult } from './_shared';
 
 export const braveProvider: SearchProvider = {

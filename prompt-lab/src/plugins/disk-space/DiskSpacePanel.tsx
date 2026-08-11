@@ -413,7 +413,22 @@ export function DiskSpacePanel() {
             openPreview={openPreview}
             parentDirectory={parentDirectory}
             loadDirectory={loadDirectory}
-            showAnalysisControls={activeTab === 'analysis'}
+            showAnalysisControls={false}
+            isFocusedTab={isFocusedTab}
+            start={start}
+            cancelScan={cancelScan}
+            choose={choose}
+          />
+        )}
+        {activeTab === 'analysis' && (
+          <BrowserTab
+            scan={scan}
+            preview={preview}
+            setPreview={setPreview}
+            openPreview={openPreview}
+            parentDirectory={parentDirectory}
+            loadDirectory={loadDirectory}
+            showAnalysisControls={true}
             isFocusedTab={isFocusedTab}
             start={start}
             cancelScan={cancelScan}

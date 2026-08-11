@@ -2,7 +2,7 @@
  * SearchResults — 搜索结果弹层
  */
 import { Card, List, Tag, Space, Typography, Empty, Spin, Button, Drawer, Tag as AntTag } from 'antd';
-import { Globe, Github, BookOpen } from 'lucide-react';
+import { Globe, BookMarked, BookOpen } from 'lucide-react';
 import type { AggregatedSearchResponse } from '../../../core/work-browser/types';
 import { AiSummaryCard } from './AiSummary';
 
@@ -15,7 +15,7 @@ export interface SearchResultsProps {
 }
 
 function sourceIcon(source: string) {
-  if (source.includes('github')) return <Github size={14} />;
+  if (source.includes('github')) return <BookMarked size={14} />;
   if (source.includes('stackoverflow')) return <BookOpen size={14} />;
   return <Globe size={14} />;
 }

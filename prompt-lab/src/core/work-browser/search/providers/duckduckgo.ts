@@ -4,7 +4,7 @@
  * - 不需要 API key；适合 Phase 1 默认启用
  * - 解析 HTML 抽取标题/链接/摘要
  */
-import type { SearchProvider, SearchQuery, SearchResult } from '../types';
+import type { SearchProvider, SearchQuery, SearchResult } from '../../types';
 import { fetchHtml, DOMParser, makeResult } from './_shared';
 
 export const duckduckgoProvider: SearchProvider = {

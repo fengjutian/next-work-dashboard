@@ -9,7 +9,7 @@
  *
  * 不做"完整 Readability 风格提取"——那是 readability.ts 的职责。
  */
-import type { CleanOptions } from './types';
+import type { CleanOptions } from '../types';
 
 interface CleanerArtifacts {
   css: string;

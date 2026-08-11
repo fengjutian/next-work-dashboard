@@ -4,7 +4,7 @@
  *        https://api.github.com/search/repositories?q=...
  * - 适合"代码 / Issue"垂直搜索
  */
-import type { SearchProvider, SearchQuery, SearchResult } from '../types';
+import type { SearchProvider, SearchQuery, SearchResult } from '../../types';
 import { fetchJson, makeResult } from './_shared';
 
 interface GhSearchResponse {

@@ -34,7 +34,7 @@ export function dedupeResults(results: SearchResult[], options: DedupOptions = {
   for (const r of results) {
     const urlKey = r.canonicalUrl;
     const hashKey = r.contentHash || '';
-    const titleKey = `${r.domain}::${normalizeTitle(r.title)}`;
+    const titleKey = r.domain ? `${r.domain}::${normalizeTitle(r.title)}` : '';
 
     let merged: number | null = null;
     if (options.strictUrl) {
@@ -64,7 +64,7 @@ export function dedupeResults(results: SearchResult[], options: DedupOptions = {
       out.push(r);
       seen.set(urlKey, out.length - 1);
       if (hashKey) seen.set(hashKey, out.length - 1);
-      seen.set(titleKey, out.length - 1);
+      if (titleKey) seen.set(titleKey, out.length - 1);
     } else {
       const ex = out[merged];
       if (!ex.source.includes(r.source)) ex.source = `${ex.source} · ${r.source}`;

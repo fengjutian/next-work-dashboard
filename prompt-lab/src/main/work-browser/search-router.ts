@@ -37,7 +37,7 @@ export class SearchRouter {
       },
     });
     this.store.appendSearchHistory({
-      workspaceId: input.workspaceId || null,
+      workspaceId: (input.workspaceId as any) || null,
       text: query.text,
       providers: this.providers.map((p) => p.id),
       resultCount: response.results.length,

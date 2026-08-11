@@ -1,3 +1,4 @@
 export { htmlClean } from './html-cleaner';
-export { extractReadability } from './readability';
-export { htmlToMarkdown } from './markdown';
+export { extractReadability, extractReadabilityFromDom } from './readability';
+export type { ReadabilityResult, DomLike } from './readability';
+export { htmlToMarkdown, htmlToMarkdownInline } from './markdown';
