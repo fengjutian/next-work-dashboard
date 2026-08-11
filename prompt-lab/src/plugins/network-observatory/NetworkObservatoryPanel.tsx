@@ -158,15 +158,15 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [rules, setRules] = useState<NetProbeAlertRule[]>([]);
   const [incidents, setIncidents] = useState<NetProbeIncident[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<'overview' | 'target' | 'rules' | 'lan'>('overview');
   const [history, setHistory] = useState<NetProbeResult[]>([]);
   const [heatmap, setHeatmap] = useState<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>([]);
   const [systemInfo, setSystemInfo] = useState<{ hostname: string; platform: string } | null>(null);
   const [daemonState, setDaemonState] = useState<NetProbeState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autoStart, setAutoStart] = useState<boolean>(true);
-  const [showRules, setShowRules] = useState<boolean>(false);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
-  const [showLan, setShowLan] = useState<boolean>(false);
+  const [showAddTarget, setShowAddTarget] = useState<boolean>(false);
 
   // Add-target form state
   const [draftKind, setDraftKind] = useState<NetProbeKind>('icmp');
@@ -314,6 +314,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
       });
       setTargets((prev) => [created, ...prev]);
       setSelectedId(created.id);
+      setActiveView('target');
     } catch (e) {
       setError(String((e as Error).message ?? e));
     }
@@ -322,15 +323,20 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const removeTarget = useCallback(
     async (id: string) => {
       if (!api) return;
+      const target = targetMap.get(id);
+      if (!window.confirm(`确认删除监控目标“${target?.target ?? id}”？相关历史数据也可能被移除。`)) return;
       try {
         await api.removeTarget(id);
         setTargets((prev) => prev.filter((t) => t.id !== id));
-        if (selectedId === id) setSelectedId(null);
+        if (selectedId === id) {
+          setSelectedId(null);
+          setActiveView('overview');
+        }
       } catch (e) {
         setError(String((e as Error).message ?? e));
       }
     },
-    [api, selectedId],
+    [api, selectedId, targetMap],
   );
 
   const toggleTarget = useCallback(
@@ -523,7 +529,18 @@ export const NetworkObservatoryPanel: React.FC = () => {
       <div className="grid flex-1 grid-cols-[300px_1fr] overflow-hidden">
         {/* Left: target list + add form */}
         <aside className="flex flex-col border-r border-border overflow-hidden">
-          <div className="border-b border-border bg-muted/30 p-3">
+          <div className="border-b border-border bg-muted/30">
+            <button
+              type="button"
+              onClick={() => setShowAddTarget((visible) => !visible)}
+              aria-expanded={showAddTarget}
+              aria-controls="network-observatory-add-target"
+              className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium hover:bg-muted/60"
+            >
+              <span className="inline-flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> 新增监控目标</span>
+              <span aria-hidden="true">{showAddTarget ? '−' : '+'}</span>
+            </button>
+            {showAddTarget && <div id="network-observatory-add-target" className="border-t border-border p-3">
             <div className="mb-2 flex gap-1">
               {PROBE_KINDS.map((k) => (
                 <button
@@ -644,87 +661,76 @@ export const NetworkObservatoryPanel: React.FC = () => {
                 <Plus className="h-3.5 w-3.5" /> 添加
               </button>
             </div>
+            </div>}
           </div>
           <div className="flex-1 overflow-auto">
             {targets.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-muted-foreground">还没有目标</div>
             ) : (
               targets.map((t) => (
-                <button
+                <div
                   key={t.id}
-                  type="button"
-                  onClick={() => setSelectedId(t.id)}
                   className={`flex w-full items-center justify-between gap-2 border-b border-border/40 px-3 py-2 text-left text-sm ${selectedId === t.id ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
                 >
-                  <div className="flex-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(t.id);
+                      setActiveView('target');
+                    }}
+                    aria-current={activeView === 'target' && selectedId === t.id ? 'page' : undefined}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <div className="flex items-center gap-1.5">
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono uppercase">{t.probe}</span>
                       <span className="truncate font-mono text-xs">{t.target}</span>
                     </div>
                     <div className="text-[10px] text-muted-foreground">{t.intervalMs}ms · {t.enabled ? '运行中' : '已暂停'}</div>
-                  </div>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void toggleTarget(t);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.stopPropagation();
-                        void toggleTarget(t);
-                      }
-                    }}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void toggleTarget(t)}
                     className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                     title={t.enabled ? '暂停' : '启用'}
+                    aria-label={`${t.enabled ? '暂停' : '启用'} ${t.target}`}
                   >
                     {t.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                  </span>
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void removeTarget(t.id);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.stopPropagation();
-                        void removeTarget(t.id);
-                      }
-                    }}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void removeTarget(t.id)}
                     className="rounded p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                     title="删除"
+                    aria-label={`删除 ${t.target}`}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                  </span>
-                </button>
+                  </button>
+                </div>
               ))
             )}
           </div>
           <div className="border-t border-border p-2 space-y-1">
             <button
               type="button"
-              onClick={() => setShowRules((v) => !v)}
-              className="w-full rounded border border-border px-2 py-1.5 text-xs hover:bg-muted"
+              onClick={() => setActiveView('rules')}
+              className={`w-full rounded border px-2 py-1.5 text-xs ${activeView === 'rules' ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
             >
-              告警规则 ({rules.length}) {showRules ? '▾' : '▸'}
+              告警规则 ({rules.length})
             </button>
             <button
               type="button"
-              onClick={() => setShowLan(v => !v)}
-              className="w-full rounded border border-border px-2 py-1.5 text-xs hover:bg-muted"
+              onClick={() => setActiveView('lan')}
+              className={`w-full rounded border px-2 py-1.5 text-xs ${activeView === 'lan' ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
               title="LAN 扫描 + 拓扑"
             >
-              LAN 拓扑 {showLan ? '▾' : '▸'}
+              LAN 拓扑
             </button>
           </div>
         </aside>
 
         {/* Right: detail */}
         <main className="flex flex-col overflow-hidden">
-          {selectedId && targetMap.get(selectedId) ? (
+          {activeView === 'target' && selectedId && targetMap.get(selectedId) ? (
             <TargetDetail
               target={targetMap.get(selectedId)!}
               history={history}
@@ -735,7 +741,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
               heatmapOption={heatmapOption}
               heatmapCellCount={heatmapCellCount}
             />
-          ) : showRules ? (
+          ) : activeView === 'rules' ? (
             <RulesPanel
               rules={rules}
               incidents={incidents}
@@ -747,7 +753,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
                 await refreshAll();
               }}
             />
-          ) : showLan ? (
+          ) : activeView === 'lan' ? (
             <LanPanel api={api} systemInfo={systemInfo} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -1705,6 +1711,8 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
   }, [refresh]);
 
   const handleScan = useCallback(async () => {
+    const requestedSubnet = subnet.trim() || '自动检测的本地 /24 网段';
+    if (!window.confirm(`将主动扫描 ${requestedSubnet}，最多探测 254 台主机。请确认你有权扫描该网络。`)) return;
     setBusy(true);
     setError(null);
     try {
@@ -1726,6 +1734,7 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
       // the raw IP used as the cytoscape node id. Look up the host by id
       // before deleting so we can match against the right value.
       const target = hosts.find((h) => h.id === id);
+      if (!window.confirm(`确认删除设备记录“${target?.ip ?? id}”？`)) return;
       await api.deleteLanHost(id);
       await refresh();
       if (target && selectedIp === target.ip) setSelectedIp(null);

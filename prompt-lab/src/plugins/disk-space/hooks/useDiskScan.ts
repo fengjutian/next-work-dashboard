@@ -136,6 +136,8 @@ class TopN<T> {
   }
   private sinkDown(i: number): void {
     const n = this.data.length;
+    // 标准小顶堆下滤：循环到堆序稳定为止。
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const l = 2 * i + 1;
       const r = 2 * i + 2;

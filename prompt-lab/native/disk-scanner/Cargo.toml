@@ -3,8 +3,14 @@ name = "nwd-disk-scanner"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+rayon = "1"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
 [profile.release]
 strip = true
 lto = true
 codegen-units = 1
-

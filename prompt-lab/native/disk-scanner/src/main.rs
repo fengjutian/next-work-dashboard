@@ -2,13 +2,15 @@ use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet},
     env, fs,
-    hash::{DefaultHasher, Hasher},
     io::{self, BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, atomic::{AtomicBool, Ordering}},
     thread,
     time::{Instant, UNIX_EPOCH},
 };
+
+use serde::Serialize;
+use xxhash_rust::xxh64;
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
@@ -93,12 +95,15 @@ fn emit_disks() {
     emit(r#"{"disks":[]}"#);
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 struct FileResult {
     path: String,
     size: u64,
     modified: u128,
     extension: String,
+    /// inode 用于硬链接去重：同 size + 同 inode 的多次出现只算 1 份。
+    #[serde(skip_serializing)]
+    inode: u64,
 }
 
 /// 只按 size 排序的 wrapper —— BinaryHeap 不能直接对 FileResult 排序（会落到 path
@@ -146,17 +151,20 @@ fn retain_largest(heap: &mut BinaryHeap<Reverse<BySize>>, candidate: FileResult,
 }
 
 fn content_hash(path: &Path) -> io::Result<u64> {
+    // 用 xxh64 替代 std::DefaultHasher：跨进程稳定（同样的文件同样的 hash），
+    // 哈希质量显著好于 SipHash（DefaultHasher 在 [std::collections::HashMap] 用的），
+    // 减少 64-bit 碰撞触发的额外 byte-compare。
     let mut reader = BufReader::new(fs::File::open(path)?);
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = xxh64::Xxh64::new(0);
     let mut buffer = [0_u8; 128 * 1024];
     loop {
         let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
-        hasher.write(&buffer[..read]);
+        hasher.update(&buffer[..read]);
     }
-    Ok(hasher.finish())
+    Ok(hasher.digest())
 }
 
 fn same_content(left: &Path, right: &Path) -> io::Result<bool> {
@@ -200,41 +208,59 @@ fn emit(line: &str) {
     let _ = io::stdout().flush();
 }
 
+/// 通用 JSON 事件 emit：所有事件结构都 derive(Serialize)，用 serde_json 写 stdout。
+/// 比手工 format! + escape_json 更快、bug 面更小（自动处理 Unicode、控制字符、转义）。
+fn emit_json<T: Serialize>(event: &T) {
+    // serde_json::to_writer 写入 stdout 不需要中间 String，零拷贝。
+    if let Ok(mut stdout) = io::stdout().lock() {
+        if serde_json::to_writer(&mut stdout, event).is_ok() {
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum ScanEvent<'a> {
+    #[serde(rename = "files")]
+    Files { items: &'a [FileResult] },
+    #[serde(rename = "directories")]
+    Directories { items: &'a [(String, u64)] },
+    #[serde(rename = "extension")]
+    Extension { extension: &'a str, size: u64 },
+    #[serde(rename = "duplicate-progress")]
+    DuplicateProgress { stage: &'a str },
+    #[serde(rename = "duplicate")]
+    Duplicate { group_id: &'a str, size: u64, files: &'a [FileResult] },
+    #[serde(rename = "scan-status")]
+    ScanStatus {
+        current_path: &'a str,
+        directories: u64,
+        files: u64,
+        bytes: u64,
+        elapsed_ms: u128,
+    },
+    #[serde(rename = "scan-error")]
+    ScanError { path: &'a str, category: &'a str, message: String },
+    #[serde(rename = "progress")]
+    Progress { files: u64, bytes: u64, errors: u64 },
+    #[serde(rename = "done")]
+    Done { files: u64, bytes: u64, errors: u64 },
+}
+
 /// 攒批 emit `files` 事件：把 buffer 里的 FileResult 序列化为单个 JSON 数组。
 /// 减少 IPC 流量与 setState 频率，渲染端的 TopN 在收到批次后一次性 bulk push。
 fn emit_files_batch(buffer: &mut Vec<FileResult>) {
     if buffer.is_empty() { return; }
-    let mut out = String::with_capacity(buffer.len() * 96);
-    out.push_str(r#"{"type":"files","items":["#);
-    for (index, file) in buffer.iter().enumerate() {
-        if index > 0 { out.push(','); }
-        out.push_str(&format!(
-            r#"{{"path":"{}","size":{},"modifiedAt":{},"extension":"{}"}}"#,
-            escape_json(&file.path),
-            file.size,
-            file.modified,
-            escape_json(&file.extension),
-        ));
-    }
-    out.push_str("]}");
-    emit(&out);
+    emit_json(&ScanEvent::Files { items: buffer.as_slice() });
     buffer.clear();
 }
 
 /// 攒批 emit `directories` 事件：与 files 同理。
 fn emit_directories_batch(buffer: &mut Vec<(String, u64)>) {
     if buffer.is_empty() { return; }
-    let mut out = String::with_capacity(buffer.len() * 96);
-    out.push_str(r#"{"type":"directories","items":["#);
-    for (index, (path, size)) in buffer.iter().enumerate() {
-        if index > 0 { out.push(','); }
-        out.push_str(&format!(
-            r#"{{"path":"{}","size":{size}}}"#,
-            escape_json(path),
-        ));
-    }
-    out.push_str("]}");
-    emit(&out);
+    emit_json(&ScanEvent::Directories { items: buffer.as_slice() });
     buffer.clear();
 }
 
@@ -290,7 +316,7 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
     let mut directories_scanned = 0_u64;
     let started = Instant::now();
     let mut extensions: HashMap<String, u64> = HashMap::new();
-    let mut by_size: HashMap<u64, Vec<FileResult>> = HashMap::new();
+    let mut by_size: HashMap<(u64, u64), Vec<FileResult>> = HashMap::new();
     let mut directory_bytes: HashMap<PathBuf, u64> = HashMap::new();
     // 攒批 buffer：每 256 个文件 flush 一次 `files` 事件，避免每文件一次 IPC。
     // 渲染端按 TopN 自己算 largest，这里不再维护 largest heap。
@@ -300,14 +326,24 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
         while paused.load(Ordering::Relaxed) { thread::sleep(std::time::Duration::from_millis(100)); }
         directories_scanned += 1;
         if directories_scanned == 1 || directories_scanned % 25 == 0 {
-            emit(&format!(r#"{{"type":"scan-status","currentPath":"{}","directories":{directories_scanned},"files":{files},"bytes":{bytes},"elapsedMs":{}}}"#, escape_json(&directory.to_string_lossy()), started.elapsed().as_millis()));
+            emit_json(&ScanEvent::ScanStatus {
+                current_path: &directory.to_string_lossy(),
+                directories: directories_scanned,
+                files,
+                bytes,
+                elapsed_ms: started.elapsed().as_millis(),
+            });
         }
         let entries = match fs::read_dir(&directory) {
             Ok(value) => value,
             Err(error) => {
                 errors += 1;
                 if reported_errors < 100 {
-                    emit(&format!(r#"{{"type":"scan-error","path":"{}","category":"{}","message":"{}"}}"#, escape_json(&directory.to_string_lossy()), error_category(&error), escape_json(&error.to_string())));
+                    emit_json(&ScanEvent::ScanError {
+                        path: &directory.to_string_lossy(),
+                        category: error_category(&error),
+                        message: error.to_string(),
+                    });
                     reported_errors += 1;
                 }
                 continue;
@@ -366,14 +402,31 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
                 .to_lowercase();
             let extension_bytes = extensions.entry(extension.clone()).or_insert(0);
             *extension_bytes = extension_bytes.saturating_add(metadata.len());
+            // inode 去重：硬链接的多个路径名指向同一 inode。
+            // Unix 上 metadata.ino() 直接返回；Windows 上 metadata.file_index() 等价。
+            #[cfg(unix)]
+            let inode = metadata.ino();
+            #[cfg(windows)]
+            let inode = metadata.file_index();
             let result = FileResult {
                 path: entry.path().to_string_lossy().into_owned(),
                 size: metadata.len(),
                 modified,
                 extension,
+                inode,
             };
             if !skip_duplicates && result.size >= min_duplicate_size {
-                by_size.entry(result.size).or_default().push(result.clone());
+                // 用 (size, inode) 做 key：同 size 不同 inode 才算独立候选；
+                // 同 size + 同 inode（硬链接）合并为单条。
+                let bucket_key = (result.size, result.inode);
+                let entry_in_bucket = by_size.entry(bucket_key).or_default();
+                // 同一 inode 的不同路径名：只保留第一个（避免重复字节累加）。
+                if entry_in_bucket.is_empty() {
+                    entry_in_bucket.push(result.clone());
+                } else {
+                    // 已有同 inode 的样本：当前文件不重复加进桶。
+                    // 但 size 仍计入全局 bytes（实际占用一致）。
+                }
             }
             file_buffer.push(result);
             if file_buffer.len() >= FILE_BATCH_SIZE {
@@ -381,19 +434,14 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
             }
             if files % 2_000 == 0 {
                 emit_files_batch(&mut file_buffer);
-                emit(&format!(
-                    r#"{{"type":"progress","files":{files},"bytes":{bytes},"errors":{errors}}}"#
-                ));
+                emit_json(&ScanEvent::Progress { files, bytes, errors });
             }
         }
     }
     // 主循环结束，flush 剩余的 files 批次。
     emit_files_batch(&mut file_buffer);
     for (extension, size) in extensions {
-        emit(&format!(
-            r#"{{"type":"extension","extension":"{}","size":{size}}}"#,
-            escape_json(&extension)
-        ));
+        emit_json(&ScanEvent::Extension { extension: &extension, size });
     }
     let direct_directories = directory_bytes.keys().cloned().collect::<Vec<_>>();
     for directory in direct_directories {
@@ -422,14 +470,12 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
         .collect();
     emit_directories_batch(&mut directory_buffer);
     if skip_duplicates {
-        emit(&format!(
-            r#"{{"type":"done","files":{files},"bytes":{bytes},"errors":{errors}}}"#
-        ));
+        emit_json(&ScanEvent::Done { files, bytes, errors });
         return Ok(());
     }
-    emit(r#"{"type":"duplicate-progress","stage":"hashing"}"#);
+    emit_json(&ScanEvent::DuplicateProgress { stage: "hashing" });
     let mut duplicate_groups = Vec::<DuplicateGroup>::new();
-    for (size, candidates) in by_size.into_iter().filter(|(_, values)| values.len() > 1) {
+    for ((size, _inode), candidates) in by_size.into_iter().filter(|(_, values)| values.len() > 1) {
         let mut by_hash: HashMap<u64, Vec<FileResult>> = HashMap::new();
         for candidate in candidates {
             match content_hash(Path::new(&candidate.path)) {

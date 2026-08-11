@@ -40,6 +40,7 @@ import {
 } from './net-probe-storage';
 import { evaluateAlerts, maintenanceTick, getOpenIncidentsSnapshot, resetAlertState } from './net-probe-alerts';
 import { testChannel } from './net-probe-notify';
+import { validateLanScanOptions, validateTargetInput } from './net-probe-validation';
 
 const DAEMON_START_TIMEOUT_MS = 10_000;
 const INMEM_RESULT_LIMIT = 500;
@@ -343,15 +344,16 @@ function safeParseJson(s: string): Record<string, unknown> | null {
 }
 
 export async function addTarget(input: NetProbeTargetInput): Promise<NetProbeTarget> {
-  const id = input.id ?? `t${nextTargetId++}`;
+  const validated = validateTargetInput(input);
+  const id = validated.id ?? `t${nextTargetId++}`;
   const row = dbUpsertTarget({
     id,
-    target: input.target,
-    probe: input.probe ?? 'icmp',
-    intervalMs: input.intervalMs ?? 5000,
-    timeoutMs: input.timeoutMs ?? 3000,
-    optionsJson: JSON.stringify(input.options ?? {}),
-    enabled: input.enabled ?? true,
+    target: validated.target,
+    probe: validated.probe ?? 'icmp',
+    intervalMs: validated.intervalMs ?? 5000,
+    timeoutMs: validated.timeoutMs ?? 3000,
+    optionsJson: JSON.stringify(validated.options ?? {}),
+    enabled: validated.enabled ?? true,
   });
   await startDaemon();
   if (row.enabled) {
@@ -527,14 +529,23 @@ export function setupNetProbeIPC(): void {
   ipcMain.handle('net-probe:update-target', (_event, id: string, patch: Partial<NetProbeTargetInput>) => {
     const existing = dbGetTarget(id);
     if (!existing) return null;
-    return dbUpsertTarget({
-      ...existing,
+    const validated = validateTargetInput({
+      id,
       target: patch.target ?? existing.target,
-      probe: (patch.probe as string | undefined) ?? existing.probe,
+      probe: patch.probe ?? existing.probe as NetProbeTargetInput['probe'],
       intervalMs: patch.intervalMs ?? existing.intervalMs,
       timeoutMs: patch.timeoutMs ?? existing.timeoutMs,
-      optionsJson: patch.options ? JSON.stringify(patch.options) : existing.optionsJson,
-      enabled: patch.enabled != null ? patch.enabled : existing.enabled,
+      options: patch.options ?? safeParseJson(existing.optionsJson) ?? {},
+      enabled: patch.enabled ?? existing.enabled,
+    });
+    return dbUpsertTarget({
+      ...existing,
+      target: validated.target,
+      probe: validated.probe ?? existing.probe,
+      intervalMs: validated.intervalMs ?? existing.intervalMs,
+      timeoutMs: validated.timeoutMs ?? existing.timeoutMs,
+      optionsJson: JSON.stringify(validated.options ?? {}),
+      enabled: validated.enabled ?? existing.enabled,
     });
   });
   ipcMain.handle('net-probe:set-target-enabled', (_event, id: string, enabled: boolean) => updateTargetEnabled(id, enabled));
@@ -560,13 +571,14 @@ export function setupNetProbeIPC(): void {
   // merge the discovered hosts into storage, return the raw payload. We use
   // a fresh target id so it doesn't collide with user-added targets.
   ipcMain.handle('net-probe:scan-lan', async (_event, opts: { subnet?: string; maxHosts?: number; perPortTimeoutMs?: number } = {}) => {
+    const validatedOpts = validateLanScanOptions(opts);
     const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const targetId = `lanscan-${scanId}`;
     const scanOptions: Record<string, unknown> = {
-      max_hosts: opts.maxHosts ?? 254,
-      per_port_timeout_ms: opts.perPortTimeoutMs ?? 300,
+      max_hosts: validatedOpts.maxHosts,
+      per_port_timeout_ms: validatedOpts.perPortTimeoutMs,
     };
-    if (opts.subnet) scanOptions.subnet = opts.subnet;
+    if (validatedOpts.subnet) scanOptions.subnet = validatedOpts.subnet;
 
     const collector = new OneShotCollector(targetId, 30_000);
     const off = broadcastListeners((ev) => collector.handle(ev));
@@ -574,7 +586,7 @@ export function setupNetProbeIPC(): void {
       await startDaemon();
       await addTarget({
         id: targetId,
-        target: opts.subnet ? `lan:${opts.subnet}` : 'lan:auto',
+        target: validatedOpts.subnet ? `lan:${validatedOpts.subnet}` : 'lan:auto',
         probe: 'lan_scan',
         intervalMs: 600_000, // effectively one-shot
         timeoutMs: 30_000,

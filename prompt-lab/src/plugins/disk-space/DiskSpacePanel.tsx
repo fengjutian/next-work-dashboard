@@ -341,7 +341,7 @@ export function DiskSpacePanel() {
       .filter((item) => Math.abs(item.change) >= 1024 * 1024)
       .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
       .slice(0, 20);
-  }, [directorySnapshots, root]);
+  }, [directorySnapshotData, root]);
 
   // 诊断（AI 调用）
   const generateDiagnosis = async () => {
