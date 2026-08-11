@@ -53,6 +53,7 @@ const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ d
 const videoPlayer = preloadable(() => import('../video-player').then((m) => ({ default: m.VideoPlayerPanel })));
 const mycast = preloadable(() => import('../mycast').then((m) => ({ default: m.MyCastPanel })));
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
+const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -79,6 +80,7 @@ const LyricStudioPanel = lyricStudio.component;
 const VideoPlayerPanel = videoPlayer.component;
 const MyCastPanel = mycast.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
+const WorkBrowserPanel = workBrowser.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -433,6 +435,35 @@ const builtInPlugins: Plugin[] = [
       commands: [{ id: 'lyric-studio.generate', title: 'AI 生成整首歌词', category: '歌词工坊' }],
       views: [{ id: 'lyric-studio.main', title: '歌词工坊', component: LyricStudioPanel, location: 'main' }],
       settings: [{ key: 'lyric-studio.autoSave', label: '自动保存项目', type: 'boolean', default: true }],
+    },
+  },
+  {
+    id: 'work-browser',
+    name: 'Work Browser',
+    icon: Globe,
+    component: WorkBrowserPanel,
+    enabled: false,
+    order: 9,
+    keepAlive: true,
+    preload: () => import('../work-browser'),
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('work-browser.search', () => {
+        window.dispatchEvent(new CustomEvent('work-browser:command', { detail: { command: 'search' } }));
+      }));
+      context.subscriptions.add(context.commands.register('work-browser.save', () => {
+        window.dispatchEvent(new CustomEvent('work-browser:command', { detail: { command: 'save' } }));
+      }));
+    },
+    contributions: {
+      commands: [
+        { id: 'work-browser.search', title: '打开 Work Browser 搜索', category: 'Work Browser' },
+        { id: 'work-browser.save', title: '保存当前页面到 Workspace', category: 'Work Browser' },
+      ],
+      settings: [
+        { key: 'workBrowser.ai.baseUrl', label: 'AI 服务 baseUrl（OpenAI-compatible）', type: 'string', default: 'https://api.openai.com/v1' },
+        { key: 'workBrowser.ai.apiKey', label: 'AI 服务 API Key', type: 'string' },
+        { key: 'workBrowser.ai.model', label: 'AI 模型', type: 'string', default: 'gpt-4o-mini' },
+      ],
     },
   },
   {
