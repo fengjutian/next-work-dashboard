@@ -162,6 +162,7 @@ const electronAPI: ElectronAPI = {
     issuePairing: () => ipcRenderer.invoke('mycast:issue-pairing'),
     listSessions: () => ipcRenderer.invoke('mycast:list-sessions'),
     listTransfers: () => ipcRenderer.invoke('mycast:list-transfers'),
+    openTransfer: (transferId: string) => ipcRenderer.invoke('mycast:open-transfer', transferId),
     sendToPhone: (deviceId: string, frame: Record<string, unknown>) => ipcRenderer.invoke('mycast:send-to-phone', deviceId, frame),
     endSession: (sessionId: string) => ipcRenderer.invoke('mycast:end-session', sessionId),
     cancelTransfer: (uploadId: string) => ipcRenderer.invoke('mycast:cancel-transfer', uploadId),

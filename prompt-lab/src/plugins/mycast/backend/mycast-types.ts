@@ -60,6 +60,7 @@ export interface MyCastApi {
   issuePairing: () => Promise<{ pairCode: string; expiresInMs: number }>;
   listSessions: () => Promise<SessionInfo[]>;
   listTransfers: () => Promise<TransferInfo[]>;
+  openTransfer: (transferId: string) => Promise<{ success: boolean; error?: string }>;
   sendToPhone: (deviceId: string, frame: Record<string, unknown>) => Promise<boolean>;
   endSession: (sessionId: string) => Promise<boolean>;
   cancelTransfer: (uploadId: string) => Promise<boolean>;

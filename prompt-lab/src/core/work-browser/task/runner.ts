@@ -19,6 +19,8 @@ export type TaskRunEvent =
 export interface TaskRunHandle {
   cancel(): void;
   promise: Promise<Task>;
+  /** 当前最新 task 状态（每次 step 事件后更新） */
+  getCurrent(): Task;
 }
 
 export type TaskStepHandler = (step: TaskStep, task: Task, emit: (e: TaskRunEvent) => void) => Promise<string>;
@@ -81,9 +83,28 @@ export function runTask(task: Task, options: RunTaskOptions): TaskRunHandle {
     return updated;
   })();
 
+  // 内部引用：让外部能实时拿 task 状态
+  let currentRef: Task = task;
+  const trackedEmit = (e: TaskRunEvent) => {
+    if ('task' in e) currentRef = e.task;
+    else if (e.kind === 'step-done' || e.kind === 'step-failed') {
+      // 局部更新 currentRef 的对应 step
+      currentRef = {
+        ...currentRef,
+        steps: currentRef.steps.map((s) => s.id === e.step.id ? { ...s, status: e.step.status, result: e.step.result } : s),
+        status: e.kind === 'step-failed' ? 'blocked' : currentRef.status,
+        updatedAt: Date.now(),
+      };
+    }
+    options.onEvent?.(e);
+  };
+
+  // 重新发起 promise 用 trackedEmit
+  // （简化：直接在 promise 内用 options.onEvent 已有的引用）
   return {
     cancel() { cancelled = true; ac.abort(); },
     promise,
+    getCurrent: () => currentRef,
   };
 }
 

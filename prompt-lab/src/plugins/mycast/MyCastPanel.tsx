@@ -294,7 +294,6 @@ export const MyCastPanel: React.FC = () => {
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">MyCast · 局域网投屏</h2>
-            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600">技术预览</span>
           </div>
           <p className="text-[11px] text-muted-foreground">
             {state?.ready
@@ -342,7 +341,7 @@ export const MyCastPanel: React.FC = () => {
         {tab === 'home' && <HomeTab state={state} pairCode={pairCode} pairRemaining={pairRemaining} qrSvg={qrSvg} onIssue={issuePairing} starting={starting} />}
         {tab === 'devices' && <DevicesTab devices={devices} sessions={sessions} onEndSession={async (id) => { await window.electronAPI.mycast.endSession(id); await refreshAll(); }} />}
         {tab === 'screen' && <ScreenTab videoRef={videoRef} activeScreen={activeScreen} streamStats={streamStats} onStop={teardownScreen} state={state} />}
-        {tab === 'files' && <FilesTab transfers={transfers} onCancel={async (id) => { await window.electronAPI.mycast.cancelTransfer(id); await refreshAll(); }} onRefresh={refreshAll} />}
+        {tab === 'files' && <FilesTab transfers={transfers} onCancel={async (id) => { await window.electronAPI.mycast.cancelTransfer(id); await refreshAll(); }} onOpen={async (id) => { const result = await window.electronAPI.mycast.openTransfer(id); if (!result.success) setError(result.error ?? '无法打开文件'); }} onRefresh={refreshAll} />}
       </main>
     </div>
   );
@@ -566,8 +565,9 @@ const Metric: React.FC<{ label: string; value: React.ReactNode }> = ({ label, va
 const FilesTab: React.FC<{
   transfers: TransferInfo[];
   onCancel: (id: string) => void;
+  onOpen: (id: string) => void;
   onRefresh: () => void;
-}> = ({ transfers, onCancel, onRefresh }) => {
+}> = ({ transfers, onCancel, onOpen, onRefresh }) => {
   return (
     <div className="space-y-3">
       <div className="rounded-lg border bg-card p-4 text-xs text-muted-foreground">
@@ -600,6 +600,9 @@ const FilesTab: React.FC<{
                 </span>
                 {t.status === 'active' && (
                   <Button size="sm" variant="ghost" onClick={() => onCancel(t.id)}>取消</Button>
+                )}
+                {t.status === 'completed' && (
+                  <Button size="sm" variant="outline" onClick={() => onOpen(t.id)}>打开</Button>
                 )}
               </li>
             ))}

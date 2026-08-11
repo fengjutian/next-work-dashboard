@@ -15,13 +15,19 @@ import { savePageAsMarkdown } from './save';
 import { getCleanerPayload, getWebviewCleanerPreloadPath, setupWorkBrowserSession } from './cleaner';
 import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
 import { instantiateTask, ALL_TEMPLATES, type TaskTemplate } from '../../core/work-browser/task/template';
+import { runTask, type TaskStepHandler } from '../../core/work-browser/task/runner';
+import { buildAutoHandlers, type TaskAutoContext } from '../../core/work-browser/task/auto-handlers';
 import { buildRagContext } from '../../core/work-browser/ai/rag';
 import { embed } from '../../core/work-browser/embedding/embedder';
 import { searchLanceDocuments } from '../lancedb-memory';
 import { DEFAULT_MODEL_ID } from '../../core/work-browser/embedding/embedder';
+import { summarizeResults, loadAIConfig } from '../../core/work-browser/ai/summarizer';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
+
+// 用 listTasks(WorkspaceId) 需要 workspaceId；为了按 id 查 task，临时从所有 workspace 找
+const ALL_WORKSPACE_SENTINEL = '__all__' as any;
 
 let initialized = false;
 
@@ -77,6 +83,82 @@ export function setupWorkBrowserIPC(): void {
     const task = instantiateTask(input.workspaceId, tpl as TaskTemplate, input.title);
     workspaces.upsertTask(task);
     return task;
+  });
+
+  // Task 自动编排：跑一个 task 的所有 step，用 auto-handler 链
+  ipcMain.handle('work-browser:task:run-auto', async (_e, taskId: TaskId) => {
+    // 从 SQLite 找 task
+    const allTasks = workspaces.listTasks(ALL_WORKSPACE_SENTINEL);
+    const task = allTasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+
+    const ctx: TaskAutoContext = {
+      workspaceId: task.workspaceId,
+      search: {
+        async run(input) {
+          const r = await search.runSearch(input);
+          return {
+            results: r.results.map((x) => ({ title: x.title, url: x.url, snippet: x.snippet, source: x.source })),
+            summary: r.aiSummary,
+          };
+        },
+      },
+      rag: {
+        async run(input) {
+          const bundle = await search.runRag(input);
+          return {
+            systemPrompt: bundle.systemPrompt,
+            citations: bundle.citations,
+            chunks: bundle.chunks.map((c) => ({
+              documentId: c.documentId,
+              content: c.content,
+              sectionTitle: c.sectionTitle,
+              page: c.page,
+              fusedScore: c.fusedScore,
+            })),
+          };
+        },
+      },
+      summarize: async ({ systemPrompt, userPrompt }) => {
+        const cfg = await loadAIConfig(async (k) => workspaces.getSetting(k));
+        if (!cfg.apiKey && !cfg.local) return null;
+        // 用 summarizer 的内部分支：直接拿 systemPrompt + userPrompt 调 chat/completions
+        const res = await fetch(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model: cfg.model,
+            temperature: 0.2,
+            max_tokens: 1500,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+          }),
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        return data.choices?.[0]?.message?.content?.trim() || null;
+      },
+    };
+
+    const handle = runTask(task, {
+      handlers: buildAutoHandlers() as unknown as Record<string, TaskStepHandler>,
+      onEvent: (e) => {
+        // 同步每个 step 的更新到 SQLite
+        if (e.kind === 'step-done' || e.kind === 'step-failed' || e.kind === 'step-start' || e.kind === 'task-done' || e.kind === 'task-failed') {
+          // 重读 task 状态
+          const updated = e.kind === 'task-done' || e.kind === 'task-failed' ? e.task : applyStepUpdateLocal(e);
+          try { workspaces.upsertTask(updated); } catch { /* 静默 */ }
+        }
+      },
+    });
+    const final = await handle.promise;
+    workspaces.upsertTask(final);
+    return final;
   });
 
   // ── AI Conversation ──

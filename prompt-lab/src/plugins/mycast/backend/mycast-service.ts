@@ -13,7 +13,7 @@
  *      ▼
  *   Phones / browsers
  */
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -409,6 +409,26 @@ export async function listTransfers(): Promise<unknown[]> {
   return r.transfers ?? [];
 }
 
+export async function openTransfer(transferId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const transfers = await listTransfers() as Array<{ id?: string; path?: string; status?: string }>;
+    const transfer = transfers.find((item) => item.id === transferId);
+    if (!transfer || transfer.status !== 'completed' || !transfer.path) {
+      return { success: false, error: '传输文件不存在或尚未完成' };
+    }
+
+    const filePath = path.resolve(transfer.path);
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      return { success: false, error: '本地文件已被移动或删除' };
+    }
+
+    const error = await shell.openPath(filePath);
+    return error ? { success: false, error } : { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '无法打开文件' };
+  }
+}
+
 export async function sendToPhone(deviceId: string, frame: Record<string, unknown>): Promise<boolean> {
   const r = await sendRequest({ type: 'send_to_phone', device_id: deviceId, frame }) as { delivered?: boolean };
   return Boolean(r.delivered);
@@ -434,6 +454,7 @@ export function setupMyCastIPC(): void {
   ipcMain.handle('mycast:issue-pairing', () => issuePairing());
   ipcMain.handle('mycast:list-sessions', () => listSessions());
   ipcMain.handle('mycast:list-transfers', () => listTransfers());
+  ipcMain.handle('mycast:open-transfer', (_event, transferId: string) => openTransfer(transferId));
   ipcMain.handle('mycast:send-to-phone', (_event, deviceId: string, frame: Record<string, unknown>) => sendToPhone(deviceId, frame));
   ipcMain.handle('mycast:end-session', (_event, sessionId: string) => endSession(sessionId));
   ipcMain.handle('mycast:cancel-transfer', (_event, uploadId: string) => cancelTransfer(uploadId));
