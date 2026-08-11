@@ -107,7 +107,10 @@ const SYNTHESIS_JSON_SCHEMA_DESC = `
     { "topic": string, "positions": string[] }  // 每组 2～4 个不同立场
   ],
   "blindSpots": string[],           // 1～3 个容易忽略的盲点
-  "nextSteps": string[]             // 1～5 条不依赖星座标签的综合行动建议
+  "nextSteps": string[],            // 1～5 条不依赖星座标签的综合行动建议
+  "distinctiveViews": [             // 1～5 个相对其他回答最独特的视角
+    { "sign": string, "difference": string } // sign 使用英文标识，如 aquarius
+  ]
 }
 `.trim();
 
@@ -195,6 +198,7 @@ ${summary}
 2. 找出 2～4 组有代表性的分歧，说明每个分歧的核心张力；
 3. 指出 1～3 个原问题可能忽略的盲点；
 4. 给出 1～5 条不依赖任何星座标签的综合行动建议，每条都说明"为什么这条管用"。
+5. 选出 1～5 个真正具有独特论点的视角，并准确返回其英文 sign；不要为了凑数而选择。
 
 # 约束
 - 不要简单复述上面 12 份视角；要有归纳、对比、批判。

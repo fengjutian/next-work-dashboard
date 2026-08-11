@@ -4,6 +4,7 @@ import {
   extractJson,
   isValidPerspectiveArray,
   isValidSynthesis,
+  isTransientLlmError,
   parsePerspective,
   parseSynthesis,
 } from '../src/plugins/zodiac-perspectives/zodiac-service';
@@ -33,6 +34,12 @@ describe('zodiac-service JSON parsing', () => {
       async () => 'third',
     ], 2);
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'fulfilled']);
+  });
+
+  it('recognizes retryable provider errors without retrying ordinary validation errors', () => {
+    expect(isTransientLlmError(new Error('LLM API error 429: busy'))).toBe(true);
+    expect(isTransientLlmError(new Error('LLM API error 503: unavailable'))).toBe(true);
+    expect(isTransientLlmError(new Error('缺少 interpretation 字段或为空'))).toBe(false);
   });
 
   it('extractJson unwraps fenced ```json``` blocks', () => {
@@ -80,12 +87,14 @@ describe('zodiac-service JSON parsing', () => {
       ],
       blindSpots: ['b1'],
       nextSteps: ['n1', 'n2'],
+      distinctiveViews: [{ sign: 'aquarius', difference: '质疑二选一前提' }],
     });
     const s = parseSynthesis(raw);
     expect(s.consensus).toHaveLength(3);
     expect(s.disagreements).toHaveLength(2);
     expect(s.blindSpots).toHaveLength(1);
     expect(s.nextSteps).toHaveLength(2);
+    expect(s.distinctiveViews?.[0].sign).toBe('aquarius');
   });
 
   it('parseSynthesis rejects too few consensus items', () => {

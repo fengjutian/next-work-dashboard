@@ -18,7 +18,16 @@ import {
   type ZodiacRunRecord,
   type ZodiacFollowupMessageRecord,
 } from '@/db';
-import { HISTORY_MAX_RUNS, type ZodiacRun } from './zodiac-types';
+import {
+  HISTORY_MAX_RUNS,
+  ZODIAC_SIGNS,
+  type GenerationLength,
+  type GenerationScene,
+  type GenerationTone,
+  type ZodiacPerspective,
+  type ZodiacRun,
+  type ZodiacSynthesis,
+} from './zodiac-types';
 
 // ── 适配：record ↔ domain ──────────────────────────────────────
 
@@ -34,8 +43,8 @@ function recordToRun(record: ZodiacRunRecord): ZodiacRun {
     id: record.id,
     question: record.question,
     options: normalizeOptions(record.options),
-    perspectives: Array.isArray(record.perspectives) ? (record.perspectives as unknown as ZodiacRun['perspectives']) : [],
-    synthesis: (record.synthesis ?? null) as ZodiacRun['synthesis'],
+    perspectives: normalizePerspectives(record.perspectives),
+    synthesis: normalizeSynthesis(record.synthesis),
     favorite: record.favorite,
     title: record.title,
     createdAt: record.createdAt,
@@ -63,12 +72,77 @@ function runToRecord(run: ZodiacRun): ZodiacRunRecord {
 
 function normalizeOptions(raw: unknown): ZodiacRun['options'] {
   const base = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  const scenes: readonly GenerationScene[] = ['general', 'work', 'relationship', 'decision', 'creative', 'entertainment'];
+  const lengths: readonly GenerationLength[] = ['short', 'standard', 'detailed'];
+  const tones: readonly GenerationTone[] = ['rational', 'gentle', 'sharp', 'humorous'];
   return {
-    scene: (base.scene as ZodiacRun['options']['scene']) ?? 'general',
-    length: (base.length as ZodiacRun['options']['length']) ?? 'standard',
-    tone: (base.tone as ZodiacRun['options']['tone']) ?? 'gentle',
+    scene: scenes.includes(base.scene as GenerationScene) ? base.scene as GenerationScene : 'general',
+    length: lengths.includes(base.length as GenerationLength) ? base.length as GenerationLength : 'standard',
+    tone: tones.includes(base.tone as GenerationTone) ? base.tone as GenerationTone : 'gentle',
     includeSynthesis: base.includeSynthesis !== false,
   };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+export function normalizePerspectives(raw: unknown): ZodiacPerspective[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const normalized: ZodiacPerspective[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const value = item as Record<string, unknown>;
+    if (typeof value.sign !== 'string' || !(ZODIAC_SIGNS as readonly string[]).includes(value.sign) || seen.has(value.sign)) continue;
+    const focus = stringArray(value.focus);
+    const advice = stringArray(value.advice);
+    if (typeof value.interpretation !== 'string' || !value.interpretation.trim() || !focus.length || !advice.length) continue;
+    seen.add(value.sign);
+    normalized.push({
+      sign: value.sign as ZodiacPerspective['sign'],
+      interpretation: value.interpretation.trim(),
+      focus,
+      advice,
+      ...(typeof value.caution === 'string' && value.caution.trim() ? { caution: value.caution.trim() } : {}),
+    });
+  }
+  return normalized.sort((a, b) => ZODIAC_SIGNS.indexOf(a.sign) - ZODIAC_SIGNS.indexOf(b.sign));
+}
+
+export function normalizeSynthesis(raw: unknown): ZodiacSynthesis | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const consensus = stringArray(value.consensus);
+  const blindSpots = stringArray(value.blindSpots);
+  const nextSteps = stringArray(value.nextSteps);
+  const disagreements = Array.isArray(value.disagreements)
+    ? value.disagreements.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const entry = item as Record<string, unknown>;
+      const positions = stringArray(entry.positions);
+      return typeof entry.topic === 'string' && entry.topic.trim() && positions.length >= 2
+        ? [{ topic: entry.topic.trim(), positions }]
+        : [];
+    })
+    : [];
+  const distinctiveViews = Array.isArray(value.distinctiveViews)
+    ? value.distinctiveViews.flatMap((item) => {
+      if (!item || typeof item !== 'object') return [];
+      const entry = item as Record<string, unknown>;
+      return typeof entry.sign === 'string'
+        && (ZODIAC_SIGNS as readonly string[]).includes(entry.sign)
+        && typeof entry.difference === 'string'
+        && entry.difference.trim()
+        ? [{ sign: entry.sign as ZodiacPerspective['sign'], difference: entry.difference.trim() }]
+        : [];
+    }).slice(0, 5)
+    : [];
+  return consensus.length && disagreements.length && blindSpots.length && nextSteps.length
+    ? { consensus, disagreements, blindSpots, nextSteps, ...(distinctiveViews.length ? { distinctiveViews } : {}) }
+    : null;
 }
 
 export function defaultTitle(question: string): string {

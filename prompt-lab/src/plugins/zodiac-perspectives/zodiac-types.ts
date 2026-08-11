@@ -58,6 +58,8 @@ export interface ZodiacSynthesis {
   disagreements: Array<{ topic: string; positions: string[] }>;
   blindSpots: string[];
   nextSteps: string[];
+  /** 汇总模型识别出的独特视角，供“只看差异”使用。 */
+  distinctiveViews?: Array<{ sign: ZodiacSign; difference: string }>;
 }
 
 export interface ZodiacPerspectiveResult {

@@ -52,6 +52,13 @@ function synthesisSection(synthesis: ZodiacSynthesis): string {
   lines.push('');
   lines.push('## 综合行动建议');
   for (const item of synthesis.nextSteps) lines.push(`- ${item}`);
+  if (synthesis.distinctiveViews?.length) {
+    lines.push('');
+    lines.push('## 独特视角');
+    for (const item of synthesis.distinctiveViews) {
+      lines.push(`- **${ZODIAC_META[item.sign].name}**：${item.difference}`);
+    }
+  }
   return lines.join('\n');
 }
 

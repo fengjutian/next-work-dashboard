@@ -214,7 +214,22 @@ export function parseSynthesis(raw: string): ZodiacSynthesis {
   if (nextSteps.length < 1) {
     throw new Error('汇总缺少 nextSteps 建议');
   }
-  return { consensus, disagreements, blindSpots, nextSteps };
+  const distinctiveViews: NonNullable<ZodiacSynthesis['distinctiveViews']> = [];
+  const seenSigns = new Set<ZodiacSign>();
+  if (Array.isArray(obj.distinctiveViews)) {
+    for (const item of obj.distinctiveViews) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as Record<string, unknown>;
+      if (typeof entry.sign !== 'string' || !(ZODIAC_SIGNS as readonly string[]).includes(entry.sign)) continue;
+      if (seenSigns.has(entry.sign as ZodiacSign) || typeof entry.difference !== 'string') continue;
+      const difference = clip(entry.difference, 160);
+      if (!difference) continue;
+      seenSigns.add(entry.sign as ZodiacSign);
+      distinctiveViews.push({ sign: entry.sign as ZodiacSign, difference });
+      if (distinctiveViews.length >= 5) break;
+    }
+  }
+  return { consensus, disagreements, blindSpots, nextSteps, ...(distinctiveViews.length ? { distinctiveViews } : {}) };
 }
 
 // ── 流式输出累积 ──────────────────────────────────────────────
@@ -236,9 +251,26 @@ async function collectStream(
   return raw;
 }
 
+export function isTransientLlmError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /LLM API error (408|409|425|429|5\d\d)\b/i.test(error.message)
+    || /\b(timeout|timed out|network|fetch failed|ECONNRESET|ETIMEDOUT)\b/i.test(error.message);
+}
+
+async function waitForRetry(attempt: number, signal?: AbortSignal): Promise<void> {
+  const delay = Math.min(4_000, 500 * (2 ** attempt)) + Math.floor(Math.random() * 200);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delay);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('生成已取消', 'AbortError'));
+    }, { once: true });
+  });
+}
+
 // ── 单次单星座生成（含 1 次自动重试） ──────────────────────
 
-async function generateOneSign(
+export async function generatePerspective(
   sign: ZodiacSign,
   question: string,
   options: GenerationOptions,
@@ -265,6 +297,7 @@ async function generateOneSign(
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
+      if (attempt === 0 && isTransientLlmError(error)) await waitForRetry(attempt, signal);
       // 第二次尝试：把系统 prompt 里加一句"只输出 JSON，不要任何解释"
       if (attempt === 0) {
         messages[0] = {
@@ -279,7 +312,7 @@ async function generateOneSign(
 
 // ── 汇总生成（独立请求，含 1 次自动重试） ──────────────────────
 
-async function generateSynthesis(
+export async function regenerateSynthesis(
   question: string,
   options: GenerationOptions,
   perspectives: ZodiacPerspective[],
@@ -305,6 +338,7 @@ async function generateSynthesis(
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
+      if (attempt === 0 && isTransientLlmError(error)) await waitForRetry(attempt, signal);
       if (attempt === 0) {
         messages[0] = {
           role: 'system',
@@ -341,7 +375,7 @@ export async function generateAllPerspectives(
     if (signal?.aborted) throw new DOMException('生成已取消', 'AbortError');
     callbacks.onCardStart?.(sign);
     try {
-      const perspective = await generateOneSign(
+      const perspective = await generatePerspective(
         sign,
         question,
         options,
@@ -388,7 +422,7 @@ export async function generateAllPerspectives(
     } else {
       callbacks.onSynthesisStart?.();
       try {
-        synthesis = await generateSynthesis(question, options, perspectives, ctx, signal);
+        synthesis = await regenerateSynthesis(question, options, perspectives, ctx, signal);
         callbacks.onSynthesisDone?.(synthesis);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

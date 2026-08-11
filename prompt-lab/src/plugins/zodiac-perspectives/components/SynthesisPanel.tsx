@@ -7,6 +7,7 @@ import { ChevronDown, Copy, Loader2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { buildSynthesisMarkdown, copyText } from '../zodiac-copy';
 import type { SynthesisStatus, ZodiacRun, ZodiacSynthesis } from '../zodiac-types';
+import { ZODIAC_META } from '../zodiac-data';
 
 export interface SynthesisPanelProps {
   run: ZodiacRun;
@@ -61,7 +62,7 @@ export function SynthesisPanel({ run, status, synthesis, error, onCopy, onRetry 
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
           <span>{run.perspectives.length === 12 ? '视角内容已更新，原总结已失效。' : '等待更多视角完成后生成总结。'}</span>
           {run.perspectives.length === 12 && onRetry && (
-            <Button variant="outline" size="sm" onClick={onRetry}>重新生成整轮与总结</Button>
+            <Button variant="outline" size="sm" onClick={onRetry}>重新生成总结</Button>
           )}
         </div>
       )}
@@ -95,6 +96,12 @@ export function SynthesisPanel({ run, status, synthesis, error, onCopy, onRetry 
           />
           <Subsection title="容易忽略的盲点" items={synthesis.blindSpots} />
           <Subsection title="综合行动建议" items={synthesis.nextSteps} />
+          {synthesis.distinctiveViews?.length ? (
+            <Subsection
+              title="独特视角"
+              items={synthesis.distinctiveViews.map((item) => `${ZODIAC_META[item.sign].name}：${item.difference}`)}
+            />
+          ) : null}
         </div>
       )}
 

@@ -12,7 +12,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Copy, History, RefreshCw, Save, Sparkles } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { createOpenAIProvider } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { QuestionInput } from './components/QuestionInput';
 import { PerspectiveGrid, type DifferenceFilter, type LayoutMode } from './components/PerspectiveGrid';
@@ -29,7 +28,7 @@ import type {
   ZodiacRun,
   ZodiacSign,
 } from './zodiac-types';
-import { generateAllPerspectives, parsePerspective, type GenerateCallbacks } from './zodiac-service';
+import { generateAllPerspectives, generatePerspective, regenerateSynthesis, type GenerateCallbacks } from './zodiac-service';
 import { buildAllPerspectivesMarkdown, copyText } from './zodiac-copy';
 import {
   defaultTitle,
@@ -40,7 +39,7 @@ import {
   updateRunPerspectives,
   updateRunSynthesis,
 } from './zodiac-storage';
-import { buildSingleSignUserPrompt, COMMON_SYSTEM_PROMPT, detectHighRisk } from './zodiac-prompts';
+import { detectHighRisk } from './zodiac-prompts';
 import { ZODIAC_META } from './zodiac-data';
 
 const DEFAULT_OPTIONS: GenerationOptions = {
@@ -134,9 +133,11 @@ export function ZodiacPerspectivesPanel() {
 
   // 计算差异
   const outlierSigns = useMemo(() => {
+    const structured = run?.synthesis?.distinctiveViews?.map((item) => item.sign) ?? [];
+    if (structured.length > 0) return structured;
     const done = cards.filter((c) => c.status === 'done' && c.perspective).map((c) => c.perspective!);
     return identifyOutliers(done);
-  }, [cards]);
+  }, [cards, run?.synthesis]);
 
   const completedCount = useMemo(() => cards.filter((c) => c.status === 'done').length, [cards]);
 
@@ -281,34 +282,26 @@ export function ZodiacPerspectivesPanel() {
       updateCard({ status: 'streaming', error: undefined, streamedInterpretation: '' });
       const controller = new AbortController();
       try {
-        const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
-        let raw = '';
-        for await (const chunk of provider.chat(
-          [
-            { role: 'system', content: COMMON_SYSTEM_PROMPT },
-            { role: 'user', content: buildSingleSignUserPrompt(run.question, run.options, sign) },
-          ],
-          { model: aiApi.model, temperature: 0.85, maxTokens: 700, stream: true, signal: controller.signal },
-        )) {
-          if (chunk.delta) {
-            raw += chunk.delta;
-            // 继续收集原始 JSON，但不要把未解析 JSON 直接渲染给用户。
-          }
-        }
-        const perspective = parsePerspective(raw, sign);
+        const perspective = await generatePerspective(
+          sign,
+          run.question,
+          run.options,
+          { apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl, model: aiApi.model },
+          controller.signal,
+        );
         // 只有新答案成功后才让旧总结失效；失败重试仍保留原有一致结果。
         setSynthesisStatus('idle');
         updateRunSynthesis(run.id, null);
         updateCard({ status: 'done', perspective, streamedInterpretation: undefined });
-        const nextPerspectives = [...run.perspectives.filter((p) => p.sign !== sign), perspective]
-          .sort((a, b) => ZODIAC_ORDER.indexOf(a.sign) - ZODIAC_ORDER.indexOf(b.sign));
-        updateRunPerspectives(run.id, nextPerspectives);
-        if (nextPerspectives.length === 12) {
-          setPartial(run.id, false);
-          setRun((prev) => (prev ? { ...prev, partial: false, perspectives: nextPerspectives, synthesis: null, updatedAt: Date.now() } : prev));
-        } else {
-          setRun((prev) => (prev ? { ...prev, perspectives: nextPerspectives, synthesis: null, updatedAt: Date.now() } : prev));
-        }
+        setRun((prev) => {
+          if (!prev) return prev;
+          const nextPerspectives = [...prev.perspectives.filter((p) => p.sign !== sign), perspective]
+            .sort((a, b) => ZODIAC_ORDER.indexOf(a.sign) - ZODIAC_ORDER.indexOf(b.sign));
+          const partial = nextPerspectives.length !== 12;
+          updateRunPerspectives(prev.id, nextPerspectives);
+          setPartial(prev.id, partial);
+          return { ...prev, partial, perspectives: nextPerspectives, synthesis: null, updatedAt: Date.now() };
+        });
         toast.success(`${ZODIAC_META[sign].name} 已重新生成。`);
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -319,6 +312,35 @@ export function ZodiacPerspectivesPanel() {
     },
     [aiApi, aiConfigured, run],
   );
+
+  const handleRetrySynthesis = useCallback(async () => {
+    if (!run || !aiConfigured || run.perspectives.length < 4) return;
+    setSynthesisStatus('running');
+    setErrorMessage(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const synthesis = await regenerateSynthesis(
+        run.question,
+        run.options,
+        run.perspectives,
+        { apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl, model: aiApi.model },
+        controller.signal,
+      );
+      updateRunSynthesis(run.id, synthesis);
+      setRun((prev) => (prev ? { ...prev, synthesis, updatedAt: Date.now() } : prev));
+      setSynthesisStatus('done');
+      toast.success('圆桌纪要已更新。');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorMessage(message);
+      setSynthesisStatus('failed');
+      toast.error(`总结生成失败：${message}`);
+    } finally {
+      abortRef.current = null;
+    }
+  }, [aiApi, aiConfigured, run]);
 
   // ── 操作：补全缺失 ──────────────────────────────────────────
 
@@ -476,7 +498,7 @@ export function ZodiacPerspectivesPanel() {
               synthesis={run.synthesis}
               error={errorMessage ?? undefined}
               onCopy={(text, success) => toast[success ? 'success' : 'error'](text)}
-              onRetry={() => startGeneration(run.question)}
+              onRetry={handleRetrySynthesis}
             />
           )}
         </>
