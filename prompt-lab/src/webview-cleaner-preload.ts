@@ -40,16 +40,17 @@ function injectBrowserChromeStyle() {
   const style = document.createElement('style');
   style.setAttribute('data-work-browser-chrome', '');
   style.textContent = `
-    :root { scrollbar-width: thin; scrollbar-color: rgba(97,36,91,.32) transparent; }
-    ::-webkit-scrollbar { width: 9px; height: 9px; }
-    ::-webkit-scrollbar-track { background: transparent; }
+    :root { scrollbar-width: thin !important; scrollbar-color: rgba(97,36,91,.32) transparent !important; }
+    html, body { scrollbar-width: thin !important; scrollbar-color: rgba(97,36,91,.32) transparent !important; }
+    ::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
+    ::-webkit-scrollbar-track { background: transparent !important; }
     ::-webkit-scrollbar-thumb {
-      min-width: 32px; min-height: 32px;
-      border: 2px solid transparent; border-radius: 999px;
-      background: rgba(97,36,91,.24); background-clip: padding-box;
+      min-width: 32px !important; min-height: 32px !important;
+      border: 2px solid transparent !important; border-radius: 999px !important;
+      background: rgba(97,36,91,.24) !important; background-clip: padding-box !important;
     }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.48); background-clip: padding-box; }
-    ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.48) !important; background-clip: padding-box !important; }
+    ::-webkit-scrollbar-corner { background: transparent !important; }
   `;
   (document.head || document.documentElement).appendChild(style);
 }

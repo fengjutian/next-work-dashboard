@@ -1,7 +1,7 @@
 /**
  * TabBar — Tab 切换栏
  */
-import { Tabs, Button, Space } from '../ui';
+import { Tabs, Space } from '../ui';
 import { ArrowRight, Globe2, X } from 'lucide-react';
 import { useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
@@ -24,22 +24,22 @@ export function TabBar({ tabs, activeId, onActivate, onClose, onAdd }: TabBarPro
   const items = tabs.map((t) => ({
     key: t.id,
     label: (
-      <Space size={4}>
-        {t.favicon && <img src={t.favicon} alt="" style={{ width: 14, height: 14 }} />}
-        <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title || t.url}</span>
-        <Button
-          type="text"
-          size="small"
-          icon={<X size={12} />}
+      <Space size={6} className="group/tab min-w-0">
+        {t.favicon ? <img src={t.favicon} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm" /> : <Globe2 size={13} className="shrink-0 text-muted-foreground" />}
+        <span className="max-w-36 truncate" title={t.title || t.url}>{formatTabTitle(t)}</span>
+        <button
+          type="button"
+          aria-label={`关闭 ${t.title || t.url}`}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 opacity-0 transition hover:bg-primary/10 hover:text-primary focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 group-hover/tab:opacity-100"
           onClick={(e) => { e.stopPropagation(); onClose(t); }}
-        />
+        ><X size={11} /></button>
       </Space>
     ),
   }));
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border/70 bg-card/70 px-2 pt-1">
-      <div className="min-w-0 flex-1 overflow-auto">
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/30 bg-muted/10 px-2">
+      <div className="work-browser-tab-strip min-w-0 flex-1 overflow-hidden">
         <Tabs
           size="small"
           type="card"
@@ -52,7 +52,7 @@ export function TabBar({ tabs, activeId, onActivate, onClose, onAdd }: TabBarPro
           tabBarStyle={{ marginBottom: 0 }}
         />
       </div>
-      <div className="mb-1 flex h-9 w-[min(32vw,400px)] shrink-0 items-center rounded-xl border border-border/70 bg-background/80 pl-3 shadow-sm transition focus-within:border-primary/30 focus-within:ring-2 focus-within:ring-primary/10">
+      <div className="flex h-8 w-[min(30vw,360px)] shrink-0 items-center rounded-lg border border-transparent bg-muted/45 pl-2.5 transition focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/10">
         <Globe2 size={14} className="shrink-0 text-muted-foreground" />
         <input
           placeholder="输入 URL →"
@@ -65,10 +65,21 @@ export function TabBar({ tabs, activeId, onActivate, onClose, onAdd }: TabBarPro
           type="button"
           aria-label="打开网址"
           onClick={() => void submitUrl()}
-          className="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:opacity-40"
+          className="mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground transition hover:bg-primary-hover disabled:bg-muted disabled:text-muted-foreground"
           disabled={!url.trim()}
         ><ArrowRight size={13} /></button>
       </div>
     </div>
   );
+}
+
+function formatTabTitle(tab: Tab): string {
+  const title = (tab.title || '').trim();
+  if (title && title !== tab.url && !/^https?:\/\//i.test(title)) return title;
+  try {
+    const url = new URL(tab.url);
+    return url.hostname.replace(/^www\./, '') || '新标签页';
+  } catch {
+    return title || '新标签页';
+  }
 }

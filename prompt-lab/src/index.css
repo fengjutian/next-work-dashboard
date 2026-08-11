@@ -236,6 +236,16 @@
   background: transparent;
 }
 
+.work-browser-tab-strip [role='tablist'] {
+  scrollbar-width: none;
+}
+
+.work-browser-tab-strip [role='tablist']::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* Monaco draws its own scrollbar instead of using the browser pseudo-elements. */
 .monaco-scrollable-element > .scrollbar {
   background: transparent !important;

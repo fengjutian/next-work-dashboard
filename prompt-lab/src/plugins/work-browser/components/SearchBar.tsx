@@ -22,7 +22,7 @@ export function SearchBar({ onSearch, onSave, onResearch, cleanerEnabled, onTogg
   const submit = () => { if (text.trim()) onSearch(text.trim(), scope); };
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <div className="flex min-w-0 flex-1 items-center rounded-2xl border border-border/70 bg-card p-1 shadow-[0_5px_20px_hsl(var(--foreground)/0.045)] transition focus-within:border-primary/25 focus-within:shadow-[0_8px_30px_hsl(var(--primary)/0.08)]">
+      <div className="flex min-w-0 flex-1 items-center rounded-xl border border-border/60 bg-card p-0.5 transition focus-within:border-primary/25 focus-within:ring-2 focus-within:ring-primary/10">
         <div className="flex shrink-0 items-center rounded-xl bg-muted/80 p-0.5">
           {([
             ['web', '网络'], ['workspace', '工作区'], ['library', '全库'],
@@ -38,16 +38,16 @@ export function SearchBar({ onSearch, onSave, onResearch, cleanerEnabled, onTogg
           onChange={(e) => setText(e.target.value)}
           onPressEnter={submit}
           allowClear
-          className="h-10 border-transparent bg-transparent shadow-none focus-within:border-transparent focus-within:ring-0"
+          className="h-9 border-transparent bg-transparent shadow-none focus-within:border-transparent focus-within:ring-0"
         /></div>
-        <Button type="primary" onClick={submit} loading={loading} className="h-9 rounded-xl border-0 px-4 shadow-none">搜索</Button>
+        <Button type="primary" onClick={submit} loading={loading} className="h-8 rounded-lg border-0 px-4 shadow-none">搜索</Button>
       </div>
         <Tooltip title={cleanerEnabled ? '关闭净化' : '开启净化（去广告/弹窗/Cookie Banner）'}>
-          <Button type="text" icon={<Shield size={17} />} onClick={onToggleCleaner} className={`h-11 w-11 rounded-xl border ${cleanerEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-border bg-card'}`} aria-label="切换网页净化" />
+          <Button type="text" icon={<Shield size={16} />} onClick={onToggleCleaner} className={`h-9 w-9 rounded-lg border ${cleanerEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-border bg-card'}`} aria-label="切换网页净化" />
         </Tooltip>
         {onSave && (
           <Tooltip title="保存当前页面到 Workspace（Markdown + 原 HTML）">
-            <Button icon={<Save size={16} />} onClick={onSave} className="h-11 rounded-xl bg-card">保存</Button>
+            <Button icon={<Save size={15} />} onClick={onSave} className="h-9 rounded-lg bg-card">保存</Button>
           </Tooltip>
         )}
         {onResearch && (
@@ -55,6 +55,7 @@ export function SearchBar({ onSearch, onSave, onResearch, cleanerEnabled, onTogg
             <Button
               type="default"
               icon={<FlaskConical size={16} />}
+              className="h-9 rounded-lg"
               onClick={() => onResearch(text.trim() || '什么是 RAG？')}
             >
               研究

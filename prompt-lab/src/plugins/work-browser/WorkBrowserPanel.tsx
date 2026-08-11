@@ -93,7 +93,9 @@ export function WorkBrowserPanel() {
       if (activeWorkspaceIdRef.current === wsId) setAnnotations(anns);
     } catch (error) {
       // Annotation Graph 是增强能力；旧版主进程未注册该 channel 时不阻塞浏览器主体。
-      console.warn('[work-browser] workspace annotations unavailable:', error);
+      if (!String(error).includes('No handler registered')) {
+        console.warn('[work-browser] workspace annotations unavailable:', error);
+      }
       if (activeWorkspaceIdRef.current === wsId) setAnnotations([]);
     }
   }, []);
@@ -193,6 +195,14 @@ export function WorkBrowserPanel() {
     if (await handleAddTab(url)) setSearchOpen(false);
   }, [handleAddTab]);
 
+  const handleTabUpdate = useCallback((tabId: string, patch: Partial<Pick<Tab, 'title' | 'url' | 'favicon'>>) => {
+    setTabs((current) => current.map((tab) => tab.id === tabId ? { ...tab, ...patch } : tab));
+    setActiveTab((current) => current?.id === tabId ? { ...current, ...patch } : current);
+    void window.electronAPI.workBrowser.tab.update(tabId, patch).catch((error) => {
+      console.warn('[work-browser] tab metadata update failed:', error);
+    });
+  }, []);
+
   const toggleLeftSidebar = () => setLeftCollapsed((collapsed) => {
     localStorage.setItem(STORAGE_KEYS.LEFT_SIDEBAR_COLLAPSED, String(!collapsed));
     return !collapsed;
@@ -209,12 +219,12 @@ export function WorkBrowserPanel() {
   return (
     <div className="work-browser-panel flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <ToastHost />
-      <header className="relative z-10 shrink-0 bg-background/95 px-3 py-2 backdrop-blur-xl">
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={toggleLeftSidebar} title={leftCollapsed ? '展开工作区侧栏' : '折叠工作区侧栏'} aria-label={leftCollapsed ? '展开工作区侧栏' : '折叠工作区侧栏'} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border bg-card transition hover:border-primary/25 hover:bg-accent ${leftCollapsed ? 'border-primary/20 text-primary shadow-sm' : 'border-border/60 text-muted-foreground'}`}><PanelLeft size={17} /></button>
+      <header className="relative z-10 shrink-0 bg-background/95 px-2 py-1.5 backdrop-blur-xl">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={toggleLeftSidebar} title={leftCollapsed ? '展开工作区侧栏' : '折叠工作区侧栏'} aria-label={leftCollapsed ? '展开工作区侧栏' : '折叠工作区侧栏'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-transparent transition hover:bg-accent ${leftCollapsed ? 'bg-primary-light text-primary' : 'text-muted-foreground'}`}><PanelLeft size={17} /></button>
           {activeWorkspace && (
-            <div className="hidden shrink-0 items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2 shadow-sm xl:flex">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary-light text-primary"><FolderKanban size={14} /></span>
+            <div className="hidden shrink-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5 xl:flex">
+              <span className="grid h-6 w-6 place-items-center rounded-md bg-card text-primary shadow-sm"><FolderKanban size={13} /></span>
               <div className="leading-tight">
                 <div className="max-w-28 truncate text-xs font-semibold">{activeWorkspace.name}</div>
                 <div className="text-[10px] text-muted-foreground">{tabs.length} 标签 · {documents.length} 文档</div>
@@ -231,11 +241,11 @@ export function WorkBrowserPanel() {
             loading={searchLoading}
           />
           </div>
-          <button type="button" onClick={toggleRightSidebar} title={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} aria-label={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border bg-card transition hover:border-primary/25 hover:bg-accent ${rightCollapsed ? 'border-primary/20 text-primary shadow-sm' : 'border-border/60 text-muted-foreground'}`}><PanelRight size={17} /></button>
+          <button type="button" onClick={toggleRightSidebar} title={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} aria-label={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-transparent transition hover:bg-accent ${rightCollapsed ? 'bg-primary-light text-primary' : 'text-muted-foreground'}`}><PanelRight size={17} /></button>
         </div>
       </header>
-      <div className="grid min-h-0 flex-1 gap-2 bg-muted/30 p-2 pt-0 transition-[grid-template-columns] duration-200" style={{ gridTemplateColumns }}>
-        {!leftCollapsed && <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
+      <div className="mx-2 mb-2 grid min-h-0 flex-1 gap-px overflow-hidden rounded-2xl bg-border/30 transition-[grid-template-columns] duration-200" style={{ gridTemplateColumns }}>
+        {!leftCollapsed && <aside className="min-h-0 overflow-hidden bg-card/90">
           <WorkspaceList
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
@@ -247,7 +257,7 @@ export function WorkBrowserPanel() {
             }}
           />
         </aside>}
-        <main className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_12px_36px_hsl(var(--foreground)/0.05)]">
+        <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-card">
           {activeWorkspace ? (
             <>
               <TabBar
@@ -272,6 +282,7 @@ export function WorkBrowserPanel() {
                   activeDocumentId={activeDocumentId}
                   onOpenUrl={handleAddTab}
                   onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
+                  onTabUpdate={handleTabUpdate}
                 />
               </div>
             </>
@@ -281,7 +292,7 @@ export function WorkBrowserPanel() {
             </div>
           )}
         </main>
-        {!rightCollapsed && <aside className="min-h-0 overflow-hidden rounded-2xl border border-border/60 bg-card/90 shadow-[0_8px_28px_hsl(var(--foreground)/0.035)]">
+        {!rightCollapsed && <aside className="min-h-0 overflow-hidden bg-card/90">
           {activeWorkspace ? (
             <Tabs
               size="small"

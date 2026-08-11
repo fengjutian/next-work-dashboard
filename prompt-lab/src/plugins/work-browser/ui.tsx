@@ -36,7 +36,26 @@ export function Card({ title, extra, children, className, style, onClick }: Comm
 export function List<T>({ dataSource = [], renderItem, className }: { dataSource?: T[]; renderItem: (item: T, index: number) => React.ReactNode; size?: string; className?: string }) { return <div className={cn('divide-y divide-border', className)}>{dataSource.map((item, index) => { const candidate = item as { id?: React.Key; key?: React.Key } | null; return <React.Fragment key={candidate?.id ?? candidate?.key ?? index}>{renderItem(item, index)}</React.Fragment>; })}</div>; }
 List.Item = function ListItem({ children, className, ...props }: CommonProps) { return <div {...props as React.HTMLAttributes<HTMLDivElement>} className={cn('px-3 py-2', className)}>{children}</div>; };
 
-export function Tabs({ items = [], activeKey, onChange, className, style, type }: { items?: Array<{ key: string; label: React.ReactNode; children?: React.ReactNode }>; activeKey?: string; onChange?: (key: string) => void; size?: string; type?: string; tabBarStyle?: React.CSSProperties; className?: string; style?: React.CSSProperties }) { const [own, setOwn] = useState(items[0]?.key); const current = activeKey ?? own; const card = type === 'card'; return <div style={style} className={cn('flex min-h-0 flex-col', className)}><div className={cn('shrink-0 border-b border-border/70 p-1.5', card ? 'flex gap-1 overflow-x-auto' : 'grid auto-cols-fr grid-flow-col')}>{items.map((item) => <button type="button" key={item.key} onClick={() => { setOwn(item.key); onChange?.(item.key); }} className={cn('relative flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground', card && 'shrink-0 justify-start', current === item.key && 'bg-primary-light text-primary shadow-sm')}>{item.label}</button>)}</div><div className="min-h-0 flex-1 overflow-auto">{items.find((item) => item.key === current)?.children}</div></div>; }
+export function Tabs({ items = [], activeKey, onChange, className, style, type }: { items?: Array<{ key: string; label: React.ReactNode; children?: React.ReactNode }>; activeKey?: string; onChange?: (key: string) => void; size?: string; type?: string; tabBarStyle?: React.CSSProperties; className?: string; style?: React.CSSProperties }) {
+  const [own, setOwn] = useState(items[0]?.key);
+  const current = activeKey ?? own;
+  const card = type === 'card';
+  const activate = (key: string) => { setOwn(key); onChange?.(key); };
+  return <div style={style} className={cn('flex min-h-0 flex-col', className)}>
+    <div role="tablist" className={cn('shrink-0', card ? 'flex gap-1 overflow-x-auto border-0 p-0' : 'grid auto-cols-fr grid-flow-col border-b border-border/70 p-1.5')}>
+      {items.map((item) => <div
+        role="tab"
+        tabIndex={current === item.key ? 0 : -1}
+        aria-selected={current === item.key}
+        key={item.key}
+        onClick={() => activate(item.key)}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(item.key); } }}
+        className={cn('relative flex min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25', card && 'h-9 max-w-52 shrink-0 justify-start px-3', current === item.key && 'bg-primary-light text-primary shadow-sm')}
+      >{item.label}</div>)}
+    </div>
+    <div className="min-h-0 flex-1 overflow-auto">{items.find((item) => item.key === current)?.children}</div>
+  </div>;
+}
 
 export function Segmented<T extends string = string>({ value, onChange, options, className, block }: { value?: T; onChange?: (value: T) => void; size?: string; options: Array<{ label: React.ReactNode; value: T }>; className?: string; block?: boolean }) { return <div className={cn('inline-flex rounded-lg bg-muted p-1', block && 'flex w-full', className)}>{options.map((o) => <button type="button" key={o.value} onClick={() => onChange?.(o.value)} className={cn('rounded-md px-3 py-1 text-xs text-muted-foreground transition', value === o.value && 'bg-card text-foreground shadow-sm')}>{o.label}</button>)}</div>; }
 

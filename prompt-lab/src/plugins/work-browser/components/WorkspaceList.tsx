@@ -35,11 +35,11 @@ export function WorkspaceList({ workspaces, activeId, onSelect, onCreate }: Work
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border/60 p-3">
+      <div className="border-b border-border/30 p-3">
         <Space style={{ width: '100%' }} direction="vertical" size="small">
           <Typography.Text strong className="text-xs uppercase tracking-[0.14em] text-muted-foreground">工作区</Typography.Text>
           {!creating ? (
-            <Button block icon={<Plus size={14} />} onClick={() => setCreating(true)} className="border-dashed bg-background/60">新建工作区</Button>
+            <Button block icon={<Plus size={14} />} onClick={() => setCreating(true)} className="border-border/40 bg-background/30 shadow-none">新建工作区</Button>
           ) : (
             <div className="space-y-1.5">
             <Space.Compact style={{ width: '100%' }}>
@@ -69,10 +69,10 @@ export function WorkspaceList({ workspaces, activeId, onSelect, onCreate }: Work
               return (
                 <List.Item
                   onClick={() => onSelect(ws)}
-                  className={`mb-1 cursor-pointer rounded-xl border px-3 py-2.5 transition ${active ? 'border-primary/15 bg-primary-light text-primary shadow-sm' : 'border-transparent hover:bg-accent'}`}
+                  className={`mb-1 cursor-pointer rounded-xl border px-3 py-2.5 transition ${active ? 'border-transparent bg-primary-light text-primary' : 'border-transparent hover:bg-accent'}`}
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border/50 bg-card shadow-sm" style={{ color: ws.color || 'hsl(var(--primary))' }}><FolderKanban size={17} /></span>
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted/60" style={{ color: ws.color || 'hsl(var(--primary))' }}><FolderKanban size={17} /></span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm" style={{ fontWeight: active ? 600 : 500 }}>{ws.name}</div>
                       {ws.description && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{ws.description}</Typography.Text>}
