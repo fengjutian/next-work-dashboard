@@ -102,8 +102,8 @@ export function WorkBrowserPanel() {
     message.success(next ? '已开启净化' : '已关闭净化');
   };
 
-  const handleSearch = useCallback(async (text: string) => {
-    await runSearch(text, activeWorkspace?.id);
+  const handleSearch = useCallback(async (text: string, scope: 'web' | 'workspace' | 'library' = 'workspace') => {
+    await runSearch(text, activeWorkspace?.id, scope);
     setSearchOpen(true);
     void refreshHistory();
   }, [activeWorkspace?.id, runSearch, refreshHistory]);
