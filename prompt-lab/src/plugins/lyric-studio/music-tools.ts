@@ -1,6 +1,6 @@
 import Meyda from 'meyda';
 import { buildCandidateSegments } from './audio-structure';
-import type { AudioAnalysis, AudioFeatureFrame, LrcLine, MelodyNote } from './types';
+import type { AudioAnalysis, AudioFeatureFrame, LrcLine, LyricProject, LyricSection, MelodyNote } from './types';
 
 function extractAudioFeatures(data: Float32Array, sampleRate: number): AudioFeatureFrame[] {
   const frameSize = 4096;
@@ -73,3 +73,67 @@ export function exportMidi(title: string, notes: MelodyNote[], bpm: number): voi
 
 function safeName(value: string): string { return value.replace(/[\\/:*?"<>|]/g, '-') || 'song'; }
 function downloadBlob(content: BlobPart, name: string, type: string): void { const url = URL.createObjectURL(new Blob([content], { type })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click(); URL.revokeObjectURL(url); }
+
+const SUNO_SECTION_TAGS: Record<LyricSection['kind'], string> = {
+  Intro: 'Intro',
+  Verse: 'Verse',
+  'Pre-Chorus': 'Pre-Chorus',
+  Chorus: 'Chorus',
+  Bridge: 'Bridge',
+  Outro: 'Outro',
+};
+
+export interface SunoPromptOptions {
+  /** 顶部风格描述，会覆盖自动拼装的 style hint。 */
+  styleHint?: string;
+  /** 不想出现的标签，例如 "auto-tune, distorted" */
+  negativeTags?: string[];
+  /** 额外的歌曲元信息，比如“主歌用木吉他、副歌用电鼓” */
+  arrangement?: string;
+  /** 强制用这个语言描述，默认根据 project.language */
+  vocalHint?: string;
+}
+
+const VOCAL_HINT_BY_LANG: Record<string, string> = {
+  中文: '华语演唱',
+  粤语: '粤语演唱',
+  英文: 'English vocal',
+};
+
+export function buildSunoPrompt(project: LyricProject, options: SunoPromptOptions = {}): string {
+  const lyrics = project.sections
+    .filter((section) => section.lyrics.trim())
+    .map((section) => `[${SUNO_SECTION_TAGS[section.kind]}]\n${section.lyrics.trim()}`)
+    .join('\n\n');
+
+  const styleParts = [project.style, project.emotion, `${project.bpm} BPM`]
+    .map((value) => value?.toString().trim())
+    .filter(Boolean) as string[];
+  if (project.location) styleParts.push(project.location);
+  if (project.time) styleParts.push(project.time);
+  const vocal = options.vocalHint ?? VOCAL_HINT_BY_LANG[project.language] ?? (project.language ? `${project.language} vocal` : null);
+  if (vocal) styleParts.push(vocal);
+
+  const styleLine = options.styleHint?.trim() || styleParts.join(', ');
+  const arrangementLine = options.arrangement?.trim();
+  const negativeLine = options.negativeTags?.length ? `, avoid: ${options.negativeTags.join(', ')}` : '';
+
+  const header = `[Style: ${styleLine}${arrangementLine ? ` | Arrangement: ${arrangementLine}` : ''}${negativeLine}]`;
+  const meta = [
+    project.title && `# ${project.title}`,
+    project.theme && `Theme: ${project.theme}`,
+    project.story && `Story: ${project.story}`,
+  ].filter(Boolean).join('\n');
+
+  return [header, meta, lyrics].filter(Boolean).join('\n\n');
+}
+
+export async function copySunoPrompt(project: LyricProject, options: SunoPromptOptions = {}): Promise<boolean> {
+  const text = buildSunoPrompt(project, options);
+  if (typeof navigator === 'undefined' || !navigator.clipboard) {
+    downloadBlob(text, `${safeName(project.title)}-suno-prompt.txt`, 'text/plain;charset=utf-8');
+    return false;
+  }
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch { downloadBlob(text, `${safeName(project.title)}-suno-prompt.txt`, 'text/plain;charset=utf-8'); return false; }
+}
