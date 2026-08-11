@@ -39,21 +39,6 @@ const WEBVIEW_SCROLLBAR_CSS = `
   ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.5) !important; background-clip: padding-box !important; }
 `;
 
-const INSTALL_INTERNAL_TAB_INTERCEPTOR = `(() => {
-  if (window.__workBrowserInternalTabInterceptor) return;
-  window.__workBrowserInternalTabInterceptor = true;
-  window.addEventListener('click', (event) => {
-    if (event.defaultPrevented || event.button !== 0) return;
-    const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
-    if (!anchor) return;
-    const opensNewWindow = String(anchor.target || '').toLowerCase() === '_blank' || event.ctrlKey || event.metaKey;
-    if (!opensNewWindow || !/^https?:\\/\\//i.test(anchor.href)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    console.info('__WORK_BROWSER_OPEN_URL__' + anchor.href);
-  }, true);
-})()`;
-
 export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const [preloadPath, setPreloadPath] = useState<string>('');
@@ -111,7 +96,6 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     const onDidFinishLoad = () => {
       setLoaded(true);
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
-      void wv.executeJavaScript(INSTALL_INTERNAL_TAB_INTERCEPTOR).catch(() => undefined);
       // 主动触发 webview 内部重读 annotations
       void wv.executeJavaScript(`window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`).catch(() => undefined);
     };
@@ -133,19 +117,10 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       event.preventDefault();
       if (popupEvent.url && /^https?:\/\//i.test(popupEvent.url)) onOpenUrl?.(popupEvent.url);
     };
-    const onConsoleMessage = (event: Event) => {
-      const message = String((event as Event & { message?: string }).message || '');
-      const prefix = '__WORK_BROWSER_OPEN_URL__';
-      if (!message.startsWith(prefix)) return;
-      const url = message.slice(prefix.length);
-      if (/^https?:\/\//i.test(url)) onOpenUrl?.(url);
-    };
-
     wv.addEventListener('ipc-message', onIpcMessage);
     wv.addEventListener('did-finish-load', onDidFinishLoad);
     wv.addEventListener('did-start-loading', onDidStartLoading);
     wv.addEventListener('new-window' as any, onNewWindow as any);
-    wv.addEventListener('console-message', onConsoleMessage as any);
     wv.addEventListener('page-title-updated', onPageTitleUpdated as any);
     wv.addEventListener('did-navigate', onDidNavigate as any);
     wv.addEventListener('page-favicon-updated', onPageFaviconUpdated as any);
@@ -154,7 +129,6 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       wv.removeEventListener('did-finish-load', onDidFinishLoad);
       wv.removeEventListener('did-start-loading', onDidStartLoading);
       wv.removeEventListener('new-window' as any, onNewWindow as any);
-      wv.removeEventListener('console-message', onConsoleMessage as any);
       wv.removeEventListener('page-title-updated', onPageTitleUpdated as any);
       wv.removeEventListener('did-navigate', onDidNavigate as any);
       wv.removeEventListener('page-favicon-updated', onPageFaviconUpdated as any);

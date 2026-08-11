@@ -126,7 +126,12 @@ export function GraphView({ workspaceId, documents, tabs = [], annotations = [],
       const data = (await window.electronAPI.workBrowser.graph.listByWorkspace(workspaceId, kindArg)) as PageEdge[];
       setEdges(data);
     } catch (e) {
-      console.error('[GraphView] listByWorkspace failed', e);
+      const message = e instanceof Error ? e.message : String(e);
+      // Electron 主进程不支持 renderer 级 HMR。新增 IPC 尚未随主进程重启时，
+      // 图谱仍可用 documents / tabs / annotations 渲染孤立节点。
+      if (!message.includes("No handler registered for 'work-browser:graph:list-by-workspace'")) {
+        console.error('[GraphView] listByWorkspace failed', e);
+      }
       setEdges([]);
     } finally {
       setLoading(false);
@@ -262,7 +267,6 @@ export function GraphView({ workspaceId, documents, tabs = [], annotations = [],
           })),
         ] as any,
         layout: { name: 'fcose', animate: false, randomize: true, nodeSeparation: 80 } as any,
-        wheelSensitivity: 0.2,
         minZoom: 0.2,
         maxZoom: 3,
       });
