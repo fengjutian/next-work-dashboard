@@ -102,6 +102,20 @@ const PROBE_KINDS: { value: NetProbeKind; label: string; placeholder: string }[]
   { value: 'traceroute', label: 'Trace', placeholder: 'github.com' },
 ];
 
+const PROBE_TEMPLATES: Array<{
+  label: string;
+  kind: NetProbeKind;
+  target: string;
+  interval: number;
+  port?: number;
+  url?: string;
+}> = [
+  { label: '公共 DNS', kind: 'dns', target: '1.1.1.1', interval: 10 },
+  { label: 'HTTPS 网站', kind: 'http', target: 'example.com', url: 'https://example.com', interval: 30 },
+  { label: '服务器端口', kind: 'tcp', target: 'example.com', port: 443, interval: 10 },
+  { label: '路由追踪', kind: 'traceroute', target: '1.1.1.1', interval: 60 },
+];
+
 const ALERT_METRICS: { value: AlertMetric; label: string; unit: string }[] = [
   { value: 'latency_p95', label: 'P95 延迟', unit: 'ms' },
   { value: 'latency_avg', label: '平均延迟', unit: 'ms' },
@@ -160,11 +174,12 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'overview' | 'target' | 'rules' | 'lan'>('overview');
   const [history, setHistory] = useState<NetProbeResult[]>([]);
+  const [overviewResults, setOverviewResults] = useState<NetProbeResult[]>([]);
   const [heatmap, setHeatmap] = useState<Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>([]);
   const [systemInfo, setSystemInfo] = useState<{ hostname: string; platform: string } | null>(null);
   const [daemonState, setDaemonState] = useState<NetProbeState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [autoStart, setAutoStart] = useState<boolean>(true);
+  const [autoStart] = useState<boolean>(true);
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [showAddTarget, setShowAddTarget] = useState<boolean>(false);
 
@@ -181,20 +196,23 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [draftMaxHops, setDraftMaxHops] = useState<number>(15);
 
   const targetMap = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
+  const selectedTarget = selectedId ? targetMap.get(selectedId) ?? null : null;
 
   const refreshAll = useCallback(async () => {
     if (!api) return;
     try {
-      const [t, r, i, s] = await Promise.all([
+      const [t, r, i, s, recent] = await Promise.all([
         api.listTargets(),
         api.listAlertRules(),
         api.listIncidents(),
         api.state(),
+        api.listResults({ limit: 500 }),
       ]);
       setTargets(t);
       setRules(r);
       setIncidents(i);
       setDaemonState(s);
+      setOverviewResults(recent);
     } catch (e) {
       setError(String((e as Error).message ?? e));
     }
@@ -242,20 +260,19 @@ export const NetworkObservatoryPanel: React.FC = () => {
         setDaemonState((prev) => prev ? { ...prev, ready: false, lastExit: { code: event.code, error: event.error, timestampMs: event.timestampMs } } : prev);
         return;
       }
-      if (event.type === 'probe_result' && event.id === selectedId) {
-        setHistory((prev) => {
-          const newRow: NetProbeResult = {
-            id: `${event.id}-${event.timestampMs}`,
-            targetId: event.id,
-            probe: event.probe as NetProbeKind,
-            timestampMs: event.timestampMs,
-            success: event.success,
-            latencyMs: event.latencyMs,
-            error: event.error,
-            payloadJson: JSON.stringify(event.payload ?? {}),
-          };
-          return [newRow, ...prev].slice(0, 500);
-        });
+      if (event.type === 'probe_result') {
+        const newRow: NetProbeResult = {
+          id: `${event.id}-${event.timestampMs}`,
+          targetId: event.id,
+          probe: event.probe as NetProbeKind,
+          timestampMs: event.timestampMs,
+          success: event.success,
+          latencyMs: event.latencyMs,
+          error: event.error,
+          payloadJson: JSON.stringify(event.payload ?? {}),
+        };
+        setOverviewResults((prev) => [newRow, ...prev].slice(0, 500));
+        if (event.id === selectedId) setHistory((prev) => [newRow, ...prev].slice(0, 500));
       }
     });
     return off;
@@ -319,6 +336,15 @@ export const NetworkObservatoryPanel: React.FC = () => {
       setError(String((e as Error).message ?? e));
     }
   }, [api, draftKind, draftTarget, draftInterval, draftPort, draftRecord, draftResolvers, draftUrl, draftPath, draftIpVersion, draftMaxHops]);
+
+  const applyTemplate = useCallback((template: typeof PROBE_TEMPLATES[number]) => {
+    setDraftKind(template.kind);
+    setDraftTarget(template.target);
+    setDraftInterval(template.interval);
+    if (template.port) setDraftPort(template.port);
+    setDraftUrl(template.url ?? '');
+    setShowAddTarget(true);
+  }, []);
 
   const removeTarget = useCallback(
     async (id: string) => {
@@ -541,6 +567,18 @@ export const NetworkObservatoryPanel: React.FC = () => {
               <span aria-hidden="true">{showAddTarget ? '−' : '+'}</span>
             </button>
             {showAddTarget && <div id="network-observatory-add-target" className="border-t border-border p-3">
+            <div className="mb-2 grid grid-cols-2 gap-1" aria-label="探测模板">
+              {PROBE_TEMPLATES.map((template) => (
+                <button
+                  key={template.label}
+                  type="button"
+                  onClick={() => applyTemplate(template)}
+                  className="rounded border border-border bg-background px-2 py-1 text-left text-[11px] text-muted-foreground hover:border-primary hover:text-foreground"
+                >
+                  {template.label}
+                </button>
+              ))}
+            </div>
             <div className="mb-2 flex gap-1">
               {PROBE_KINDS.map((k) => (
                 <button
@@ -730,9 +768,9 @@ export const NetworkObservatoryPanel: React.FC = () => {
 
         {/* Right: detail */}
         <main className="flex flex-col overflow-hidden">
-          {activeView === 'target' && selectedId && targetMap.get(selectedId) ? (
+          {activeView === 'target' && selectedTarget ? (
             <TargetDetail
-              target={targetMap.get(selectedId)!}
+              target={selectedTarget}
               history={history}
               stats={stats}
               chartOption={chartOption}
@@ -756,11 +794,25 @@ export const NetworkObservatoryPanel: React.FC = () => {
           ) : activeView === 'lan' ? (
             <LanPanel api={api} systemInfo={systemInfo} />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+            <>
+            <ObservatoryOverview
+              targets={targets}
+              results={overviewResults}
+              incidents={incidents}
+              daemonReady={daemonState?.ready ?? false}
+              onSelectTarget={(id) => {
+                setSelectedId(id);
+                setActiveView('target');
+              }}
+              onAddTarget={() => setShowAddTarget(true)}
+            />
+            {/* Retained for translation extraction; replaced visually by the overview. */}
+            <div className="hidden">
               <Network className="h-10 w-10 opacity-30" />
               <p>添加一个目标,或选择一个目标查看详情</p>
               <p className="text-xs opacity-70">ICMP / TCP / DNS / HTTP · 7 天历史 · 告警</p>
             </div>
+            </>
           )}
         </main>
       </div>
@@ -807,6 +859,111 @@ interface TraceroutePath {
   timestampMs: number;
   complete: boolean;
 }
+
+interface ObservatoryOverviewProps {
+  targets: NetProbeTarget[];
+  results: NetProbeResult[];
+  incidents: NetProbeIncident[];
+  daemonReady: boolean;
+  onSelectTarget: (id: string) => void;
+  onAddTarget: () => void;
+}
+
+const ObservatoryOverview: React.FC<ObservatoryOverviewProps> = ({
+  targets, results, incidents, daemonReady, onSelectTarget, onAddTarget,
+}) => {
+  const latestByTarget = useMemo(() => {
+    const latest = new Map<string, NetProbeResult>();
+    for (const result of results) {
+      const current = latest.get(result.targetId);
+      if (!current || result.timestampMs > current.timestampMs) latest.set(result.targetId, result);
+    }
+    return latest;
+  }, [results]);
+  const enabledTargets = targets.filter((target) => target.enabled);
+  const latestResults = enabledTargets.map((target) => latestByTarget.get(target.id)).filter((result): result is NetProbeResult => Boolean(result));
+  const healthyCount = latestResults.filter((result) => result.success).length;
+  const healthScore = latestResults.length > 0 ? Math.round((healthyCount / latestResults.length) * 100) : null;
+  const successfulLatencies = latestResults.flatMap((result) => result.success && result.latencyMs != null ? [result.latencyMs] : []);
+  const averageLatency = successfulLatencies.length > 0
+    ? Math.round(successfulLatencies.reduce((sum, latency) => sum + latency, 0) / successfulLatencies.length)
+    : null;
+  const unhealthyTargets = enabledTargets.filter((target) => latestByTarget.get(target.id)?.success === false);
+  const openIncidents = incidents.filter((incident) => incident.endedAt == null);
+
+  return (
+    <div className="h-full overflow-auto p-5">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">网络健康总览</h2>
+          <p className="mt-1 text-xs text-muted-foreground">根据每个启用目标的最新探测结果计算</p>
+        </div>
+        <button type="button" onClick={onAddTarget} className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90">
+          <Plus className="h-3.5 w-3.5" /> 新增监控
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <OverviewMetric label="健康分" value={healthScore == null ? '等待数据' : `${healthScore}%`} tone={healthScore == null ? 'muted' : healthScore >= 90 ? 'good' : 'bad'} />
+        <OverviewMetric label="启用目标" value={String(enabledTargets.length)} hint={`共 ${targets.length} 个目标`} />
+        <OverviewMetric label="平均延迟" value={averageLatency == null ? '—' : `${averageLatency} ms`} />
+        <OverviewMetric label="打开事件" value={String(openIncidents.length)} tone={openIncidents.length > 0 ? 'bad' : 'good'} />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <section className="rounded-lg border border-border bg-card p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-medium">需要关注</h3>
+            <span className={`text-xs ${daemonReady ? 'text-emerald-500' : 'text-destructive'}`}>{daemonReady ? '探测服务在线' : '探测服务离线'}</span>
+          </div>
+          {unhealthyTargets.length === 0 ? (
+            <div className="flex items-center gap-2 rounded bg-emerald-500/10 px-3 py-4 text-xs text-emerald-600">
+              <CheckCircle className="h-4 w-4" /> 当前没有探测失败的目标
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {unhealthyTargets.slice(0, 8).map((target) => (
+                <button key={target.id} type="button" onClick={() => onSelectTarget(target.id)} className="flex w-full items-center justify-between rounded border border-destructive/20 px-3 py-2 text-left hover:bg-destructive/5">
+                  <span className="min-w-0 truncate font-mono text-xs">{target.target}</span>
+                  <span className="ml-3 shrink-0 text-[11px] text-destructive">{latestByTarget.get(target.id)?.error ?? '探测失败'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-border bg-card p-4">
+          <h3 className="mb-3 text-sm font-medium">最近探测</h3>
+          {results.length === 0 ? (
+            <p className="py-4 text-xs text-muted-foreground">还没有探测数据，添加目标后会自动显示。</p>
+          ) : (
+            <div className="space-y-1">
+              {[...results].sort((a, b) => b.timestampMs - a.timestampMs).slice(0, 8).map((result) => {
+                const target = targets.find((item) => item.id === result.targetId);
+                return (
+                  <button key={result.id} type="button" onClick={() => target && onSelectTarget(target.id)} disabled={!target} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted disabled:cursor-default">
+                    {result.success ? <CheckCircle className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />}
+                    <span className="min-w-0 flex-1 truncate font-mono">{target?.target ?? result.targetId}</span>
+                    <span className="text-muted-foreground">{result.latencyMs == null ? '—' : `${Math.round(result.latencyMs)} ms`}</span>
+                    <span className="w-16 text-right text-muted-foreground">{formatTimestamp(result.timestampMs)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+};
+
+const OverviewMetric: React.FC<{ label: string; value: string; hint?: string; tone?: 'good' | 'bad' | 'muted' }> = ({ label, value, hint, tone = 'muted' }) => (
+  <div className="rounded-lg border border-border bg-card p-4">
+    <div className="text-xs text-muted-foreground">{label}</div>
+    <div className={`mt-1 text-xl font-semibold ${tone === 'good' ? 'text-emerald-500' : tone === 'bad' ? 'text-destructive' : ''}`}>{value}</div>
+    {hint && <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div>}
+  </div>
+);
 
 interface TargetDetailProps {
   target: NetProbeTarget;

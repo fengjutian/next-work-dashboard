@@ -187,22 +187,6 @@ fn same_content(left: &Path, right: &Path) -> io::Result<bool> {
     }
 }
 
-fn escape_json(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 8);
-    for ch in value.chars() {
-        match ch {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            c if c.is_control() => output.push_str(&format!("\\u{:04x}", c as u32)),
-            c => output.push(c),
-        }
-    }
-    output
-}
-
 fn emit(line: &str) {
     println!("{line}");
     let _ = io::stdout().flush();
@@ -211,12 +195,10 @@ fn emit(line: &str) {
 /// 通用 JSON 事件 emit：所有事件结构都 derive(Serialize)，用 serde_json 写 stdout。
 /// 比手工 format! + escape_json 更快、bug 面更小（自动处理 Unicode、控制字符、转义）。
 fn emit_json<T: Serialize>(event: &T) {
-    // serde_json::to_writer 写入 stdout 不需要中间 String，零拷贝。
-    if let Ok(mut stdout) = io::stdout().lock() {
-        if serde_json::to_writer(&mut stdout, event).is_ok() {
-            let _ = stdout.write_all(b"\n");
-            let _ = stdout.flush();
-        }
+    let mut stdout = io::stdout().lock();
+    if serde_json::to_writer(&mut stdout, event).is_ok() {
+        let _ = stdout.write_all(b"\n");
+        let _ = stdout.flush();
     }
 }
 
@@ -308,7 +290,6 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
             "root is not a directory",
         ));
     }
-    let mut stack: Vec<PathBuf> = vec![root.clone()];
     let mut files = 0_u64;
     let mut bytes = 0_u64;
     let mut errors = 0_u64;
@@ -322,26 +303,23 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
     // 渲染端按 TopN 自己算 largest，这里不再维护 largest heap。
     let mut file_buffer: Vec<FileResult> = Vec::with_capacity(256);
     const FILE_BATCH_SIZE: usize = 256;
-    while let Some(directory) = stack.pop() {
+    // 用 walkdir 替代手写栈：自动跳过 symlink（follow_links=false）。
+    // filter_entry 让 exclusion 命中时跳过整个子树（与旧实现"同名目录不入栈"等价）。
+    let walker = walkdir::WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !(e.depth() > 0 && e.file_type().is_dir() && should_exclude(e.path(), exclusions)));
+    for entry_result in walker {
         while paused.load(Ordering::Relaxed) { thread::sleep(std::time::Duration::from_millis(100)); }
-        directories_scanned += 1;
-        if directories_scanned == 1 || directories_scanned % 25 == 0 {
-            emit_json(&ScanEvent::ScanStatus {
-                current_path: &directory.to_string_lossy(),
-                directories: directories_scanned,
-                files,
-                bytes,
-                elapsed_ms: started.elapsed().as_millis(),
-            });
-        }
-        let entries = match fs::read_dir(&directory) {
+        let entry = match entry_result {
             Ok(value) => value,
             Err(error) => {
                 errors += 1;
                 if reported_errors < 100 {
+                    let synthetic = io::Error::other(error.to_string());
                     emit_json(&ScanEvent::ScanError {
-                        path: &directory.to_string_lossy(),
-                        category: error_category(&error),
+                        path: &error.path().map(|p| p.to_string_lossy()).unwrap_or_default(),
+                        category: error_category(&synthetic),
                         message: error.to_string(),
                     });
                     reported_errors += 1;
@@ -349,93 +327,75 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
                 continue;
             }
         };
-        for entry in entries {
-            while paused.load(Ordering::Relaxed) { thread::sleep(std::time::Duration::from_millis(100)); }
-            let entry = match entry {
-                Ok(value) => value,
-                Err(_) => {
-                    errors += 1;
-                    continue;
-                }
-            };
-            let file_type = match entry.file_type() {
-                Ok(value) => value,
-                Err(_) => {
-                    errors += 1;
-                    continue;
-                }
-            };
-            if file_type.is_symlink() {
-                continue;
+        let path = entry.path();
+        if entry.file_type().is_dir() {
+            directories_scanned += 1;
+            if directories_scanned == 1 || directories_scanned % 25 == 0 {
+                emit_json(&ScanEvent::ScanStatus {
+                    current_path: &path.to_string_lossy(),
+                    directories: directories_scanned,
+                    files,
+                    bytes,
+                    elapsed_ms: started.elapsed().as_millis(),
+                });
             }
-            if file_type.is_dir() {
-                if should_exclude(&entry.path(), exclusions) {
-                    continue;
-                }
-                stack.push(entry.path());
-                continue;
-            }
-            if !file_type.is_file() {
-                continue;
-            }
-            let metadata = match entry.metadata() {
-                Ok(value) => value,
-                Err(_) => {
-                    errors += 1;
-                    continue;
-                }
-            };
-            files += 1;
-            bytes = bytes.saturating_add(metadata.len());
-            if let Some(parent) = entry.path().parent() { let total = directory_bytes.entry(parent.to_path_buf()).or_insert(0); *total = total.saturating_add(metadata.len()); }
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(|v| v.duration_since(UNIX_EPOCH).ok())
-                .map(|v| v.as_millis())
-                .unwrap_or(0);
-            let extension = entry
-                .path()
-                .extension()
-                .and_then(|v| v.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let extension_bytes = extensions.entry(extension.clone()).or_insert(0);
-            *extension_bytes = extension_bytes.saturating_add(metadata.len());
-            // inode 去重：硬链接的多个路径名指向同一 inode。
-            // Unix 上 metadata.ino() 直接返回；Windows 上 metadata.file_index() 等价。
+            continue;
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        // 文件处理
+        let metadata = match path.metadata() {
+            Ok(v) => v,
+            Err(_) => { errors += 1; continue; }
+        };
+        files += 1;
+        bytes = bytes.saturating_add(metadata.len());
+        if let Some(parent) = path.parent() {
+            let total = directory_bytes.entry(parent.to_path_buf()).or_insert(0);
+            *total = total.saturating_add(metadata.len());
+        }
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|v| v.duration_since(UNIX_EPOCH).ok())
+            .map(|v| v.as_millis())
+            .unwrap_or(0);
+        let extension = path
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let extension_bytes = extensions.entry(extension.clone()).or_insert(0);
+        *extension_bytes = extension_bytes.saturating_add(metadata.len());
+        // inode 去重
+        let inode: u64 = {
             #[cfg(unix)]
-            let inode = metadata.ino();
-            #[cfg(windows)]
-            let inode = metadata.file_index();
-            let result = FileResult {
-                path: entry.path().to_string_lossy().into_owned(),
-                size: metadata.len(),
-                modified,
-                extension,
-                inode,
-            };
-            if !skip_duplicates && result.size >= min_duplicate_size {
-                // 用 (size, inode) 做 key：同 size 不同 inode 才算独立候选；
-                // 同 size + 同 inode（硬链接）合并为单条。
-                let bucket_key = (result.size, result.inode);
-                let entry_in_bucket = by_size.entry(bucket_key).or_default();
-                // 同一 inode 的不同路径名：只保留第一个（避免重复字节累加）。
-                if entry_in_bucket.is_empty() {
-                    entry_in_bucket.push(result.clone());
-                } else {
-                    // 已有同 inode 的样本：当前文件不重复加进桶。
-                    // 但 size 仍计入全局 bytes（实际占用一致）。
-                }
+            { metadata.ino() }
+            #[cfg(not(unix))]
+            { 0 }
+        };
+        let result = FileResult {
+            path: path.to_string_lossy().into_owned(),
+            size: metadata.len(),
+            modified,
+            extension,
+            inode,
+        };
+        if !skip_duplicates && result.size >= min_duplicate_size {
+            let bucket_key = (result.size, result.inode);
+            let entry_in_bucket = by_size.entry(bucket_key).or_default();
+            if entry_in_bucket.is_empty() {
+                entry_in_bucket.push(result.clone());
             }
-            file_buffer.push(result);
-            if file_buffer.len() >= FILE_BATCH_SIZE {
-                emit_files_batch(&mut file_buffer);
-            }
-            if files % 2_000 == 0 {
-                emit_files_batch(&mut file_buffer);
-                emit_json(&ScanEvent::Progress { files, bytes, errors });
-            }
+        }
+        file_buffer.push(result);
+        if file_buffer.len() >= FILE_BATCH_SIZE {
+            emit_files_batch(&mut file_buffer);
+        }
+        if files % 2_000 == 0 {
+            emit_files_batch(&mut file_buffer);
+            emit_json(&ScanEvent::Progress { files, bytes, errors });
         }
     }
     // 主循环结束，flush 剩余的 files 批次。
@@ -521,27 +481,14 @@ fn scan(root: &Path, exclusions: &HashSet<String>, skip_duplicates: bool, min_du
     });
     duplicate_groups.truncate(100);
     for (index, group) in duplicate_groups.iter().enumerate() {
-        let files_json = group
-            .files
-            .iter()
-            .map(|file| {
-                format!(
-                    r#"{{"path":"{}","size":{},"modifiedAt":{}}}"#,
-                    escape_json(&file.path),
-                    file.size,
-                    file.modified
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        emit(&format!(
-            r#"{{"type":"duplicate","groupId":"duplicate-{index}","size":{},"files":[{files_json}]}}"#,
-            group.size
-        ));
+        let group_id = format!("duplicate-{index}");
+        emit_json(&ScanEvent::Duplicate {
+            group_id: &group_id,
+            size: group.size,
+            files: &group.files,
+        });
     }
-    emit(&format!(
-        r#"{{"type":"done","files":{files},"bytes":{bytes},"errors":{errors}}}"#
-    ));
+    emit_json(&ScanEvent::Done { files, bytes, errors });
     Ok(())
 }
 
@@ -642,7 +589,7 @@ mod tests {
     fn top_files_remain_bounded_for_large_streams() {
         let mut largest: BinaryHeap<Reverse<BySize>> = BinaryHeap::with_capacity(50);
         for size in 0..1_000_000_u64 {
-            retain_largest(&mut largest, FileResult { path: size.to_string(), size, modified: 0, extension: String::new() }, 50);
+            retain_largest(&mut largest, FileResult { path: size.to_string(), size, modified: 0, extension: String::new(), inode: 0 }, 50);
         }
         // 验证堆容量始终为 50（不再依赖 Vec 长度收缩）
         assert_eq!(largest.len(), 50);
