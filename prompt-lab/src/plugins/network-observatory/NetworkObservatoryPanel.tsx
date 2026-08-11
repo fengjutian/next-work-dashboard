@@ -12,6 +12,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart } from 'echarts/charts';
+import cytoscape, { type Core, type ElementDefinition } from 'cytoscape';
+// `cytoscape-fcose` doesn't ship .d.ts files. Type as `any` to satisfy
+// strict TS without bringing in a `@types/cytoscape-fcose` (none exists).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fcose: any = require('cytoscape-fcose');
 import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption, EChartsType } from 'echarts/core';
@@ -54,6 +59,18 @@ import {
 } from './backend/net-probe-report';
 
 echarts.use([BarChart, HeatmapChart, LineChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
+
+// Register the fcose force-directed layout exactly once. cytoscape.use() is
+// idempotent for the same name, so this is safe even with React StrictMode.
+let fcoseRegistered = false;
+if (!fcoseRegistered) {
+  try {
+    cytoscape.use(fcose as Parameters<typeof cytoscape.use>[0]);
+    fcoseRegistered = true;
+  } catch {
+    // fcose unavailable — fall back to cytoscape's built-in `cose` at use time
+  }
+}
 
 interface NetProbeAPI {
   start: () => Promise<{ ready: boolean; version: string | null }>;
@@ -1677,6 +1694,9 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
   const [subnet, setSubnet] = useState<string>('');
   const [lastScan, setLastScan] = useState<{ scanId: string; found: number; totalMs: number | null; ts: number } | null>(null);
 
+  const cyRef = useRef<HTMLDivElement | null>(null);
+  const cyCoreRef = useRef<Core | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       const rows = await api.listLanHosts({ limit: 500 });
@@ -1723,34 +1743,212 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
     }
   }, [api, refresh, selectedIp]);
 
-  // Layout: local host at the center, discovered hosts around the perimeter.
   // Sort by last-seen desc so freshly seen hosts are on top.
   const sortedHosts = useMemo(() => {
     return [...hosts].sort((a, b) => b.lastSeen - a.lastSeen);
   }, [hosts]);
 
-  const layout = useMemo(() => {
-    const W = 640;
-    const H = 420;
-    const cx = W / 2;
-    const cy = H / 2;
-    const r = Math.min(W, H) / 2 - 60;
-    const n = sortedHosts.length;
-    const positions: Record<string, { x: number; y: number }> = {};
-    for (let i = 0; i < n; i++) {
-      const angle = (i / Math.max(1, n)) * Math.PI * 2 - Math.PI / 2;
-      positions[sortedHosts[i].ip] = {
-        x: cx + r * Math.cos(angle),
-        y: cy + r * Math.sin(angle),
-      };
-    }
-    return { W, H, cx, cy, positions };
-  }, [sortedHosts]);
-
   const selected = useMemo(
     () => (selectedIp ? sortedHosts.find((h) => h.ip === selectedIp) ?? null : null),
     [selectedIp, sortedHosts],
   );
+
+  // Color rule shared by sidebar dots, list view, and the cytoscape stylesheet.
+  const colorForHost = useCallback((h: LanHostUI): string => {
+    if (h.ports.includes(443) || h.ports.includes(80)) return '#10b981';
+    if (h.ports.length > 0) return '#f59e0b';
+    return '#94a3b8';
+  }, []);
+
+  // ── cytoscape: build / sync the graph ──
+  // We initialize the core once and then keep elements in sync via add/remove.
+  // The layout runs only when nodes change (not on selection changes).
+  useEffect(() => {
+    if (!cyRef.current) return;
+    if (!cyCoreRef.current) {
+      cyCoreRef.current = cytoscape({
+        container: cyRef.current,
+        wheelSensitivity: 0.3,
+        minZoom: 0.3,
+        maxZoom: 2.5,
+        boxSelectionEnabled: false,
+        autoungrabify: false, // allow drag-to-rearrange
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': 'data(color)',
+              'border-color': '#0f172a',
+              'border-width': 1.5,
+              'border-opacity': 0.3,
+              label: 'data(label)',
+              'font-size': 9,
+              'font-family': 'ui-monospace, "SF Mono", Consolas, monospace',
+              color: '#0f172a',
+              'text-margin-y': -4,
+              'text-valign': 'top',
+              'text-halign': 'center',
+              'text-wrap': 'wrap',
+              'text-max-width': '90px',
+              width: 36,
+              height: 36,
+            },
+          },
+          {
+            selector: 'node[kind = "self"]',
+            style: {
+              'background-color': '#6366f1',
+              'border-color': '#a5b4fc',
+              'border-width': 2.5,
+              'border-opacity': 1,
+              'font-size': 11,
+              'font-weight': 600,
+              color: '#fff',
+              'text-margin-y': 4,
+              'text-valign': 'center',
+              width: 64,
+              height: 64,
+            },
+          },
+          {
+            selector: 'node:selected',
+            style: {
+              'border-color': '#0f172a',
+              'border-width': 3,
+              'border-opacity': 1,
+              width: 44,
+              height: 44,
+            },
+          },
+          {
+            selector: 'node[kind = "self"]:selected',
+            style: {
+              width: 72,
+              height: 72,
+            },
+          },
+          {
+            selector: 'edge',
+            style: {
+              width: 1.2,
+              'line-color': '#cbd5e1',
+              'line-style': 'dashed',
+              'curve-style': 'bezier',
+              'target-arrow-shape': 'none',
+              opacity: 0.7,
+            },
+          },
+          {
+            selector: 'edge:selected, edge.source:selected, edge.target:selected',
+            style: {
+              'line-color': '#6366f1',
+              'line-style': 'solid',
+              width: 2,
+              opacity: 1,
+            },
+          },
+        ],
+      });
+      cyCoreRef.current.on('tap', 'node', (evt) => {
+        const id = evt.target.id();
+        if (id === 'self') {
+          setSelectedIp(null);
+        } else {
+          setSelectedIp(id);
+        }
+      });
+      cyCoreRef.current.on('tap', (evt) => {
+        // Tap on background deselects.
+        if (evt.target === cyCoreRef.current) setSelectedIp(null);
+      });
+    }
+
+    const cy = cyCoreRef.current;
+    // Build elements.
+    const selfLabel = systemInfo?.hostname ?? '本机';
+    const elements: ElementDefinition[] = [
+      { data: { id: 'self', label: selfLabel, kind: 'self' } },
+      ...sortedHosts.map((h) => ({
+        data: {
+          id: h.ip,
+          label: `${h.ip.split('.').slice(-1)[0]}\n${h.ip}${h.hostname ? `\n${h.hostname.length > 14 ? h.hostname.slice(0, 14) + '…' : h.hostname}` : ''}`,
+          color: colorForHost(h),
+          ports: h.ports,
+        },
+      })),
+      ...sortedHosts.map((h) => ({
+        data: { id: `e-${h.ip}`, source: 'self', target: h.ip },
+      })),
+    ];
+
+    // Diff: remove old non-self nodes/edges, then add new ones. Cheaper than
+    // re-running layout on every refresh.
+    const desiredIds = new Set(elements.map((e) => e.data.id).filter((id) => id !== 'self'));
+    cy.elements('node[ip]').forEach((n) => { if (!desiredIds.has(n.id())) n.remove(); });
+    cy.elements('edge').forEach((e) => { if (e.id() && !desiredIds.has(e.id().slice(2))) e.remove(); });
+    // Add missing nodes / edges.
+    const existingNodeIds = new Set(cy.nodes().map((n) => n.id()));
+    const existingEdgeIds = new Set(cy.edges().map((e) => e.id()));
+    elements.forEach((el) => {
+      const id = (el.data as { id: string }).id;
+      if (id === 'self') return; // never remove the self node
+      if (el.data.source && el.data.target) {
+        if (!existingEdgeIds.has(id)) cy.add(el);
+      } else {
+        if (!existingNodeIds.has(id)) cy.add(el);
+      }
+    });
+    // Apply port count badge as a `data` attr so future stylesheet rules can
+    // size nodes by open-port count if desired.
+    sortedHosts.forEach((h) => {
+      const n = cy.getElementById(h.ip);
+      if (n.nonempty()) n.data('ports', String(h.ports.length));
+    });
+
+    // Run the force-directed layout. We run it once on first render of
+    // nodes, and again whenever the node set size changes significantly.
+    const hasNodes = cy.nodes().length > 1;
+    if (hasNodes) {
+      const layoutName = (cy as unknown as { _private: { layoutName?: string } })._private?.layoutName;
+      void layoutName;
+      const hasFcose = (cy as unknown as { layout: (n: string) => unknown }).layout;
+      void hasFcose;
+      cy.layout({
+        name: 'fcose',
+        quality: 'default',
+        randomize: true,
+        animate: false,
+        nodeSeparation: 80,
+        idealEdgeLength: () => 90,
+        nodeRepulsion: () => 8000,
+        gravity: 0.25,
+        numIter: 2500,
+        fit: true,
+        padding: 30,
+      } as cytoscape.LayoutOptions).run();
+    } else if (cy.nodes().length === 1) {
+      cy.fit(undefined, 30);
+    }
+  }, [sortedHosts, systemInfo, colorForHost]);
+
+  // Cleanup on unmount.
+  useEffect(() => {
+    return () => {
+      cyCoreRef.current?.destroy();
+      cyCoreRef.current = null;
+    };
+  }, []);
+
+  // Sync selectedIp → cytoscape visual selection.
+  useEffect(() => {
+    const cy = cyCoreRef.current;
+    if (!cy) return;
+    cy.elements().unselect();
+    if (selectedIp) {
+      const n = cy.getElementById(selectedIp);
+      if (n.nonempty()) n.select();
+    }
+  }, [selectedIp]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -1779,6 +1977,17 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
           >
             刷新
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              const cy = cyCoreRef.current;
+              if (cy) cy.fit(undefined, 30);
+            }}
+            className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+            title="重新居中 + 适配视窗"
+          >
+            居中
+          </button>
           {lastScan && (
             <span className="text-[11px] text-muted-foreground">
               上次: {lastScan.found} 主机 / {lastScan.totalMs?.toFixed(0) ?? '?'}ms
@@ -1801,9 +2010,9 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
 
       <div className="grid flex-1 grid-cols-[1fr_280px] overflow-hidden">
         {/* Topology */}
-        <div className="relative flex items-center justify-center overflow-hidden bg-muted/20">
+        <div className="relative overflow-hidden bg-muted/20">
           {sortedHosts.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
               <Network className="h-10 w-10 opacity-30" />
               <p>还没有扫描过 LAN</p>
               <p className="text-xs opacity-70">点上面的「扫描 LAN」开始 TCP 扫描本地 /24</p>
@@ -1814,115 +2023,15 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
               )}
             </div>
           ) : (
-            <svg
-              viewBox={`0 0 ${layout.W} ${layout.H}`}
-              className="h-full w-full"
-              preserveAspectRatio="xMidYMid meet"
-            >
-              {/* Center node (this machine) */}
-              <g>
-                <circle cx={layout.cx} cy={layout.cy} r={36} fill="#6366f1" stroke="#a5b4fc" strokeWidth={2} />
-                <text
-                  x={layout.cx}
-                  y={layout.cy + 4}
-                  textAnchor="middle"
-                  fontSize={11}
-                  fontFamily="ui-monospace, monospace"
-                  fill="#fff"
-                  fontWeight={600}
-                >
-                  {systemInfo?.hostname ?? '本机'}
-                </text>
-              </g>
-              {/* Edges (center → host) */}
-              {sortedHosts.map((h) => {
-                const p = layout.positions[h.ip];
-                if (!p) return null;
-                const isSel = selectedIp === h.ip;
-                return (
-                  <line
-                    key={`e-${h.id}`}
-                    x1={layout.cx}
-                    y1={layout.cy}
-                    x2={p.x}
-                    y2={p.y}
-                    stroke={isSel ? '#6366f1' : '#cbd5e1'}
-                    strokeWidth={isSel ? 2 : 1}
-                    strokeDasharray={isSel ? '0' : '3 3'}
-                  />
-                );
-              })}
-              {/* Host nodes */}
-              {sortedHosts.map((h) => {
-                const p = layout.positions[h.ip];
-                if (!p) return null;
-                const isSel = selectedIp === h.ip;
-                const r = isSel ? 22 : 18;
-                const color = h.ports.includes(443) || h.ports.includes(80)
-                  ? '#10b981'
-                  : h.ports.length > 0
-                    ? '#f59e0b'
-                    : '#94a3b8';
-                return (
-                  <g
-                    key={h.id}
-                    onClick={() => setSelectedIp(h.ip)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <circle
-                      cx={p.x}
-                      cy={p.y}
-                      r={r}
-                      fill={color}
-                      stroke={isSel ? '#0f172a' : '#fff'}
-                      strokeWidth={isSel ? 2 : 1.5}
-                      opacity={0.95}
-                    />
-                    <text
-                      x={p.x}
-                      y={p.y + 3}
-                      textAnchor="middle"
-                      fontSize={9}
-                      fontFamily="ui-monospace, monospace"
-                      fill="#fff"
-                      fontWeight={600}
-                      pointerEvents="none"
-                    >
-                      {h.ip.split('.').slice(-1)[0]}
-                    </text>
-                    <text
-                      x={p.x}
-                      y={p.y + r + 12}
-                      textAnchor="middle"
-                      fontSize={9}
-                      fontFamily="ui-monospace, monospace"
-                      fill="#475569"
-                      pointerEvents="none"
-                    >
-                      {h.ip}
-                    </text>
-                    {h.hostname && (
-                      <text
-                        x={p.x}
-                        y={p.y + r + 22}
-                        textAnchor="middle"
-                        fontSize={8}
-                        fontFamily="ui-monospace, monospace"
-                        fill="#94a3b8"
-                        pointerEvents="none"
-                      >
-                        {(h.hostname.length > 18 ? h.hostname.slice(0, 18) + '…' : h.hostname)}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
+            <div ref={cyRef} className="h-full w-full" />
           )}
           <div className="pointer-events-none absolute right-2 top-2 rounded bg-background/80 px-2 py-1 text-[10px] text-muted-foreground shadow">
             <span className="mr-2"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle" /> Web (80/443)</span>
             <span className="mr-2"><span className="inline-block h-2 w-2 rounded-full bg-amber-500 align-middle" /> Other TCP</span>
             <span><span className="inline-block h-2 w-2 rounded-full bg-slate-400 align-middle" /> No ports</span>
+          </div>
+          <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-background/80 px-2 py-1 text-[10px] text-muted-foreground shadow">
+            拖动节点 · 滚轮缩放 · 双击空白处自适应
           </div>
         </div>
 
@@ -2007,13 +2116,7 @@ const LanPanel: React.FC<LanPanelProps> = ({ api, systemInfo }) => {
                   >
                     <span
                       className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{
-                        background: h.ports.includes(443) || h.ports.includes(80)
-                          ? '#10b981'
-                          : h.ports.length > 0
-                            ? '#f59e0b'
-                            : '#94a3b8',
-                      }}
+                      style={{ background: colorForHost(h) }}
                     />
                     <span className="flex-1 min-w-0">
                       <div className="truncate font-mono text-[11px]">{h.ip}</div>
