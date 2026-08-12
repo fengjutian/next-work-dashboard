@@ -56,6 +56,16 @@ const INSTALL_LINK_BRIDGE = `(() => {
   }, true);
 })()`;
 
+function executeWhenWebviewReady(webview: Electron.WebviewTag, script: string) {
+  try {
+    // Electron throws synchronously until the element is attached and dom-ready.
+    webview.getWebContentsId();
+    void webview.executeJavaScript(script).catch(() => undefined);
+  } catch {
+    // A dom-ready listener retries after the guest page becomes usable.
+  }
+}
+
 export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const lastOpenedUrlRef = useRef<{ url: string; at: number }>({ url: '', at: 0 });
@@ -86,7 +96,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
-    void wv.executeJavaScript(INSTALL_LINK_BRIDGE).catch(() => undefined);
+    executeWhenWebviewReady(wv, INSTALL_LINK_BRIDGE);
 
     const onIpcMessage = (e: Electron.IpcMessageEvent) => {
       if (e.channel === 'work-browser:selection-changed') {
@@ -120,12 +130,13 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
         openInInternalTab(url);
       }
     };
+    const installPageBridge = () => executeWhenWebviewReady(wv, INSTALL_LINK_BRIDGE);
     const onDidFinishLoad = () => {
       setLoaded(true);
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
-      void wv.executeJavaScript(INSTALL_LINK_BRIDGE).catch(() => undefined);
+      installPageBridge();
       // 主动触发 webview 内部重读 annotations
-      void wv.executeJavaScript(`window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`).catch(() => undefined);
+      executeWhenWebviewReady(wv, `window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`);
     };
     const onDidStartLoading = () => setLoaded(false);
     const onPageTitleUpdated = (event: Event) => {
@@ -158,6 +169,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       if (message.startsWith(prefix)) openInInternalTab(message.slice(prefix.length));
     };
     wv.addEventListener('ipc-message', onIpcMessage);
+    wv.addEventListener('dom-ready', installPageBridge);
     wv.addEventListener('did-finish-load', onDidFinishLoad);
     wv.addEventListener('did-start-loading', onDidStartLoading);
     wv.addEventListener('new-window' as any, onNewWindow as any);
@@ -168,6 +180,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     wv.addEventListener('page-favicon-updated', onPageFaviconUpdated as any);
     return () => {
       wv.removeEventListener('ipc-message', onIpcMessage);
+      wv.removeEventListener('dom-ready', installPageBridge);
       wv.removeEventListener('did-finish-load', onDidFinishLoad);
       wv.removeEventListener('did-start-loading', onDidStartLoading);
       wv.removeEventListener('new-window' as any, onNewWindow as any);
