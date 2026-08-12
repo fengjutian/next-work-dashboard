@@ -311,6 +311,7 @@ export function WorkBrowserPanel() {
                 tabs={tabs}
                 activeId={activeTab?.id}
                 onActivate={setActiveTab}
+                onHome={() => setActiveTab(null)}
                 onClose={async (t) => {
                   try {
                     await window.electronAPI.workBrowser.tab.remove(t.id);

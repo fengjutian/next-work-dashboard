@@ -2,7 +2,7 @@
  * TabBar — Tab 切换栏
  */
 import { Tabs, Space } from '../ui';
-import { ArrowRight, Globe2, X } from 'lucide-react';
+import { ArrowRight, Globe2, Home, X } from 'lucide-react';
 import { useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
 
@@ -10,11 +10,12 @@ export interface TabBarProps {
   tabs: Tab[];
   activeId?: string;
   onActivate: (tab: Tab) => void;
+  onHome: () => void;
   onClose: (tab: Tab) => void;
   onAdd: (url: string) => boolean | Promise<boolean>;
 }
 
-export function TabBar({ tabs, activeId, onActivate, onClose, onAdd }: TabBarProps) {
+export function TabBar({ tabs, activeId, onActivate, onHome, onClose, onAdd }: TabBarProps) {
   const [url, setUrl] = useState('');
   const submitUrl = async () => {
     const value = url.trim();
@@ -39,6 +40,19 @@ export function TabBar({ tabs, activeId, onActivate, onClose, onAdd }: TabBarPro
 
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/30 bg-muted/10 px-2">
+      <button
+        type="button"
+        aria-label="返回首页"
+        title="返回首页"
+        onClick={onHome}
+        className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${
+          activeId
+            ? 'text-muted-foreground hover:bg-primary/8 hover:text-primary'
+            : 'bg-primary/10 text-primary shadow-sm'
+        }`}
+      >
+        <Home size={15} strokeWidth={1.8} />
+      </button>
       <div className="work-browser-tab-strip min-w-0 flex-1 overflow-hidden">
         <Tabs
           size="small"
