@@ -43,6 +43,8 @@ export function WorkBrowserPanel() {
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
+  const [closedTabs, setClosedTabs] = useState<Tab[]>([]);
+  const [webviewRefreshKey, setWebviewRefreshKey] = useState(0);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
