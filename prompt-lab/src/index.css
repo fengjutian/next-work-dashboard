@@ -260,6 +260,36 @@
   background: hsl(var(--primary) / 0.36);
 }
 
+@keyframes work-browser-load-slide {
+  0% { transform: translateX(-100%) scaleX(.35); }
+  55% { transform: translateX(35%) scaleX(.55); }
+  100% { transform: translateX(220%) scaleX(.3); }
+}
+
+.work-browser-load-track {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  height: 2px;
+  overflow: hidden;
+  background: hsl(var(--primary) / 0.06);
+  pointer-events: none;
+}
+
+.work-browser-load-track > span {
+  display: block;
+  width: 45%;
+  height: 100%;
+  transform-origin: center;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / .85), transparent);
+  animation: work-browser-load-slide 1.15s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-browser-load-track > span { animation: none; transform: none; width: 100%; }
+}
+
 /* Monaco draws its own scrollbar instead of using the browser pseudo-elements. */
 .monaco-scrollable-element > .scrollbar {
   background: transparent !important;

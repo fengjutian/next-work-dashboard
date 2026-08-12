@@ -43,8 +43,11 @@ export function WorkBrowserPanel() {
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
+  const [cachedPages, setCachedPages] = useState<Tab[]>([]);
+  const [readyPages, setReadyPages] = useState<Record<string, boolean>>({});
+  const [displayedPageId, setDisplayedPageId] = useState<string | null>(null);
   const [closedTabs, setClosedTabs] = useState<Tab[]>([]);
-  const [webviewRefreshKey, setWebviewRefreshKey] = useState(0);
+  const [webviewRefreshKeys, setWebviewRefreshKeys] = useState<Record<string, number>>({});
   const [documents, setDocuments] = useState<Document[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
@@ -61,6 +64,7 @@ export function WorkBrowserPanel() {
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
   const aiConfigBridgeAvailableRef = useRef(true);
+  const lastTabByWorkspaceRef = useRef(new Map<string, string>());
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
@@ -121,7 +125,10 @@ export function WorkBrowserPanel() {
       const list = (await window.electronAPI.workBrowser.tab.list(wsId)) as Tab[];
       if (activeWorkspaceIdRef.current !== wsId) return;
       setTabs(list);
-      setActiveTab((current) => list.find((tab) => tab.id === current?.id) ?? list[0] ?? null);
+      setActiveTab((current) => {
+        const rememberedId = lastTabByWorkspaceRef.current.get(wsId);
+        return list.find((tab) => tab.id === rememberedId) ?? list.find((tab) => tab.id === current?.id) ?? list[0] ?? null;
+      });
     } catch (error) {
       if (activeWorkspaceIdRef.current === wsId) message.error(`标签页加载失败：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -160,8 +167,6 @@ export function WorkBrowserPanel() {
 
   useEffect(() => {
     if (activeWorkspaceId) {
-      setTabs([]);
-      setActiveTab(null);
       setDocuments([]);
       setAnnotations([]);
       void refreshTabs(activeWorkspaceId);
@@ -169,6 +174,30 @@ export function WorkBrowserPanel() {
       void refreshAnnotations(activeWorkspaceId);
     }
   }, [activeWorkspaceId, refreshTabs, refreshDocuments, refreshAnnotations]);
+
+  useEffect(() => {
+    if (!activeTab) return;
+    lastTabByWorkspaceRef.current.set(activeTab.workspaceId, activeTab.id);
+    setCachedPages((current) => {
+      const next = [...current.filter((tab) => tab.id !== activeTab.id), activeTab];
+      if (next.length <= 8) return next;
+      const removable = next.find((tab) => !tab.isPinned && tab.id !== activeTab.id);
+      return removable ? next.filter((tab) => tab.id !== removable.id) : next.slice(-8);
+    });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!activeTab) {
+      setDisplayedPageId(null);
+    } else if (readyPages[activeTab.id]) {
+      setDisplayedPageId(activeTab.id);
+    }
+  }, [activeTab, readyPages]);
+
+  const handlePageReadyChange = useCallback((tabId: string, ready: boolean) => {
+    setReadyPages((current) => current[tabId] === ready ? current : { ...current, [tabId]: ready });
+    if (ready && activeTab?.id === tabId) setDisplayedPageId(tabId);
+  }, [activeTab?.id]);
 
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
 
@@ -230,7 +259,9 @@ export function WorkBrowserPanel() {
 
   const closeTabSet = useCallback(async (closing: Tab[]) => {
     if (!activeWorkspace || closing.length === 0) return;
-    const closingIds = new Set(closing.map((tab) => tab.id));
+    const closingIds = new Set<string>(closing.map((tab) => tab.id));
+    setCachedPages((current) => current.filter((tab) => !closingIds.has(tab.id)));
+    setReadyPages((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !closingIds.has(id))));
     const remaining = tabs.filter((tab) => !closingIds.has(tab.id));
     setClosedTabs((current) => [...closing.slice().reverse(), ...current].slice(0, 20));
     try {
@@ -381,22 +412,44 @@ export function WorkBrowserPanel() {
                 onCloseOthers={(tab) => closeTabSet(tabs.filter((candidate) => candidate.id !== tab.id && !candidate.isPinned))}
                 onDuplicate={duplicateTab}
                 onPin={togglePinnedTab}
-                onRefresh={(tab) => { setActiveTab(tab); setWebviewRefreshKey((key) => key + 1); }}
+                onRefresh={(tab) => {
+                  setActiveTab(tab);
+                  setWebviewRefreshKeys((current) => ({ ...current, [tab.id]: (current[tab.id] || 0) + 1 }));
+                }}
                 onReopen={reopenClosedTab}
                 onAddRight={addTabRight}
                 onAdd={handleAddTab}
               />
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <WebContent
-                  key={`${activeTab?.id || 'home'}:${webviewRefreshKey}`}
-                  tab={activeTab}
-                  cleanerEnabled={cleanerEnabled}
-                  blockedDomains={blockedDomains}
-                  activeDocumentId={activeDocumentId}
-                  onOpenUrl={handleAddTab}
-                  onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
-                  onTabUpdate={handleTabUpdate}
-                />
+              <div className="relative flex-1 overflow-hidden bg-card">
+                {!activeTab && (
+                  <div className="absolute inset-0 transition-opacity duration-200 ease-out">
+                    <WebContent
+                      tab={null}
+                      cleanerEnabled={cleanerEnabled}
+                      blockedDomains={blockedDomains}
+                      onOpenUrl={handleAddTab}
+                      onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
+                    />
+                  </div>
+                )}
+                {cachedPages.map((page) => {
+                  const visible = page.id === displayedPageId;
+                  return (
+                    <div key={`${page.id}:${webviewRefreshKeys[page.id] || 0}`} className={`absolute inset-0 transition-opacity duration-200 ease-out ${visible ? 'z-10 visible opacity-100' : 'invisible z-0 pointer-events-none opacity-0'}`} aria-hidden={!visible}>
+                      <WebContent
+                        tab={page}
+                        cleanerEnabled={cleanerEnabled}
+                        blockedDomains={blockedDomains}
+                        activeDocumentId={visible ? activeDocumentId : undefined}
+                        onOpenUrl={handleAddTab}
+                        onSelectionChange={visible ? undefined : () => undefined}
+                        onResearch={(topic) => { setResearchTopic(topic); setResearchOpen(true); }}
+                        onTabUpdate={handleTabUpdate}
+                        onReadyChange={handlePageReadyChange}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </>
           ) : (

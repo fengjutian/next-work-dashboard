@@ -23,6 +23,7 @@ export interface WebContentProps {
   onOpenUrl?: (url: string) => void;
   onResearch?: (topic: string) => void;
   onTabUpdate?: (tabId: string, patch: Partial<Pick<Tab, 'title' | 'url' | 'favicon'>>) => void;
+  onReadyChange?: (tabId: string, ready: boolean) => void;
 }
 
 declare global {
@@ -66,7 +67,7 @@ function executeWhenWebviewReady(webview: Electron.WebviewTag, script: string) {
   }
 }
 
-export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate }: WebContentProps) {
+export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate, onReadyChange }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const lastOpenedUrlRef = useRef<{ url: string; at: number }>({ url: '', at: 0 });
   const [preloadPath, setPreloadPath] = useState<string>('');
@@ -163,12 +164,16 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     const installPageBridge = () => executeWhenWebviewReady(wv, INSTALL_LINK_BRIDGE);
     const onDidFinishLoad = () => {
       setLoaded(true);
+      if (tab) onReadyChange?.(tab.id, true);
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
       installPageBridge();
       // 主动触发 webview 内部重读 annotations
       executeWhenWebviewReady(wv, `window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`);
     };
-    const onDidStartLoading = () => setLoaded(false);
+    const onDidStartLoading = () => {
+      setLoaded(false);
+      if (tab) onReadyChange?.(tab.id, false);
+    };
     const onPageTitleUpdated = (event: Event) => {
       const title = String((event as Event & { title?: string }).title || '').trim();
       if (title && tab) onTabUpdate?.(tab.id, { title });
@@ -220,7 +225,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       wv.removeEventListener('did-navigate', onDidNavigate as any);
       wv.removeEventListener('page-favicon-updated', onPageFaviconUpdated as any);
     };
-  }, [tab, preloadPath, onSelectionChange, openInInternalTab, onTabUpdate]);
+  }, [tab, preloadPath, onSelectionChange, openInInternalTab, onTabUpdate, onReadyChange]);
 
   const handleAnnotation = useCallback(async (note: string, color: string) => {
     if (!selection || !activeDocumentId) return;
@@ -338,9 +343,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
         </div>
       )}
       {!loaded && preloadPath && (
-        <div style={{ position: 'absolute', top: 8, right: 12, background: 'rgba(255,255,255,0.85)', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
-          ⏳ 加载中…
-        </div>
+        <div className="work-browser-load-track" aria-label="页面加载中"><span /></div>
       )}
       {selection && activeDocumentId && (
         <AnnotationPopover
