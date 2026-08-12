@@ -15,7 +15,9 @@ export default defineConfig({
       // optional `require("canvas")` probe is converted into a hard runtime
       // resolution and Save Page fails on installations without canvas.
       // Native Node resolution preserves jsdom's try/catch fallback.
-      external: ['node-pty', '@lancedb/lancedb', 'better-sqlite3', 'jsdom'],
+      // `ws` must also stay external. Bundling turns its guarded optional
+      // bufferutil/utf-8-validate probes into hard runtime imports.
+      external: ['node-pty', '@lancedb/lancedb', 'better-sqlite3', 'jsdom', 'ws'],
     },
   },
 });

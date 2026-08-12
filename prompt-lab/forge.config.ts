@@ -63,6 +63,7 @@ const config: ForgeConfig = {
       const copied = new Set<string>();
       copyProductionDependencyTree('node-pty', buildPath, projectRoot, copied);
       copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied);
+      copyProductionDependencyTree('ws', buildPath, projectRoot, copied);
     },
   },
   packagerConfig: {
