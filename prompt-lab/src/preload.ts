@@ -187,6 +187,7 @@ const electronAPI: ElectronAPI = {
     cancelFile: (fileId: string) => ipcRenderer.invoke('phone:cancel-file', fileId),
     markRead: (peerId: string, messageIds: string[]) => ipcRenderer.invoke('phone:mark-read', peerId, messageIds),
     sendSignal: (peerId: string, signal: import('./plugins/phone/types').PhoneSignal) => ipcRenderer.invoke('phone:send-signal', peerId, signal),
+    recordCall: (input: Parameters<import('./plugins/phone/types').PhoneApi['recordCall']>[0]) => ipcRenderer.invoke('phone:record-call', input),
     openFile: (messageId: string) => ipcRenderer.invoke('phone:open-file', messageId),
     onEvent: (handler: (event: import('./plugins/phone/types').PhoneEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: import('./plugins/phone/types').PhoneEvent) => handler(payload);

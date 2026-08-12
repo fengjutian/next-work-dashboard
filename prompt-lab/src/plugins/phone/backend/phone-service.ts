@@ -6,7 +6,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { PhoneEvent, PhoneMessage, PhonePeer, PhoneSignal, PhoneState } from '../types';
+import type { PhoneApi, PhoneEvent, PhoneMessage, PhonePeer, PhoneSignal, PhoneState } from '../types';
 import { summarizeConversations, validChatText } from '../domain';
 import { derivePeerKey, isFreshTimestamp, signEnvelope, verifyEnvelope } from '../security';
 
@@ -148,5 +148,6 @@ export function setupPhoneIPC(): void {
   ipcMain.handle('phone:cancel-file', (_event, fileId: string) => { const controller = fileControllers.get(fileId); controller?.abort(); return Boolean(controller); });
   ipcMain.handle('phone:mark-read', (_event, peerId: string, ids: string[]) => { for (const id of ids) { const message = store.messages.find((item) => item.id === id && item.peerId === peerId && item.recipientId === store.deviceId); if (message) message.status = 'read'; sendWire(peerId, 'chat.read', { messageId: id }); } save(); return true; });
   ipcMain.handle('phone:send-signal', (_event, peerId: string, signal: PhoneSignal) => sendWire(peerId, signal.type, { ...signal, type: undefined, peerId: undefined }));
+  ipcMain.handle('phone:record-call', (_event, input: Parameters<PhoneApi['recordCall']>[0]) => { const message: PhoneMessage = { id: `call:${input.callId}:${store.deviceId}`, peerId: input.peerId, senderId: input.direction === 'outgoing' ? store.deviceId : input.peerId, recipientId: input.direction === 'outgoing' ? input.peerId : store.deviceId, kind: 'call', call: { id: input.callId, kind: input.kind, direction: input.direction, outcome: input.outcome, durationMs: input.durationMs }, createdAt: Date.now(), status: 'read' }; persistMessage(message); emit({ type: 'message', message }); return message; });
   ipcMain.handle('phone:open-file', async (_event, messageId: string) => { const file = store.messages.find((item) => item.id === messageId)?.file?.localPath; if (!file || !fs.existsSync(file)) return false; return (await shell.openPath(file)) === ''; });
 }

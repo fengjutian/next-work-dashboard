@@ -28,4 +28,11 @@ describe('phone message domain', () => {
     const read = { ...message('m2', 'read', 1), peerId: 'p2', senderId: 'p2', recipientId: 'local' };
     expect(summarizeConversations([read, unread], 'local').map((item) => [item.peerId, item.unreadCount])).toEqual([['p1', 1], ['p2', 0]]);
   });
+
+  it('includes call records in the conversation summary without counting read calls as unread', () => {
+    const call: PhoneMessage = { id: 'call:1', peerId: 'p1', senderId: 'local', recipientId: 'p1', kind: 'call', call: { id: '1', kind: 'audio', direction: 'outgoing', outcome: 'completed', durationMs: 5_000 }, createdAt: 4, status: 'read' };
+    const [summary] = summarizeConversations([call], 'local');
+    expect(summary.lastMessage?.kind).toBe('call');
+    expect(summary.unreadCount).toBe(0);
+  });
 });

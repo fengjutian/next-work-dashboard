@@ -1,6 +1,7 @@
 export type PhonePeerStatus = 'online' | 'offline' | 'pending' | 'incompatible';
 export type PhoneMessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 export type PhoneCallKind = 'audio' | 'video';
+export type PhoneCallOutcome = 'completed' | 'rejected' | 'cancelled' | 'busy' | 'timeout' | 'failed' | 'remote-hangup';
 
 export interface PhonePeer {
   id: string;
@@ -21,7 +22,7 @@ export interface PhoneMessage {
   kind: 'text' | 'file' | 'call';
   text?: string;
   file?: { id: string; name: string; size: number; sha256?: string; localPath?: string; url?: string };
-  call?: { id: string; kind: PhoneCallKind; outcome?: string; durationMs?: number };
+  call?: { id: string; kind: PhoneCallKind; direction: 'incoming' | 'outgoing'; outcome: PhoneCallOutcome; durationMs?: number };
   createdAt: number;
   status: PhoneMessageStatus;
 }
@@ -77,6 +78,7 @@ export interface PhoneApi {
   cancelFile(fileId: string): Promise<boolean>;
   markRead(peerId: string, messageIds: string[]): Promise<boolean>;
   sendSignal(peerId: string, signal: PhoneSignal): Promise<boolean>;
+  recordCall(input: { callId: string; peerId: string; kind: PhoneCallKind; direction: 'incoming' | 'outgoing'; outcome: PhoneCallOutcome; durationMs?: number }): Promise<PhoneMessage>;
   openFile(messageId: string): Promise<boolean>;
   onEvent(handler: (event: PhoneEvent) => void): () => void;
 }
