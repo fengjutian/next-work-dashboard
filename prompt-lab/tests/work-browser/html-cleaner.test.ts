@@ -2,7 +2,7 @@
  * HTML Cleaner — 选择器 + CSS + JS 注入
  */
 import { describe, it, expect } from 'vitest';
-import { htmlClean } from '@/core/work-browser/parser';
+import { extractReadability, htmlClean } from '@/core/work-browser/parser';
 import { DEFAULT_CLEAN_OPTIONS, type CleanOptions } from '@/core/work-browser/types';
 
 describe('htmlClean', () => {
@@ -43,5 +43,21 @@ describe('htmlClean', () => {
   it('JS 注入幂等（防重复注入）', () => {
     const out = htmlClean(DEFAULT_CLEAN_OPTIONS);
     expect(out.js).toContain('__workBrowserCleaner');
+  });
+});
+
+describe('extractReadability', () => {
+  it('parses HTML with CSS selectors and removes non-content elements', async () => {
+    const result = await extractReadability(`<!doctype html><html><head>
+      <title>Saved article</title><meta name="author" content="Alice">
+      </head><body><nav>Navigation</nav><article class="story-content">
+      <h1>Saved article</h1><p>This is the main article paragraph with enough useful text to be selected as readable content.</p>
+      <p>A second paragraph makes the extracted article stable and representative.</p>
+      </article><script>window.bad = true</script></body></html>`);
+
+    expect(result.title).toBe('Saved article');
+    expect(result.author).toBe('Alice');
+    expect(result.contentText).toContain('main article paragraph');
+    expect(result.contentText).not.toContain('Navigation');
   });
 });

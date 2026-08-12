@@ -19,8 +19,7 @@ const POSITIVE_HINTS = ['article', 'main', 'content', 'post', 'story', 'entry', 
 const NEGATIVE_HINTS = ['comment', 'sidebar', 'footer', 'header', 'nav', 'ad', 'meta', 'share', 'related', 'recommend'];
 
 /**
- * 简化的 DOM 接口 — 接受 jsdom / @xmldom/xmldom / 自实现的最小子集。
- * Phase 1 在 main 端用 @xmldom/xmldom（已安装）解析。
+ * 简化的 DOM 接口 — 接受 jsdom 或自实现的最小子集。
  */
 export interface DomLike {
   querySelectorAll(sel: string): DomLike[];
@@ -167,11 +166,14 @@ export function extractReadabilityFromDom(dom: DomLike): ReadabilityResult {
 }
 
 /**
- * 便捷入口：传入 HTML 字符串和 DOM 解析器（默认 lazy import @xmldom/xmldom）。
+ * 便捷入口：传入 HTML 字符串并用 jsdom 构造标准 DOM。
  * 主要在 main 端用，测试里直接传 DomLike。
  */
 export async function extractReadability(html: string): Promise<ReadabilityResult> {
-  const { DOMParser } = await import('@xmldom/xmldom');
-  const doc = new DOMParser().parseFromString(html, 'text/html') as unknown as DomLike;
+  // @xmldom/xmldom only implements the XML DOM API and does not provide
+  // querySelector/querySelectorAll. The extractor relies on CSS selectors,
+  // therefore it must use an HTML DOM implementation here.
+  const { JSDOM } = await import('jsdom');
+  const doc = new JSDOM(html).window.document as unknown as DomLike;
   return extractReadabilityFromDom(doc);
 }
