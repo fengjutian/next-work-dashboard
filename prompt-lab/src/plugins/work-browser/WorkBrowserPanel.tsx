@@ -215,6 +215,66 @@ export function WorkBrowserPanel() {
     }
   }, [activeWorkspace, refreshTabs, tabs]);
 
+  const createTabAt = useCallback(async (url: string, position: number, title?: string) => {
+    if (!activeWorkspace) return null;
+    const created = (await window.electronAPI.workBrowser.tab.create({
+      workspaceId: activeWorkspace.id,
+      url,
+      title: title || url,
+      position,
+    })) as Tab;
+    await refreshTabs(activeWorkspace.id);
+    setActiveTab(created);
+    return created;
+  }, [activeWorkspace, refreshTabs]);
+
+  const closeTabSet = useCallback(async (closing: Tab[]) => {
+    if (!activeWorkspace || closing.length === 0) return;
+    const closingIds = new Set(closing.map((tab) => tab.id));
+    const remaining = tabs.filter((tab) => !closingIds.has(tab.id));
+    setClosedTabs((current) => [...closing.slice().reverse(), ...current].slice(0, 20));
+    try {
+      await Promise.all(closing.map((tab) => window.electronAPI.workBrowser.tab.remove(tab.id)));
+      if (activeTab && closingIds.has(activeTab.id)) {
+        setActiveTab(remaining.find((tab) => tab.position >= activeTab.position) ?? remaining.at(-1) ?? null);
+      }
+      await refreshTabs(activeWorkspace.id);
+    } catch (error) {
+      message.error(`关闭标签页失败：${error instanceof Error ? error.message : String(error)}`);
+      await refreshTabs(activeWorkspace.id);
+    }
+  }, [activeWorkspace, activeTab, refreshTabs, tabs]);
+
+  const addTabRight = useCallback(async (tab: Tab) => {
+    const stored = await window.electronAPI.workBrowser.settings.get('workBrowser.homeUrl').catch(() => undefined);
+    const url = typeof stored === 'string' && /^https?:\/\//i.test(stored) ? stored : 'https://www.google.com';
+    await createTabAt(url, tab.position + 0.5, url);
+  }, [createTabAt]);
+
+  const duplicateTab = useCallback(async (tab: Tab) => {
+    await createTabAt(tab.url, tab.position + 0.5, tab.title);
+  }, [createTabAt]);
+
+  const togglePinnedTab = useCallback(async (tab: Tab) => {
+    try {
+      await window.electronAPI.workBrowser.tab.update(tab.id, { isPinned: !tab.isPinned });
+      if (activeWorkspace) await refreshTabs(activeWorkspace.id);
+    } catch (error) {
+      message.error(`固定标签页失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [activeWorkspace, refreshTabs]);
+
+  const reopenClosedTab = useCallback(async () => {
+    const [closed, ...rest] = closedTabs;
+    if (!closed || !activeWorkspace) return;
+    try {
+      await createTabAt(closed.url, closed.position, closed.title);
+      setClosedTabs(rest);
+    } catch (error) {
+      message.error(`恢复标签页失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [activeWorkspace, closedTabs, createTabAt]);
+
   const handleSave = useCallback(async (input: { url: string; title?: string; workspaceId: string }) => {
     try {
       const r = await window.electronAPI.workBrowser.document.save({
@@ -312,20 +372,22 @@ export function WorkBrowserPanel() {
               <TabBar
                 tabs={tabs}
                 activeId={activeTab?.id}
+                canReopen={closedTabs.length > 0}
                 onActivate={setActiveTab}
                 onHome={() => setActiveTab(null)}
-                onClose={async (t) => {
-                  try {
-                    await window.electronAPI.workBrowser.tab.remove(t.id);
-                    await refreshTabs(activeWorkspace.id);
-                  } catch (error) {
-                    message.error(`关闭标签页失败：${error instanceof Error ? error.message : String(error)}`);
-                  }
-                }}
+                onClose={(tab) => closeTabSet([tab])}
+                onCloseRight={(tab) => closeTabSet(tabs.filter((candidate) => !candidate.isPinned && candidate.position > tab.position))}
+                onCloseOthers={(tab) => closeTabSet(tabs.filter((candidate) => candidate.id !== tab.id && !candidate.isPinned))}
+                onDuplicate={duplicateTab}
+                onPin={togglePinnedTab}
+                onRefresh={(tab) => { setActiveTab(tab); setWebviewRefreshKey((key) => key + 1); }}
+                onReopen={reopenClosedTab}
+                onAddRight={addTabRight}
                 onAdd={handleAddTab}
               />
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 <WebContent
+                  key={`${activeTab?.id || 'home'}:${webviewRefreshKey}`}
                   tab={activeTab}
                   cleanerEnabled={cleanerEnabled}
                   blockedDomains={blockedDomains}
