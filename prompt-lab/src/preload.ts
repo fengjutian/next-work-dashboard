@@ -172,6 +172,24 @@ const electronAPI: ElectronAPI = {
       return () => { ipcRenderer.removeListener('mycast:event', listener); };
     },
   },
+  phone: {
+    start: () => ipcRenderer.invoke('phone:start'),
+    state: () => ipcRenderer.invoke('phone:state'),
+    listMessages: (peerId: string) => ipcRenderer.invoke('phone:list-messages', peerId),
+    pair: (peerId: string) => ipcRenderer.invoke('phone:pair', peerId),
+    respondPairing: (requestId: string, peerId: string, accepted: boolean) => ipcRenderer.invoke('phone:respond-pairing', requestId, peerId, accepted),
+    removePeer: (peerId: string) => ipcRenderer.invoke('phone:remove-peer', peerId),
+    sendText: (peerId: string, text: string) => ipcRenderer.invoke('phone:send-text', peerId, text),
+    selectAndSendFiles: (peerId: string) => ipcRenderer.invoke('phone:send-files', peerId),
+    markRead: (peerId: string, messageIds: string[]) => ipcRenderer.invoke('phone:mark-read', peerId, messageIds),
+    sendSignal: (peerId: string, signal: import('./plugins/phone/types').PhoneSignal) => ipcRenderer.invoke('phone:send-signal', peerId, signal),
+    openFile: (messageId: string) => ipcRenderer.invoke('phone:open-file', messageId),
+    onEvent: (handler: (event: import('./plugins/phone/types').PhoneEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: import('./plugins/phone/types').PhoneEvent) => handler(payload);
+      ipcRenderer.on('phone:event', listener);
+      return () => { ipcRenderer.removeListener('phone:event', listener); };
+    },
+  },
   voice: {
     start: () => ipcRenderer.invoke('voice:start'),
     state: () => ipcRenderer.invoke('voice:state'),

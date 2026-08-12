@@ -50,6 +50,7 @@ import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
 import { setupMyCastIPC, startDaemon as startMyCastDaemon, shutdownDaemon as shutdownMyCastDaemon } from '../plugins/mycast/backend/mycast-service';
+import { setupPhoneIPC, startPhoneService, stopPhoneService } from '../plugins/phone/backend/phone-service';
 import { setupVoiceIPC, startDaemon as startVoiceDaemon, shutdownDaemon as shutdownVoiceDaemon } from '../plugins/voice-input/backend/voice-engine-service';
 import { fetchMarketplaceCatalog, installMarketplacePlugin, loadCachedCatalog, loadPluginDefinitions, savePluginDefinitions } from './plugin-marketplace';
 
@@ -2397,6 +2398,13 @@ export function setupIPC(webviewPreloadPath: string) {
   app.on('before-quit', () => {
     void shutdownMyCastDaemon();
   });
+
+  setupPhoneIPC();
+  void startPhoneService().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[phone] service warm-start failed:', err);
+  });
+  app.on('before-quit', () => { void stopPhoneService(); });
 
   // ── Voice Engine (本地语音输入) ──
   setupVoiceIPC();

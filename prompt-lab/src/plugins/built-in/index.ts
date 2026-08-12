@@ -52,6 +52,7 @@ const networkObservatory = preloadable(() => import('../network-observatory').th
 const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ default: m.LyricStudioPanel })));
 const videoPlayer = preloadable(() => import('../video-player').then((m) => ({ default: m.VideoPlayerPanel })));
 const mycast = preloadable(() => import('../mycast').then((m) => ({ default: m.MyCastPanel })));
+const phone = preloadable(() => import('../phone').then((m) => ({ default: m.PhonePanel })));
 const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ default: m.VoiceInputPanel })));
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
@@ -80,6 +81,7 @@ const NetworkObservatoryPanel = networkObservatory.component;
 const LyricStudioPanel = lyricStudio.component;
 const VideoPlayerPanel = videoPlayer.component;
 const MyCastPanel = mycast.component;
+const PhonePanel = phone.component;
 const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const WorkBrowserPanel = workBrowser.component;
@@ -525,12 +527,30 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'phone',
+    name: 'Phone',
+    icon: Phone,
+    component: PhonePanel,
+    preload: phone.preload,
+    enabled: false,
+    order: 28,
+    keepAlive: true,
+    contributions: {
+      commands: [{ id: 'phone.refresh', title: '刷新局域网设备', category: 'Phone' }],
+    },
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('phone.refresh', () => {
+        window.dispatchEvent(new CustomEvent('phone:command', { detail: { command: 'refresh' } }));
+      }));
+    },
+  },
+  {
     id: 'voice-input',
     name: '语音输入',
     icon: AudioLines,
     component: VoiceInputPanel,
     enabled: true,
-    order: 28,
+    order: 29,
     keepAlive: true,
     contributions: {
       commands: [
