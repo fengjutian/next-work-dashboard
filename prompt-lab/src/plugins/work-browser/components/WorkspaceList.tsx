@@ -83,7 +83,9 @@ export function WorkspaceList({ workspaces, activeId, onSelect, onCreate, onUpda
           <div className="space-y-1.5">
             {workspaces.map((ws, index) => {
               const active = ws.id === activeId;
-              const color = WORKSPACE_COLORS[index % WORKSPACE_COLORS.length];
+              const color = ws.color && ws.color.toLowerCase() !== '#2563eb'
+                ? ws.color
+                : WORKSPACE_COLORS[index % WORKSPACE_COLORS.length];
               const editing = editingId === ws.id;
               return (
                 <div
