@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceMessageStatus, mergeMessages, validChatText } from '../src/plugins/phone/domain';
+import { advanceMessageStatus, mergeMessages, summarizeConversations, validChatText } from '../src/plugins/phone/domain';
 import type { PhoneMessage } from '../src/plugins/phone/types';
 
 function message(id: string, status: PhoneMessage['status'], createdAt = 1): PhoneMessage {
@@ -22,5 +22,10 @@ describe('phone message domain', () => {
     expect(() => validChatText('   ')).toThrow('消息不能为空');
     expect(() => validChatText('x'.repeat(20_001))).toThrow('20,000');
   });
-});
 
+  it('summarizes unread messages per peer and orders recent conversations first', () => {
+    const unread = { ...message('m1', 'delivered', 2), peerId: 'p1', senderId: 'p1', recipientId: 'local' };
+    const read = { ...message('m2', 'read', 1), peerId: 'p2', senderId: 'p2', recipientId: 'local' };
+    expect(summarizeConversations([read, unread], 'local').map((item) => [item.peerId, item.unreadCount])).toEqual([['p1', 1], ['p2', 0]]);
+  });
+});

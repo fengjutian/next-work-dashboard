@@ -7,7 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { PhoneEvent, PhoneMessage, PhonePeer, PhoneSignal, PhoneState } from '../types';
-import { validChatText } from '../domain';
+import { summarizeConversations, validChatText } from '../domain';
+import { derivePeerKey, isFreshTimestamp, signEnvelope, verifyEnvelope } from '../security';
 
 const DISCOVERY_PORT = 39177;
 const PROTOCOL_VERSION = 1;
@@ -25,12 +26,15 @@ let wsServer: WebSocketServer | undefined;
 let udp: dgram.Socket | undefined;
 let discoveryTimer: NodeJS.Timeout | undefined;
 let pruneTimer: NodeJS.Timeout | undefined;
+let heartbeatTimer: NodeJS.Timeout | undefined;
 let port = 0;
 let started = false;
 const peers = new Map<string, PhonePeer>();
 const sockets = new Map<string, WebSocket>();
 const pairingRequests = new Map<string, string>();
 const receivedFiles = new Map<string, string>();
+const fileControllers = new Map<string, AbortController>();
+const recentEnvelopeIds = new Map<string, number>();
 
 function uuid(): string { return crypto.randomUUID(); }
 function fingerprint(secret: string): string { return crypto.createHash('sha256').update(secret).digest('hex').slice(0, 24); }
@@ -43,8 +47,8 @@ function load(): void {
 }
 function emit(event: PhoneEvent): void { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('phone:event', event); }
 function state(): PhoneState { return { ready: started, deviceId: store.deviceId, deviceName: store.deviceName, fingerprint: fingerprint(store.secret), port, peers: [...peers.values()].sort((a, b) => Number(b.trusted) - Number(a.trusted) || a.name.localeCompare(b.name)) }; }
-function peerAuth(peerId: string): string | undefined { const trusted = store.trusted[peerId]; if (!trusted) return undefined; return crypto.createHash('sha256').update([fingerprint(store.secret), trusted.fingerprint].sort().join(':')).digest('hex'); }
-function envelope(type: string, payload: Record<string, unknown>, peerId?: string): WireEnvelope { return { version: 1, id: uuid(), type, fromDeviceId: store.deviceId, fromName: store.deviceName, fingerprint: fingerprint(store.secret), sentAt: Date.now(), payload, auth: peerId ? peerAuth(peerId) : undefined }; }
+function peerAuth(peerId: string): string | undefined { const trusted = store.trusted[peerId]; return trusted ? derivePeerKey(fingerprint(store.secret), trusted.fingerprint) : undefined; }
+function envelope(type: string, payload: Record<string, unknown>, peerId?: string): WireEnvelope { const frame: WireEnvelope = { version: 1, id: uuid(), type, fromDeviceId: store.deviceId, fromName: store.deviceName, fingerprint: fingerprint(store.secret), sentAt: Date.now(), payload }; const key = peerId ? peerAuth(peerId) : undefined; if (key) frame.auth = signEnvelope(frame, key); return frame; }
 function persistMessage(message: PhoneMessage): void { const index = store.messages.findIndex((item) => item.id === message.id); if (index >= 0) store.messages[index] = message; else store.messages.push(message); save(); }
 function updateMessageStatus(id: string, status: PhoneMessage['status']): void { const message = store.messages.find((item) => item.id === id); if (!message) return; message.status = status; save(); emit({ type: 'message.status', messageId: id, peerId: message.peerId, status: status === 'read' ? 'read' : 'delivered' }); }
 function flushQueuedMessages(peerId: string): void { for (const message of store.messages.filter((item) => item.peerId === peerId && item.senderId === store.deviceId && (item.status === 'queued' || item.status === 'failed') && item.kind === 'text')) { message.status = 'sending'; if (sendWire(peerId, 'chat.text', { message })) message.status = 'sent'; } save(); }
@@ -76,6 +80,10 @@ async function handleWire(socket: WebSocket, raw: string, expectedPeerId?: strin
     emit({ type: 'pair.result', requestId: String(frame.payload.requestId), accepted, peer }); return peer.id;
   }
   if (!peer.trusted) return peer.id;
+  const key = peerAuth(peer.id); if (!key || !verifyEnvelope(frame, key) || !isFreshTimestamp(frame.sentAt) || recentEnvelopeIds.has(frame.id)) return peer.id;
+  recentEnvelopeIds.set(frame.id, Date.now());
+  if (frame.type === 'peer.ping') { socket.send(JSON.stringify(envelope('peer.pong', {}, peer.id))); return peer.id; }
+  if (frame.type === 'peer.pong') return peer.id;
   if (frame.type === 'chat.text' || frame.type === 'chat.file') {
     const message = frame.payload.message as unknown as PhoneMessage; if (!message?.id || message.recipientId !== store.deviceId) return peer.id;
     if (message.kind === 'file' && message.file) message.file.localPath = receivedFiles.get(message.file.id);
@@ -112,14 +120,15 @@ export async function startPhoneService(): Promise<PhoneState> {
   udp = dgram.createSocket({ type: 'udp4', reuseAddr: true }); udp.on('message', (buffer, info) => { try { const data = JSON.parse(buffer.toString()) as { v: number; id: string; name: string; port: number; fingerprint: string }; if (data.id === store.deviceId) return; const trusted = store.trusted[data.id]; const peer: PhonePeer = { id: data.id, name: data.name, host: info.address, port: data.port, fingerprint: data.fingerprint, trusted: Boolean(trusted && trusted.fingerprint === data.fingerprint), status: data.v === PROTOCOL_VERSION ? 'online' : 'incompatible', lastSeenAt: Date.now() }; peers.set(peer.id, peer); emit({ type: 'peer.updated', peer }); if (peer.trusted && peer.status === 'online' && store.deviceId.localeCompare(peer.id) < 0) connect(peer); } catch { /* ignore unrelated UDP */ } });
   await new Promise<void>((resolve, reject) => { udp?.once('error', reject); udp?.bind(DISCOVERY_PORT, () => { udp?.setBroadcast(true); resolve(); }); });
   const announce = () => { const data = Buffer.from(JSON.stringify({ v: PROTOCOL_VERSION, id: store.deviceId, name: store.deviceName, port, fingerprint: fingerprint(store.secret) })); udp?.send(data, DISCOVERY_PORT, '255.255.255.255'); };
-  announce(); discoveryTimer = setInterval(announce, 3000); pruneTimer = setInterval(() => { const now = Date.now(); for (const [id, peer] of peers) if (now - peer.lastSeenAt > PEER_TTL_MS && peer.status !== 'offline') { const next = { ...peer, status: 'offline' as const }; peers.set(id, next); emit({ type: 'peer.updated', peer: next }); } }, 3000);
+  announce(); discoveryTimer = setInterval(announce, 3000); heartbeatTimer = setInterval(() => { for (const [peerId, socket] of sockets) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(envelope('peer.ping', {}, peerId))); }, 5000); pruneTimer = setInterval(() => { const now = Date.now(); for (const [id, seenAt] of recentEnvelopeIds) if (now - seenAt > 120_000) recentEnvelopeIds.delete(id); for (const [id, peer] of peers) if (now - peer.lastSeenAt > PEER_TTL_MS && peer.status !== 'offline') { const next = { ...peer, status: 'offline' as const }; peers.set(id, next); emit({ type: 'peer.updated', peer: next }); } }, 3000);
   started = true; emit({ type: 'state', state: state() }); return state();
 }
-export async function stopPhoneService(): Promise<void> { if (!started) return; if (discoveryTimer) clearInterval(discoveryTimer); if (pruneTimer) clearInterval(pruneTimer); discoveryTimer = undefined; pruneTimer = undefined; for (const socket of sockets.values()) socket.close(); sockets.clear(); udp?.close(); udp = undefined; wsServer?.close(); wsServer = undefined; await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve()); server = undefined; port = 0; started = false; peers.clear(); emit({ type: 'state', state: state() }); }
+export async function stopPhoneService(): Promise<void> { if (!started) return; if (discoveryTimer) clearInterval(discoveryTimer); if (heartbeatTimer) clearInterval(heartbeatTimer); if (pruneTimer) clearInterval(pruneTimer); discoveryTimer = undefined; heartbeatTimer = undefined; pruneTimer = undefined; for (const socket of sockets.values()) socket.close(); sockets.clear(); udp?.close(); udp = undefined; wsServer?.close(); wsServer = undefined; await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve()); server = undefined; port = 0; started = false; peers.clear(); recentEnvelopeIds.clear(); emit({ type: 'state', state: state() }); }
 
 async function sendText(peerId: string, value: string): Promise<PhoneMessage> { const text = validChatText(value); const message: PhoneMessage = { id: uuid(), peerId, senderId: store.deviceId, recipientId: peerId, kind: 'text', text, createdAt: Date.now(), status: 'sending' }; persistMessage(message); const sent = sendWire(peerId, 'chat.text', { message }); message.status = sent ? 'sent' : 'queued'; persistMessage(message); return message; }
-async function sendFiles(peerId: string): Promise<PhoneMessage[]> { const peer = peers.get(peerId); if (!peer?.trusted || peer.status !== 'online') throw new Error('对方不在线或尚未配对'); const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] }); if (result.canceled) return []; const messages: PhoneMessage[] = [];
-  for (const source of result.filePaths) { const stats = fs.statSync(source); const name = path.basename(source); if (stats.size > MAX_FILE_BYTES) throw new Error(`${name} 超过 10 GB`); const sha256 = await new Promise<string>((resolve, reject) => { const hash = crypto.createHash('sha256'); fs.createReadStream(source).on('data', (chunk) => hash.update(chunk)).on('end', () => resolve(hash.digest('hex'))).on('error', reject); }); const fileId = uuid(); const auth = peerAuth(peerId); const uploadUrl = `http://${peer.host}:${peer.port}/phone/files/${fileId}?peerId=${encodeURIComponent(store.deviceId)}&name=${encodeURIComponent(name)}&sha256=${sha256}`; let transferred = 0; const body = fs.createReadStream(source); body.on('data', (chunk: Buffer) => { transferred += chunk.length; emit({ type: 'file.progress', peerId, fileId, name, transferred, total: stats.size, direction: 'send', status: 'transferring' }); }); try { const upload = await fetch(uploadUrl, { method: 'PUT', headers: { authorization: `Bearer ${auth}`, 'content-length': String(stats.size) }, body: body as unknown as BodyInit, duplex: 'half' } as RequestInit & { duplex: string }); if (!upload.ok) throw new Error(`文件发送失败 (${upload.status})`); emit({ type: 'file.progress', peerId, fileId, name, transferred: stats.size, total: stats.size, direction: 'send', status: 'completed' }); } catch (error) { emit({ type: 'file.progress', peerId, fileId, name, transferred, total: stats.size, direction: 'send', status: 'failed' }); throw error; } const message: PhoneMessage = { id: uuid(), peerId, senderId: store.deviceId, recipientId: peerId, kind: 'file', file: { id: fileId, name, size: stats.size, sha256, localPath: source }, createdAt: Date.now(), status: 'sent' }; persistMessage(message); sendWire(peerId, 'chat.file', { message }); messages.push(message); }
+async function sendFile(peerId: string, source: string, existing?: PhoneMessage): Promise<PhoneMessage> { const peer = peers.get(peerId); if (!peer?.trusted || peer.status !== 'online') throw new Error('对方不在线或尚未配对'); const stats = fs.statSync(source); const name = path.basename(source); if (stats.size > MAX_FILE_BYTES) throw new Error(`${name} 超过 10 GB`); const fileId = existing?.file?.id ?? uuid(); const message: PhoneMessage = existing ?? { id: uuid(), peerId, senderId: store.deviceId, recipientId: peerId, kind: 'file', file: { id: fileId, name, size: stats.size, localPath: source }, createdAt: Date.now(), status: 'sending' }; message.status = 'sending'; persistMessage(message); const sha256 = await new Promise<string>((resolve, reject) => { const hash = crypto.createHash('sha256'); fs.createReadStream(source).on('data', (chunk) => hash.update(chunk)).on('end', () => resolve(hash.digest('hex'))).on('error', reject); }); if (message.file) message.file.sha256 = sha256; const controller = new AbortController(); fileControllers.set(fileId, controller); const auth = peerAuth(peerId); const uploadUrl = `http://${peer.host}:${peer.port}/phone/files/${fileId}?peerId=${encodeURIComponent(store.deviceId)}&name=${encodeURIComponent(name)}&sha256=${sha256}`; let transferred = 0; const body = fs.createReadStream(source); body.on('data', (chunk: Buffer) => { transferred += chunk.length; emit({ type: 'file.progress', peerId, fileId, name, transferred, total: stats.size, direction: 'send', status: 'transferring' }); }); try { const upload = await fetch(uploadUrl, { method: 'PUT', headers: { authorization: `Bearer ${auth}`, 'content-length': String(stats.size) }, body: body as unknown as BodyInit, duplex: 'half', signal: controller.signal } as RequestInit & { duplex: string }); if (!upload.ok) throw new Error(`文件发送失败 (${upload.status})`); message.status = 'sent'; persistMessage(message); sendWire(peerId, 'chat.file', { message }); emit({ type: 'file.progress', peerId, fileId, name, transferred: stats.size, total: stats.size, direction: 'send', status: 'completed' }); return message; } catch (error) { message.status = 'failed'; persistMessage(message); emit({ type: 'message', message }); emit({ type: 'file.progress', peerId, fileId, name, transferred, total: stats.size, direction: 'send', status: 'failed' }); throw error; } finally { fileControllers.delete(fileId); } }
+async function sendFiles(peerId: string): Promise<PhoneMessage[]> { const result = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] }); if (result.canceled) return []; const messages: PhoneMessage[] = [];
+  for (const source of result.filePaths) messages.push(await sendFile(peerId, source));
   return messages;
 }
 
@@ -129,12 +138,15 @@ export function setupPhoneIPC(): void {
   ipcMain.handle('phone:stop', () => stopPhoneService());
   ipcMain.handle('phone:state', () => state());
   ipcMain.handle('phone:list-messages', (_event, peerId: string) => store.messages.filter((item) => item.peerId === peerId));
+  ipcMain.handle('phone:list-conversations', () => summarizeConversations(store.messages, store.deviceId));
   ipcMain.handle('phone:pair', (_event, peerId: string) => { const requestId = uuid(); if (!sendWire(peerId, 'pair.request', { requestId })) throw new Error('设备不可达'); return { requestId }; });
   ipcMain.handle('phone:respond-pairing', (_event, requestId: string, peerId: string, accepted: boolean) => { const peer = peers.get(peerId); if (!peer || pairingRequests.get(requestId) !== peerId) return false; if (accepted) { store.trusted[peerId] = { fingerprint: peer.fingerprint, name: peer.name }; peer.trusted = true; save(); } pairingRequests.delete(requestId); return sendWire(peerId, 'pair.result', { requestId, accepted }); });
-  ipcMain.handle('phone:remove-peer', (_event, peerId: string) => { delete store.trusted[peerId]; const peer = peers.get(peerId); if (peer) { peer.trusted = false; emit({ type: 'peer.updated', peer }); } save(); return true; });
+  ipcMain.handle('phone:remove-peer', (_event, peerId: string) => { delete store.trusted[peerId]; sockets.get(peerId)?.close(); sockets.delete(peerId); const peer = peers.get(peerId); if (peer) { peer.trusted = false; emit({ type: 'peer.updated', peer }); } save(); return true; });
   ipcMain.handle('phone:send-text', (_event, peerId: string, text: string) => sendText(peerId, text));
   ipcMain.handle('phone:send-files', (_event, peerId: string) => sendFiles(peerId));
-  ipcMain.handle('phone:mark-read', (_event, peerId: string, ids: string[]) => { for (const id of ids) sendWire(peerId, 'chat.read', { messageId: id }); return true; });
+  ipcMain.handle('phone:retry-file', (_event, messageId: string) => { const message = store.messages.find((item) => item.id === messageId && item.kind === 'file'); const source = message?.file?.localPath; if (!message || !source || !fs.existsSync(source)) throw new Error('原文件不存在，无法重试'); return sendFile(message.peerId, source, message); });
+  ipcMain.handle('phone:cancel-file', (_event, fileId: string) => { const controller = fileControllers.get(fileId); controller?.abort(); return Boolean(controller); });
+  ipcMain.handle('phone:mark-read', (_event, peerId: string, ids: string[]) => { for (const id of ids) { const message = store.messages.find((item) => item.id === id && item.peerId === peerId && item.recipientId === store.deviceId); if (message) message.status = 'read'; sendWire(peerId, 'chat.read', { messageId: id }); } save(); return true; });
   ipcMain.handle('phone:send-signal', (_event, peerId: string, signal: PhoneSignal) => sendWire(peerId, signal.type, { ...signal, type: undefined, peerId: undefined }));
   ipcMain.handle('phone:open-file', async (_event, messageId: string) => { const file = store.messages.find((item) => item.id === messageId)?.file?.localPath; if (!file || !fs.existsSync(file)) return false; return (await shell.openPath(file)) === ''; });
 }

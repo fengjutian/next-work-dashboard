@@ -1,4 +1,4 @@
-import type { PhoneMessage, PhoneMessageStatus } from './types';
+import type { PhoneConversationSummary, PhoneMessage, PhoneMessageStatus } from './types';
 
 const STATUS_ORDER: Record<PhoneMessageStatus, number> = { queued: 0, sending: 1, sent: 2, delivered: 3, read: 4, failed: 1 };
 
@@ -24,3 +24,10 @@ export function validChatText(value: string): string {
   return text;
 }
 
+export function summarizeConversations(messages: PhoneMessage[], localDeviceId: string): PhoneConversationSummary[] {
+  const peerIds = [...new Set(messages.map((message) => message.peerId))];
+  return peerIds.map((peerId) => {
+    const peerMessages = messages.filter((message) => message.peerId === peerId).sort((a, b) => b.createdAt - a.createdAt);
+    return { peerId, lastMessage: peerMessages[0], unreadCount: peerMessages.filter((message) => message.recipientId === localDeviceId && message.status !== 'read').length };
+  }).sort((a, b) => (b.lastMessage?.createdAt ?? 0) - (a.lastMessage?.createdAt ?? 0));
+}

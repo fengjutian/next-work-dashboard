@@ -36,6 +36,12 @@ export interface PhoneState {
   error?: string;
 }
 
+export interface PhoneConversationSummary {
+  peerId: string;
+  lastMessage?: PhoneMessage;
+  unreadCount: number;
+}
+
 export type PhoneSignal =
   | { type: 'pair.request'; requestId: string; peer: PhonePeer }
   | { type: 'pair.result'; requestId: string; accepted: boolean; peer: PhonePeer }
@@ -61,11 +67,14 @@ export interface PhoneApi {
   stop(): Promise<void>;
   state(): Promise<PhoneState>;
   listMessages(peerId: string): Promise<PhoneMessage[]>;
+  listConversations(): Promise<PhoneConversationSummary[]>;
   pair(peerId: string): Promise<{ requestId: string }>;
   respondPairing(requestId: string, peerId: string, accepted: boolean): Promise<boolean>;
   removePeer(peerId: string): Promise<boolean>;
   sendText(peerId: string, text: string): Promise<PhoneMessage>;
   selectAndSendFiles(peerId: string): Promise<PhoneMessage[]>;
+  retryFile(messageId: string): Promise<PhoneMessage>;
+  cancelFile(fileId: string): Promise<boolean>;
   markRead(peerId: string, messageIds: string[]): Promise<boolean>;
   sendSignal(peerId: string, signal: PhoneSignal): Promise<boolean>;
   openFile(messageId: string): Promise<boolean>;
