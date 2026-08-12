@@ -53,10 +53,12 @@ export type PhoneEvent =
   | { type: 'pair.result'; requestId: string; accepted: boolean; peer: PhonePeer }
   | { type: 'message'; message: PhoneMessage }
   | { type: 'message.status'; messageId: string; peerId: string; status: 'delivered' | 'read' }
+  | { type: 'file.progress'; peerId: string; fileId: string; name: string; transferred: number; total: number; direction: 'send' | 'receive'; status: 'transferring' | 'completed' | 'failed' }
   | Exclude<PhoneSignal, { type: 'pair.request' | 'pair.result' | 'message' | 'message.status' }>;
 
 export interface PhoneApi {
   start(): Promise<PhoneState>;
+  stop(): Promise<void>;
   state(): Promise<PhoneState>;
   listMessages(peerId: string): Promise<PhoneMessage[]>;
   pair(peerId: string): Promise<{ requestId: string }>;
@@ -69,4 +71,3 @@ export interface PhoneApi {
   openFile(messageId: string): Promise<boolean>;
   onEvent(handler: (event: PhoneEvent) => void): () => void;
 }
-

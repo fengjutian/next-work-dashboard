@@ -539,9 +539,11 @@ const builtInPlugins: Plugin[] = [
       commands: [{ id: 'phone.refresh', title: '刷新局域网设备', category: 'Phone' }],
     },
     activate: (context) => {
+      void window.electronAPI.phone.start();
       context.subscriptions.add(context.commands.register('phone.refresh', () => {
-        window.dispatchEvent(new CustomEvent('phone:command', { detail: { command: 'refresh' } }));
+        void window.electronAPI.phone.start();
       }));
+      return () => { void window.electronAPI.phone.stop(); };
     },
   },
   {

@@ -174,6 +174,7 @@ const electronAPI: ElectronAPI = {
   },
   phone: {
     start: () => ipcRenderer.invoke('phone:start'),
+    stop: () => ipcRenderer.invoke('phone:stop'),
     state: () => ipcRenderer.invoke('phone:state'),
     listMessages: (peerId: string) => ipcRenderer.invoke('phone:list-messages', peerId),
     pair: (peerId: string) => ipcRenderer.invoke('phone:pair', peerId),
