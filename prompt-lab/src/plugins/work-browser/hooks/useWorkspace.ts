@@ -24,11 +24,16 @@ export function useWorkspaces(includeArchived = false) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const create = useCallback(async (input: { name: string; description?: string; icon?: string }) => {
+  const create = useCallback(async (input: { name: string; description?: string; icon?: string; color?: string }) => {
     const ws = (await window.electronAPI.workBrowser.workspace.create(input)) as Workspace;
     await refresh();
     return ws;
   }, [refresh]);
 
-  return { workspaces, loading, error, refresh, create };
+  const update = useCallback(async (id: string, patch: Partial<Pick<Workspace, 'name' | 'description' | 'icon' | 'color'>>) => {
+    await window.electronAPI.workBrowser.workspace.update(id, patch);
+    await refresh();
+  }, [refresh]);
+
+  return { workspaces, loading, error, refresh, create, update };
 }

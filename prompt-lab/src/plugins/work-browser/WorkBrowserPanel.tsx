@@ -39,7 +39,7 @@ import { STORAGE_KEYS } from './constants';
 export function WorkBrowserPanel() {
   const aiApi = useStore((state) => state.aiApi);
   const setActiveActivity = useStore((state) => state.setActiveActivity);
-  const { workspaces, create: createWorkspace } = useWorkspaces(false);
+  const { workspaces, create: createWorkspace, update: updateWorkspace } = useWorkspaces(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
@@ -359,6 +359,7 @@ export function WorkBrowserPanel() {
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
             onSelect={setActiveWorkspace}
+            onUpdate={updateWorkspace}
             onCreate={async (input) => {
               const created = await createWorkspace(input);
               setActiveWorkspace(created);
