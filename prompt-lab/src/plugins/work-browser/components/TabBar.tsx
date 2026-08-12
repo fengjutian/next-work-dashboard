@@ -65,8 +65,15 @@ export function TabBar(props: TabBarProps) {
         event.preventDefault();
         setMenu({ tab, x: event.clientX, y: event.clientY });
       }}
-      className={`group/tab flex shrink-0 cursor-default items-center gap-2 rounded-xl text-xs transition ${
-        isVertical ? 'h-9 w-full px-2.5' : tab.isPinned ? 'h-9 w-10 justify-center px-0' : 'h-9 min-w-28 max-w-56 px-3'
+      style={!isVertical && !tab.isPinned ? {
+        flexBasis: orderedTabs.length > 6 ? `${100 / orderedTabs.length}%` : '180px',
+      } : undefined}
+      className={`group/tab flex cursor-default items-center gap-2 text-xs transition ${
+        isVertical
+          ? 'h-9 w-full rounded-xl px-2.5'
+          : tab.isPinned
+            ? 'h-9 w-10 shrink-0 justify-center border-r border-border/30 px-0'
+            : 'h-9 min-w-16 max-w-56 shrink border-r border-border/30 px-2.5'
       } ${activeId === tab.id ? 'bg-primary/10 text-primary shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}`}
       title={tab.title || tab.url}
     >
@@ -84,7 +91,7 @@ export function TabBar(props: TabBarProps) {
   return (
     <div className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/30 bg-muted/10 px-2">
       <button type="button" aria-label="返回首页" title="返回首页" onClick={onHome} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${activeId ? 'text-muted-foreground hover:bg-primary/10 hover:text-primary' : 'bg-primary/10 text-primary shadow-sm'}`}><Home size={15} /></button>
-      <div className="work-browser-tab-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1">
+      <div className="work-browser-tab-strip flex min-w-0 flex-1 items-center overflow-x-auto py-1">
         {orderedTabs.map((tab) => tabButton(tab))}
       </div>
       <div className="flex h-8 w-[min(30vw,360px)] shrink-0 items-center rounded-lg bg-muted/45 pl-2.5 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/10">
