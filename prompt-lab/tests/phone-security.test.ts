@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { derivePeerKey, isFreshTimestamp, signEnvelope, verifyEnvelope } from '../src/plugins/phone/security';
+import { derivePeerKey, isFreshTimestamp, pairingCode, signEnvelope, verifyEnvelope } from '../src/plugins/phone/security';
 
 const frame = { id: 'message-1', type: 'chat.text', fromDeviceId: 'device-a', sentAt: 1000, payload: { text: 'hello' } };
 
@@ -26,5 +26,12 @@ describe('phone envelope security', () => {
     expect(isFreshTimestamp(1_000, 120_000, 120_000)).toBe(true);
     expect(isFreshTimestamp(1_000, 122_001, 120_000)).toBe(false);
     expect(isFreshTimestamp(Number.NaN, 1_000)).toBe(false);
+  });
+
+  it('shows both pairing participants the same six-digit code', () => {
+    const first = pairingCode('request-1', 'fingerprint-a', 'fingerprint-b');
+    expect(pairingCode('request-1', 'fingerprint-b', 'fingerprint-a')).toBe(first);
+    expect(first).toMatch(/^\d{6}$/);
+    expect(pairingCode('request-2', 'fingerprint-a', 'fingerprint-b')).not.toBe(first);
   });
 });

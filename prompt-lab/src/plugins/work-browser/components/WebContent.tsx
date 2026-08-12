@@ -69,6 +69,7 @@ function executeWhenWebviewReady(webview: Electron.WebviewTag, script: string) {
 
 export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate, onReadyChange }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
+  const hasEverLoadedRef = useRef(false);
   const lastOpenedUrlRef = useRef<{ url: string; at: number }>({ url: '', at: 0 });
   const [preloadPath, setPreloadPath] = useState<string>('');
   const [selection, setSelection] = useState<{ text: string; selector: string; x: number; y: number } | null>(null);
@@ -164,6 +165,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     const installPageBridge = () => executeWhenWebviewReady(wv, INSTALL_LINK_BRIDGE);
     const onDidFinishLoad = () => {
       setLoaded(true);
+      hasEverLoadedRef.current = true;
       if (tab) onReadyChange?.(tab.id, true);
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
       installPageBridge();
@@ -172,7 +174,9 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     };
     const onDidStartLoading = () => {
       setLoaded(false);
-      if (tab) onReadyChange?.(tab.id, false);
+      // A cached webview remains displayable while a later navigation is in
+      // progress. Marking it unready again causes workspace switches to flash.
+      if (tab && !hasEverLoadedRef.current) onReadyChange?.(tab.id, false);
     };
     const onPageTitleUpdated = (event: Event) => {
       const title = String((event as Event & { title?: string }).title || '').trim();

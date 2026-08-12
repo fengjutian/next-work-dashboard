@@ -74,7 +74,9 @@ if (started) {
   const openMainWindow = () => createWindow(path.join(__dirname, 'preload.js'));
 
   app.on('second-instance', () => {
-    if (app.isReady()) openMainWindow();
+    if (!app.isReady()) return;
+    if (BrowserWindow.getAllWindows().length === 0) openMainWindow();
+    else showMainWindow();
   });
 
   // 应用生命周期

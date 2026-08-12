@@ -6,6 +6,9 @@ export type PhoneCallOutcome = 'completed' | 'rejected' | 'cancelled' | 'busy' |
 export interface PhonePeer {
   id: string;
   name: string;
+  nickname?: string;
+  remark?: string;
+  avatar?: string;
   host: string;
   port: number;
   fingerprint: string;
@@ -31,6 +34,8 @@ export interface PhoneState {
   ready: boolean;
   deviceId: string;
   deviceName: string;
+  nickname: string;
+  avatar?: string;
   fingerprint: string;
   port: number;
   peers: PhonePeer[];
@@ -56,8 +61,8 @@ export type PhoneSignal =
 export type PhoneEvent =
   | { type: 'state'; state: PhoneState }
   | { type: 'peer.updated'; peer: PhonePeer }
-  | { type: 'pair.request'; requestId: string; peer: PhonePeer }
-  | { type: 'pair.result'; requestId: string; accepted: boolean; peer: PhonePeer }
+  | { type: 'pair.request'; requestId: string; code: string; peer: PhonePeer }
+  | { type: 'pair.result'; requestId: string; code: string; accepted: boolean; peer: PhonePeer }
   | { type: 'message'; message: PhoneMessage }
   | { type: 'message.status'; messageId: string; peerId: string; status: 'delivered' | 'read' }
   | { type: 'file.progress'; peerId: string; fileId: string; name: string; transferred: number; total: number; direction: 'send' | 'receive'; status: 'transferring' | 'completed' | 'failed' }
@@ -69,9 +74,11 @@ export interface PhoneApi {
   state(): Promise<PhoneState>;
   listMessages(peerId: string): Promise<PhoneMessage[]>;
   listConversations(): Promise<PhoneConversationSummary[]>;
-  pair(peerId: string): Promise<{ requestId: string }>;
+  pair(peerId: string): Promise<{ requestId: string; code: string }>;
   respondPairing(requestId: string, peerId: string, accepted: boolean): Promise<boolean>;
   removePeer(peerId: string): Promise<boolean>;
+  updateProfile(profile: { nickname: string; avatar?: string }): Promise<PhoneState>;
+  updatePeer(peerId: string, patch: { remark?: string }): Promise<PhonePeer>;
   sendText(peerId: string, text: string): Promise<PhoneMessage>;
   selectAndSendFiles(peerId: string): Promise<PhoneMessage[]>;
   retryFile(messageId: string): Promise<PhoneMessage>;

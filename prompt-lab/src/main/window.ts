@@ -33,17 +33,43 @@ export function createWindow(preloadPath: string) {
   win.on('unmaximize', publishMaximizedState);
 
   // 加载页面 — Vite/Forge 注入的全局常量
+  const loadTarget = MAIN_WINDOW_VITE_DEV_SERVER_URL
+    || path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`);
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL).catch((error) => {
+      console.error(`[window] Failed to load ${loadTarget}`, error);
+      if (!win.isDestroyed()) win.show();
+    });
   } else {
-    win.loadFile(
+    void win.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
-    );
+    ).catch((error) => {
+      console.error(`[window] Failed to load ${loadTarget}`, error);
+      if (!win.isDestroyed()) win.show();
+    });
   }
 
-  win.once('ready-to-show', () => {
+  let shown = false;
+  const showWindow = () => {
+    if (shown || win.isDestroyed()) return;
+    shown = true;
     win.show();
+    win.focus();
+  };
+  win.once('ready-to-show', showWindow);
+  win.webContents.once('did-finish-load', showWindow);
+  win.webContents.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    console.error(`[window] Renderer load failed (${code}): ${description} - ${validatedURL}`);
+    showWindow();
   });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[window] Renderer process exited', details);
+    showWindow();
+  });
+  // `ready-to-show` can be skipped when the renderer fails before first paint.
+  const showFallback = setTimeout(showWindow, 5_000);
+  win.once('closed', () => clearTimeout(showFallback));
 
   // 关闭窗口时：最小化到托盘（而非退出）
   win.on('close', (event) => {

@@ -65,6 +65,9 @@ export function WorkBrowserPanel() {
   const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
   const aiConfigBridgeAvailableRef = useRef(true);
   const lastTabByWorkspaceRef = useRef(new Map<string, string>());
+  const tabsByWorkspaceRef = useRef(new Map<string, Tab[]>());
+  const documentsByWorkspaceRef = useRef(new Map<string, Document[]>());
+  const annotationsByWorkspaceRef = useRef(new Map<string, Annotation[]>());
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
@@ -123,6 +126,7 @@ export function WorkBrowserPanel() {
   const refreshTabs = useCallback(async (wsId: string) => {
     try {
       const list = (await window.electronAPI.workBrowser.tab.list(wsId)) as Tab[];
+      tabsByWorkspaceRef.current.set(wsId, list);
       if (activeWorkspaceIdRef.current !== wsId) return;
       setTabs(list);
       setActiveTab((current) => {
@@ -137,6 +141,7 @@ export function WorkBrowserPanel() {
   const refreshDocuments = useCallback(async (wsId: string) => {
     try {
       const docs = (await window.electronAPI.workBrowser.document.list(wsId, 100)) as Document[];
+      documentsByWorkspaceRef.current.set(wsId, docs);
       if (activeWorkspaceIdRef.current === wsId) setDocuments(docs);
     } catch (error) {
       if (activeWorkspaceIdRef.current === wsId) message.error(`文档加载失败：${error instanceof Error ? error.message : String(error)}`);
@@ -146,6 +151,7 @@ export function WorkBrowserPanel() {
   const refreshAnnotations = useCallback(async (wsId: string) => {
     try {
       const anns = (await window.electronAPI.workBrowser.annotation.listByWorkspace(wsId)) as Annotation[];
+      annotationsByWorkspaceRef.current.set(wsId, anns);
       if (activeWorkspaceIdRef.current === wsId) setAnnotations(anns);
     } catch (error) {
       // Annotation Graph 是增强能力；旧版主进程未注册该 channel 时不阻塞浏览器主体。
@@ -167,8 +173,6 @@ export function WorkBrowserPanel() {
 
   useEffect(() => {
     if (activeWorkspaceId) {
-      setDocuments([]);
-      setAnnotations([]);
       void refreshTabs(activeWorkspaceId);
       void refreshDocuments(activeWorkspaceId);
       void refreshAnnotations(activeWorkspaceId);
@@ -200,6 +204,21 @@ export function WorkBrowserPanel() {
   }, [activeTab?.id]);
 
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
+
+  const selectWorkspace = useCallback((workspace: Workspace) => {
+    if (workspace.id === activeWorkspace?.id) return;
+    const cachedTabs = tabsByWorkspaceRef.current.get(workspace.id);
+    const cachedDocuments = documentsByWorkspaceRef.current.get(workspace.id);
+    const cachedAnnotations = annotationsByWorkspaceRef.current.get(workspace.id);
+    setActiveWorkspace(workspace);
+    if (cachedTabs) {
+      setTabs(cachedTabs);
+      const rememberedId = lastTabByWorkspaceRef.current.get(workspace.id);
+      setActiveTab(cachedTabs.find((tab) => tab.id === rememberedId) ?? cachedTabs[0] ?? null);
+    }
+    if (cachedDocuments) setDocuments(cachedDocuments);
+    if (cachedAnnotations) setAnnotations(cachedAnnotations);
+  }, [activeWorkspace?.id]);
 
   // Cleaner 配置
   useEffect(() => {
@@ -389,7 +408,7 @@ export function WorkBrowserPanel() {
           <WorkspaceList
             workspaces={workspaces}
             activeId={activeWorkspace?.id}
-            onSelect={setActiveWorkspace}
+            onSelect={selectWorkspace}
             onUpdate={updateWorkspace}
             onCreate={async (input) => {
               const created = await createWorkspace(input);
@@ -435,7 +454,15 @@ export function WorkBrowserPanel() {
                 {cachedPages.map((page) => {
                   const visible = page.id === displayedPageId;
                   return (
-                    <div key={`${page.id}:${webviewRefreshKeys[page.id] || 0}`} className={`absolute inset-0 transition-opacity duration-200 ease-out ${visible ? 'z-10 visible opacity-100' : 'invisible z-0 pointer-events-none opacity-0'}`} aria-hidden={!visible}>
+                    <div
+                      key={`${page.id}:${webviewRefreshKeys[page.id] || 0}`}
+                      className={`absolute inset-0 ${visible ? 'z-10' : 'z-0 pointer-events-none'}`}
+                      style={{
+                        transform: visible ? 'translate3d(0,0,0)' : 'translate3d(-200vw,0,0)',
+                        contain: 'strict',
+                      }}
+                      aria-hidden={!visible}
+                    >
                       <WebContent
                         tab={page}
                         cleanerEnabled={cleanerEnabled}

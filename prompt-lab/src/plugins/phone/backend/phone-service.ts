@@ -8,14 +8,14 @@ import path from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { PhoneApi, PhoneEvent, PhoneMessage, PhonePeer, PhoneSignal, PhoneState } from '../types';
 import { summarizeConversations, validChatText } from '../domain';
-import { derivePeerKey, isFreshTimestamp, signEnvelope, verifyEnvelope } from '../security';
+import { derivePeerKey, isFreshTimestamp, pairingCode, signEnvelope, verifyEnvelope } from '../security';
 
 const DISCOVERY_PORT = 39177;
 const PROTOCOL_VERSION = 1;
 const PEER_TTL_MS = 12_000;
 const MAX_FILE_BYTES = 10 * 1024 * 1024 * 1024;
 
-interface Store { deviceId: string; deviceName: string; secret: string; trusted: Record<string, { fingerprint: string; name: string }>; messages: PhoneMessage[] }
+interface Store { deviceId: string; deviceName: string; nickname: string; avatar?: string; secret: string; trusted: Record<string, { fingerprint: string; name: string; nickname?: string; avatar?: string; remark?: string }>; messages: PhoneMessage[] }
 interface WireEnvelope { version: 1; id: string; type: string; fromDeviceId: string; fromName: string; fingerprint: string; sentAt: number; payload: Record<string, unknown>; auth?: string }
 
 let store: Store;
@@ -31,7 +31,7 @@ let port = 0;
 let started = false;
 const peers = new Map<string, PhonePeer>();
 const sockets = new Map<string, WebSocket>();
-const pairingRequests = new Map<string, string>();
+const pairingRequests = new Map<string, { peerId: string; code: string }>();
 const receivedFiles = new Map<string, string>();
 const fileControllers = new Map<string, AbortController>();
 const recentEnvelopeIds = new Map<string, number>();
@@ -43,12 +43,12 @@ function save(): void { fs.mkdirSync(path.dirname(storePath), { recursive: true 
 function load(): void {
   const directory = storageDir(); storePath = path.join(directory, 'phone.json'); downloadDirectory = path.join(directory, 'downloads');
   fs.mkdirSync(downloadDirectory, { recursive: true });
-  try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')) as Store; } catch { store = { deviceId: uuid(), deviceName: os.hostname(), secret: crypto.randomBytes(32).toString('hex'), trusted: {}, messages: [] }; save(); }
+  try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')) as Store; store.nickname ||= store.deviceName; } catch { store = { deviceId: uuid(), deviceName: os.hostname(), nickname: os.hostname(), secret: crypto.randomBytes(32).toString('hex'), trusted: {}, messages: [] }; save(); }
 }
 function emit(event: PhoneEvent): void { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('phone:event', event); }
-function state(): PhoneState { return { ready: started, deviceId: store.deviceId, deviceName: store.deviceName, fingerprint: fingerprint(store.secret), port, peers: [...peers.values()].sort((a, b) => Number(b.trusted) - Number(a.trusted) || a.name.localeCompare(b.name)) }; }
+function state(): PhoneState { return { ready: started, deviceId: store.deviceId, deviceName: store.deviceName, nickname: store.nickname, avatar: store.avatar, fingerprint: fingerprint(store.secret), port, peers: [...peers.values()].sort((a, b) => Number(b.trusted) - Number(a.trusted) || a.name.localeCompare(b.name)) }; }
 function peerAuth(peerId: string): string | undefined { const trusted = store.trusted[peerId]; return trusted ? derivePeerKey(fingerprint(store.secret), trusted.fingerprint) : undefined; }
-function envelope(type: string, payload: Record<string, unknown>, peerId?: string): WireEnvelope { const frame: WireEnvelope = { version: 1, id: uuid(), type, fromDeviceId: store.deviceId, fromName: store.deviceName, fingerprint: fingerprint(store.secret), sentAt: Date.now(), payload }; const key = peerId ? peerAuth(peerId) : undefined; if (key) frame.auth = signEnvelope(frame, key); return frame; }
+function envelope(type: string, payload: Record<string, unknown>, peerId?: string): WireEnvelope { const frame: WireEnvelope = { version: 1, id: uuid(), type, fromDeviceId: store.deviceId, fromName: store.nickname, fingerprint: fingerprint(store.secret), sentAt: Date.now(), payload }; const key = peerId ? peerAuth(peerId) : undefined; if (key) frame.auth = signEnvelope(frame, key); return frame; }
 function persistMessage(message: PhoneMessage): void { const index = store.messages.findIndex((item) => item.id === message.id); if (index >= 0) store.messages[index] = message; else store.messages.push(message); save(); }
 function updateMessageStatus(id: string, status: PhoneMessage['status']): void { const message = store.messages.find((item) => item.id === id); if (!message) return; message.status = status; save(); emit({ type: 'message.status', messageId: id, peerId: message.peerId, status: status === 'read' ? 'read' : 'delivered' }); }
 function flushQueuedMessages(peerId: string): void { for (const message of store.messages.filter((item) => item.peerId === peerId && item.senderId === store.deviceId && (item.status === 'queued' || item.status === 'failed') && item.kind === 'text')) { message.status = 'sending'; if (sendWire(peerId, 'chat.text', { message })) message.status = 'sent'; } save(); }
@@ -71,13 +71,13 @@ async function handleWire(socket: WebSocket, raw: string, expectedPeerId?: strin
   let frame: WireEnvelope; try { frame = JSON.parse(raw) as WireEnvelope; } catch { return expectedPeerId; }
   if (frame.version !== PROTOCOL_VERSION || frame.fromDeviceId === store.deviceId) return expectedPeerId;
   const known = peers.get(frame.fromDeviceId); const trusted = store.trusted[frame.fromDeviceId];
-  const peer: PhonePeer = { id: frame.fromDeviceId, name: frame.fromName, host: known?.host ?? '', port: known?.port ?? 0, fingerprint: frame.fingerprint, trusted: Boolean(trusted && trusted.fingerprint === frame.fingerprint), status: 'online', lastSeenAt: Date.now() };
+  const peer: PhonePeer = { id: frame.fromDeviceId, name: frame.fromName, nickname: frame.fromName, remark: trusted?.remark, avatar: trusted?.avatar, host: known?.host ?? '', port: known?.port ?? 0, fingerprint: frame.fingerprint, trusted: Boolean(trusted && trusted.fingerprint === frame.fingerprint), status: 'online', lastSeenAt: Date.now() };
   peers.set(peer.id, peer); sockets.set(peer.id, socket); emit({ type: 'peer.updated', peer });
   if (frame.type === 'peer.hello') { if (peer.trusted) flushQueuedMessages(peer.id); return peer.id; }
-  if (frame.type === 'pair.request') { const requestId = String(frame.payload.requestId ?? frame.id); pairingRequests.set(requestId, peer.id); emit({ type: 'pair.request', requestId, peer }); return peer.id; }
+  if (frame.type === 'pair.request') { const requestId = String(frame.payload.requestId ?? frame.id); const code = pairingCode(requestId, fingerprint(store.secret), peer.fingerprint); pairingRequests.set(requestId, { peerId: peer.id, code }); emit({ type: 'pair.request', requestId, code, peer }); return peer.id; }
   if (frame.type === 'pair.result') {
     const accepted = Boolean(frame.payload.accepted); if (accepted) { store.trusted[peer.id] = { fingerprint: peer.fingerprint, name: peer.name }; peer.trusted = true; save(); }
-    emit({ type: 'pair.result', requestId: String(frame.payload.requestId), accepted, peer }); return peer.id;
+    const requestId = String(frame.payload.requestId); emit({ type: 'pair.result', requestId, code: pairingCode(requestId, fingerprint(store.secret), peer.fingerprint), accepted, peer }); return peer.id;
   }
   if (!peer.trusted) return peer.id;
   const key = peerAuth(peer.id); if (!key || !verifyEnvelope(frame, key) || !isFreshTimestamp(frame.sentAt) || recentEnvelopeIds.has(frame.id)) return peer.id;
@@ -117,9 +117,9 @@ export async function startPhoneService(): Promise<PhoneState> {
   wsServer = new WebSocketServer({ noServer: true }); wsServer.on('connection', (socket) => bindSocket(socket));
   server.on('upgrade', (request, socket, head) => { if (request.url === '/phone') wsServer?.handleUpgrade(request, socket, head, (ws) => wsServer?.emit('connection', ws, request)); else socket.destroy(); });
   await new Promise<void>((resolve, reject) => { server?.once('error', reject); server?.listen(0, '0.0.0.0', () => resolve()); }); port = (server.address() as { port: number }).port;
-  udp = dgram.createSocket({ type: 'udp4', reuseAddr: true }); udp.on('message', (buffer, info) => { try { const data = JSON.parse(buffer.toString()) as { v: number; id: string; name: string; port: number; fingerprint: string }; if (data.id === store.deviceId) return; const trusted = store.trusted[data.id]; const peer: PhonePeer = { id: data.id, name: data.name, host: info.address, port: data.port, fingerprint: data.fingerprint, trusted: Boolean(trusted && trusted.fingerprint === data.fingerprint), status: data.v === PROTOCOL_VERSION ? 'online' : 'incompatible', lastSeenAt: Date.now() }; peers.set(peer.id, peer); emit({ type: 'peer.updated', peer }); if (peer.trusted && peer.status === 'online' && store.deviceId.localeCompare(peer.id) < 0) connect(peer); } catch { /* ignore unrelated UDP */ } });
+  udp = dgram.createSocket({ type: 'udp4', reuseAddr: true }); udp.on('message', (buffer, info) => { try { const data = JSON.parse(buffer.toString()) as { v: number; id: string; name: string; nickname?: string; avatar?: string; port: number; fingerprint: string }; if (data.id === store.deviceId) return; const trusted = store.trusted[data.id]; const peer: PhonePeer = { id: data.id, name: data.name, nickname: data.nickname ?? data.name, remark: trusted?.remark, avatar: data.avatar, host: info.address, port: data.port, fingerprint: data.fingerprint, trusted: Boolean(trusted && trusted.fingerprint === data.fingerprint), status: data.v === PROTOCOL_VERSION ? 'online' : 'incompatible', lastSeenAt: Date.now() }; peers.set(peer.id, peer); emit({ type: 'peer.updated', peer }); if (peer.trusted && peer.status === 'online' && store.deviceId.localeCompare(peer.id) < 0) connect(peer); } catch { /* ignore unrelated UDP */ } });
   await new Promise<void>((resolve, reject) => { udp?.once('error', reject); udp?.bind(DISCOVERY_PORT, () => { udp?.setBroadcast(true); resolve(); }); });
-  const announce = () => { const data = Buffer.from(JSON.stringify({ v: PROTOCOL_VERSION, id: store.deviceId, name: store.deviceName, port, fingerprint: fingerprint(store.secret) })); udp?.send(data, DISCOVERY_PORT, '255.255.255.255'); };
+  const announce = () => { const data = Buffer.from(JSON.stringify({ v: PROTOCOL_VERSION, id: store.deviceId, name: store.deviceName, nickname: store.nickname, avatar: store.avatar, port, fingerprint: fingerprint(store.secret) })); udp?.send(data, DISCOVERY_PORT, '255.255.255.255'); };
   announce(); discoveryTimer = setInterval(announce, 3000); heartbeatTimer = setInterval(() => { for (const [peerId, socket] of sockets) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(envelope('peer.ping', {}, peerId))); }, 5000); pruneTimer = setInterval(() => { const now = Date.now(); for (const [id, seenAt] of recentEnvelopeIds) if (now - seenAt > 120_000) recentEnvelopeIds.delete(id); for (const [id, peer] of peers) if (now - peer.lastSeenAt > PEER_TTL_MS && peer.status !== 'offline') { const next = { ...peer, status: 'offline' as const }; peers.set(id, next); emit({ type: 'peer.updated', peer: next }); } }, 3000);
   started = true; emit({ type: 'state', state: state() }); return state();
 }
@@ -139,9 +139,11 @@ export function setupPhoneIPC(): void {
   ipcMain.handle('phone:state', () => state());
   ipcMain.handle('phone:list-messages', (_event, peerId: string) => store.messages.filter((item) => item.peerId === peerId));
   ipcMain.handle('phone:list-conversations', () => summarizeConversations(store.messages, store.deviceId));
-  ipcMain.handle('phone:pair', (_event, peerId: string) => { const requestId = uuid(); if (!sendWire(peerId, 'pair.request', { requestId })) throw new Error('设备不可达'); return { requestId }; });
-  ipcMain.handle('phone:respond-pairing', (_event, requestId: string, peerId: string, accepted: boolean) => { const peer = peers.get(peerId); if (!peer || pairingRequests.get(requestId) !== peerId) return false; if (accepted) { store.trusted[peerId] = { fingerprint: peer.fingerprint, name: peer.name }; peer.trusted = true; save(); } pairingRequests.delete(requestId); return sendWire(peerId, 'pair.result', { requestId, accepted }); });
+  ipcMain.handle('phone:pair', (_event, peerId: string) => { const requestId = uuid(); const peer = peers.get(peerId); if (!peer || !sendWire(peerId, 'pair.request', { requestId })) throw new Error('设备不可达'); return { requestId, code: pairingCode(requestId, fingerprint(store.secret), peer.fingerprint) }; });
+  ipcMain.handle('phone:respond-pairing', (_event, requestId: string, peerId: string, accepted: boolean) => { const peer = peers.get(peerId); if (!peer || pairingRequests.get(requestId)?.peerId !== peerId) return false; if (accepted) { store.trusted[peerId] = { fingerprint: peer.fingerprint, name: peer.name, nickname: peer.nickname, avatar: peer.avatar }; peer.trusted = true; save(); } pairingRequests.delete(requestId); return sendWire(peerId, 'pair.result', { requestId, accepted }); });
   ipcMain.handle('phone:remove-peer', (_event, peerId: string) => { delete store.trusted[peerId]; sockets.get(peerId)?.close(); sockets.delete(peerId); const peer = peers.get(peerId); if (peer) { peer.trusted = false; emit({ type: 'peer.updated', peer }); } save(); return true; });
+  ipcMain.handle('phone:update-profile', (_event, profile: { nickname: string; avatar?: string }) => { const nickname = profile.nickname.trim(); if (!nickname || nickname.length > 40) throw new Error('昵称长度应为 1-40 个字符'); if (profile.avatar && profile.avatar.length > 300_000) throw new Error('头像数据过大'); store.nickname = nickname; store.avatar = profile.avatar; save(); return state(); });
+  ipcMain.handle('phone:update-peer', (_event, peerId: string, patch: { remark?: string }) => { const trusted = store.trusted[peerId]; const peer = peers.get(peerId); if (!trusted || !peer) throw new Error('可信设备不存在'); const remark = patch.remark?.trim().slice(0, 80); trusted.remark = remark; peer.remark = remark; save(); emit({ type: 'peer.updated', peer }); return peer; });
   ipcMain.handle('phone:send-text', (_event, peerId: string, text: string) => sendText(peerId, text));
   ipcMain.handle('phone:send-files', (_event, peerId: string) => sendFiles(peerId));
   ipcMain.handle('phone:retry-file', (_event, messageId: string) => { const message = store.messages.find((item) => item.id === messageId && item.kind === 'file'); const source = message?.file?.localPath; if (!message || !source || !fs.existsSync(source)) throw new Error('原文件不存在，无法重试'); return sendFile(message.peerId, source, message); });
