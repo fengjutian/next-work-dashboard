@@ -18,6 +18,11 @@ export default defineConfig({
       // `ws` must also stay external. Bundling turns its guarded optional
       // bufferutil/utf-8-validate probes into hard runtime imports.
       external: ['node-pty', '@lancedb/lancedb', 'better-sqlite3', 'jsdom', 'ws'],
+      onwarn(warning, warn) {
+        const transformersPureAnnotation = warning.code === 'INVALID_ANNOTATION'
+          && warning.id?.includes('@huggingface/transformers/dist/transformers.node.mjs');
+        if (!transformersPureAnnotation) warn(warning);
+      },
     },
   },
 });
