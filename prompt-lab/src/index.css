@@ -236,14 +236,28 @@
   background: transparent;
 }
 
-.work-browser-tab-strip [role='tablist'] {
-  scrollbar-width: none;
+.work-browser-tab-strip {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.2) transparent;
+  scrollbar-gutter: stable;
 }
 
-.work-browser-tab-strip [role='tablist']::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+.work-browser-tab-strip::-webkit-scrollbar {
+  height: 4px;
+}
+
+.work-browser-tab-strip::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.work-browser-tab-strip::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.18);
+}
+
+.work-browser-tab-strip:hover::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.36);
 }
 
 /* Monaco draws its own scrollbar instead of using the browser pseudo-elements. */

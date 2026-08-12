@@ -33,10 +33,10 @@ declare global {
 
 const WEBVIEW_SCROLLBAR_CSS = `
   :root, html, body { scrollbar-width: thin !important; scrollbar-color: rgba(97,36,91,.3) transparent !important; }
-  ::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
+  ::-webkit-scrollbar { width: 6px !important; height: 6px !important; }
   ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent !important; }
-  ::-webkit-scrollbar-thumb { min-width: 32px !important; min-height: 32px !important; border: 2px solid transparent !important; border-radius: 999px !important; background: rgba(97,36,91,.24) !important; background-clip: padding-box !important; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.5) !important; background-clip: padding-box !important; }
+  ::-webkit-scrollbar-thumb { min-width: 32px !important; min-height: 32px !important; border: 1px solid transparent !important; border-radius: 999px !important; background: rgba(97,36,91,.20) !important; background-clip: padding-box !important; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(97,36,91,.48) !important; background-clip: padding-box !important; }
 `;
 
 const INSTALL_LINK_BRIDGE = `(() => {

@@ -2,7 +2,7 @@ import {
   ArrowRight, Copy, Globe2, Home, ListTree, Pin, PinOff, Plus, RefreshCw,
   RotateCcw, Rows3, X,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
 
 export interface TabBarProps {
@@ -28,6 +28,8 @@ export function TabBar(props: TabBarProps) {
   const [url, setUrl] = useState('');
   const [vertical, setVertical] = useState(() => localStorage.getItem('work-browser.vertical-tabs') === 'true');
   const [menu, setMenu] = useState<{ tab: Tab; x: number; y: number } | null>(null);
+  const [hoverCard, setHoverCard] = useState<{ tab: Tab; left: number; top: number } | null>(null);
+  const hoverTimerRef = useRef<number>();
   const orderedTabs = useMemo(() => [...tabs].sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.position - b.position), [tabs]);
 
   useEffect(() => {
@@ -61,6 +63,17 @@ export function TabBar(props: TabBarProps) {
       role="tab"
       aria-selected={activeId === tab.id}
       onClick={() => onActivate(tab)}
+      onMouseEnter={(event) => {
+        window.clearTimeout(hoverTimerRef.current);
+        const rect = event.currentTarget.getBoundingClientRect();
+        hoverTimerRef.current = window.setTimeout(() => {
+          setHoverCard({ tab, left: Math.min(rect.left, window.innerWidth - 300), top: rect.bottom + 7 });
+        }, 350);
+      }}
+      onMouseLeave={() => {
+        window.clearTimeout(hoverTimerRef.current);
+        setHoverCard(null);
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         setMenu({ tab, x: event.clientX, y: event.clientY });
@@ -75,7 +88,6 @@ export function TabBar(props: TabBarProps) {
             ? 'h-9 w-10 shrink-0 justify-center border-r border-border/30 px-0'
             : 'h-9 min-w-16 max-w-56 shrink border-r border-border/30 px-2.5'
       } ${activeId === tab.id ? 'bg-primary/10 text-primary shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}`}
-      title={tab.title || tab.url}
     >
       {tab.favicon ? <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm" /> : <Globe2 size={13} className="shrink-0" />}
       {(!tab.isPinned || isVertical) && <span className="min-w-0 flex-1 truncate">{formatTabTitle(tab)}</span>}
@@ -122,6 +134,42 @@ export function TabBar(props: TabBarProps) {
           <MenuItem icon={<RotateCcw size={14} />} label="重新打开已关闭的标签页" disabled={!canReopen} onClick={() => run(onReopen)} />
         </div>
       )}
+
+      {hoverCard && !menu && (
+        <TabHoverCard tab={hoverCard.tab} left={hoverCard.left} top={hoverCard.top} active={hoverCard.tab.id === activeId} />
+      )}
+    </div>
+  );
+}
+
+function TabHoverCard({ tab, left, top, active }: { tab: Tab; left: number; top: number; active: boolean }) {
+  let hostname = tab.url;
+  let pathParts: string[] = [];
+  try {
+    const parsed = new URL(tab.url);
+    hostname = parsed.hostname.replace(/^www\./, '');
+    pathParts = parsed.pathname.split('/').filter(Boolean).slice(0, 3);
+  } catch { /* Show the original URL. */ }
+  return (
+    <div className="pointer-events-none fixed z-[900] w-72 overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl" style={{ left, top }}>
+      <div className="flex h-24 items-center justify-center bg-gradient-to-br from-primary/12 via-muted/40 to-background">
+        <div className="flex flex-col items-center gap-2">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-card shadow-sm">
+            {tab.favicon ? <img src={tab.favicon} alt="" className="h-6 w-6 rounded" /> : <Globe2 size={20} className="text-primary" />}
+          </div>
+          <span className="max-w-56 truncate text-xs font-medium text-foreground">{hostname}</span>
+        </div>
+      </div>
+      <div className="p-3">
+        <div className="truncate text-sm font-medium text-foreground">{tab.title || hostname}</div>
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">{tab.url}</div>
+        <div className="mt-3 flex items-center gap-1.5 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
+          <span className="rounded-md bg-muted px-1.5 py-0.5">网站小地图</span>
+          <span className="truncate">{hostname}</span>
+          {pathParts.map((part) => <span key={part} className="flex min-w-0 items-center gap-1"><span>/</span><span className="max-w-16 truncate">{decodeURIComponent(part)}</span></span>)}
+          <span className="ml-auto shrink-0">{tab.isPinned ? '已固定' : active ? '当前页面' : '标签页'}</span>
+        </div>
+      </div>
     </div>
   );
 }
