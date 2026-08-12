@@ -8,7 +8,7 @@
  *  - 净化走"网络层 session.webRequest" + "webview preload 注入 CSS/JS"双层
  */
 import { Alert, Tag, Tooltip, Button, Space, Typography } from '../ui';
-import { ArrowRight, BookOpen, FlaskConical, Globe2, Search, Sparkles, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Check, FlaskConical, Globe2, Search, Settings2, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
 import { AnnotationPopover } from './AnnotationPopover';
@@ -74,6 +74,9 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
   const [annotationPanel, setAnnotationPanel] = useState<{ id: string; note: string; rangeText: string; color: string; url: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [startValue, setStartValue] = useState('');
+  const [homeUrl, setHomeUrl] = useState('https://www.google.com');
+  const [homeSettingsOpen, setHomeSettingsOpen] = useState(false);
+  const [customHomeUrl, setCustomHomeUrl] = useState('');
 
   const openInInternalTab = useCallback((url: string) => {
     if (!/^https?:\/\//i.test(url)) return;
@@ -90,6 +93,33 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       if (!cancelled && typeof p === 'string') setPreloadPath(p);
     });
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.electronAPI.workBrowser.settings.get('workBrowser.homeUrl')
+      .then((value) => {
+        if (!cancelled && typeof value === 'string' && /^https?:\/\//i.test(value)) {
+          setHomeUrl(value);
+          setCustomHomeUrl(value);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveHomeUrl = useCallback(async (value: string) => {
+    const normalized = /^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`;
+    if (!value.trim()) return;
+    try {
+      new URL(normalized);
+      await window.electronAPI.workBrowser.settings.set('workBrowser.homeUrl', normalized);
+      setHomeUrl(normalized);
+      setCustomHomeUrl(normalized);
+      setHomeSettingsOpen(false);
+    } catch {
+      // Keep the editor open so the user can correct an invalid URL.
+    }
   }, []);
 
   // 绑定 webview 事件
@@ -224,7 +254,50 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
             <button type="button" onClick={() => startValue.trim() && onOpenUrl?.(startValue.trim())} className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary-hover"><ArrowRight size={17} /></button>
           </div>
           <div className="mt-5 grid grid-cols-3 gap-3">
-            <button type="button" onClick={() => onOpenUrl?.('https://www.google.com')} className="group rounded-2xl border border-border/60 bg-card/75 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-lg"><Globe2 size={18} className="mb-3 text-blue-500" /><div className="text-sm font-medium">打开网页</div><div className="mt-1 text-[11px] text-muted-foreground">从互联网开始探索</div></button>
+            <div className="relative rounded-2xl border border-border/60 bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-lg">
+              <button type="button" onClick={() => onOpenUrl?.(homeUrl)} className="group block w-full p-4 text-left">
+                <Globe2 size={18} className="mb-3 text-blue-500" />
+                <div className="text-sm font-medium">打开网页</div>
+                <div className="mt-1 max-w-[85%] truncate text-[11px] text-muted-foreground" title={homeUrl}>{new URL(homeUrl).hostname}</div>
+              </button>
+              <button
+                type="button"
+                aria-label="配置默认网页"
+                title="配置默认网页"
+                onClick={() => setHomeSettingsOpen((open) => !open)}
+                className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
+              >
+                <Settings2 size={14} />
+              </button>
+              {homeSettingsOpen && (
+                <div className="absolute bottom-[calc(100%+8px)] left-0 z-30 w-72 rounded-2xl border border-border/60 bg-card p-3 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+                  <div className="mb-2 text-xs font-medium text-foreground">默认打开网页</div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      ['Google', 'https://www.google.com'],
+                      ['Bing', 'https://www.bing.com'],
+                      ['百度', 'https://www.baidu.com'],
+                    ].map(([name, value]) => (
+                      <button key={value} type="button" onClick={() => void saveHomeUrl(value)} className="flex h-8 items-center justify-center gap-1 rounded-lg bg-muted/60 px-2 text-xs transition hover:bg-primary/10 hover:text-primary">
+                        {homeUrl === value && <Check size={11} />}{name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-border/60 bg-background p-1">
+                    <input
+                      value={customHomeUrl}
+                      onChange={(event) => setCustomHomeUrl(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void saveHomeUrl(customHomeUrl); }}
+                      placeholder="自定义 URL"
+                      className="h-7 min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
+                    />
+                    <button type="button" onClick={() => void saveHomeUrl(customHomeUrl)} className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground">
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             <button type="button" onClick={() => onResearch?.('帮我研究一个新主题')} className="group rounded-2xl border border-border/60 bg-card/75 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-lg"><FlaskConical size={18} className="mb-3 text-violet-500" /><div className="text-sm font-medium">深度研究</div><div className="mt-1 text-[11px] text-muted-foreground">多来源生成研究报告</div></button>
             <div className="rounded-2xl border border-border/60 bg-card/75 p-4 text-left shadow-sm"><BookOpen size={18} className="mb-3 text-amber-500" /><div className="text-sm font-medium">知识沉淀</div><div className="mt-1 text-[11px] text-muted-foreground">保存页面并添加笔记</div></div>
           </div>
