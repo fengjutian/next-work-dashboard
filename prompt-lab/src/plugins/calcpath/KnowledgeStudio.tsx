@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, BookOpen, CheckCircle, Info, Sparkles } from '@/components/icons';
+import type { ReactNode } from 'react';
+import { ArrowRight, BookOpen, CheckCircle, Sparkles } from '@/components/icons';
 import { LESSONS } from './lessons';
 import { AITutor } from './AITutor';
 import { MathVisualLab } from './MathVisualLab';
@@ -33,5 +34,5 @@ export function KnowledgeStudio({ nodeId, state, problem, onBack, onPractice }: 
   </div>;
 }
 
-function LessonCard({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) { return <section className="rounded-3xl border bg-white p-7 shadow-sm dark:bg-slate-900 md:p-9"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[.16em] text-emerald-700"><BookOpen className="h-4 w-4" />{eyebrow}</div><h2 className="mt-4 text-2xl font-semibold">{title}</h2><div className="mt-6">{children}</div></section>; }
-function Continue({ children, onClick, disabled = false }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) { return <div className="mt-7 flex justify-end"><button disabled={disabled} onClick={onClick} className="flex items-center gap-2 rounded-xl bg-[#d08332] px-5 py-3 text-sm font-semibold text-white disabled:opacity-35">{children}<ArrowRight className="h-4 w-4" /></button></div>; }
+function LessonCard({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) { return <section className="rounded-3xl border bg-white p-7 shadow-sm dark:bg-slate-900 md:p-9"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[.16em] text-emerald-700"><BookOpen className="h-4 w-4" />{eyebrow}</div><h2 className="mt-4 text-2xl font-semibold">{title}</h2><div className="mt-6">{children}</div></section>; }
+function Continue({ children, onClick, disabled = false }: { children: ReactNode; onClick: () => void; disabled?: boolean }) { return <div className="mt-7 flex justify-end"><button disabled={disabled} onClick={onClick} className="flex items-center gap-2 rounded-xl bg-[#d08332] px-5 py-3 text-sm font-semibold text-white disabled:opacity-35">{children}<ArrowRight className="h-4 w-4" /></button></div>; }
