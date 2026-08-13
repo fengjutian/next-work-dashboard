@@ -11,6 +11,7 @@ import { useStore } from '@/store/store';
 import { addLookupHistory, BUILT_IN_WORD_BOOKS, buildVocabularyGraph, dueForReview, filterVocabulary, formatNextReview, importVocabularyJson, learningActivity, mergeEntry, mergeVocabulary, normalizeQuery, normalizeWord, parseLookupResponse, reviewEntry, updateEntryLabels, vocabularyStats, vocabularyToCsv } from './model';
 import { loadLookupHistory, loadReviewLog, loadVocabulary, saveLookupHistory, saveReviewLog, saveVocabulary } from './storage';
 import type { LookupHistoryItem, ReviewLogItem, WordEntry } from './types';
+import { ArticleReader } from './ArticleReader';
 
 echarts.use([GraphChart, LegendComponent, TooltipComponent, CanvasRenderer]);
 
@@ -40,7 +41,7 @@ export function EnglishLookupPanel() {
   const [result, setResult] = useState<WordEntry | null>(null);
   const [entries, setEntries] = useState<WordEntry[]>(loadVocabulary);
   const [history, setHistory] = useState<LookupHistoryItem[]>(loadLookupHistory);
-  const [tab, setTab] = useState<'lookup' | 'book' | 'review' | 'graph'>('lookup');
+  const [tab, setTab] = useState<'lookup' | 'article' | 'book' | 'review' | 'graph'>('lookup');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [bookSearch, setBookSearch] = useState('');
@@ -103,6 +104,8 @@ export function EnglishLookupPanel() {
     <header className="border-b px-6 py-5"><div className="mx-auto flex max-w-6xl items-center gap-3"><div className="rounded-xl bg-primary/10 p-2.5 text-primary"><Languages className="h-6 w-6"/></div><div><h1 className="text-lg font-semibold">AI 英语查询</h1><p className="text-xs text-muted-foreground">释义、语境、复习与词汇关系，一次查清</p></div><div className="ml-auto flex rounded-lg border bg-muted/30 p-1">{([['lookup','查询',Search],['book',`单词本 ${entries.length}`,BookOpen],['review',`复习 ${dueEntries.length}`,Sparkles],['graph','知识图谱',Network]] as const).map(([id,label,Icon]) => <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs ${tab === id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'}`}><Icon className="h-3.5 w-3.5"/>{label}</button>)}</div></div></header>
     <main className={`min-h-0 flex-1 ${tab === 'graph' ? 'overflow-hidden p-2 sm:p-3' : 'overflow-auto p-3 sm:p-6'}`}><div className={tab === 'graph' ? 'h-full w-full' : tab === 'book' ? 'mx-auto flex w-full max-w-[1600px] flex-col [&>div:nth-child(1)]:order-2 [&>div:nth-child(2)]:order-3 [&>div:nth-child(2)]:grid-cols-[repeat(auto-fit,minmax(280px,1fr))] [&>div:nth-child(3)]:order-1' : 'mx-auto max-w-6xl'}>
       {tab === 'lookup' && history.length > 0 && <div className="mx-auto mb-3 flex max-w-3xl flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">最近查询：</span>{history.slice(0, 6).map((item) => <button key={item.query} onClick={() => { setQuery(item.query); void lookup(item.query); }} className="max-w-48 truncate rounded-full border px-2.5 py-1 text-xs hover:bg-accent">{item.query}</button>)}<button onClick={() => setHistory([])} className="text-xs text-muted-foreground hover:text-foreground">清空</button></div>}
+      {tab === 'lookup' && <div className="mx-auto mb-4 flex max-w-3xl justify-end"><Button size="sm" variant="outline" onClick={() => setTab('article')}>文章翻译与阅读</Button></div>}
+      {tab === 'article' && <><div className="mx-auto mb-3 flex max-w-[1500px] justify-end"><Button size="sm" variant="outline" onClick={() => setTab('lookup')}>返回单词查询</Button></div><ArticleReader speak={speak} onLookup={(word, context) => { setQuery(context); setTargetWord(word); setTab('lookup'); }}/></>}
       {tab === 'lookup' && loading && <div className="mx-auto mb-2 max-w-3xl text-right"><button type="button" onClick={() => abortRef.current?.abort()} className="text-xs text-muted-foreground hover:text-foreground">取消查询</button></div>}
       {tab === 'lookup' && <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2"><span className="text-xs text-muted-foreground">目标词（可选）</span><input value={targetWord} onChange={(event) => setTargetWord(event.target.value)} placeholder="查询句子时指定，例如 run into" className="h-8 flex-1 rounded-md border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30"/></div>}
       {tab === 'lookup' && <div className="mx-auto mb-3 flex max-w-3xl justify-end gap-2"><select aria-label="发音口音" value={voiceLocale} onChange={(event) => setVoiceLocale(event.target.value as typeof voiceLocale)} className="h-8 rounded-md border bg-card px-2 text-xs"><option value="en-US">美音</option><option value="en-GB">英音</option></select><select aria-label="朗读语速" value={speechRate} onChange={(event) => setSpeechRate(Number(event.target.value))} className="h-8 rounded-md border bg-card px-2 text-xs"><option value="0.75">0.75×</option><option value="0.9">0.9×</option><option value="1">1×</option><option value="1.25">1.25×</option></select></div>}
