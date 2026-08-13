@@ -73,6 +73,24 @@ export function vocabularyToCsv(entries: WordEntry[]): string {
   return ['word,phonetic,partOfSpeech,meanings,example,familiarity,reviewCount', ...rows.map((row) => row.map(csvCell).join(','))].join('\n');
 }
 
+export function importVocabularyJson(raw: string, now = Date.now()): WordEntry[] {
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new Error('JSON 文件格式不正确'); }
+  if (!Array.isArray(value)) throw new Error('JSON 文件必须是单词数组');
+  return value.map(record).map((item) => {
+    const word = normalizeWord(String(item.word || ''));
+    const definitions = Array.isArray(item.definitions) ? item.definitions.map(record).map((definition) => ({ partOfSpeech: String(definition.partOfSpeech || '').trim() || undefined, meaning: String(definition.meaning || '').trim(), example: String(definition.example || '').trim(), translation: String(definition.translation || '').trim() })).filter((definition) => definition.meaning) : [];
+    if (!word || !definitions.length) return null;
+    return { ...item, id: word, word, definitions, collocations: strings(item.collocations, 10), topics: strings(item.topics, 6), relations: [], phonetic: String(item.phonetic || ''), partOfSpeech: String(item.partOfSpeech || ''), memoryTip: String(item.memoryTip || ''), createdAt: Number(item.createdAt) || now, updatedAt: now } as WordEntry;
+  }).filter((entry): entry is WordEntry => entry !== null);
+}
+
+export function mergeVocabulary(current: WordEntry[], incoming: WordEntry[]): WordEntry[] {
+  const merged = new Map(current.map((entry) => [entry.word, entry]));
+  for (const entry of incoming) merged.set(entry.word, mergeEntry(merged.get(entry.word), entry));
+  return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 export function buildVocabularyGraph(entries: WordEntry[]): VocabularyGraph {
   const nodes = new Map<string, VocabularyGraph['nodes'][number]>();
   const links = new Map<string, VocabularyGraph['links'][number]>();
