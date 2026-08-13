@@ -8,9 +8,9 @@ import { BookOpen, Languages, Loader2, Network, Search, Sparkles, Trash2 } from 
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider } from '@/core/llm';
 import { useStore } from '@/store/store';
-import { addLookupHistory, buildVocabularyGraph, dueForReview, formatNextReview, importVocabularyJson, mergeEntry, mergeVocabulary, normalizeQuery, normalizeWord, parseLookupResponse, reviewEntry, vocabularyStats, vocabularyToCsv } from './model';
-import { loadLookupHistory, loadVocabulary, saveLookupHistory, saveVocabulary } from './storage';
-import type { LookupHistoryItem, WordEntry } from './types';
+import { addLookupHistory, buildVocabularyGraph, dueForReview, formatNextReview, importVocabularyJson, learningActivity, mergeEntry, mergeVocabulary, normalizeQuery, normalizeWord, parseLookupResponse, reviewEntry, vocabularyStats, vocabularyToCsv } from './model';
+import { loadLookupHistory, loadReviewLog, loadVocabulary, saveLookupHistory, saveReviewLog, saveVocabulary } from './storage';
+import type { LookupHistoryItem, ReviewLogItem, WordEntry } from './types';
 
 echarts.use([GraphChart, LegendComponent, TooltipComponent, CanvasRenderer]);
 
@@ -49,11 +49,15 @@ export function EnglishLookupPanel() {
   const [speechRate, setSpeechRate] = useState(0.9);
   const [selectedWords, setSelectedWords] = useState<Set<string>>(() => new Set());
   const [importMessage, setImportMessage] = useState('');
+  const [reviewLog, setReviewLog] = useState<ReviewLogItem[]>(loadReviewLog);
+  const [dailyGoal, setDailyGoal] = useState(() => Number(localStorage.getItem('nwd.english-lookup.daily-goal') || 10));
   const inputRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => saveVocabulary(entries), [entries]);
   useEffect(() => saveLookupHistory(history), [history]);
+  useEffect(() => saveReviewLog(reviewLog), [reviewLog]);
+  useEffect(() => localStorage.setItem('nwd.english-lookup.daily-goal', String(dailyGoal)), [dailyGoal]);
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => { const openSearch = () => { setTab('lookup'); requestAnimationFrame(() => inputRef.current?.focus()); }; window.addEventListener('english-lookup:search', openSearch); return () => window.removeEventListener('english-lookup:search', openSearch); }, []);
 
