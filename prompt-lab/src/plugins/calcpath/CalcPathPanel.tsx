@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, BookOpen, CheckCircle2, Lightbulb, RotateCcw, Target } from '@/components/icons';
-import { KNOWLEDGE_NODES, PROBLEMS } from './curriculum';
+import { KNOWLEDGE_NODES } from './curriculum';
 import { evaluateAnswer, getNextProblem, masteryLabel, updateSkill } from './engine';
-import { createInitialState, loadState, saveState } from './storage';
+import { loadState, saveState } from './storage';
 import type { CalcPathState, Problem } from './types';
 
 type View = 'home' | 'path' | 'practice';
@@ -21,7 +21,12 @@ export function CalcPathPanel() {
   }, [state.skillStates]);
   const due = Object.values(state.skillStates).filter((item) => item.nextReviewAt && item.nextReviewAt <= new Date().toISOString()).length;
 
-  const start = (target = getNextProblem(state)) => { setProblem(target); setAnswer(''); setHintCount(0); setFeedback(undefined); setView('practice'); };
+  const start = useCallback((target = getNextProblem(state)) => { setProblem(target); setAnswer(''); setHintCount(0); setFeedback(undefined); setView('practice'); }, [state]);
+  useEffect(() => {
+    const handlePractice = () => start();
+    window.addEventListener('calcpath:practice', handlePractice);
+    return () => window.removeEventListener('calcpath:practice', handlePractice);
+  }, [start]);
   const submit = () => {
     if (!answer.trim() || feedback) return;
     const result = evaluateAnswer(problem, answer);
