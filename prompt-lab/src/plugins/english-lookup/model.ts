@@ -21,14 +21,16 @@ export function parseLookupResponse(raw: string, requestedWord: string, now = Da
   const word = normalizeWord(String(data.word || requestedWord));
   if (!word) throw new Error('请输入有效的英文单词或短语');
   const definitions = Array.isArray(data.definitions) ? data.definitions.map(record).map((item) => ({
-    meaning: String(item.meaning || '').trim(), example: String(item.example || '').trim(), translation: String(item.translation || '').trim(),
+    partOfSpeech: String(item.partOfSpeech || '').trim() || undefined, meaning: String(item.meaning || '').trim(), example: String(item.example || '').trim(), translation: String(item.translation || '').trim(),
   })).filter((item) => item.meaning).slice(0, 6) : [];
   if (!definitions.length) throw new Error('AI 返回结果缺少释义，请重试');
   const relations: WordRelation[] = Array.isArray(data.relations) ? data.relations.map(record).map((item) => ({
     word: normalizeWord(String(item.word || '')),
     type: relationTypes.has(item.type as WordRelation['type']) ? item.type as WordRelation['type'] : 'related',
   })).filter((item) => item.word && item.word !== word).slice(0, 16) : [];
-  return { id: word, word, phonetic: String(data.phonetic || '').trim(), partOfSpeech: String(data.partOfSpeech || '').trim(), definitions, collocations: strings(data.collocations, 10), topics: strings(data.topics, 6), relations, memoryTip: String(data.memoryTip || '').trim(), createdAt: now, updatedAt: now };
+  const forms = Array.isArray(data.forms) ? data.forms.map(record).map((item) => ({ label: String(item.label || '').trim(), value: String(item.value || '').trim() })).filter((item) => item.label && item.value).slice(0, 10) : [];
+  const comparisons = Array.isArray(data.comparisons) ? data.comparisons.map(record).map((item) => ({ word: normalizeWord(String(item.word || '')), difference: String(item.difference || '').trim(), example: String(item.example || '').trim() || undefined })).filter((item) => item.word && item.difference).slice(0, 6) : [];
+  return { id: word, word, phonetic: String(data.phonetic || '').trim(), partOfSpeech: String(data.partOfSpeech || '').trim(), definitions, forms, comparisons, collocations: strings(data.collocations, 10), topics: strings(data.topics, 6), relations, memoryTip: String(data.memoryTip || '').trim(), createdAt: now, updatedAt: now };
 }
 
 export function mergeEntry(previous: WordEntry | undefined, next: WordEntry): WordEntry {
