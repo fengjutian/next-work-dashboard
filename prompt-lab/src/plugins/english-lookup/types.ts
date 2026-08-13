@@ -10,8 +10,19 @@ export interface WordEntry {
   topics: string[];
   relations: WordRelation[];
   memoryTip: string;
+  query?: string;
+  context?: string;
+  familiarity?: 'new' | 'learning' | 'mastered';
+  reviewCount?: number;
+  nextReviewAt?: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface LookupHistoryItem {
+  query: string;
+  word: string;
+  lookedUpAt: number;
 }
 
 export interface VocabularyGraph {

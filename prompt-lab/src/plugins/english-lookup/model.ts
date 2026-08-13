@@ -1,4 +1,4 @@
-import type { VocabularyGraph, WordEntry, WordRelation } from './types';
+import type { LookupHistoryItem, VocabularyGraph, WordEntry, WordRelation } from './types';
 
 type JsonRecord = Record<string, unknown>;
 const relationTypes = new Set<WordRelation['type']>(['synonym', 'antonym', 'related', 'word-family']);
@@ -7,6 +7,10 @@ function record(value: unknown): JsonRecord { return value && typeof value === '
 function strings(value: unknown, limit: number): string[] { return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, limit) : []; }
 
 export function normalizeWord(value: string): string { return value.trim().toLocaleLowerCase('en-US').replace(/[^a-z\-' ]/g, '').replace(/\s+/g, ' '); }
+
+export function normalizeQuery(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').slice(0, 500);
+}
 
 export function parseLookupResponse(raw: string, requestedWord: string, now = Date.now()): WordEntry {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? raw;
@@ -28,7 +32,21 @@ export function parseLookupResponse(raw: string, requestedWord: string, now = Da
 }
 
 export function mergeEntry(previous: WordEntry | undefined, next: WordEntry): WordEntry {
-  return previous ? { ...next, createdAt: previous.createdAt, updatedAt: next.updatedAt } : next;
+  return previous ? { ...next, familiarity: previous.familiarity, reviewCount: previous.reviewCount, nextReviewAt: previous.nextReviewAt, createdAt: previous.createdAt, updatedAt: next.updatedAt } : next;
+}
+
+export function addLookupHistory(history: LookupHistoryItem[], item: LookupHistoryItem, limit = 20): LookupHistoryItem[] {
+  return [item, ...history.filter((entry) => entry.query.toLocaleLowerCase('en-US') !== item.query.toLocaleLowerCase('en-US'))].slice(0, limit);
+}
+
+export function reviewEntry(entry: WordEntry, rating: 'forgot' | 'hard' | 'known', now = Date.now()): WordEntry {
+  const reviewCount = (entry.reviewCount ?? 0) + 1;
+  const days = rating === 'forgot' ? 1 : rating === 'hard' ? Math.min(7, Math.max(2, reviewCount * 2)) : Math.min(90, Math.max(7, reviewCount * 7));
+  return { ...entry, familiarity: rating === 'forgot' ? 'new' : rating === 'hard' ? 'learning' : 'mastered', reviewCount, nextReviewAt: now + days * 86_400_000, updatedAt: now };
+}
+
+export function dueForReview(entries: WordEntry[], now = Date.now()): WordEntry[] {
+  return entries.filter((entry) => (entry.nextReviewAt ?? entry.createdAt) <= now).sort((a, b) => (a.nextReviewAt ?? a.createdAt) - (b.nextReviewAt ?? b.createdAt));
 }
 
 export function buildVocabularyGraph(entries: WordEntry[]): VocabularyGraph {
