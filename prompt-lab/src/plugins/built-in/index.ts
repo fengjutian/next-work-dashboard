@@ -56,6 +56,7 @@ const phone = preloadable(() => import('../phone').then((m) => ({ default: m.Pho
 const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ default: m.VoiceInputPanel })));
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
+const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -85,6 +86,7 @@ const PhonePanel = phone.component;
 const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const WorkBrowserPanel = workBrowser.component;
+const EnglishLookupPanel = englishLookup.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -527,6 +529,19 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'english-lookup',
+    name: 'AI 英语查询',
+    icon: Languages,
+    component: EnglishLookupPanel,
+    enabled: false,
+    order: 11,
+    keepAlive: true,
+    contributions: {
+      commands: [{ id: 'english-lookup.search', title: '查询英语单词', category: 'AI 英语查询' }],
+      views: [{ id: 'english-lookup.main', title: 'AI 英语查询', component: EnglishLookupPanel, location: 'main' }],
+    },
+  },
+  {
     id: 'phone',
     name: 'Phone',
     icon: Phone,
@@ -656,6 +671,7 @@ export function registerBuiltInPlugins(): void {
     mycast: mycast.preload,
     'voice-input': voiceInput.preload,
     'zodiac-perspectives': zodiacPerspectives.preload,
+    'english-lookup': englishLookup.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
