@@ -57,6 +57,7 @@ const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ def
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
+const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default: m.CalcPathPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -87,6 +88,7 @@ const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const WorkBrowserPanel = workBrowser.component;
 const EnglishLookupPanel = englishLookup.component;
+const CalcPathPanel = calcPath.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -189,6 +191,11 @@ const builtInPlugins: Plugin[] = [
     component: WereadPanel,
     enabled: false,
     order: 6,
+  },
+  {
+    id: 'calcpath', name: 'CalcPath 微积分', icon: BookOpen, component: CalcPathPanel, enabled: false, order: 22, keepAlive: true,
+    contributions: { commands: [{ id: 'calcpath.practice', title: '开始自适应微积分练习', category: 'CalcPath' }] },
+    activate: (context) => context.commands.register('calcpath.practice', () => window.dispatchEvent(new CustomEvent('calcpath:practice'))),
   },
   {
     id: 'translator',
@@ -673,6 +680,7 @@ export function registerBuiltInPlugins(): void {
     'voice-input': voiceInput.preload,
     'zodiac-perspectives': zodiacPerspectives.preload,
     'english-lookup': englishLookup.preload,
+    calcpath: calcPath.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,
