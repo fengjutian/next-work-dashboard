@@ -536,6 +536,7 @@ const builtInPlugins: Plugin[] = [
     enabled: false,
     order: 11,
     keepAlive: true,
+    activate: (context) => context.commands.register('english-lookup.search', () => window.dispatchEvent(new CustomEvent('english-lookup:search'))),
     contributions: {
       commands: [{ id: 'english-lookup.search', title: '查询英语单词', category: 'AI 英语查询' }],
       views: [{ id: 'english-lookup.main', title: 'AI 英语查询', component: EnglishLookupPanel, location: 'main' }],
