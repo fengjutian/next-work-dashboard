@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addLookupHistory, buildVocabularyGraph, dueForReview, mergeEntry, normalizeQuery, normalizeWord, parseLookupResponse, reviewEntry } from '../src/plugins/english-lookup/model';
+import { addLookupHistory, buildVocabularyGraph, dueForReview, mergeEntry, normalizeQuery, normalizeWord, parseLookupResponse, reviewEntry, vocabularyStats, vocabularyToCsv } from '../src/plugins/english-lookup/model';
 
 const response = JSON.stringify({ word: 'Serendipity', phonetic: '/ˌserənˈdɪpəti/', partOfSpeech: 'noun', definitions: [{ meaning: '意外发现美好事物的幸运', example: 'We met by serendipity.', translation: '我们因缘际会。' }], collocations: ['pure serendipity'], topics: ['discovery'], relations: [{ word: 'chance', type: 'synonym' }, { word: 'planned', type: 'antonym' }], memoryTip: '把它想成一次幸运偶遇。' });
 
@@ -13,4 +13,5 @@ describe('english lookup model', () => {
   it('deduplicates recent history case-insensitively', () => expect(addLookupHistory([{ query: 'Test', word: 'test', lookedUpAt: 1 }], { query: 'test', word: 'test', lookedUpAt: 2 })).toEqual([{ query: 'test', word: 'test', lookedUpAt: 2 }]));
   it('schedules reviews from learner feedback', () => { const entry = parseLookupResponse(response, 'serendipity', 10); const reviewed = reviewEntry(entry, 'known', 100); expect(reviewed.familiarity).toBe('mastered'); expect(reviewed.nextReviewAt).toBeGreaterThan(100); expect(dueForReview([reviewed], 101)).toHaveLength(0); });
   it('parses word forms, definition parts of speech and comparisons', () => { const entry = parseLookupResponse(JSON.stringify({ word: 'run', definitions: [{ partOfSpeech: 'verb', meaning: '跑' }], forms: [{ label: '过去式', value: 'ran' }], comparisons: [{ word: 'jog', difference: '速度较慢' }] }), 'run'); expect(entry.definitions[0].partOfSpeech).toBe('verb'); expect(entry.forms).toEqual([{ label: '过去式', value: 'ran' }]); expect(entry.comparisons?.[0].word).toBe('jog'); });
+  it('summarizes learning progress and exports escaped CSV', () => { const entry = { ...parseLookupResponse(response, 'serendipity'), familiarity: 'mastered' as const, reviewCount: 3 }; expect(vocabularyStats([entry])).toMatchObject({ total: 1, mastered: 1, reviews: 3, masteryRate: 100 }); expect(vocabularyToCsv([entry])).toContain('"serendipity"'); });
 });

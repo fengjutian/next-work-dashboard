@@ -51,6 +51,21 @@ export function dueForReview(entries: WordEntry[], now = Date.now()): WordEntry[
   return entries.filter((entry) => (entry.nextReviewAt ?? entry.createdAt) <= now).sort((a, b) => (a.nextReviewAt ?? a.createdAt) - (b.nextReviewAt ?? b.createdAt));
 }
 
+export function vocabularyStats(entries: WordEntry[]): { total: number; newCount: number; learning: number; mastered: number; reviews: number; masteryRate: number } {
+  const newCount = entries.filter((entry) => (entry.familiarity ?? 'new') === 'new').length;
+  const learning = entries.filter((entry) => entry.familiarity === 'learning').length;
+  const mastered = entries.filter((entry) => entry.familiarity === 'mastered').length;
+  const reviews = entries.reduce((sum, entry) => sum + (entry.reviewCount ?? 0), 0);
+  return { total: entries.length, newCount, learning, mastered, reviews, masteryRate: entries.length ? Math.round(mastered / entries.length * 100) : 0 };
+}
+
+function csvCell(value: unknown): string { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+
+export function vocabularyToCsv(entries: WordEntry[]): string {
+  const rows = entries.map((entry) => [entry.word, entry.phonetic, entry.partOfSpeech, entry.definitions.map((item) => item.meaning).join('；'), entry.definitions[0]?.example ?? '', entry.familiarity ?? 'new', entry.reviewCount ?? 0]);
+  return ['word,phonetic,partOfSpeech,meanings,example,familiarity,reviewCount', ...rows.map((row) => row.map(csvCell).join(','))].join('\n');
+}
+
 export function buildVocabularyGraph(entries: WordEntry[]): VocabularyGraph {
   const nodes = new Map<string, VocabularyGraph['nodes'][number]>();
   const links = new Map<string, VocabularyGraph['links'][number]>();
