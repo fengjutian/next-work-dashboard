@@ -3,11 +3,12 @@ import { ArrowRight, BookOpen, CheckCircle, Info, RotateCcw, SlidersHorizontal }
 import { BRIDGE_CONTEXT, KNOWLEDGE_NODES, PROBLEMS } from './curriculum';
 import { LearningLandscape } from './LearningLandscape';
 import { KnowledgeStudio } from './KnowledgeStudio';
+import { CourseCatalog } from './CourseCatalog';
 import { evaluateAnswer, getNextProblem, updateSkill } from './engine';
 import { loadState, saveState } from './storage';
 import type { CalcPathState, Problem } from './types';
 
-type View = 'home' | 'path' | 'practice' | 'learn';
+type View = 'home' | 'path' | 'catalog' | 'practice' | 'learn';
 const pct = (value: number) => `${Math.round(value * 100)}%`;
 
 export function CalcPathPanel() {
@@ -47,6 +48,7 @@ export function CalcPathPanel() {
     <aside className="hidden w-56 shrink-0 border-r border-emerald-950/10 bg-[#103c35] p-5 text-white md:flex md:flex-col">
       <div className="mb-8"><div className="text-xl font-semibold tracking-tight">CalcPath</div><div className="mt-1 text-xs text-emerald-100/70">你的微积分学习路径</div></div>
       {[['home', '学习总览'], ['path', '知识路径']].map(([id, label]) => <button key={id} onClick={() => setView(id as View)} className={`mb-2 rounded-xl px-3 py-2.5 text-left text-sm ${view === id ? 'bg-white/15 font-medium' : 'text-emerald-50/75 hover:bg-white/10'}`}>{label}</button>)}
+      <button onClick={() => setView('catalog')} className={`mb-2 rounded-xl px-3 py-2.5 text-left text-sm ${view === 'catalog' ? 'bg-white/15 font-medium' : 'text-emerald-50/75 hover:bg-white/10'}`}>完整课程</button>
       <button onClick={() => openLesson(getNextProblem(state).knowledgeId)} className={`mb-2 rounded-xl px-3 py-2.5 text-left text-sm ${view === 'learn' ? 'bg-white/15 font-medium' : 'text-emerald-50/75 hover:bg-white/10'}`}>引导式课堂</button>
       <button onClick={() => start()} className="mb-2 rounded-xl px-3 py-2.5 text-left text-xs text-emerald-50/55 hover:bg-white/10">专项练习</button>
       <div className="mt-auto rounded-2xl bg-white/10 p-4"><div className="text-xs text-emerald-100/70">综合掌握度</div><div className="mt-1 text-2xl font-semibold">{pct(overall)}</div><div className="mt-3 h-1.5 rounded bg-white/15"><div className="h-full rounded bg-[#efb85d]" style={{ width: pct(overall) }} /></div></div>
@@ -60,6 +62,7 @@ export function CalcPathPanel() {
         {!state.diagnosticComplete && <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900 dark:bg-amber-950/30"><div className="font-medium">首次诊断已准备好</div><p className="mt-1 text-sm text-slate-600 dark:text-slate-400">从基础函数题开始，答题结果会逐步定位你的知识缺口，无需一次完成长测验。</p></div>}
       </div>}
       {view === 'path' && <div className="mx-auto max-w-6xl"><h1 className="text-3xl font-semibold">知识不是清单，而是一张路网</h1><p className="mt-2 text-sm text-slate-500">点击任意知识节点，进入它的学习室。</p><div className="mt-7"><LearningLandscape state={state} onSelect={openLesson} /></div><div className="mt-5 grid gap-4 md:grid-cols-3"><div className="rounded-2xl border bg-white p-5 dark:bg-slate-900"><div className="text-xs font-semibold text-blue-700">高中地基</div><p className="mt-2 text-sm text-slate-500">代数负责变形，函数负责表达变化，图像负责建立直觉。</p></div><div className="rounded-2xl border bg-white p-5 dark:bg-slate-900"><div className="text-xs font-semibold text-amber-700">关键桥梁</div><p className="mt-2 text-sm text-slate-500">“无限趋近”和“瞬时变化”是从高中静态数学转向大学动态数学的跃迁。</p></div><div className="rounded-2xl border bg-white p-5 dark:bg-slate-900"><div className="text-xs font-semibold text-violet-700">大学方向</div><p className="mt-2 text-sm text-slate-500">导数和积分继续分叉到多元微积分、微分方程、级数、概率与线代。</p></div></div></div>}
+      {view === 'catalog' && <CourseCatalog onOpen={openLesson} />}
       {view === 'learn' && <KnowledgeStudio nodeId={learningNodeId} state={state} problem={lessonProblem} onBack={() => setView('path')} onPractice={(target) => start(target)} />}
       {view === 'practice' && <div className="mx-auto max-w-5xl"><button className="text-sm text-slate-500 hover:text-slate-800" onClick={() => openLesson(problem.knowledgeId)}>← 回到本节讲解</button><div className="mt-5"><LearningLandscape state={state} compact activeId={problem.knowledgeId} /></div><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_270px]"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between text-xs text-slate-500"><span>{currentNode?.title}</span><span>理解检查 · 难度 {problem.difficulty}/5</span></div><h1 className="mt-6 text-2xl font-semibold leading-relaxed">{problem.question}</h1><input autoFocus value={answer} onChange={(event) => setAnswer(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submit()} disabled={!!feedback} placeholder="输入你的推理结果" className="mt-7 w-full rounded-xl border border-slate-300 bg-transparent px-4 py-3 outline-none focus:border-emerald-600 dark:border-slate-700" />
         {!feedback && <div className="mt-4 flex flex-wrap justify-between gap-3"><button onClick={() => setHintCount(Math.min(problem.hints.length, hintCount + 1))} disabled={hintCount >= problem.hints.length} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-amber-700 disabled:opacity-40"><Info className="h-4 w-4" />给我一点提示</button><button onClick={submit} className="rounded-xl bg-[#103c35] px-5 py-2.5 text-sm font-medium text-white">提交答案</button></div>}
