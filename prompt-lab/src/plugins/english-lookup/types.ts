@@ -19,6 +19,8 @@ export interface WordEntry {
   familiarity?: 'new' | 'learning' | 'mastered';
   reviewCount?: number;
   nextReviewAt?: number;
+  tags?: string[];
+  wordBooks?: Array<'CET-4' | 'CET-6' | 'IELTS' | '商务' | '编程'>;
   createdAt: number;
   updatedAt: number;
 }
@@ -36,6 +38,6 @@ export interface ReviewLogItem {
 }
 
 export interface VocabularyGraph {
-  nodes: Array<{ id: string; name: string; category: number; symbolSize: number; saved: boolean }>;
+  nodes: Array<{ id: string; name: string; category: number; symbolSize: number; saved: boolean; familiarity?: WordEntry['familiarity'] }>;
   links: Array<{ source: string; target: string; value: string }>;
 }

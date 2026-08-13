@@ -2,6 +2,7 @@ import type { LookupHistoryItem, ReviewLogItem, VocabularyGraph, WordEntry, Word
 
 type JsonRecord = Record<string, unknown>;
 const relationTypes = new Set<WordRelation['type']>(['synonym', 'antonym', 'related', 'word-family']);
+export const BUILT_IN_WORD_BOOKS = ['CET-4', 'CET-6', 'IELTS', '商务', '编程'] as const;
 
 function record(value: unknown): JsonRecord { return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}; }
 function strings(value: unknown, limit: number): string[] { return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, limit) : []; }
@@ -41,7 +42,18 @@ export function formatNextReview(nextReviewAt: number | undefined, now = Date.no
 }
 
 export function mergeEntry(previous: WordEntry | undefined, next: WordEntry): WordEntry {
-  return previous ? { ...next, familiarity: previous.familiarity, reviewCount: previous.reviewCount, nextReviewAt: previous.nextReviewAt, createdAt: previous.createdAt, updatedAt: next.updatedAt } : next;
+  return previous ? { ...next, familiarity: previous.familiarity, reviewCount: previous.reviewCount, nextReviewAt: previous.nextReviewAt, tags: previous.tags, wordBooks: previous.wordBooks, createdAt: previous.createdAt, updatedAt: next.updatedAt } : next;
+}
+
+export function updateEntryLabels(entry: WordEntry, labels: { addTags?: string[]; removeTags?: string[]; addBooks?: WordEntry['wordBooks']; removeBooks?: WordEntry['wordBooks'] }): WordEntry {
+  const clean = (values: string[]) => [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, 30);
+  const tags = clean([...(entry.tags ?? []), ...(labels.addTags ?? [])]).filter((tag) => !(labels.removeTags ?? []).includes(tag));
+  const wordBooks = [...new Set([...(entry.wordBooks ?? []), ...(labels.addBooks ?? [])])].filter((book) => !(labels.removeBooks ?? []).includes(book));
+  return { ...entry, tags, wordBooks, updatedAt: Date.now() };
+}
+
+export function filterVocabulary(entries: WordEntry[], tag = '', book = '', familiarity = 'all'): WordEntry[] {
+  return entries.filter((entry) => (!tag || entry.tags?.includes(tag)) && (!book || entry.wordBooks?.includes(book as NonNullable<WordEntry['wordBooks']>[number])) && (familiarity === 'all' || (entry.familiarity ?? 'new') === familiarity));
 }
 
 export function addLookupHistory(history: LookupHistoryItem[], item: LookupHistoryItem, limit = 20): LookupHistoryItem[] {
@@ -102,15 +114,18 @@ export function learningActivity(log: ReviewLogItem[], now = Date.now(), days = 
   return { today: counts.get(localDay(now)) ?? 0, streak, days: result };
 }
 
-export function buildVocabularyGraph(entries: WordEntry[]): VocabularyGraph {
+export function buildVocabularyGraph(entries: WordEntry[], relationFilter: Set<string> = new Set(['synonym', 'antonym', 'related', 'word-family', 'topic']), focus = ''): VocabularyGraph {
   const nodes = new Map<string, VocabularyGraph['nodes'][number]>();
   const links = new Map<string, VocabularyGraph['links'][number]>();
   const saved = new Set(entries.map((entry) => entry.word));
-  const addNode = (name: string, category: number) => { const id = category === 2 ? `topic:${name}` : name; if (!nodes.has(id)) nodes.set(id, { id, name, category, symbolSize: category === 0 ? 30 : category === 2 ? 16 : 20, saved: saved.has(name) }); return id; };
+  const familiarity = new Map(entries.map((entry) => [entry.word, entry.familiarity ?? 'new']));
+  const addNode = (name: string, category: number) => { const id = category === 2 ? `topic:${name}` : name; if (!nodes.has(id)) nodes.set(id, { id, name, category, symbolSize: category === 0 ? 30 : category === 2 ? 16 : 20, saved: saved.has(name), familiarity: familiarity.get(name) }); return id; };
   for (const entry of entries) {
     const source = addNode(entry.word, 0);
-    for (const relation of entry.relations) { const target = addNode(relation.word, 1); const key = `${source}\0${target}\0${relation.type}`; links.set(key, { source, target, value: relation.type }); }
-    for (const topic of entry.topics) { const target = addNode(topic, 2); const key = `${source}\0${target}\0topic`; links.set(key, { source, target, value: 'topic' }); }
+    for (const relation of entry.relations) { if (!relationFilter.has(relation.type)) continue; const target = addNode(relation.word, 1); const key = `${source}\0${target}\0${relation.type}`; links.set(key, { source, target, value: relation.type }); }
+    if (relationFilter.has('topic')) for (const topic of entry.topics) { const target = addNode(topic, 2); const key = `${source}\0${target}\0topic`; links.set(key, { source, target, value: 'topic' }); }
   }
-  return { nodes: [...nodes.values()], links: [...links.values()] };
+  if (!focus || !nodes.has(focus)) return { nodes: [...nodes.values()], links: [...links.values()] };
+  const visible = new Set([focus]); for (const link of links.values()) if (link.source === focus || link.target === focus) { visible.add(link.source); visible.add(link.target); }
+  return { nodes: [...nodes.values()].filter((node) => visible.has(node.id)), links: [...links.values()].filter((link) => visible.has(link.source) && visible.has(link.target)) };
 }
