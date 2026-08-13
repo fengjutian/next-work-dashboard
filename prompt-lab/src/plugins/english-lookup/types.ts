@@ -29,6 +29,12 @@ export interface LookupHistoryItem {
   lookedUpAt: number;
 }
 
+export interface ReviewLogItem {
+  word: string;
+  rating: 'forgot' | 'hard' | 'known';
+  reviewedAt: number;
+}
+
 export interface VocabularyGraph {
   nodes: Array<{ id: string; name: string; category: number; symbolSize: number; saved: boolean }>;
   links: Array<{ source: string; target: string; value: string }>;

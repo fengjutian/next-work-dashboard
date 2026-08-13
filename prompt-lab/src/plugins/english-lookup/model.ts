@@ -1,4 +1,4 @@
-import type { LookupHistoryItem, VocabularyGraph, WordEntry, WordRelation } from './types';
+import type { LookupHistoryItem, ReviewLogItem, VocabularyGraph, WordEntry, WordRelation } from './types';
 
 type JsonRecord = Record<string, unknown>;
 const relationTypes = new Set<WordRelation['type']>(['synonym', 'antonym', 'related', 'word-family']);
@@ -89,6 +89,17 @@ export function mergeVocabulary(current: WordEntry[], incoming: WordEntry[]): Wo
   const merged = new Map(current.map((entry) => [entry.word, entry]));
   for (const entry of incoming) merged.set(entry.word, mergeEntry(merged.get(entry.word), entry));
   return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function localDay(timestamp: number): string { const date = new Date(timestamp); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+
+export function learningActivity(log: ReviewLogItem[], now = Date.now(), days = 7): { today: number; streak: number; days: Array<{ date: string; count: number }> } {
+  const counts = new Map<string, number>();
+  for (const item of log) counts.set(localDay(item.reviewedAt), (counts.get(localDay(item.reviewedAt)) ?? 0) + 1);
+  const result = Array.from({ length: days }, (_, offset) => { const date = new Date(now); date.setDate(date.getDate() - (days - 1 - offset)); const key = localDay(date.getTime()); return { date: key, count: counts.get(key) ?? 0 }; });
+  let streak = 0; const cursor = new Date(now);
+  while ((counts.get(localDay(cursor.getTime())) ?? 0) > 0) { streak += 1; cursor.setDate(cursor.getDate() - 1); }
+  return { today: counts.get(localDay(now)) ?? 0, streak, days: result };
 }
 
 export function buildVocabularyGraph(entries: WordEntry[]): VocabularyGraph {
