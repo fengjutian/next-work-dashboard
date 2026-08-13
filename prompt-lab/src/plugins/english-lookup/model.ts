@@ -86,14 +86,16 @@ export function vocabularyToCsv(entries: WordEntry[]): string {
 }
 
 export function importVocabularyJson(raw: string, now = Date.now()): WordEntry[] {
+  if (new Blob([raw]).size > 5_000_000) throw new Error('导入文件不能超过 5 MB');
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw new Error('JSON 文件格式不正确'); }
   if (!Array.isArray(value)) throw new Error('JSON 文件必须是单词数组');
+  if (value.length > 10_000) throw new Error('单次最多导入 10000 个单词');
   return value.map(record).map((item) => {
     const word = normalizeWord(String(item.word || ''));
     const definitions = Array.isArray(item.definitions) ? item.definitions.map(record).map((definition) => ({ partOfSpeech: String(definition.partOfSpeech || '').trim() || undefined, meaning: String(definition.meaning || '').trim(), example: String(definition.example || '').trim(), translation: String(definition.translation || '').trim() })).filter((definition) => definition.meaning) : [];
     if (!word || !definitions.length) return null;
-    return { ...item, id: word, word, definitions, collocations: strings(item.collocations, 10), topics: strings(item.topics, 6), relations: [], phonetic: String(item.phonetic || ''), partOfSpeech: String(item.partOfSpeech || ''), memoryTip: String(item.memoryTip || ''), createdAt: Number(item.createdAt) || now, updatedAt: now } as WordEntry;
+    return { ...item, id: word, word, definitions, tags: strings(item.tags, 30), wordBooks: strings(item.wordBooks, 5).filter((book): book is NonNullable<WordEntry['wordBooks']>[number] => (BUILT_IN_WORD_BOOKS as readonly string[]).includes(book)), collocations: strings(item.collocations, 10), topics: strings(item.topics, 6), relations: [], phonetic: String(item.phonetic || ''), partOfSpeech: String(item.partOfSpeech || ''), memoryTip: String(item.memoryTip || ''), createdAt: Number(item.createdAt) || now, updatedAt: now } as WordEntry;
   }).filter((entry): entry is WordEntry => entry !== null);
 }
 
