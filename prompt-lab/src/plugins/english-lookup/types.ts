@@ -8,6 +8,7 @@ export interface WordEntry {
   definitions: Array<{ partOfSpeech?: string; meaning: string; example: string; translation: string }>;
   forms?: Array<{ label: string; value: string }>;
   comparisons?: Array<{ word: string; difference: string; example?: string }>;
+  suggestions?: string[];
   collocations: string[];
   topics: string[];
   relations: WordRelation[];

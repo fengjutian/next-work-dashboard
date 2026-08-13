@@ -30,7 +30,14 @@ export function parseLookupResponse(raw: string, requestedWord: string, now = Da
   })).filter((item) => item.word && item.word !== word).slice(0, 16) : [];
   const forms = Array.isArray(data.forms) ? data.forms.map(record).map((item) => ({ label: String(item.label || '').trim(), value: String(item.value || '').trim() })).filter((item) => item.label && item.value).slice(0, 10) : [];
   const comparisons = Array.isArray(data.comparisons) ? data.comparisons.map(record).map((item) => ({ word: normalizeWord(String(item.word || '')), difference: String(item.difference || '').trim(), example: String(item.example || '').trim() || undefined })).filter((item) => item.word && item.difference).slice(0, 6) : [];
-  return { id: word, word, phonetic: String(data.phonetic || '').trim(), partOfSpeech: String(data.partOfSpeech || '').trim(), definitions, forms, comparisons, collocations: strings(data.collocations, 10), topics: strings(data.topics, 6), relations, memoryTip: String(data.memoryTip || '').trim(), createdAt: now, updatedAt: now };
+  const suggestions = strings(data.suggestions, 5).map(normalizeWord).filter((item) => item && item !== word);
+  return { id: word, word, phonetic: String(data.phonetic || '').trim(), partOfSpeech: String(data.partOfSpeech || '').trim(), definitions, forms, comparisons, suggestions, collocations: strings(data.collocations, 10), topics: strings(data.topics, 6), relations, memoryTip: String(data.memoryTip || '').trim(), createdAt: now, updatedAt: now };
+}
+
+export function formatNextReview(nextReviewAt: number | undefined, now = Date.now()): string {
+  if (!nextReviewAt || nextReviewAt <= now) return '今日复习';
+  const days = Math.ceil((nextReviewAt - now) / 86_400_000);
+  return days === 1 ? '明日复习' : `${days} 天后复习`;
 }
 
 export function mergeEntry(previous: WordEntry | undefined, next: WordEntry): WordEntry {
