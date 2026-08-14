@@ -57,13 +57,16 @@ const INSTALL_LINK_BRIDGE = `(() => {
   }, true);
 })()`;
 
-function executeWhenWebviewReady(webview: Electron.WebviewTag, script: string) {
+function executeInReadyWebview(webview: Electron.WebviewTag, script: string) {
   try {
-    // Electron throws synchronously until the element is attached and dom-ready.
+    // Callers invoke this only from dom-ready/did-finish-load. Calling
+    // executeJavaScript while a guest is still loading makes Electron attach a
+    // did-stop-loading waiter for every call; repeated React effects can then
+    // trigger MaxListenersExceededWarning on the guest WebContents.
     webview.getWebContentsId();
     void webview.executeJavaScript(script).catch(() => undefined);
   } catch {
-    // A dom-ready listener retries after the guest page becomes usable.
+    // The guest was detached between the readiness event and this call.
   }
 }
 
@@ -128,7 +131,6 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv) return;
-    executeWhenWebviewReady(wv, INSTALL_LINK_BRIDGE);
 
     const onIpcMessage = (e: Electron.IpcMessageEvent) => {
       if (e.channel === 'work-browser:selection-changed') {
@@ -162,7 +164,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
         openInInternalTab(url);
       }
     };
-    const installPageBridge = () => executeWhenWebviewReady(wv, INSTALL_LINK_BRIDGE);
+    const installPageBridge = () => executeInReadyWebview(wv, INSTALL_LINK_BRIDGE);
     const onDidFinishLoad = () => {
       setLoaded(true);
       hasEverLoadedRef.current = true;
@@ -170,7 +172,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
       installPageBridge();
       // 主动触发 webview 内部重读 annotations
-      executeWhenWebviewReady(wv, `window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`);
+      executeInReadyWebview(wv, `window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`);
     };
     const onDidStartLoading = () => {
       setLoaded(false);
