@@ -101,7 +101,7 @@ async function refreshAllFeeds(): Promise<void> {
       try { mergeFeed(await fetchFeed(feed.feedUrl), feed.category); }
       catch (cause) {
         const state = loadRssState();
-        saveRssState({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, error: cause instanceof Error ? cause.message : String(cause) } : item) });
+        saveRssState({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, lastFetchedAt: Date.now(), error: cause instanceof Error ? cause.message : String(cause) } : item) });
       }
     }
   } finally { refreshRunning = false; }

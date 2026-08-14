@@ -60,6 +60,7 @@ const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ d
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
 const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default: m.CalcPathPanel })));
 const rssReader = preloadable(() => import('../rss-reader').then((m) => ({ default: m.RssReaderPanel })));
+const outlineScaffolder = preloadable(() => import('../outline-scaffolder').then((m) => ({ default: m.OutlineScaffolderPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -93,8 +94,20 @@ const WorkBrowserPanel = workBrowser.component;
 const EnglishLookupPanel = englishLookup.component;
 const CalcPathPanel = calcPath.component;
 const RssReaderPanel = rssReader.component;
+const OutlineScaffolderPanel = outlineScaffolder.component;
 
 const builtInPlugins: Plugin[] = [
+  {
+    id: 'outline-scaffolder',
+    name: '章节文档生成器',
+    icon: FileText,
+    component: OutlineScaffolderPanel,
+    enabled: true,
+    order: 8,
+    contributions: {
+      commands: [{ id: 'outline-scaffolder.create', title: '批量创建章节文档', category: '章节文档生成器' }],
+    },
+  },
   {
     id: 'ai',
     name: 'AI',
