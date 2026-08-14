@@ -1,10 +1,10 @@
-import { ipcMain } from 'electron';
+import { ipcMain, Notification } from 'electron';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { parseRssFeed } from './rss-parser';
 import { extractReadability } from '../../../core/work-browser/parser';
-import { getRssHttpCache, getRssRefreshMinutes, loadRssState, pruneRssArticles, saveRssHttpCache, saveRssState, setRssRefreshMinutes, setRssRetentionDays } from './rss-database';
-import type { RssArticle, RssFeed, RssSubscription } from '../types';
+import { deleteRssRule, getRssArticleContent, getRssHttpCache, getRssNotificationsEnabled, getRssRefreshMinutes, listRssRules, loadRssState, pruneRssArticles, saveRssArticleContent, saveRssHttpCache, saveRssRule, saveRssState, searchRssArticles, setRssNotificationsEnabled, setRssRefreshMinutes, setRssRetentionDays } from './rss-database';
+import type { RssArticle, RssFeed, RssKeywordRule, RssSubscription } from '../types';
 
 const MAX_FEED_BYTES = 5 * 1024 * 1024;
 
@@ -79,17 +79,39 @@ function subscriptionId(url: string): string {
   return `feed-${(hash >>> 0).toString(36)}`;
 }
 
+function ruleMatches(article: RssArticle, rule: RssKeywordRule): boolean {
+  if (!rule.enabled) return false;
+  const haystack = `${article.title} ${article.description} ${article.author}`.toLowerCase();
+  const includes = rule.includeKeywords.map((word) => word.trim().toLowerCase()).filter(Boolean);
+  const excludes = rule.excludeKeywords.map((word) => word.trim().toLowerCase()).filter(Boolean);
+  return (!includes.length || includes.some((word) => haystack.includes(word))) && !excludes.some((word) => haystack.includes(word));
+}
+
+function showNotification(title: string, body: string): void {
+  if (getRssNotificationsEnabled() && Notification.isSupported()) new Notification({ title, body: body.slice(0, 240) }).show();
+}
+
 function mergeFeed(feed: RssFeed, category = '未分类'): void {
   const state = loadRssState();
   const id = subscriptionId(feed.feedUrl);
   const existingFeed = state.subscriptions.find((item) => item.feedUrl === feed.feedUrl || item.id === id);
   const existingArticles = new Map(state.articles.map((item) => [`${item.feedId}:${item.id}`, item]));
+  const knownIds = new Set(state.articles.filter((item) => item.feedId === existingFeed?.id).map((item) => item.id));
+  const rules = listRssRules();
   const articles: RssArticle[] = feed.items.map((item) => {
     const existing = existingArticles.get(`${existingFeed?.id ?? id}:${item.id}`);
-    return { ...item, feedId: existingFeed?.id ?? id, feedTitle: feed.title, read: existing?.read ?? false, starred: existing?.starred ?? false };
+    const article: RssArticle = { ...item, feedId: existingFeed?.id ?? id, feedTitle: feed.title, read: existing?.read ?? false, starred: existing?.starred ?? false };
+    if (existingFeed && !knownIds.has(item.id)) for (const rule of rules) if (ruleMatches(article, rule)) {
+      if (rule.action === 'star') article.starred = true;
+      if (rule.action === 'mark-read') article.read = true;
+      if (rule.action === 'notify') showNotification(`${feed.title} · ${rule.name}`, article.title);
+    }
+    return article;
   });
   const subscription: RssSubscription = { id: existingFeed?.id ?? id, title: feed.title, description: feed.description, siteUrl: feed.siteUrl, feedUrl: feed.feedUrl, category: existingFeed?.category ?? category, addedAt: existingFeed?.addedAt ?? Date.now(), lastFetchedAt: Date.now() };
   saveRssState({ subscriptions: [...state.subscriptions.filter((item) => item.id !== subscription.id), subscription], articles: [...articles, ...state.articles.filter((item) => item.feedId !== subscription.id)] });
+  const newArticles = existingFeed ? articles.filter((article) => !knownIds.has(article.id)) : [];
+  if (newArticles.length) showNotification(`${feed.title} 有 ${newArticles.length} 篇新文章`, newArticles.slice(0, 3).map((article) => article.title).join('、'));
 }
 
 let refreshRunning = false;
@@ -130,7 +152,10 @@ export function registerRssIpc(): void {
   ipcMain.handle('rss:refresh:all', async () => { await refreshAllFeeds(); return loadRssState(); });
   ipcMain.handle('rss:settings:refresh', (_event, minutes: number) => setRssRefreshMinutes([0, 15, 60, 240].includes(minutes) ? minutes : 60));
   ipcMain.handle('rss:settings:retention', (_event, days: number) => { setRssRetentionDays([0, 30, 90, 180].includes(days) ? days : 90); return pruneRssArticles(days); });
-  ipcMain.handle('rss:article:extract', async (_event, rawUrl: string) => {
+  ipcMain.handle('rss:settings:notifications', (_event, enabled: boolean) => setRssNotificationsEnabled(!!enabled));
+  ipcMain.handle('rss:article:extract', async (_event, feedId: string, articleId: string, rawUrl: string) => {
+    const cached = getRssArticleContent(feedId, articleId);
+    if (cached) return cached;
     const { response, url, cachedBody } = await fetchSafely(rawUrl);
     if (response.status !== 304 && !response.ok) throw new Error(`正文请求失败（HTTP ${response.status}）`);
     const html = cachedBody ?? await response.text();
@@ -138,7 +163,12 @@ export function registerRssIpc(): void {
     if (!cachedBody) saveRssHttpCache(url.toString(), html, response.headers.get('etag'), response.headers.get('last-modified'));
     const extracted = await extractReadability(html);
     if (!extracted.contentText) throw new Error('未能提取到正文');
+    saveRssArticleContent(feedId, articleId, extracted.contentText, extracted.wordCount);
     return { text: extracted.contentText, wordCount: extracted.wordCount };
   });
+  ipcMain.handle('rss:search', (_event, query: string) => searchRssArticles(query));
+  ipcMain.handle('rss:rules:list', () => listRssRules());
+  ipcMain.handle('rss:rules:save', (_event, rule: RssKeywordRule) => saveRssRule(rule));
+  ipcMain.handle('rss:rules:delete', (_event, id: string) => deleteRssRule(id));
   startRssBackgroundRefresh();
 }

@@ -29,3 +29,13 @@ export interface RssArticle extends RssFeedItem {
   read: boolean;
   starred: boolean;
 }
+
+export type RssRuleAction = 'notify' | 'star' | 'mark-read';
+export interface RssKeywordRule {
+  id: string;
+  name: string;
+  includeKeywords: string[];
+  excludeKeywords: string[];
+  action: RssRuleAction;
+  enabled: boolean;
+}
