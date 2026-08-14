@@ -10,7 +10,8 @@ export async function settleWithConcurrency<T>(tasks: Array<() => Promise<T>>, c
   let cursor = 0;
   const worker = async () => {
     while (cursor < tasks.length) {
-      const index = cursor++;
+      const index = cursor;
+      cursor += 1;
       try {
         results[index] = { status: 'fulfilled', value: await tasks[index]() };
       } catch (reason) {

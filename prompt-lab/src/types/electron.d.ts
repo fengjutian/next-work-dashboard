@@ -126,6 +126,8 @@ export interface MarketplaceCatalog {
 export interface ElectronAPI {
   rss: {
     fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
+    loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
+    saveState: (state: { subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }) => Promise<void>;
   };
   plugins: {
     loadDefinitions: () => Promise<unknown[]>;

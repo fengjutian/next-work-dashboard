@@ -6,6 +6,8 @@ import { workBrowserBridge } from './preload/work-browser';
 const electronAPI: ElectronAPI = {
   rss: {
     fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
+    loadState: () => ipcRenderer.invoke('rss:state:load'),
+    saveState: (state) => ipcRenderer.invoke('rss:state:save', state),
   },
   plugins: {
     loadDefinitions: () => ipcRenderer.invoke('plugins:definitions:load'),
