@@ -367,7 +367,7 @@ export function WorkBrowserPanel() {
   }, [activeTab, documents]);
 
   const handleOpenResult = useCallback(async (url: string) => {
-    if (await handleAddTab(url)) setSearchOpen(false);
+    await handleAddTab(url);
   }, [handleAddTab]);
 
   const handleTabUpdate = useCallback((tabId: string, patch: Partial<Pick<Tab, 'title' | 'url' | 'favicon'>>) => {

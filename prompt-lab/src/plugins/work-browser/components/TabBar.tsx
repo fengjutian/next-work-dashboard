@@ -1,5 +1,5 @@
 import {
-  ArrowRight, Copy, Globe2, Home, ListTree, Pin, PinOff, Plus, RefreshCw,
+  ArrowRight, ChevronDown, Copy, Globe2, Home, ListTree, Pin, PinOff, Plus, RefreshCw,
   RotateCcw, Rows3, X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -97,11 +97,11 @@ export function TabBar(props: TabBarProps) {
         isVertical
           ? 'h-9 w-full rounded-xl px-2.5'
           : tab.isPinned
-            ? 'h-9 w-10 shrink-0 justify-center rounded-xl px-0'
-            : 'h-9 min-w-24 max-w-60 shrink rounded-xl px-3'
+            ? 'h-9 w-10 shrink-0 justify-center rounded-t-xl rounded-b-md px-0'
+            : 'h-9 min-w-28 max-w-64 shrink rounded-t-xl rounded-b-md px-3'
       } ${activeId === tab.id
-        ? 'bg-card text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.12)]'
-        : 'text-muted-foreground hover:bg-card/55 hover:text-foreground'}`}
+        ? 'bg-card text-foreground shadow-[0_-1px_0_rgba(255,255,255,.7),0_1px_3px_rgba(0,0,0,.10)]'
+        : 'text-foreground/75 hover:bg-card/45 hover:text-foreground'}`}
     >
       {tab.favicon ? <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm" /> : <Globe2 size={13} className="shrink-0" />}
       {(!tab.isPinned || isVertical) && <span className="min-w-0 flex-1 truncate">{formatTabTitle(tab)}</span>}
@@ -120,16 +120,21 @@ export function TabBar(props: TabBarProps) {
   );
 
   return (
-    <div className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-primary/[0.07] px-2">
-      <button type="button" aria-label="返回首页" title="返回首页" onClick={onHome} className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl transition ${activeId ? 'text-muted-foreground hover:bg-card/60 hover:text-foreground' : 'bg-card text-foreground shadow-sm'}`}><Home size={15} /></button>
-      <div className="work-browser-tab-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1.5">
-        {orderedTabs.map((tab) => tabButton(tab))}
-        <button type="button" aria-label="新建标签页" title="新建标签页" onClick={() => void onNewTab()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-card/60 hover:text-foreground"><Plus size={16} /></button>
+    <div className="relative flex h-20 shrink-0 flex-col border-b border-border/50 bg-[#dce8fb] dark:bg-muted/45">
+      <div className="flex h-10 min-w-0 items-end gap-1 px-1.5 pt-1">
+        <button type="button" aria-label="标签页列表" title="标签页列表" onClick={toggleVertical} className="mb-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-card/70 text-foreground transition hover:bg-card"><ChevronDown size={15} /></button>
+        <div className="work-browser-tab-strip flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">
+          {orderedTabs.map((tab) => tabButton(tab))}
+          <button type="button" aria-label="新建标签页" title="新建标签页" onClick={() => void onNewTab()} className="mb-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-foreground/75 transition hover:bg-card/55 hover:text-foreground"><Plus size={17} /></button>
+        </div>
       </div>
-      <div className="flex h-8 w-[min(30vw,360px)] shrink-0 items-center rounded-lg bg-muted/45 pl-2.5 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/10">
-        <Globe2 size={14} className="shrink-0 text-muted-foreground" />
-        <input placeholder="输入 URL →" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void submitUrl(); }} className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/70" />
-        <button type="button" aria-label="打开网址" onClick={() => void submitUrl()} disabled={!url.trim()} className="mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"><ArrowRight size={13} /></button>
+      <div className="flex h-10 items-center gap-2 border-t border-white/40 bg-card/55 px-2 dark:border-border/40">
+        <button type="button" aria-label="返回首页" title="返回首页" onClick={onHome} className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition ${activeId ? 'text-muted-foreground hover:bg-muted hover:text-foreground' : 'bg-muted text-foreground'}`}><Home size={15} /></button>
+        <div className="flex h-8 min-w-0 flex-1 items-center rounded-full border border-transparent bg-muted/70 pl-3 transition focus-within:border-primary/25 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/10">
+          <Globe2 size={14} className="shrink-0 text-muted-foreground" />
+          <input placeholder="输入网址或搜索" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void submitUrl(); }} className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/70" />
+          <button type="button" aria-label="打开网址" onClick={() => void submitUrl()} disabled={!url.trim()} className="mr-1 grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-primary hover:text-primary-foreground disabled:opacity-35"><ArrowRight size={13} /></button>
+        </div>
       </div>
 
       {vertical && (

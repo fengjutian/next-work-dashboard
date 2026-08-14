@@ -62,7 +62,7 @@ export function SearchResults({ open, onClose, data, loading, onOpen }: SearchRe
                 <button
                   key={`${result.canonicalUrl}:${result.source}`}
                   type="button"
-                  onClick={() => onOpen(result.url)}
+                  onClick={() => onOpen(withTextFragment(result.url, data.query.text))}
                   className="group flex w-full gap-3 border-b border-border/50 px-4 py-3.5 text-left transition last:border-b-0 hover:bg-primary/[0.035] focus-visible:bg-primary/[0.05] focus-visible:outline-none"
                 >
                   <span className="mt-0.5 w-5 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/60">{index + 1}</span>
@@ -93,6 +93,20 @@ function compactUrl(value: string): string {
   try {
     const url = new URL(value);
     return `${url.pathname}${url.search}` || '/';
+  } catch {
+    return value;
+  }
+}
+
+function withTextFragment(value: string, query: string): string {
+  const text = query.trim().replace(/\s+/g, ' ').slice(0, 120);
+  if (!text) return value;
+  try {
+    const url = new URL(value);
+    if (!/^https?:$/.test(url.protocol)) return value;
+    const anchor = url.hash.slice(1).split(':~:text=')[0];
+    url.hash = `${anchor ? `${anchor}:~:` : ':~:'}text=${encodeURIComponent(text)}`;
+    return url.toString();
   } catch {
     return value;
   }
