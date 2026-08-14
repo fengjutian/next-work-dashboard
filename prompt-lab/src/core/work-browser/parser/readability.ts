@@ -7,7 +7,7 @@
  *  - 段落评分：包含 <p>/<article> 加分；纯链接列表减分
  *  - 取评分最高的容器作为正文，输出 Markdown
  */
-import { htmlToMarkdownInline } from './markdown';
+import { htmlToMarkdown } from './markdown';
 
 const STRIP_SELECTORS = [
   'script', 'style', 'noscript', 'iframe', 'object', 'embed',
@@ -156,7 +156,7 @@ export function extractReadabilityFromDom(dom: DomLike): ReadabilityResult {
     title,
     author,
     publishedAt: publishedAt && Number.isFinite(publishedAt) ? publishedAt : null,
-    contentMarkdown: htmlToMarkdownInline(top.innerHTML || ''),
+    contentMarkdown: htmlToMarkdown(top.innerHTML || ''),
     contentText,
     excerpt: contentText.slice(0, 200).replace(/\s+/g, ' '),
     wordCount,

@@ -22,6 +22,28 @@ const DEFAULT_TEMPLATE = `# {{title}}
 
 {{headings}}`;
 
+const RECENT_PROJECTS_KEY = 'outline-scaffolder.recent-projects.v1';
+
+interface SavedProject {
+  id: string;
+  name: string;
+  rootPath: string;
+  subfolder: string;
+  source: string;
+  splitMode: SplitMode;
+  organizeByPart: boolean;
+  template: string;
+  files: string[];
+  updatedAt: number;
+}
+
+function loadSavedProjects(): SavedProject[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_PROJECTS_KEY) ?? '[]');
+    return Array.isArray(value) ? value.slice(0, 20) : [];
+  } catch { return []; }
+}
+
 function OutlineTree({ nodes }: { nodes: OutlineNode[] }) {
   return <ul className="space-y-1">
     {nodes.map((node) => <li key={node.id}>
@@ -57,6 +79,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [modifiedAt, setModifiedAt] = useState<number>();
   const [documentLoading, setDocumentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<SavedProject[]>(loadSavedProjects);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish'>('generate');
   const [aiInstruction, setAiInstruction] = useState('');
@@ -67,6 +90,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
+
+  useEffect(() => { try { localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recentProjects)); } catch { /* Recent projects are a convenience; documents remain on disk. */ } }, [recentProjects]);
 
   useEffect(() => { setConflicts([]); }, [files, target]);
   useEffect(() => {
@@ -81,11 +106,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setView(next);
   };
 
-  const openDocument = async (path: string) => {
-    if (!target || (dirty && !window.confirm('当前文档尚未保存，确定切换吗？'))) return;
+  const openDocument = async (path: string, folder = target, confirmDiscard = true) => {
+    if (!folder || (confirmDiscard && dirty && !window.confirm('当前文档尚未保存，确定切换吗？'))) return;
     setDocumentLoading(true);
     try {
-      const result = await window.electronAPI.workspace.readTextFile(target.path, path);
+      const result = await window.electronAPI.workspace.readTextFile(folder.path, path);
       if (!result.success || !result.data) throw new Error(result.error);
       setActiveFile(path); setDocumentContent(result.data.content); setSavedContent(result.data.content); setModifiedAt(result.data.modifiedAt);
     } catch (error) {
@@ -93,22 +118,61 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { setDocumentLoading(false); }
   };
 
-  const loadExistingDocuments = async () => {
-    if (!target) return;
+  const rememberProject = (folder: { path: string; name: string }, paths: string[], overrides?: Partial<SavedProject>) => {
+    const requestedFolder = overrides?.subfolder ?? subfolder;
+    const savedFolder = requestedFolder.trim() && paths[0]?.includes('/') ? paths[0].split('/')[0] : '';
+    const project: SavedProject = {
+      id: `${folder.path}::${savedFolder}`,
+      name: overrides?.name ?? (projectTitle.trim() || folder.name),
+      rootPath: folder.path,
+      subfolder: savedFolder,
+      source: overrides?.source ?? source,
+      splitMode: overrides?.splitMode ?? splitMode,
+      organizeByPart: overrides?.organizeByPart ?? organizeByPart,
+      template: overrides?.template ?? template,
+      files: paths,
+      updatedAt: Date.now(),
+    };
+    setRecentProjects((current) => [project, ...current.filter((item) => item.id !== project.id)].slice(0, 20));
+  };
+
+  const loadExistingDocuments = async (folder = target, projectFolder = subfolder, shouldRemember = true, confirmDiscard = true) => {
+    if (!folder) return;
     setDocumentLoading(true);
     try {
-      const result = await window.electronAPI.workspace.listFiles(target.path);
+      const result = await window.electronAPI.workspace.listFiles(folder.path);
       if (!result.success) throw new Error(result.error);
-      const prefix = subfolder.trim() ? `${subfolder.trim().replace(/\\/g, '/')}/` : '';
-      const paths = (result.data ?? []).filter((entry) => entry.type === 'file' && entry.path.toLowerCase().endsWith('.md'))
-        .map((entry) => entry.path.replace(/\\/g, '/')).filter((path) => !prefix || path.startsWith(prefix)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const prefix = projectFolder.trim() ? `${projectFolder.trim().replace(/\\/g, '/')}/` : '';
+      const allMarkdown = (result.data ?? []).filter((entry) => entry.type === 'file' && entry.path.toLowerCase().endsWith('.md'))
+        .map((entry) => entry.path.replace(/\\/g, '/'));
+      const matched = allMarkdown.filter((path) => !prefix || path.startsWith(prefix));
+      const paths = (matched.length ? matched : allMarkdown).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       setManagedFiles(paths); setView('documents');
-      if (paths.length) await openDocument(paths[0]);
+      if (shouldRemember && paths.length) rememberProject(folder, paths, { subfolder: projectFolder });
+      if (paths.length) await openDocument(paths[0], folder, confirmDiscard);
       else notice.info({ message: '没有找到 Markdown 文档', placement: 'bottomRight' });
-    } catch (error) {
+    } catch {
       notice.error({ message: '加载失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
     } finally { setDocumentLoading(false); }
   };
+
+  const openSavedProject = async (project: SavedProject) => {
+    if (dirty && !window.confirm('当前文档尚未保存，确定打开其他项目吗？')) return;
+    try {
+      const authorized = await window.electronAPI.workspace.reauthorize(project.rootPath);
+      if (!authorized.success) throw new Error('目录授权失败');
+      const folder = { path: project.rootPath, name: project.name };
+      setTarget(folder); setProjectTitle(project.name); setSubfolder(project.subfolder); setSource(project.source);
+      setSplitMode(project.splitMode); setOrganizeByPart(project.organizeByPart); setTemplate(project.template);
+      setManagedFiles(project.files); setView('documents'); setActiveFile(''); setDocumentContent(''); setSavedContent('');
+      await loadExistingDocuments(folder, project.subfolder, false, false);
+      setRecentProjects((current) => current.map((item) => item.id === project.id ? { ...item, updatedAt: Date.now() } : item).sort((a, b) => b.updatedAt - a.updatedAt));
+    } catch (error) {
+      notice.error({ message: '项目无法打开', description: '项目目录可能已移动或删除，请重新选择目录。', placement: 'bottomRight' });
+    }
+  };
+
+  const removeSavedProject = (id: string) => setRecentProjects((current) => current.filter((project) => project.id !== id));
 
   const saveDocument = async () => {
     if (!target || !activeFile || !dirty) return;
@@ -217,8 +281,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
       }
       notice.success({ message: '文档骨架创建完成', description: `已创建 ${documents.length} 个章节文档和 README.md。`, placement: 'bottomRight' });
       const paths = documents.map((document) => document.path);
+      const outputFolder = subfolder.trim() && documents[0]?.path.includes('/') ? documents[0].path.split('/')[0] : '';
+      const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
+      const manifest = JSON.stringify({ version: 1, name: projectTitle, source, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
+      const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
+      if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
+        const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
+        if (!updated.success) throw new Error(updated.error);
+      } else if (!manifestResult.success) throw new Error(manifestResult.error);
       setManagedFiles(paths); setView('documents');
-      if (paths.length) await openDocument(paths[0]);
+      rememberProject(target, paths);
+      if (paths.length) await openDocument(paths[0], target, false);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notice.error({ message: '创建失败', description: message.includes('ALREADY_EXISTS') ? '目标中已有同名文件。为保护原内容，本次没有覆盖，请更换子目录名称。' : message, placement: 'bottomRight' });
@@ -238,6 +311,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <p className="mt-2 text-xs text-muted-foreground">默认按“章”创建文件，其下小节成为文档内标题。</p>
       </section>
       <div className="flex min-h-0 flex-col gap-5">
+        {recentProjects.length > 0 && <section className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">最近项目</h2><span className="text-xs text-muted-foreground">{recentProjects.length}</span></div><div className="max-h-36 space-y-1 overflow-auto">{recentProjects.map((project) => <div key={project.id} className="group flex items-center gap-2 rounded-md hover:bg-muted"><button type="button" className="min-w-0 flex-1 px-2 py-2 text-left" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.rootPath}{project.subfolder ? ` / ${project.subfolder}` : ''} · {project.files.length} 个文档</span></button><button type="button" className="px-2 text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" title="从列表移除（不会删除文件）" onClick={() => removeSavedProject(project.id)}>移除</button></div>)}</div></section>}
         <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <h2 className="mb-3 text-sm font-semibold">输出设置</h2>
           <div className="space-y-3">
@@ -248,7 +322,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
             <button type="button" className="text-left text-xs text-primary hover:underline" onClick={() => setShowTemplate((value) => !value)}>{showTemplate ? '收起章节模板' : '编辑章节模板'}</button>
             {showTemplate && <><textarea value={template} onChange={(event) => setTemplate(event.target.value)} className="h-36 w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs" /><p className="text-xs text-muted-foreground">变量：{'{{title}}'}、{'{{headings}}'}、{'{{placeholder}}'}</p></>}
             <Button variant="outline" className="w-full justify-start" onClick={chooseFolder}><FolderOpen className="mr-2 h-4 w-4" />{target ? target.path : '选择输出目录'}</Button>
-            {target && <Button variant="outline" className="w-full" onClick={loadExistingDocuments}><BookOpen className="mr-2 h-4 w-4" />加载已有文档</Button>}
+            {target && <Button variant="outline" className="w-full" onClick={() => loadExistingDocuments()}><BookOpen className="mr-2 h-4 w-4" />加载已有文档并保存为项目</Button>}
             {target && <Button variant="secondary" className="w-full" disabled={checking} onClick={checkExisting}>{checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}检查文件冲突</Button>}
             {conflicts.length > 0 && <div className="max-h-24 overflow-auto rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">发现 {conflicts.length} 个同名文件：{conflicts.slice(0, 3).join('、')}{conflicts.length > 3 ? '…' : ''}</div>}
             {target && !checking && conflicts.length === 0 && <p className="text-xs text-muted-foreground">生成前会再次检查；已有文件不会被覆盖。</p>}
@@ -262,7 +336,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </div>
     </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
-        <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold">章节文档</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{target ? <button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={loadExistingDocuments}>{target.path}</button> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
+        <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold">章节文档</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{target ? <button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">

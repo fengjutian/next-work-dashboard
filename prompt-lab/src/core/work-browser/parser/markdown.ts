@@ -7,12 +7,6 @@
  * 未知标签 → 降级为内联文本。
  */
 
-function escapeMarkdown(text: string): string {
-  return text
-    .replace(/([\\`*_{}[<>#+-.!|])/g, '\\$1')
-    .replace(/\n{3,}/g, '\n\n');
-}
-
 function inline(html: string): string {
   // 链接
   html = html.replace(/<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
@@ -84,5 +78,5 @@ export function htmlToMarkdownInline(html: string): string {
 }
 
 export function htmlToMarkdown(html: string): string {
-  return escapeMarkdown(block(html));
+  return block(html);
 }

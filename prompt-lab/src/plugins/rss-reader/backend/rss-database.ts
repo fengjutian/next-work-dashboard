@@ -32,7 +32,7 @@ function db(): DatabaseNS.Database {
     CREATE TABLE IF NOT EXISTS rss_article_content (
       feed_id TEXT NOT NULL, article_id TEXT NOT NULL, content_text TEXT NOT NULL, word_count INTEGER NOT NULL,
       content_markdown TEXT NOT NULL DEFAULT '',
-      cached_at INTEGER NOT NULL, PRIMARY KEY(feed_id, article_id),
+      cached_at INTEGER NOT NULL, format_version INTEGER NOT NULL DEFAULT 2, PRIMARY KEY(feed_id, article_id),
       FOREIGN KEY(feed_id, article_id) REFERENCES rss_articles(feed_id, id) ON DELETE CASCADE
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS rss_articles_fts USING fts5(feed_id UNINDEXED, article_id UNINDEXED, title, description, author, full_text);
@@ -45,6 +45,7 @@ function db(): DatabaseNS.Database {
   if (!feedColumns.has('source_url')) database.exec("ALTER TABLE rss_feeds ADD COLUMN source_url TEXT NOT NULL DEFAULT ''");
   const contentColumns = new Set((database.prepare('PRAGMA table_info(rss_article_content)').all() as Array<{ name: string }>).map((column) => column.name));
   if (!contentColumns.has('content_markdown')) database.exec("ALTER TABLE rss_article_content ADD COLUMN content_markdown TEXT NOT NULL DEFAULT ''");
+  if (!contentColumns.has('format_version')) database.exec('ALTER TABLE rss_article_content ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1');
   return database;
 }
 
@@ -89,8 +90,8 @@ export function setRssNotificationsEnabled(enabled: boolean): void {
 export function saveRssArticleContent(feedId: string, articleId: string, text: string, markdown: string, wordCount: number): void {
   const databaseHandle = db();
   databaseHandle.transaction(() => {
-    databaseHandle.prepare(`INSERT INTO rss_article_content(feed_id,article_id,content_text,word_count,content_markdown,cached_at) VALUES(?,?,?,?,?,?) ON CONFLICT(feed_id,article_id)
-      DO UPDATE SET content_text=excluded.content_text,word_count=excluded.word_count,content_markdown=excluded.content_markdown,cached_at=excluded.cached_at`).run(feedId, articleId, text, wordCount, markdown, Date.now());
+    databaseHandle.prepare(`INSERT INTO rss_article_content(feed_id,article_id,content_text,word_count,content_markdown,cached_at,format_version) VALUES(?,?,?,?,?,?,2) ON CONFLICT(feed_id,article_id)
+      DO UPDATE SET content_text=excluded.content_text,word_count=excluded.word_count,content_markdown=excluded.content_markdown,cached_at=excluded.cached_at,format_version=2`).run(feedId, articleId, text, wordCount, markdown, Date.now());
     const article = databaseHandle.prepare('SELECT title,description,author FROM rss_articles WHERE feed_id=? AND id=?').get(feedId, articleId) as { title: string; description: string; author: string } | undefined;
     if (article) {
       databaseHandle.prepare('DELETE FROM rss_articles_fts WHERE feed_id=? AND article_id=?').run(feedId, articleId);
@@ -99,8 +100,8 @@ export function saveRssArticleContent(feedId: string, articleId: string, text: s
   })();
 }
 export function getRssArticleContent(feedId: string, articleId: string): { text: string; markdown: string; wordCount: number } | null {
-  const row = db().prepare('SELECT content_text,content_markdown,word_count FROM rss_article_content WHERE feed_id=? AND article_id=?').get(feedId, articleId) as { content_text: string; content_markdown: string; word_count: number } | undefined;
-  return row ? { text: row.content_text, markdown: row.content_markdown || row.content_text, wordCount: row.word_count } : null;
+  const row = db().prepare('SELECT content_text,content_markdown,word_count,format_version FROM rss_article_content WHERE feed_id=? AND article_id=?').get(feedId, articleId) as { content_text: string; content_markdown: string; word_count: number; format_version: number } | undefined;
+  return row && row.format_version >= 2 ? { text: row.content_text, markdown: row.content_markdown || row.content_text, wordCount: row.word_count } : null;
 }
 export function searchRssArticles(query: string, limit = 200): Array<{ feedId: string; articleId: string }> {
   const tokens = query.trim().split(/\s+/).filter(Boolean).map((token) => `"${token.replace(/"/g, '""')}"`);
