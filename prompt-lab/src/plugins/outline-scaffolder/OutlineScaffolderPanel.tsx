@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { notification } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { BookOpen, Check, FileText, FolderOpen, Loader2, Save } from '@/components/icons';
+import { BookOpen, Check, FileText, FolderOpen, Loader2, Save, Sparkles } from '@/components/icons';
 import { Button } from '@/components/ui/button';
+import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
+import { useStore } from '@/store/store';
 import { createChapterDocuments, createReadme, parseOutline, type OutlineNode, type SplitMode } from './outline';
 
 const EXAMPLE = `# 第一篇 基础知识
@@ -33,6 +35,7 @@ function OutlineTree({ nodes }: { nodes: OutlineNode[] }) {
 }
 
 export const OutlineScaffolderPanel: React.FC = () => {
+  const aiApi = useStore((state) => state.aiApi);
   const [notice, holder] = notification.useNotification();
   const [source, setSource] = useState(EXAMPLE);
   const [projectTitle, setProjectTitle] = useState('我的文档');
@@ -54,11 +57,22 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [modifiedAt, setModifiedAt] = useState<number>();
   const [documentLoading, setDocumentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish'>('generate');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiResult, setAiResult] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const aiRequestRef = useRef(0);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
 
   useEffect(() => { setConflicts([]); }, [files, target]);
+  useEffect(() => {
+    aiRequestRef.current += 1;
+    setAiLoading(false); setAiResult(''); setAiError('');
+  }, [activeFile]);
 
   const dirty = documentContent !== savedContent;
 
@@ -108,6 +122,42 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const message = error instanceof Error ? error.message : String(error);
       notice.error({ message: message.includes('FILE_MODIFIED_EXTERNALLY') ? '文件已被外部修改' : '保存失败', description: message.includes('FILE_MODIFIED_EXTERNALLY') ? '请重新加载文件，确认外部改动后再编辑。' : message, placement: 'bottomRight' });
     } finally { setSaving(false); }
+  };
+
+  const runAi = async () => {
+    if (!activeFile || aiLoading) return;
+    if (!aiApi.apiKey?.trim()) { setAiError('请先在应用设置中配置 AI API Key。'); return; }
+    const requestId = ++aiRequestRef.current;
+    setAiLoading(true); setAiResult(''); setAiError('');
+    const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
+    const modePrompt = aiMode === 'generate'
+      ? '根据章节标题和现有骨架撰写完整正文。保留一级标题和合理的标题层级，替换占位注释。'
+      : aiMode === 'continue'
+        ? '承接现有正文继续写作。不要复述已有内容，只输出新增内容。'
+        : '润色现有正文，改善结构、准确性、连贯性和表达，同时保持原意与 Markdown 标题结构。输出润色后的完整正文。';
+    const system = `你是一名专业中文写作助手。当前项目名为“${projectTitle}”。请直接输出可写入文件的 Markdown，不要使用代码围栏，不要解释创作过程。`;
+    const context = managedFiles.slice(0, 100).map((path) => path.split('/').pop()?.replace(/\.md$/i, '')).filter(Boolean).join('、');
+    const user = `当前章节：${chapterName}\n全书章节：${context}\n任务：${modePrompt}${aiInstruction.trim() ? `\n用户补充要求：${aiInstruction.trim()}` : ''}\n\n现有文档：\n${documentContent}`;
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
+      let result = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.72, maxTokens: 8_192, stream: true })) {
+        if (requestId !== aiRequestRef.current) return;
+        if (chunk.delta) { result += chunk.delta; setAiResult(result); }
+      }
+      if (!result.trim()) throw new Error('AI 没有返回内容，请重试。');
+    } catch (error) {
+      if (requestId === aiRequestRef.current) setAiError(error instanceof Error ? error.message : String(error));
+    } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
+  };
+
+  const stopAi = () => { aiRequestRef.current += 1; setAiLoading(false); };
+
+  const applyAiResult = (method: 'replace' | 'append') => {
+    if (!aiResult.trim()) return;
+    setDocumentContent((current) => method === 'replace' ? aiResult.trimEnd() + '\n' : `${current.trimEnd()}\n\n${aiResult.trim()}\n`);
+    setAiOpen(false); setEditorMode('edit');
   };
 
   const chooseFolder = async () => {
@@ -210,16 +260,27 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </section>
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}生成 {documents.length || 0} 个章节文档</Button>
       </div>
-    </div> : <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
+    </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold">章节文档</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{target ? <button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={loadExistingDocuments}>{target.path}</button> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
-        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
+        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => setAiOpen((value) => !value)}><Sparkles className="mr-2 h-4 w-4" />AI 助写</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
         <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span>{documentContent.length} 字符</span></div>}
       </main>
+      {aiOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
+        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />AI 章节助写</div><p className="mt-1 text-xs text-muted-foreground">结果不会自动覆盖文档，确认后再应用。</p></div>
+        <div className="space-y-3 border-b border-border p-4">
+          <label className="block text-xs text-muted-foreground">写作任务<select value={aiMode} onChange={(event) => setAiMode(event.target.value as typeof aiMode)} disabled={aiLoading} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="generate">生成本章正文</option><option value="continue">续写本章</option><option value="polish">润色全文</option></select></label>
+          <label className="block text-xs text-muted-foreground">补充要求<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：面向初学者，约 2000 字，多用案例说明" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
+          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止生成</Button> : <Button className="w-full" onClick={runAi}><Sparkles className="mr-2 h-4 w-4" />开始生成</Button>}
+          {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown>{aiLoading && <span className="inline-block h-4 w-1 animate-pulse bg-primary" />}</article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">选择任务并填写要求，<br />AI 结果将在这里预览。</div>}</div>
+        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>追加到文档</Button><Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button></div>
+      </aside>}
     </div>}
   </div>;
 };
