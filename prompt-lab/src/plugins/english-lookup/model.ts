@@ -1,6 +1,7 @@
 import type { LookupHistoryItem, ReviewLogItem, VocabularyGraph, WordEntry, WordRelation } from './types';
 
 type JsonRecord = Record<string, unknown>;
+export interface SentenceTranslation { original: string; translation: string; grammar: string; keyExpressions: Array<{ expression: string; meaning: string }>; alternatives: string[] }
 const relationTypes = new Set<WordRelation['type']>(['synonym', 'antonym', 'related', 'word-family']);
 export const BUILT_IN_WORD_BOOKS = ['CET-4', 'CET-6', 'IELTS', '商务', '编程'] as const;
 
@@ -11,6 +12,24 @@ export function normalizeWord(value: string): string { return value.trim().toLoc
 
 export function normalizeQuery(value: string): string {
   return value.trim().replace(/\s+/g, ' ').slice(0, 500);
+}
+
+export function isSentenceQuery(value: string): boolean {
+  const query = normalizeQuery(value);
+  const words = query.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) ?? [];
+  return words.length >= 4 || /[.!?]$/.test(query) || (words.length >= 3 && /\b(?:is|are|was|were|am|be|been|has|have|had|do|does|did|should|would|could|will|can|may|must)\b/i.test(query));
+}
+
+export function parseSentenceTranslation(raw: string, original: string): SentenceTranslation {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? raw;
+  const start = fenced.indexOf('{'); const end = fenced.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('AI 没有返回可识别的翻译数据，请重试');
+  let data: JsonRecord;
+  try { data = record(JSON.parse(fenced.slice(start, end + 1))); } catch { throw new Error('AI 返回的翻译格式不完整，请重试'); }
+  const translation = String(data.translation || '').trim();
+  if (!translation) throw new Error('AI 返回结果缺少译文，请重试');
+  const keyExpressions = Array.isArray(data.keyExpressions) ? data.keyExpressions.map(record).map(item => ({ expression: String(item.expression || '').trim(), meaning: String(item.meaning || '').trim() })).filter(item => item.expression && item.meaning).slice(0, 8) : [];
+  return { original: normalizeQuery(original), translation, grammar: String(data.grammar || '').trim(), keyExpressions, alternatives: strings(data.alternatives, 4) };
 }
 
 export function parseLookupResponse(raw: string, requestedWord: string, now = Date.now()): WordEntry {
