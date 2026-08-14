@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
-import { DOMParser } from '@xmldom/xmldom';
+import { DOMParser, type Element as XmlElement } from '@xmldom/xmldom';
 import type { RssFeed, RssFeedItem } from '../types';
 
-function text(element: Element | null, ...names: string[]): string {
+function text(element: XmlElement | null, ...names: string[]): string {
   if (!element) return '';
   for (const name of names) {
     const nodes = element.getElementsByTagName(name);
@@ -12,12 +12,12 @@ function text(element: Element | null, ...names: string[]): string {
   return '';
 }
 
-function directElements(parent: Element, name: string): Element[] {
+function directElements(parent: XmlElement, name: string): XmlElement[] {
   return Array.from(parent.childNodes)
-    .filter((node): node is Element => node.nodeType === 1 && (node as Element).tagName.toLowerCase() === name);
+    .filter((node): node is XmlElement => node.nodeType === 1 && (node as XmlElement).tagName.toLowerCase() === name);
 }
 
-function atomLink(element: Element): string {
+function atomLink(element: XmlElement): string {
   const links = Array.from(element.getElementsByTagName('link'));
   const preferred = links.find((node) => !node.getAttribute('rel') || node.getAttribute('rel') === 'alternate') ?? links[0];
   return preferred?.getAttribute('href')?.trim() ?? preferred?.textContent?.trim() ?? '';
@@ -70,4 +70,3 @@ export function parseRssFeed(xml: string, feedUrl: string): RssFeed {
     items,
   };
 }
-
