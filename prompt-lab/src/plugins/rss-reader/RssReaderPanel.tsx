@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, ExternalLink, Globe, Plus, RefreshCw, Search, Star, Trash2, Upload } from '@/components/icons';
+import { Check, Download, ExternalLink, Globe, Loader2, Plus, RefreshCw, Search, Star, Trash2, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { RssArticle, RssFeed, RssSubscription } from './types';
@@ -8,6 +8,7 @@ interface RssState { subscriptions: RssSubscription[]; articles: RssArticle[] }
 type Filter = 'all' | 'unread' | 'starred';
 const STORAGE_KEY = 'plugin-rss-reader-v1';
 const REFRESH_KEY = 'plugin-rss-reader-refresh-minutes';
+const RETENTION_KEY = 'plugin-rss-reader-retention-days';
 
 function loadState(): RssState {
   try {
@@ -74,8 +75,12 @@ export const RssReaderPanel: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [refreshMinutes, setRefreshMinutes] = useState(() => Number(localStorage.getItem(REFRESH_KEY) ?? 60));
+  const [retentionDays, setRetentionDays] = useState(() => Number(localStorage.getItem(RETENTION_KEY) ?? 90));
+  const [fullTexts, setFullTexts] = useState<Record<string, { text: string; wordCount: number }>>({});
+  const [extracting, setExtracting] = useState(false);
   useEffect(() => {
     void window.electronAPI.rss.setRefreshMinutes(refreshMinutes);
+    void window.electronAPI.rss.setRetentionDays(retentionDays);
     void window.electronAPI.rss.loadState().then((stored) => {
       const legacy = loadState();
       if (!stored.subscriptions.length && legacy.subscriptions.length) {
@@ -133,6 +138,18 @@ export const RssReaderPanel: React.FC = () => {
   const exportOpml = () => { void window.electronAPI.saveFile(toOpml(state.subscriptions), 'rss-subscriptions.opml'); };
   const patchArticle = (article: RssArticle, patch: Partial<RssArticle>) => save({ ...state, articles: state.articles.map((item) => item.feedId === article.feedId && item.id === article.id ? { ...item, ...patch } : item) }, setState);
   const openArticle = (article: RssArticle) => { patchArticle(article, { read: true }); setSelectedArticle(`${article.feedId}:${article.id}`); };
+  const markVisibleRead = () => {
+    const keys = new Set(visible.map((article) => `${article.feedId}:${article.id}`));
+    save({ ...state, articles: state.articles.map((article) => keys.has(`${article.feedId}:${article.id}`) ? { ...article, read: true } : article) }, setState);
+  };
+  const loadFullText = async (article: RssArticle) => {
+    if (!article.link) return;
+    const key = `${article.feedId}:${article.id}`;
+    setExtracting(true); setError('');
+    try { const extracted = await window.electronAPI.rss.extractArticle(article.link); setFullTexts((currentTexts) => ({ ...currentTexts, [key]: extracted })); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '正文提取失败'); }
+    finally { setExtracting(false); }
+  };
 
   return <div className="flex h-full min-h-0 bg-card text-foreground">
     <aside className="w-60 shrink-0 border-r flex flex-col min-h-0">
@@ -143,16 +160,17 @@ export const RssReaderPanel: React.FC = () => {
       </div>
       <div className="flex items-center justify-between px-3 py-2 border-b"><span className="text-xs text-muted-foreground">订阅源</span><div className="flex"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void importOpml()} title="导入 OPML"><Upload className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!state.subscriptions.length} onClick={exportOpml} title="导出 OPML"><Download className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={busy || !state.subscriptions.length} onClick={() => void refresh()} title="刷新全部"><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} /></Button></div></div>
       <div className="px-3 py-2 border-b flex items-center justify-between"><span className="text-[11px] text-muted-foreground">后台刷新</span><select className="text-xs bg-background border rounded px-1 py-0.5" value={refreshMinutes} onChange={(event) => { const value = Number(event.target.value); setRefreshMinutes(value); localStorage.setItem(REFRESH_KEY, String(value)); void window.electronAPI.rss.setRefreshMinutes(value); }}><option value={0}>关闭</option><option value={15}>15 分钟</option><option value={60}>1 小时</option><option value={240}>4 小时</option></select></div>
+      <div className="px-3 py-2 border-b flex items-center justify-between"><span className="text-[11px] text-muted-foreground">文章保留</span><select className="text-xs bg-background border rounded px-1 py-0.5" value={retentionDays} onChange={(event) => { const value = Number(event.target.value); setRetentionDays(value); localStorage.setItem(RETENTION_KEY, String(value)); void window.electronAPI.rss.setRetentionDays(value).then(() => window.electronAPI.rss.loadState()).then(setState); }}><option value={30}>30 天</option><option value={90}>90 天</option><option value={180}>180 天</option><option value={0}>永久</option></select></div>
       <div className="overflow-auto flex-1 p-2 space-y-1">
         <button onClick={() => setSelectedFeed('all')} className={`w-full rounded px-2 py-2 text-left text-sm flex justify-between ${selectedFeed === 'all' ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span>全部文章</span><span>{unread()}</span></button>
-        {state.subscriptions.map((feed) => <div key={feed.id} className={`group rounded flex items-center ${selectedFeed === feed.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><button onClick={() => setSelectedFeed(feed.id)} className="flex-1 min-w-0 px-2 py-2 text-left text-sm"><span className="block truncate">{feed.title}</span><span className="text-[10px] text-muted-foreground">{feed.category} · {unread(feed.id)} 未读</span></button><button title="修改分类" className="px-1 text-[10px] opacity-0 group-hover:opacity-100 text-muted-foreground" onClick={() => { const category = window.prompt('订阅分类', feed.category); if (category?.trim()) save({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, category: category.trim() } : item) }, setState); }}>分类</button><button title="删除订阅" className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive" onClick={() => { const next = { subscriptions: state.subscriptions.filter((item) => item.id !== feed.id), articles: state.articles.filter((item) => item.feedId !== feed.id) }; save(next, setState); if (selectedFeed === feed.id) setSelectedFeed('all'); }}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
+        {state.subscriptions.map((feed) => <div key={feed.id} title={feed.error || `最后成功：${new Date(feed.lastFetchedAt).toLocaleString()}`} className={`group rounded flex items-center ${selectedFeed === feed.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span className={`ml-2 h-2 w-2 rounded-full shrink-0 ${feed.error ? 'bg-destructive' : 'bg-green-500'}`} /><button onClick={() => setSelectedFeed(feed.id)} className="flex-1 min-w-0 px-2 py-2 text-left text-sm"><span className="block truncate">{feed.title}</span><span className={`text-[10px] ${feed.error ? 'text-destructive' : 'text-muted-foreground'}`}>{feed.error ? '刷新失败' : feed.category} · {unread(feed.id)} 未读</span></button><button title="修改分类" className="px-1 text-[10px] opacity-0 group-hover:opacity-100 text-muted-foreground" onClick={() => { const category = window.prompt('订阅分类', feed.category); if (category?.trim()) save({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, category: category.trim() } : item) }, setState); }}>分类</button><button title="删除订阅" className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive" onClick={() => { const next = { subscriptions: state.subscriptions.filter((item) => item.id !== feed.id), articles: state.articles.filter((item) => item.feedId !== feed.id) }; save(next, setState); if (selectedFeed === feed.id) setSelectedFeed('all'); }}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
         {!state.subscriptions.length && <p className="px-2 py-8 text-center text-xs text-muted-foreground">添加一个订阅源开始阅读</p>}
       </div>
     </aside>
     <section className="w-80 shrink-0 border-r flex flex-col min-h-0">
-      <div className="p-3 border-b space-y-2"><div className="relative"><Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索文章" className="h-8 pl-8 text-xs" /></div><div className="flex gap-1">{(['all', 'unread', 'starred'] as Filter[]).map((value) => <Button key={value} size="sm" variant={filter === value ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setFilter(value)}>{value === 'all' ? '全部' : value === 'unread' ? '未读' : '收藏'}</Button>)}</div></div>
+      <div className="p-3 border-b space-y-2"><div className="relative"><Search className="absolute left-2 top-2 h-4 w-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索文章" className="h-8 pl-8 text-xs" /></div><div className="flex gap-1 items-center">{(['all', 'unread', 'starred'] as Filter[]).map((value) => <Button key={value} size="sm" variant={filter === value ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setFilter(value)}>{value === 'all' ? '全部' : value === 'unread' ? '未读' : '收藏'}</Button>)}<Button size="sm" variant="ghost" className="h-7 ml-auto px-2" disabled={!visible.some((article) => !article.read)} onClick={markVisibleRead} title="将当前列表全部标为已读"><Check className="h-3.5 w-3.5" /></Button></div></div>
       <div className="overflow-auto flex-1">{visible.map((article) => <button key={`${article.feedId}:${article.id}`} onClick={() => openArticle(article)} className={`w-full border-b p-3 text-left hover:bg-muted/60 ${!article.read ? 'bg-primary/5' : ''}`}><div className="flex gap-2"><span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${article.read ? 'bg-transparent' : 'bg-primary'}`} /><div className="min-w-0"><h3 className="text-sm font-medium line-clamp-2">{article.title}</h3><div className="flex justify-between gap-2 mt-1 text-[11px] text-muted-foreground"><span className="truncate">{article.feedTitle}</span><span className="shrink-0">{dateLabel(article.publishedAt)}</span></div></div></div></button>)}{!visible.length && <p className="text-center text-xs text-muted-foreground py-12">没有符合条件的文章</p>}</div>
     </section>
-    <main className="flex-1 min-w-0 overflow-auto">{current ? <article className="max-w-3xl mx-auto p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs text-primary mb-2">{current.feedTitle}</p><h1 className="text-2xl font-semibold leading-tight">{current.title}</h1><p className="text-xs text-muted-foreground mt-3">{[current.author, dateLabel(current.publishedAt)].filter(Boolean).join(' · ')}</p></div><Button variant="ghost" size="sm" onClick={() => patchArticle(current, { starred: !current.starred })} title={current.starred ? '取消收藏' : '收藏'}><Star className={`h-5 w-5 ${current.starred ? 'text-warning fill-current' : ''}`} /></Button></div><p className="mt-8 text-sm leading-7 whitespace-pre-wrap text-muted-foreground">{current.description || '该订阅源没有提供摘要。'}</p>{current.link && <Button className="mt-8" onClick={() => window.electronAPI.shell.openExternal(current.link)}>阅读原文 <ExternalLink className="ml-2 h-4 w-4" /></Button>}</article> : <div className="h-full flex items-center justify-center text-sm text-muted-foreground">选择一篇文章开始阅读</div>}</main>
+    <main className="flex-1 min-w-0 overflow-auto">{current ? <article className="max-w-3xl mx-auto p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs text-primary mb-2">{current.feedTitle}</p><h1 className="text-2xl font-semibold leading-tight">{current.title}</h1><p className="text-xs text-muted-foreground mt-3">{[current.author, dateLabel(current.publishedAt)].filter(Boolean).join(' · ')}</p></div><Button variant="ghost" size="sm" onClick={() => patchArticle(current, { starred: !current.starred })} title={current.starred ? '取消收藏' : '收藏'}><Star className={`h-5 w-5 ${current.starred ? 'text-warning fill-current' : ''}`} /></Button></div><p className="mt-8 text-sm leading-7 whitespace-pre-wrap text-muted-foreground">{fullTexts[`${current.feedId}:${current.id}`]?.text || current.description || '该订阅源没有提供摘要。'}</p>{fullTexts[`${current.feedId}:${current.id}`] && <p className="mt-4 text-xs text-muted-foreground">已提取 {fullTexts[`${current.feedId}:${current.id}`].wordCount} 词</p>}<div className="mt-8 flex gap-2">{current.link && !fullTexts[`${current.feedId}:${current.id}`] && <Button variant="outline" disabled={extracting} onClick={() => void loadFullText(current)}>{extracting ? <Loader2 className="mr-2 h-4 w-4" /> : null}提取全文</Button>}{current.link && <Button onClick={() => window.electronAPI.shell.openExternal(current.link)}>阅读原文 <ExternalLink className="ml-2 h-4 w-4" /></Button>}</div></article> : <div className="h-full flex items-center justify-center text-sm text-muted-foreground">选择一篇文章开始阅读</div>}</main>
   </div>;
 };
