@@ -73,6 +73,7 @@ function executeInReadyWebview(webview: Electron.WebviewTag, script: string) {
 export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate, onReadyChange }: WebContentProps) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const hasEverLoadedRef = useRef(false);
+  const loadSettleTimerRef = useRef<number>();
   const lastOpenedUrlRef = useRef<{ url: string; at: number }>({ url: '', at: 0 });
   const [preloadPath, setPreloadPath] = useState<string>('');
   const [selection, setSelection] = useState<{ text: string; selector: string; x: number; y: number } | null>(null);
@@ -165,20 +166,34 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       }
     };
     const installPageBridge = () => executeInReadyWebview(wv, INSTALL_LINK_BRIDGE);
-    const onDidFinishLoad = () => {
+    const markLoadSettled = () => {
+      window.clearTimeout(loadSettleTimerRef.current);
       setLoaded(true);
       hasEverLoadedRef.current = true;
       if (tab) onReadyChange?.(tab.id, true);
+    };
+    const onDidFinishLoad = () => {
+      markLoadSettled();
       void wv.insertCSS(WEBVIEW_SCROLLBAR_CSS).catch(() => undefined);
       installPageBridge();
       // 主动触发 webview 内部重读 annotations
       executeInReadyWebview(wv, `window.postMessage({type: 'work-browser-refresh-annotations'}, '*');`);
     };
     const onDidStartLoading = () => {
+      window.clearTimeout(loadSettleTimerRef.current);
       setLoaded(false);
+      // Some SPA pages keep background requests alive or abort a redirect
+      // without emitting did-finish-load. Never leave the indeterminate bar
+      // running forever when the guest is already usable.
+      loadSettleTimerRef.current = window.setTimeout(markLoadSettled, 15_000);
       // A cached webview remains displayable while a later navigation is in
       // progress. Marking it unready again causes workspace switches to flash.
       if (tab && !hasEverLoadedRef.current) onReadyChange?.(tab.id, false);
+    };
+    const onDidStopLoading = () => markLoadSettled();
+    const onDidFailLoad = (event: Event) => {
+      const failure = event as Event & { isMainFrame?: boolean };
+      if (failure.isMainFrame !== false) markLoadSettled();
     };
     const onPageTitleUpdated = (event: Event) => {
       const title = String((event as Event & { title?: string }).title || '').trim();
@@ -213,6 +228,8 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
     wv.addEventListener('dom-ready', installPageBridge);
     wv.addEventListener('did-finish-load', onDidFinishLoad);
     wv.addEventListener('did-start-loading', onDidStartLoading);
+    wv.addEventListener('did-stop-loading', onDidStopLoading);
+    wv.addEventListener('did-fail-load', onDidFailLoad as any);
     wv.addEventListener('new-window' as any, onNewWindow as any);
     wv.addEventListener('will-navigate' as any, onWillNavigate as any);
     wv.addEventListener('console-message', onConsoleMessage as any);
@@ -224,12 +241,15 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       wv.removeEventListener('dom-ready', installPageBridge);
       wv.removeEventListener('did-finish-load', onDidFinishLoad);
       wv.removeEventListener('did-start-loading', onDidStartLoading);
+      wv.removeEventListener('did-stop-loading', onDidStopLoading);
+      wv.removeEventListener('did-fail-load', onDidFailLoad as any);
       wv.removeEventListener('new-window' as any, onNewWindow as any);
       wv.removeEventListener('will-navigate' as any, onWillNavigate as any);
       wv.removeEventListener('console-message', onConsoleMessage as any);
       wv.removeEventListener('page-title-updated', onPageTitleUpdated as any);
       wv.removeEventListener('did-navigate', onDidNavigate as any);
       wv.removeEventListener('page-favicon-updated', onPageFaviconUpdated as any);
+      window.clearTimeout(loadSettleTimerRef.current);
     };
   }, [tab, preloadPath, onSelectionChange, openInInternalTab, onTabUpdate, onReadyChange]);
 

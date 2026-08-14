@@ -43,6 +43,18 @@ export function TabBar(props: TabBarProps) {
   }, [menu]);
 
   useEffect(() => {
+    if (!vertical) return;
+    const close = () => setVertical(false);
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', key);
+    };
+  }, [vertical]);
+
+  useEffect(() => {
     if (hoverCard && !tabs.some((tab) => tab.id === hoverCard.tab.id)) {
       setHoverCard(null);
     }
@@ -74,7 +86,10 @@ export function TabBar(props: TabBarProps) {
       key={tab.id}
       role="tab"
       aria-selected={activeId === tab.id}
-      onClick={() => onActivate(tab)}
+      onClick={() => {
+        onActivate(tab);
+        if (isVertical) setVertical(false);
+      }}
       onMouseEnter={(event) => {
         window.clearTimeout(hoverTimerRef.current);
         const rect = event.currentTarget.getBoundingClientRect();
@@ -91,14 +106,14 @@ export function TabBar(props: TabBarProps) {
         setMenu({ tab, x: event.clientX, y: event.clientY });
       }}
       style={!isVertical && !tab.isPinned ? {
-        flexBasis: orderedTabs.length > 6 ? `${100 / orderedTabs.length}%` : '180px',
+        flexBasis: orderedTabs.length > 6 ? `${100 / orderedTabs.length}%` : '220px',
       } : undefined}
       className={`group/tab flex cursor-default items-center gap-2 text-xs transition ${
         isVertical
           ? 'h-9 w-full rounded-xl px-2.5'
           : tab.isPinned
-            ? 'h-9 w-10 shrink-0 justify-center rounded-t-xl rounded-b-md px-0'
-            : 'h-9 min-w-28 max-w-64 shrink rounded-t-xl rounded-b-md px-3'
+            ? 'h-9 w-10 shrink-0 justify-center rounded-xl px-0'
+            : 'h-9 min-w-36 max-w-72 shrink rounded-xl px-3.5'
       } ${activeId === tab.id
         ? 'bg-card text-foreground shadow-[0_-1px_0_rgba(255,255,255,.7),0_1px_3px_rgba(0,0,0,.10)]'
         : 'text-foreground/75 hover:bg-card/45 hover:text-foreground'}`}
@@ -120,15 +135,15 @@ export function TabBar(props: TabBarProps) {
   );
 
   return (
-    <div className="relative flex h-20 shrink-0 flex-col border-b border-border/50 bg-[#dce8fb] dark:bg-muted/45">
-      <div className="flex h-10 min-w-0 items-end gap-1 px-1.5 pt-1">
-        <button type="button" aria-label="标签页列表" title="标签页列表" onClick={toggleVertical} className="mb-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-card/70 text-foreground transition hover:bg-card"><ChevronDown size={15} /></button>
-        <div className="work-browser-tab-strip flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">
+    <div className="relative flex h-[88px] shrink-0 flex-col border-b border-border/50 bg-[#dce8fb] dark:bg-muted/45">
+      <div className="flex h-11 min-w-0 items-center gap-2 px-2">
+        <button type="button" aria-label="标签页列表" title="标签页列表" onClick={toggleVertical} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-card/70 text-foreground transition hover:bg-card"><ChevronDown size={15} /></button>
+        <div className="work-browser-tab-strip flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1">
           {orderedTabs.map((tab) => tabButton(tab))}
-          <button type="button" aria-label="新建标签页" title="新建标签页" onClick={() => void onNewTab()} className="mb-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full text-foreground/75 transition hover:bg-card/55 hover:text-foreground"><Plus size={17} /></button>
+          <button type="button" aria-label="新建标签页" title="新建标签页" onClick={() => void onNewTab()} className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-foreground/75 transition hover:bg-card/55 hover:text-foreground"><Plus size={17} /></button>
         </div>
       </div>
-      <div className="flex h-10 items-center gap-2 border-t border-white/40 bg-card/55 px-2 dark:border-border/40">
+      <div className="flex h-11 items-center gap-2 border-t border-white/40 bg-card/55 px-2 dark:border-border/40">
         <button type="button" aria-label="返回首页" title="返回首页" onClick={onHome} className={`grid h-8 w-8 shrink-0 place-items-center rounded-full transition ${activeId ? 'text-muted-foreground hover:bg-muted hover:text-foreground' : 'bg-muted text-foreground'}`}><Home size={15} /></button>
         <div className="flex h-8 min-w-0 flex-1 items-center rounded-full border border-transparent bg-muted/70 pl-3 transition focus-within:border-primary/25 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/10">
           <Globe2 size={14} className="shrink-0 text-muted-foreground" />
@@ -138,9 +153,12 @@ export function TabBar(props: TabBarProps) {
       </div>
 
       {vertical && (
-        <div className="absolute left-2 top-[calc(100%+6px)] z-40 w-64 rounded-2xl border border-border/60 bg-card p-2 shadow-2xl">
+        <div
+          className="absolute left-2 top-11 z-40 w-72 overflow-hidden rounded-2xl border border-border/60 bg-card p-2 shadow-2xl"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <div className="mb-1 flex items-center justify-between px-2 py-1 text-xs font-medium"><span>垂直标签页</span><button type="button" onClick={toggleVertical} className="grid h-6 w-6 place-items-center rounded-md hover:bg-muted"><X size={12} /></button></div>
-          <div className="max-h-[60vh] space-y-1 overflow-y-auto">{orderedTabs.map((tab) => tabButton(tab, true))}</div>
+          <div className="max-h-[min(60vh,480px)] space-y-1 overflow-y-auto overscroll-contain">{orderedTabs.map((tab) => tabButton(tab, true))}</div>
         </div>
       )}
 
