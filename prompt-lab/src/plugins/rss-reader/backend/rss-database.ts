@@ -25,8 +25,29 @@ function db(): DatabaseNS.Database {
       PRIMARY KEY (feed_id, id)
     );
     CREATE INDEX IF NOT EXISTS rss_articles_published ON rss_articles(published_at DESC);
+    CREATE TABLE IF NOT EXISTS rss_http_cache (
+      url TEXT PRIMARY KEY, etag TEXT, last_modified TEXT, body TEXT NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS rss_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
   return database;
+}
+
+export interface RssHttpCache { etag: string | null; lastModified: string | null; body: string }
+export function getRssHttpCache(url: string): RssHttpCache | null {
+  const row = db().prepare('SELECT etag, last_modified, body FROM rss_http_cache WHERE url = ?').get(url) as { etag: string | null; last_modified: string | null; body: string } | undefined;
+  return row ? { etag: row.etag, lastModified: row.last_modified, body: row.body } : null;
+}
+export function saveRssHttpCache(url: string, body: string, etag: string | null, lastModified: string | null): void {
+  db().prepare(`INSERT INTO rss_http_cache(url,etag,last_modified,body,updated_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(url) DO UPDATE SET etag=excluded.etag,last_modified=excluded.last_modified,body=excluded.body,updated_at=excluded.updated_at`).run(url, etag, lastModified, body, Date.now());
+}
+export function getRssRefreshMinutes(): number {
+  const row = db().prepare("SELECT value FROM rss_settings WHERE key = 'refreshMinutes'").get() as { value: string } | undefined;
+  return row ? Number(row.value) : 60;
+}
+export function setRssRefreshMinutes(minutes: number): void {
+  db().prepare("INSERT INTO rss_settings(key,value) VALUES('refreshMinutes',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(minutes));
 }
 
 interface FeedRow { id: string; title: string; description: string; site_url: string; feed_url: string; category: string; added_at: number; last_fetched_at: number; error: string | null }
@@ -54,4 +75,3 @@ export function saveRssState(state: { subscriptions: RssSubscription[]; articles
     for (const article of state.articles) if (feedIds.has(article.feedId)) saveArticle.run({ ...article, read: article.read ? 1 : 0, starred: article.starred ? 1 : 0 });
   })();
 }
-

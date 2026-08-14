@@ -128,6 +128,8 @@ export interface ElectronAPI {
     fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
     loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
     saveState: (state: { subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }) => Promise<void>;
+    refreshAll: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
+    setRefreshMinutes: (minutes: number) => Promise<void>;
   };
   plugins: {
     loadDefinitions: () => Promise<unknown[]>;

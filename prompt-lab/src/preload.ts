@@ -8,6 +8,8 @@ const electronAPI: ElectronAPI = {
     fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
     loadState: () => ipcRenderer.invoke('rss:state:load'),
     saveState: (state) => ipcRenderer.invoke('rss:state:save', state),
+    refreshAll: () => ipcRenderer.invoke('rss:refresh:all'),
+    setRefreshMinutes: (minutes: number) => ipcRenderer.invoke('rss:settings:refresh', minutes),
   },
   plugins: {
     loadDefinitions: () => ipcRenderer.invoke('plugins:definitions:load'),
