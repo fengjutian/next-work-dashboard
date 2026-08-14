@@ -7,7 +7,7 @@ import type { RssArticle, RssFeed, RssSubscription } from '../types';
 
 const MAX_FEED_BYTES = 5 * 1024 * 1024;
 
-function privateAddress(address: string): boolean {
+export function privateAddress(address: string): boolean {
   if (address === '::1' || address === '::' || address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe8') || address.startsWith('fe9') || address.startsWith('fea') || address.startsWith('feb')) return true;
   if (isIP(address) !== 4) return false;
   const [a, b] = address.split('.').map(Number);
@@ -42,7 +42,7 @@ async function fetchSafely(rawUrl: string): Promise<{ response: Response; url: U
   throw new Error('订阅源重定向次数过多');
 }
 
-function discoverFeedUrl(html: string, pageUrl: URL): string | null {
+export function discoverFeedUrl(html: string, pageUrl: URL): string | null {
   for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
     const tag = match[0];
     const attrs = new Map<string, string>();
