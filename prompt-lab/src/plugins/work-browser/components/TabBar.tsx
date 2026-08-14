@@ -19,12 +19,13 @@ export interface TabBarProps {
   onRefresh: (tab: Tab) => void;
   onReopen: () => void | Promise<void>;
   onAddRight: (tab: Tab) => void | Promise<void>;
+  onNewTab: () => void | Promise<void>;
   onAdd: (url: string) => boolean | Promise<boolean>;
 }
 
 export function TabBar(props: TabBarProps) {
   const { tabs, activeId, canReopen, onActivate, onHome, onClose, onCloseRight,
-    onCloseOthers, onDuplicate, onPin, onRefresh, onReopen, onAddRight, onAdd } = props;
+    onCloseOthers, onDuplicate, onPin, onRefresh, onReopen, onAddRight, onNewTab, onAdd } = props;
   const [url, setUrl] = useState('');
   const [vertical, setVertical] = useState(() => localStorage.getItem('work-browser.vertical-tabs') === 'true');
   const [menu, setMenu] = useState<{ tab: Tab; x: number; y: number } | null>(null);
@@ -40,6 +41,17 @@ export function TabBar(props: TabBarProps) {
     window.addEventListener('keydown', key);
     return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', key); };
   }, [menu]);
+
+  useEffect(() => {
+    if (hoverCard && !tabs.some((tab) => tab.id === hoverCard.tab.id)) {
+      setHoverCard(null);
+    }
+    if (menu && !tabs.some((tab) => tab.id === menu.tab.id)) {
+      setMenu(null);
+    }
+  }, [hoverCard, menu, tabs]);
+
+  useEffect(() => () => window.clearTimeout(hoverTimerRef.current), []);
 
   const submitUrl = async () => {
     const value = url.trim();
@@ -85,15 +97,22 @@ export function TabBar(props: TabBarProps) {
         isVertical
           ? 'h-9 w-full rounded-xl px-2.5'
           : tab.isPinned
-            ? 'h-9 w-10 shrink-0 justify-center border-r border-border/30 px-0'
-            : 'h-9 min-w-16 max-w-56 shrink border-r border-border/30 px-2.5'
-      } ${activeId === tab.id ? 'bg-primary/10 text-primary shadow-sm' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}`}
+            ? 'h-9 w-10 shrink-0 justify-center rounded-xl px-0'
+            : 'h-9 min-w-24 max-w-60 shrink rounded-xl px-3'
+      } ${activeId === tab.id
+        ? 'bg-card text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.12)]'
+        : 'text-muted-foreground hover:bg-card/55 hover:text-foreground'}`}
     >
       {tab.favicon ? <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm" /> : <Globe2 size={13} className="shrink-0" />}
       {(!tab.isPinned || isVertical) && <span className="min-w-0 flex-1 truncate">{formatTabTitle(tab)}</span>}
       {tab.isPinned && isVertical && <Pin size={11} className="shrink-0" />}
       {!tab.isPinned && (
-        <button type="button" aria-label={`关闭 ${tab.title || tab.url}`} onClick={(event) => { event.stopPropagation(); void onClose(tab); }} className="grid h-5 w-5 shrink-0 place-items-center rounded-md opacity-0 hover:bg-primary/10 group-hover/tab:opacity-100 focus:opacity-100">
+        <button type="button" aria-label={`关闭 ${tab.title || tab.url}`} onClick={(event) => {
+          event.stopPropagation();
+          window.clearTimeout(hoverTimerRef.current);
+          setHoverCard(null);
+          void onClose(tab);
+        }} className={`grid h-5 w-5 shrink-0 place-items-center rounded-full hover:bg-muted focus:opacity-100 ${activeId === tab.id ? 'opacity-100' : 'opacity-0 group-hover/tab:opacity-100'}`}>
           <X size={11} />
         </button>
       )}
@@ -101,10 +120,11 @@ export function TabBar(props: TabBarProps) {
   );
 
   return (
-    <div className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/30 bg-muted/10 px-2">
-      <button type="button" aria-label="返回首页" title="返回首页" onClick={onHome} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${activeId ? 'text-muted-foreground hover:bg-primary/10 hover:text-primary' : 'bg-primary/10 text-primary shadow-sm'}`}><Home size={15} /></button>
-      <div className="work-browser-tab-strip flex min-w-0 flex-1 items-center overflow-x-auto py-1">
+    <div className="relative flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-primary/[0.07] px-2">
+      <button type="button" aria-label="返回首页" title="返回首页" onClick={onHome} className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl transition ${activeId ? 'text-muted-foreground hover:bg-card/60 hover:text-foreground' : 'bg-card text-foreground shadow-sm'}`}><Home size={15} /></button>
+      <div className="work-browser-tab-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1.5">
         {orderedTabs.map((tab) => tabButton(tab))}
+        <button type="button" aria-label="新建标签页" title="新建标签页" onClick={() => void onNewTab()} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-card/60 hover:text-foreground"><Plus size={16} /></button>
       </div>
       <div className="flex h-8 w-[min(30vw,360px)] shrink-0 items-center rounded-lg bg-muted/45 pl-2.5 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/10">
         <Globe2 size={14} className="shrink-0 text-muted-foreground" />

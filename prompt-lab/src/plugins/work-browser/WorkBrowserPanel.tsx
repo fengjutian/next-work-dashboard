@@ -301,6 +301,12 @@ export function WorkBrowserPanel() {
     await createTabAt(url, tab.position + 0.5, url);
   }, [createTabAt]);
 
+  const addNewTab = useCallback(async () => {
+    const stored = await window.electronAPI.workBrowser.settings.get('workBrowser.homeUrl').catch(() => undefined);
+    const url = typeof stored === 'string' && /^https?:\/\//i.test(stored) ? stored : 'https://www.google.com';
+    await handleAddTab(url);
+  }, [handleAddTab]);
+
   const duplicateTab = useCallback(async (tab: Tab) => {
     await createTabAt(tab.url, tab.position + 0.5, tab.title);
   }, [createTabAt]);
@@ -437,6 +443,7 @@ export function WorkBrowserPanel() {
                 }}
                 onReopen={reopenClosedTab}
                 onAddRight={addTabRight}
+                onNewTab={addNewTab}
                 onAdd={handleAddTab}
               />
               <div className="relative flex-1 overflow-hidden bg-card">
