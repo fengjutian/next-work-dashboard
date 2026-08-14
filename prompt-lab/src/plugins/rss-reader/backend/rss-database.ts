@@ -100,7 +100,7 @@ export function saveRssArticleContent(feedId: string, articleId: string, text: s
 }
 export function getRssArticleContent(feedId: string, articleId: string): { text: string; markdown: string; wordCount: number } | null {
   const row = db().prepare('SELECT content_text,content_markdown,word_count FROM rss_article_content WHERE feed_id=? AND article_id=?').get(feedId, articleId) as { content_text: string; content_markdown: string; word_count: number } | undefined;
-  return row ? { text: row.content_text, markdown: row.content_markdown, wordCount: row.word_count } : null;
+  return row ? { text: row.content_text, markdown: row.content_markdown || row.content_text, wordCount: row.word_count } : null;
 }
 export function searchRssArticles(query: string, limit = 200): Array<{ feedId: string; articleId: string }> {
   const tokens = query.trim().split(/\s+/).filter(Boolean).map((token) => `"${token.replace(/"/g, '""')}"`);

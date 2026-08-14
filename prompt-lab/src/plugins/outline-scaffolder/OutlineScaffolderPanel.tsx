@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { notification } from 'antd';
 import { BookOpen, Check, FileText, FolderOpen, Loader2 } from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { createChapterDocuments, createReadme, parseOutline, type OutlineNode } from './outline';
+import { createChapterDocuments, createReadme, parseOutline, type OutlineNode, type SplitMode } from './outline';
 
 const EXAMPLE = `# 第一篇 基础知识
 ## 第一章 产品介绍
@@ -11,6 +11,12 @@ const EXAMPLE = `# 第一篇 基础知识
 ## 第二章 快速开始
 ### 2.1 环境准备
 ### 2.2 安装与配置`;
+
+const DEFAULT_TEMPLATE = `# {{title}}
+
+{{placeholder}}
+
+{{headings}}`;
 
 function OutlineTree({ nodes }: { nodes: OutlineNode[] }) {
   return <ul className="space-y-1">
@@ -29,26 +35,69 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [source, setSource] = useState(EXAMPLE);
   const [projectTitle, setProjectTitle] = useState('我的文档');
   const [subfolder, setSubfolder] = useState('我的文档');
+  const [splitMode, setSplitMode] = useState<SplitMode>('chapter');
+  const [organizeByPart, setOrganizeByPart] = useState(true);
+  const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
+  const [showTemplate, setShowTemplate] = useState(false);
   const [target, setTarget] = useState<{ path: string; name: string } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [conflicts, setConflicts] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
   const nodes = useMemo(() => parseOutline(source), [source]);
-  const documents = useMemo(() => createChapterDocuments(nodes, subfolder), [nodes, subfolder]);
+  const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
+  const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
+
+  useEffect(() => { setConflicts([]); }, [files, target]);
 
   const chooseFolder = async () => {
     const folder = await window.electronAPI.workspace.openFolder();
     if (folder) setTarget(folder);
   };
 
+  const checkExisting = async (): Promise<string[]> => {
+    if (!target) return [];
+    setChecking(true);
+    try {
+      const byDirectory = new Map<string, Set<string>>();
+      for (const file of files) {
+        const parts = file.path.split('/');
+        const name = parts.pop()!;
+        const directory = parts.join('/');
+        if (!byDirectory.has(directory)) byDirectory.set(directory, new Set());
+        byDirectory.get(directory)!.add(name);
+      }
+      const found: string[] = [];
+      for (const [directory, names] of byDirectory) {
+        const result = await window.electronAPI.workspace.listDirectory(target.path, directory);
+        if (!result.success) continue;
+        for (const entry of result.data ?? []) if (entry.type === 'file' && names.has(entry.name)) found.push(directory ? `${directory}/${entry.name}` : entry.name);
+      }
+      setConflicts(found);
+      return found;
+    } finally { setChecking(false); }
+  };
+
+  const ensureDirectories = async () => {
+    if (!target) return;
+    const directories = new Set<string>();
+    for (const file of files) {
+      const parts = file.path.split('/'); parts.pop();
+      let current = '';
+      for (const part of parts) { current = current ? `${current}/${part}` : part; directories.add(current); }
+    }
+    for (const directory of directories) {
+      const result = await window.electronAPI.workspace.createDirectory(target.path, directory);
+      if (!result.success && !/EEXIST|ALREADY_EXISTS/.test(String(result.error))) throw new Error(result.error);
+    }
+  };
+
   const generate = async () => {
     if (!target || documents.length === 0) return;
     setCreating(true);
     try {
-      const outputFolder = documents[0]?.path.includes('/') ? documents[0].path.split('/')[0] : '';
-      if (outputFolder) {
-        const directory = await window.electronAPI.workspace.createDirectory(target.path, outputFolder);
-        if (!directory.success && !String(directory.error).includes('EEXIST')) throw new Error(directory.error);
-      }
-      const files = [...documents, createReadme(documents, projectTitle, subfolder)];
+      const existing = await checkExisting();
+      if (existing.length) throw new Error(`ALREADY_EXISTS:${existing[0]}`);
+      await ensureDirectories();
       for (let index = 0; index < files.length; index += 200) {
         const result = await window.electronAPI.workspace.mutateFiles(target.path, files.slice(index, index + 200).map((file) => ({
           kind: 'create' as const, path: file.path, content: file.content, encoding: 'utf8' as const, lineEnding: 'LF' as const,
@@ -80,7 +129,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
           <div className="space-y-3">
             <label className="block text-xs text-muted-foreground">文档名称<input value={projectTitle} onChange={(event) => setProjectTitle(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>
             <label className="block text-xs text-muted-foreground">子目录（可选）<input value={subfolder} onChange={(event) => setSubfolder(event.target.value)} placeholder="例如 docs" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>
+            <label className="block text-xs text-muted-foreground">拆分方式<select value={splitMode} onChange={(event) => setSplitMode(event.target.value as SplitMode)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="chapter">每章一个文件</option><option value="section">每节一个文件</option><option value="single">合并为单个文件</option></select></label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={organizeByPart} disabled={splitMode === 'single'} onChange={(event) => setOrganizeByPart(event.target.checked)} />按“篇”创建文件夹</label>
+            <button type="button" className="text-left text-xs text-primary hover:underline" onClick={() => setShowTemplate((value) => !value)}>{showTemplate ? '收起章节模板' : '编辑章节模板'}</button>
+            {showTemplate && <><textarea value={template} onChange={(event) => setTemplate(event.target.value)} className="h-36 w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs" /><p className="text-xs text-muted-foreground">变量：{'{{title}}'}、{'{{headings}}'}、{'{{placeholder}}'}</p></>}
             <Button variant="outline" className="w-full justify-start" onClick={chooseFolder}><FolderOpen className="mr-2 h-4 w-4" />{target ? target.path : '选择输出目录'}</Button>
+            {target && <Button variant="secondary" className="w-full" disabled={checking} onClick={checkExisting}>{checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}检查文件冲突</Button>}
+            {conflicts.length > 0 && <div className="max-h-24 overflow-auto rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">发现 {conflicts.length} 个同名文件：{conflicts.slice(0, 3).join('、')}{conflicts.length > 3 ? '…' : ''}</div>}
+            {target && !checking && conflicts.length === 0 && <p className="text-xs text-muted-foreground">生成前会再次检查；已有文件不会被覆盖。</p>}
           </div>
         </section>
         <section className="min-h-[230px] flex-1 overflow-auto rounded-xl border border-border bg-card p-4 shadow-sm">

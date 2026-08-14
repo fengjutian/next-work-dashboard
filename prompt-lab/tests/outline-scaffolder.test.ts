@@ -15,4 +15,19 @@ describe('outline scaffolder', () => {
     const documents = createChapterDocuments(parseOutline('第一章 A/B: C'));
     expect(documents[0].path).toBe('01-第一章 A-B- C.md');
   });
+
+  it('recognizes a plain-text Chinese outline', () => {
+    const documents = createChapterDocuments(parseOutline('第一篇 基础\n第一章 开始\n1.1 准备\n第二章 使用'));
+    expect(documents).toHaveLength(2);
+    expect(documents[0].content).toContain('## 1.1 准备');
+  });
+
+  it('supports section, single-file and part-folder modes', () => {
+    const nodes = parseOutline('# 第一篇 基础\n## 第一章 开始\n### 1.1 准备\n### 1.2 安装');
+    const sections = createChapterDocuments(nodes, { folder: '书', splitMode: 'section', organizeByPart: true });
+    expect(sections.map((item) => item.path)).toEqual(['书/第一篇 基础/01-1.1 准备.md', '书/第一篇 基础/02-1.2 安装.md']);
+    const single = createChapterDocuments(nodes, { folder: '书', splitMode: 'single', projectTitle: '指南' });
+    expect(single).toHaveLength(1);
+    expect(single[0].path).toBe('书/指南.md');
+  });
 });
