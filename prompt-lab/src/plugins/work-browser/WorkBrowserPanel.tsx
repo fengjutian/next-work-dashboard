@@ -15,7 +15,7 @@
  * └──────────┴──────────────────────────────────┴──────────┘
  */
 import { Empty, message, Tabs, ToastHost } from './ui';
-import { Bot, BookOpen, FolderKanban, GitFork, ListTodo, PanelLeft, PanelRight } from 'lucide-react';
+import { Bot, BookOpen, FolderKanban, GitFork, ListFilter, ListTodo, PanelLeft, PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import type {
@@ -416,6 +416,19 @@ export function WorkBrowserPanel() {
             loading={searchLoading}
           />
           </div>
+          {searchData && !searchOpen && (
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              title={`重新打开搜索结果（${searchData.results.length} 条）`}
+              aria-label={`重新打开搜索结果，共 ${searchData.results.length} 条`}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-primary/20 bg-primary-light px-2.5 text-xs font-medium text-primary transition hover:border-primary/35 hover:bg-primary/10"
+            >
+              <ListFilter size={15} />
+              <span className="hidden 2xl:inline">结果</span>
+              <span className="rounded-full bg-card/80 px-1.5 py-0.5 text-[10px] tabular-nums">{searchData.results.length}</span>
+            </button>
+          )}
           <button type="button" onClick={toggleRightSidebar} title={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} aria-label={rightCollapsed ? '展开辅助侧栏' : '折叠辅助侧栏'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-transparent transition hover:bg-accent ${rightCollapsed ? 'bg-primary-light text-primary' : 'text-muted-foreground'}`}><PanelRight size={17} /></button>
         </div>
       </header>
