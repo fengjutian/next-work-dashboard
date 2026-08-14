@@ -53,15 +53,17 @@ export function ThinkingLabPanel() {
 
   const recommend = useCallback(() => {
     if (!question.trim()) return toast.message('请先输入要分析的问题');
-    const ids = recommendFrameworks(question);
+    const ids = recommendFrameworks(question, mode === 'quick' ? 2 : mode === 'deep' ? 6 : 4);
     setSelected(ids);
     toast.success(`已推荐 ${ids.length} 个互补框架`);
-  }, [question]);
+  }, [mode, question]);
 
   const execute = useCallback(async () => {
     if (!question.trim()) return toast.error('请输入要分析的问题');
     if (!selected.length) return toast.error('请至少选择一个分析框架');
     if (!configured) return toast.error('请先在设置中配置 AI 服务');
+    const frameworkLimit = mode === 'quick' ? 2 : mode === 'standard' ? 4 : 6;
+    if (selected.length > frameworkLimit) return toast.error(`${mode === 'quick' ? '快速' : mode === 'standard' ? '标准' : '深度'}模式最多选择 ${frameworkLimit} 个框架`);
 
     controllerRef.current?.abort();
     const controller = new AbortController();
@@ -97,10 +99,7 @@ export function ThinkingLabPanel() {
           audit = await crossExamineAnalyses(question.trim(), completed, ai, controller.signal);
           setCritique(audit);
         }
-        const synthesisInputs = audit
-          ? completed.map((item, index) => index === 0 ? { ...item, content: `${item.content}\n\n## 分析审计补充\n${audit}` } : item)
-          : completed;
-        const merged = await synthesizeAnalyses(question.trim(), synthesisInputs, ai, controller.signal, setSynthesis);
+        const merged = await synthesizeAnalyses(question.trim(), completed, ai, controller.signal, setSynthesis, audit);
         setSynthesis(merged);
         const run: ThinkingRun = {
           id: crypto.randomUUID(), question: question.trim(), context: context.trim(), mode, frameworkIds: selected,
@@ -189,7 +188,7 @@ export function ThinkingLabPanel() {
           </div>
 
           <div className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold">分析框架</h2><p className="text-xs text-muted-foreground">建议选择 2～4 个互补框架，避免重复和过高成本</p></div><Button variant="outline" size="sm" disabled={running} onClick={recommend}><Sparkles className="h-3.5 w-3.5" /> 智能推荐</Button></div>
+            <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold">分析框架</h2><p className="text-xs text-muted-foreground">快速最多 2 个、标准最多 4 个、深度最多 6 个</p></div><Button variant="outline" size="sm" disabled={running} onClick={recommend}><Sparkles className="h-3.5 w-3.5" /> 智能推荐</Button></div>
             <div className="mb-3 flex flex-wrap gap-2">
               {([['quick', '快速', '1～2 个并发，无交叉质询'], ['standard', '标准', '最多 3 个并发并综合'], ['deep', '深度', '增加交叉质询与盲点审计']] as const).map(([id, label, hint]) => <button key={id} type="button" disabled={running} title={hint} onClick={() => setMode(id)} className={`rounded-full border px-3 py-1 text-xs ${mode === id ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{label}</button>)}
               <span className="self-center text-xs text-muted-foreground">{mode === 'quick' ? '适合快速判断' : mode === 'deep' ? '请求更多、质量更高' : '推荐日常使用'}</span>

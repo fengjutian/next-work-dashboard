@@ -19,6 +19,7 @@ export interface RssSubscription extends Omit<RssFeed, 'items'> {
   id: string;
   addedAt: number;
   lastFetchedAt: number;
+  category: string;
   error?: string;
 }
 
@@ -28,4 +29,3 @@ export interface RssArticle extends RssFeedItem {
   read: boolean;
   starred: boolean;
 }
-
