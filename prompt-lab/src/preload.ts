@@ -4,6 +4,10 @@ import { workBrowserBridge } from './preload/work-browser';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
+  outlineProjects: {
+    load: () => ipcRenderer.invoke('outline-projects:load'),
+    save: (projects) => ipcRenderer.invoke('outline-projects:save', projects),
+  },
   rss: {
     fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
     loadState: () => ipcRenderer.invoke('rss:state:load'),

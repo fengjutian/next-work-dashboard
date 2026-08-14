@@ -124,6 +124,10 @@ export interface MarketplaceCatalog {
 }
 
 export interface ElectronAPI {
+  outlineProjects: {
+    load: () => Promise<ChapterProjectRecord[]>;
+    save: (projects: ChapterProjectRecord[]) => Promise<{ success: boolean; error?: string }>;
+  };
   rss: {
     fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
     loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
@@ -777,6 +781,19 @@ export interface WorkspaceEntry {
   path: string;
   type: 'file' | 'directory';
   size?: number;
+}
+
+export interface ChapterProjectRecord {
+  id: string;
+  name: string;
+  rootPath: string;
+  subfolder: string;
+  source: string;
+  splitMode: 'chapter' | 'section' | 'single';
+  organizeByPart: boolean;
+  template: string;
+  files: string[];
+  updatedAt: number;
 }
 
 export interface WorkspaceResult<T> {

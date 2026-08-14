@@ -80,6 +80,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [documentLoading, setDocumentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [recentProjects, setRecentProjects] = useState<SavedProject[]>(loadSavedProjects);
+  const [projectHistoryReady, setProjectHistoryReady] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish'>('generate');
   const [aiInstruction, setAiInstruction] = useState('');
@@ -91,7 +92,28 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
 
-  useEffect(() => { try { localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recentProjects)); } catch { /* Recent projects are a convenience; documents remain on disk. */ } }, [recentProjects]);
+  useEffect(() => {
+    let active = true;
+    window.electronAPI.outlineProjects.load().then((stored) => {
+      if (!active) return;
+      setRecentProjects((local) => {
+        const merged = new Map<string, SavedProject>();
+        [...local, ...stored].forEach((project) => {
+          const current = merged.get(project.id);
+          if (!current || project.updatedAt > current.updatedAt) merged.set(project.id, project);
+        });
+        return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20);
+      });
+      setProjectHistoryReady(true);
+    }).catch(() => setProjectHistoryReady(true));
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!projectHistoryReady) return;
+    try { localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recentProjects)); } catch { /* Documents remain on disk. */ }
+    window.electronAPI.outlineProjects.save(recentProjects).catch(() => undefined);
+  }, [projectHistoryReady, recentProjects]);
 
   useEffect(() => { setConflicts([]); }, [files, target]);
   useEffect(() => {
@@ -145,7 +167,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       if (!result.success) throw new Error(result.error);
       const prefix = projectFolder.trim() ? `${projectFolder.trim().replace(/\\/g, '/')}/` : '';
       const allMarkdown = (result.data ?? []).filter((entry) => entry.type === 'file' && entry.path.toLowerCase().endsWith('.md'))
-        .map((entry) => entry.path.replace(/\\/g, '/'));
+        .map((entry) => entry.path.replace(/\\/g, '/')).filter((path) => !path.startsWith('.history/') && !path.includes('/.history/'));
       const matched = allMarkdown.filter((path) => !prefix || path.startsWith(prefix));
       const paths = (matched.length ? matched : allMarkdown).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       setManagedFiles(paths); setView('documents');
@@ -179,6 +201,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!target || !activeFile || !dirty) return;
     setSaving(true);
     try {
+      if (savedContent) {
+        const historyRoot = activeProject?.subfolder ? `${activeProject.subfolder}/.history` : '.history';
+        const historyDirectory = await window.electronAPI.workspace.createDirectory(target.path, historyRoot);
+        if (!historyDirectory.success && !/EEXIST|ALREADY_EXISTS/.test(String(historyDirectory.error))) throw new Error(historyDirectory.error);
+        const snapshotName = activeFile.replace(/[/\\<>:"|?*]/g, '-').replace(/\.md$/i, '');
+        const snapshot = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: `${historyRoot}/${Date.now()}-${snapshotName}.md`, content: savedContent, encoding: 'utf8', lineEnding: 'LF' }]);
+        if (!snapshot.success) throw new Error(snapshot.error);
+      }
       const result = await window.electronAPI.workspace.writeTextFile(target.path, activeFile, documentContent, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: modifiedAt });
       if (!result.success || !result.data) throw new Error(result.error);
       setSavedContent(documentContent); setModifiedAt(result.data.modifiedAt);
@@ -353,7 +383,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="truncate text-sm font-semibold">{activeProject?.name || projectTitle || '章节文档'}</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{activeProject && <div className="mb-1 text-xs text-emerald-600">● 已保存项目</div>}{target ? <><button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button>{!activeProject && managedFiles.length > 0 && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => rememberProject(target, managedFiles)}>保存为项目</Button>}</> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
-        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
+        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
         <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => setAiOpen((value) => !value)}><Sparkles className="mr-2 h-4 w-4" />AI 助写</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>

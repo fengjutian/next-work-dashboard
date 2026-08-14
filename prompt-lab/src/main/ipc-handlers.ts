@@ -139,6 +139,26 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 export function setupIPC(webviewPreloadPath: string) {
   registerOfficeIpc();
   registerRssIpc();
+  const outlineProjectsPath = path.join(app.getPath('userData'), 'outline-scaffolder-projects.json');
+  ipcMain.handle('outline-projects:load', () => {
+    try {
+      if (!fs.existsSync(outlineProjectsPath)) return [];
+      const parsed = JSON.parse(fs.readFileSync(outlineProjectsPath, 'utf8'));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  });
+  ipcMain.handle('outline-projects:save', (_event, projects: unknown) => {
+    try {
+      if (!Array.isArray(projects) || projects.length > 100) throw new Error('INVALID_PROJECT_HISTORY');
+      fs.mkdirSync(path.dirname(outlineProjectsPath), { recursive: true });
+      const temporary = `${outlineProjectsPath}.tmp`;
+      fs.writeFileSync(temporary, `${JSON.stringify(projects.slice(0, 20), null, 2)}\n`, 'utf8');
+      fs.renameSync(temporary, outlineProjectsPath);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
   ipcMain.handle('plugins:definitions:load', () => loadPluginDefinitions());
   ipcMain.handle('plugins:definitions:save', (_event, definitions: unknown[]) => savePluginDefinitions(definitions));
   ipcMain.handle('plugins:marketplace:cached', () => loadCachedCatalog());
