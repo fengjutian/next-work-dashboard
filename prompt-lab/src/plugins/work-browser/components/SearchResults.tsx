@@ -1,8 +1,8 @@
 /**
  * SearchResults — 搜索结果弹层
  */
-import { Card, List, Tag, Space, Typography, Empty, Spin, Button, Drawer, Tag as SourceTag } from '../ui';
-import { Globe, BookMarked, BookOpen } from 'lucide-react';
+import { Empty, Spin, Drawer } from '../ui';
+import { ArrowUpRight, Globe, BookMarked, BookOpen, CheckCircle2, CircleSlash2 } from 'lucide-react';
 import type { AggregatedSearchResponse } from '../../../core/work-browser/types';
 import { AiSummaryCard } from './AiSummary';
 
@@ -21,58 +21,79 @@ function sourceIcon(source: string) {
 }
 
 export function SearchResults({ open, onClose, data, loading, onOpen }: SearchResultsProps) {
+  const availableProviders = data?.providers.filter((provider) => provider.ok && provider.count > 0) ?? [];
+  const unavailableCount = data?.providers.filter((provider) => !provider.ok || provider.count === 0).length ?? 0;
+
   return (
     <Drawer
       title="搜索结果"
       open={open}
       onClose={onClose}
-      width={720}
+      width={680}
       destroyOnClose
     >
       {loading && <Spin tip="多引擎并行搜索中…" style={{ display: 'block', margin: '24px auto' }} />}
       {!loading && data && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <div className="space-y-4">
           {data.aiSummary && <AiSummaryCard summary={data.aiSummary} />}
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {data.results.length} 条结果 · {data.providers.length} 个引擎 · {data.took} ms
-            </Typography.Text>
-            <Space size={4} style={{ marginLeft: 8 }}>
-              {data.providers.map((p) => (
-                <Tag key={p.providerId} color={p.ok ? 'blue' : 'red'} style={{ fontSize: 11 }}>
-                  {p.providerId} · {p.count}
-                </Tag>
+          <div className="rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+              <span className="font-medium text-foreground">{data.results.length} 条结果</span>
+              <span className="text-muted-foreground">{data.took} ms</span>
+              <span className="h-3 w-px bg-border" />
+              {availableProviders.map((provider) => (
+                <span key={provider.providerId} className="inline-flex items-center gap-1 text-muted-foreground">
+                  <CheckCircle2 size={12} className="text-emerald-500" />
+                  {provider.providerId} <span className="tabular-nums">{provider.count}</span>
+                </span>
               ))}
-            </Space>
+              {unavailableCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-muted-foreground" title="未返回结果或暂不可用的搜索引擎">
+                  <CircleSlash2 size={12} />{unavailableCount} 个未返回
+                </span>
+              )}
+            </div>
           </div>
           {data.results.length === 0 ? (
             <Empty description="没有命中" />
           ) : (
-            <List
-              dataSource={data.results}
-              renderItem={(r) => (
-                <Card size="small" hoverable style={{ marginBottom: 8 }}>
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                    <Space>
-                      {sourceIcon(r.source)}
-                      <Typography.Link onClick={() => onOpen(r.url)} target="_blank" strong>
-                        {r.title}
-                      </Typography.Link>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.domain}</Typography.Text>
-                      <SourceTag>{r.source}</SourceTag>
-                    </Space>
-                    <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ marginBottom: 0 }}>
-                      {r.snippet}
-                    </Typography.Paragraph>
-                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>{r.canonicalUrl}</Typography.Text>
-                  </Space>
-                </Card>
-              )}
-            />
+            <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
+              {data.results.map((result, index) => (
+                <button
+                  key={`${result.canonicalUrl}:${result.source}`}
+                  type="button"
+                  onClick={() => onOpen(result.url)}
+                  className="group flex w-full gap-3 border-b border-border/50 px-4 py-3.5 text-left transition last:border-b-0 hover:bg-primary/[0.035] focus-visible:bg-primary/[0.05] focus-visible:outline-none"
+                >
+                  <span className="mt-0.5 w-5 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/60">{index + 1}</span>
+                  <span className="mt-0.5 shrink-0 text-muted-foreground">{sourceIcon(result.source)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start gap-2">
+                      <span className="line-clamp-2 flex-1 text-sm font-semibold leading-5 text-primary group-hover:underline">{result.title}</span>
+                      <ArrowUpRight size={14} className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
+                    </span>
+                    {result.snippet && <span className="mt-1 line-clamp-2 block text-xs leading-5 text-muted-foreground">{result.snippet}</span>}
+                    <span className="mt-1.5 flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground/80">
+                      <span className="shrink-0 font-medium text-foreground/65">{result.domain}</span>
+                      {result.source !== result.domain && <span className="rounded-full bg-muted px-1.5 py-0.5">{result.source}</span>}
+                      <span className="truncate">{compactUrl(result.canonicalUrl)}</span>
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
           )}
-          <Button block onClick={onClose}>关闭</Button>
-        </Space>
+        </div>
       )}
     </Drawer>
   );
+}
+
+function compactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.pathname}${url.search}` || '/';
+  } catch {
+    return value;
+  }
 }

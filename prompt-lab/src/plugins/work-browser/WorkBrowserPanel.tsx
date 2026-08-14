@@ -68,6 +68,7 @@ export function WorkBrowserPanel() {
   const tabsByWorkspaceRef = useRef(new Map<string, Tab[]>());
   const documentsByWorkspaceRef = useRef(new Map<string, Document[]>());
   const annotationsByWorkspaceRef = useRef(new Map<string, Annotation[]>());
+  const pageLastUsedRef = useRef(new Map<string, number>());
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
@@ -182,11 +183,19 @@ export function WorkBrowserPanel() {
   useEffect(() => {
     if (!activeTab) return;
     lastTabByWorkspaceRef.current.set(activeTab.workspaceId, activeTab.id);
+    pageLastUsedRef.current.set(activeTab.id, Date.now());
     setCachedPages((current) => {
-      const next = [...current.filter((tab) => tab.id !== activeTab.id), activeTab];
+      const existingIndex = current.findIndex((tab) => tab.id === activeTab.id);
+      const next = existingIndex >= 0
+        ? current.map((tab, index) => index === existingIndex ? activeTab : tab)
+        : [...current, activeTab];
       if (next.length <= 8) return next;
-      const removable = next.find((tab) => !tab.isPinned && tab.id !== activeTab.id);
-      return removable ? next.filter((tab) => tab.id !== removable.id) : next.slice(-8);
+      const removable = next
+        .filter((tab) => !tab.isPinned && tab.id !== activeTab.id)
+        .sort((left, right) => (pageLastUsedRef.current.get(left.id) ?? 0) - (pageLastUsedRef.current.get(right.id) ?? 0))[0];
+      if (!removable) return next.slice(-8);
+      pageLastUsedRef.current.delete(removable.id);
+      return next.filter((tab) => tab.id !== removable.id);
     });
   }, [activeTab]);
 
@@ -279,6 +288,7 @@ export function WorkBrowserPanel() {
   const closeTabSet = useCallback(async (closing: Tab[]) => {
     if (!activeWorkspace || closing.length === 0) return;
     const closingIds = new Set<string>(closing.map((tab) => tab.id));
+    closingIds.forEach((id) => pageLastUsedRef.current.delete(id));
     setCachedPages((current) => current.filter((tab) => !closingIds.has(tab.id)));
     setReadyPages((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !closingIds.has(id))));
     const remaining = tabs.filter((tab) => !closingIds.has(tab.id));
