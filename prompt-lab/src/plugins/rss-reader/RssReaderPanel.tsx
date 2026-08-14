@@ -55,7 +55,7 @@ function toOpml(subscriptions: RssSubscription[]): string {
 function parseOpml(xml: string): Array<{ url: string; category: string }> {
   const document = new DOMParser().parseFromString(xml, 'application/xml');
   if (document.querySelector('parsererror')) throw new Error('OPML 文件格式无效');
-  return [...document.querySelectorAll('outline[xmlUrl]')].map((node) => ({ url: node.getAttribute('xmlUrl') ?? '', category: node.parentElement?.getAttribute('text') || '未分类' })).filter((item) => !!item.url);
+  return Array.from(document.querySelectorAll('outline[xmlUrl]')).map((node) => ({ url: node.getAttribute('xmlUrl') ?? '', category: node.parentElement?.getAttribute('text') || '未分类' })).filter((item) => !!item.url);
 }
 
 function dateLabel(value: string | null): string {
