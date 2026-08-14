@@ -4,6 +4,9 @@ import { workBrowserBridge } from './preload/work-browser';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
+  rss: {
+    fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
+  },
   plugins: {
     loadDefinitions: () => ipcRenderer.invoke('plugins:definitions:load'),
     saveDefinitions: (definitions) => ipcRenderer.invoke('plugins:definitions:save', definitions),

@@ -1,7 +1,7 @@
 import { XMarkdown } from '@ant-design/x-markdown';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Check, History, Loader2, RefreshCw, Sparkles, Trash2, X } from '@/components/icons';
+import { Check, History, Loader2, Sparkles, Trash2, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/store/store';
 import { runFramework, synthesizeAnalyses } from './analysis-service';

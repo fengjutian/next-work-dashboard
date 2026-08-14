@@ -59,6 +59,7 @@ const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ d
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
 const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default: m.CalcPathPanel })));
+const rssReader = preloadable(() => import('../rss-reader').then((m) => ({ default: m.RssReaderPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -91,6 +92,7 @@ const ThinkingLabPanel = thinkingLab.component;
 const WorkBrowserPanel = workBrowser.component;
 const EnglishLookupPanel = englishLookup.component;
 const CalcPathPanel = calcPath.component;
+const RssReaderPanel = rssReader.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -631,6 +633,15 @@ const builtInPlugins: Plugin[] = [
     order: 10,
   },
   {
+    id: 'rss-reader',
+    name: 'RSS 阅读器',
+    icon: Globe,
+    component: RssReaderPanel,
+    enabled: false,
+    order: 28,
+    keepAlive: true,
+  },
+  {
     id: 'zodiac-perspectives',
     name: '十二星座视角',
     icon: Sparkles,
@@ -699,6 +710,7 @@ export function registerBuiltInPlugins(): void {
     'thinking-lab': thinkingLab.preload,
     'english-lookup': englishLookup.preload,
     calcpath: calcPath.preload,
+    'rss-reader': rssReader.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,

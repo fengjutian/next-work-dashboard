@@ -49,6 +49,7 @@ import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, ty
 import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
+import { registerRssIpc } from '../plugins/rss-reader/backend/rss-service';
 import { setupMyCastIPC, startDaemon as startMyCastDaemon, shutdownDaemon as shutdownMyCastDaemon } from '../plugins/mycast/backend/mycast-service';
 import { setupPhoneIPC, stopPhoneService } from '../plugins/phone/backend/phone-service';
 import { setupVoiceIPC, startDaemon as startVoiceDaemon, shutdownDaemon as shutdownVoiceDaemon } from '../plugins/voice-input/backend/voice-engine-service';
@@ -137,6 +138,7 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 
 export function setupIPC(webviewPreloadPath: string) {
   registerOfficeIpc();
+  registerRssIpc();
   ipcMain.handle('plugins:definitions:load', () => loadPluginDefinitions());
   ipcMain.handle('plugins:definitions:save', (_event, definitions: unknown[]) => savePluginDefinitions(definitions));
   ipcMain.handle('plugins:marketplace:cached', () => loadCachedCatalog());
