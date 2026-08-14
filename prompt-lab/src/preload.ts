@@ -11,7 +11,12 @@ const electronAPI: ElectronAPI = {
     refreshAll: () => ipcRenderer.invoke('rss:refresh:all'),
     setRefreshMinutes: (minutes: number) => ipcRenderer.invoke('rss:settings:refresh', minutes),
     setRetentionDays: (days: number) => ipcRenderer.invoke('rss:settings:retention', days),
-    extractArticle: (url: string) => ipcRenderer.invoke('rss:article:extract', url),
+    setNotificationsEnabled: (enabled: boolean) => ipcRenderer.invoke('rss:settings:notifications', enabled),
+    extractArticle: (feedId: string, articleId: string, url: string) => ipcRenderer.invoke('rss:article:extract', feedId, articleId, url),
+    search: (query: string) => ipcRenderer.invoke('rss:search', query),
+    listRules: () => ipcRenderer.invoke('rss:rules:list'),
+    saveRule: (rule) => ipcRenderer.invoke('rss:rules:save', rule),
+    deleteRule: (id: string) => ipcRenderer.invoke('rss:rules:delete', id),
   },
   plugins: {
     loadDefinitions: () => ipcRenderer.invoke('plugins:definitions:load'),

@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Download, ExternalLink, Globe, Loader2, Plus, RefreshCw, Search, Star, Trash2, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { RssArticle, RssFeed, RssSubscription } from './types';
+import type { RssArticle, RssFeed, RssKeywordRule, RssRuleAction, RssSubscription } from './types';
 
 interface RssState { subscriptions: RssSubscription[]; articles: RssArticle[] }
 type Filter = 'all' | 'unread' | 'starred';
 const STORAGE_KEY = 'plugin-rss-reader-v1';
 const REFRESH_KEY = 'plugin-rss-reader-refresh-minutes';
 const RETENTION_KEY = 'plugin-rss-reader-retention-days';
+const NOTIFICATIONS_KEY = 'plugin-rss-reader-notifications';
 
 function loadState(): RssState {
   try {
@@ -78,9 +79,14 @@ export const RssReaderPanel: React.FC = () => {
   const [retentionDays, setRetentionDays] = useState(() => Number(localStorage.getItem(RETENTION_KEY) ?? 90));
   const [fullTexts, setFullTexts] = useState<Record<string, { text: string; wordCount: number }>>({});
   const [extracting, setExtracting] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem(NOTIFICATIONS_KEY) === 'true');
+  const [rules, setRules] = useState<RssKeywordRule[]>([]);
+  const [searchMatches, setSearchMatches] = useState<Set<string> | null>(null);
   useEffect(() => {
     void window.electronAPI.rss.setRefreshMinutes(refreshMinutes);
     void window.electronAPI.rss.setRetentionDays(retentionDays);
+    void window.electronAPI.rss.setNotificationsEnabled(notificationsEnabled);
+    void window.electronAPI.rss.listRules().then(setRules);
     void window.electronAPI.rss.loadState().then((stored) => {
       const legacy = loadState();
       if (!stored.subscriptions.length && legacy.subscriptions.length) {
@@ -92,11 +98,18 @@ export const RssReaderPanel: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) { setSearchMatches(null); return undefined; }
+    const timer = window.setTimeout(() => { void window.electronAPI.rss.search(trimmed).then((matches) => setSearchMatches(new Set(matches.map((item) => `${item.feedId}:${item.articleId}`)))); }, 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const visible = useMemo(() => state.articles
     .filter((item) => selectedFeed === 'all' || item.feedId === selectedFeed)
     .filter((item) => filter === 'all' || (filter === 'unread' ? !item.read : item.starred))
-    .filter((item) => `${item.title} ${item.description} ${item.author}`.toLowerCase().includes(query.trim().toLowerCase()))
-    .sort((a, b) => (Date.parse(b.publishedAt ?? '') || 0) - (Date.parse(a.publishedAt ?? '') || 0)), [state.articles, selectedFeed, filter, query]);
+    .filter((item) => !query.trim() || searchMatches?.has(`${item.feedId}:${item.id}`))
+    .sort((a, b) => (Date.parse(b.publishedAt ?? '') || 0) - (Date.parse(a.publishedAt ?? '') || 0)), [state.articles, selectedFeed, filter, query, searchMatches]);
   const current = state.articles.find((item) => `${item.feedId}:${item.id}` === selectedArticle) ?? null;
   const unread = (feedId?: string) => state.articles.filter((item) => !item.read && (!feedId || item.feedId === feedId)).length;
 
@@ -146,10 +159,36 @@ export const RssReaderPanel: React.FC = () => {
     if (!article.link) return;
     const key = `${article.feedId}:${article.id}`;
     setExtracting(true); setError('');
-    try { const extracted = await window.electronAPI.rss.extractArticle(article.link); setFullTexts((currentTexts) => ({ ...currentTexts, [key]: extracted })); }
+    try { const extracted = await window.electronAPI.rss.extractArticle(article.feedId, article.id, article.link); setFullTexts((currentTexts) => ({ ...currentTexts, [key]: extracted })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '正文提取失败'); }
     finally { setExtracting(false); }
   };
+  const addRule = async () => {
+    const name = window.prompt('规则名称'); if (!name?.trim()) return;
+    const include = window.prompt('包含关键词（逗号分隔，任意一个匹配）', '') ?? '';
+    const exclude = window.prompt('排除关键词（逗号分隔）', '') ?? '';
+    const rawAction = window.prompt('动作：notify / star / mark-read', 'notify');
+    const action: RssRuleAction = rawAction === 'star' || rawAction === 'mark-read' ? rawAction : 'notify';
+    const rule: RssKeywordRule = { id: `rule-${Date.now().toString(36)}`, name: name.trim(), includeKeywords: include.split(/[,，]/).map((word) => word.trim()).filter(Boolean), excludeKeywords: exclude.split(/[,，]/).map((word) => word.trim()).filter(Boolean), action, enabled: true };
+    await window.electronAPI.rss.saveRule(rule); setRules((currentRules) => [...currentRules, rule]);
+  };
+  const updateRule = (rule: RssKeywordRule) => { void window.electronAPI.rss.saveRule(rule); setRules((currentRules) => currentRules.map((item) => item.id === rule.id ? rule : item)); };
+  const removeRule = (id: string) => { void window.electronAPI.rss.deleteRule(id); setRules((currentRules) => currentRules.filter((item) => item.id !== id)); };
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      const index = current ? visible.findIndex((article) => article.feedId === current.feedId && article.id === current.id) : -1;
+      if (event.key.toLowerCase() === 'j' && visible.length) { event.preventDefault(); openArticle(visible[Math.min(index + 1, visible.length - 1)]); }
+      else if (event.key.toLowerCase() === 'k' && visible.length) { event.preventDefault(); openArticle(visible[Math.max(index - 1, 0)]); }
+      else if (event.key.toLowerCase() === 's' && current) { event.preventDefault(); patchArticle(current, { starred: !current.starred }); }
+      else if (event.key.toLowerCase() === 'r' && current) { event.preventDefault(); patchArticle(current, { read: !current.read }); }
+      else if (event.key.toLowerCase() === 'o' && current?.link) { event.preventDefault(); void window.electronAPI.shell.openExternal(current.link); }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  });
 
   return <div className="flex h-full min-h-0 bg-card text-foreground">
     <aside className="w-60 shrink-0 border-r flex flex-col min-h-0">
@@ -161,6 +200,8 @@ export const RssReaderPanel: React.FC = () => {
       <div className="flex items-center justify-between px-3 py-2 border-b"><span className="text-xs text-muted-foreground">订阅源</span><div className="flex"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void importOpml()} title="导入 OPML"><Upload className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!state.subscriptions.length} onClick={exportOpml} title="导出 OPML"><Download className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={busy || !state.subscriptions.length} onClick={() => void refresh()} title="刷新全部"><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} /></Button></div></div>
       <div className="px-3 py-2 border-b flex items-center justify-between"><span className="text-[11px] text-muted-foreground">后台刷新</span><select className="text-xs bg-background border rounded px-1 py-0.5" value={refreshMinutes} onChange={(event) => { const value = Number(event.target.value); setRefreshMinutes(value); localStorage.setItem(REFRESH_KEY, String(value)); void window.electronAPI.rss.setRefreshMinutes(value); }}><option value={0}>关闭</option><option value={15}>15 分钟</option><option value={60}>1 小时</option><option value={240}>4 小时</option></select></div>
       <div className="px-3 py-2 border-b flex items-center justify-between"><span className="text-[11px] text-muted-foreground">文章保留</span><select className="text-xs bg-background border rounded px-1 py-0.5" value={retentionDays} onChange={(event) => { const value = Number(event.target.value); setRetentionDays(value); localStorage.setItem(RETENTION_KEY, String(value)); void window.electronAPI.rss.setRetentionDays(value).then(() => window.electronAPI.rss.loadState()).then(setState); }}><option value={30}>30 天</option><option value={90}>90 天</option><option value={180}>180 天</option><option value={0}>永久</option></select></div>
+      <label className="px-3 py-2 border-b flex items-center justify-between text-[11px] text-muted-foreground"><span>桌面通知</span><input type="checkbox" checked={notificationsEnabled} onChange={(event) => { const enabled = event.target.checked; setNotificationsEnabled(enabled); localStorage.setItem(NOTIFICATIONS_KEY, String(enabled)); void window.electronAPI.rss.setNotificationsEnabled(enabled); }} /></label>
+      <div className="px-3 py-2 border-b"><div className="flex items-center justify-between"><span className="text-[11px] text-muted-foreground">关键词规则</span><button className="text-xs text-primary" onClick={() => void addRule()}>+ 添加</button></div>{rules.map((rule) => <div key={rule.id} className="flex items-center gap-1 mt-1 text-[10px]" title={`${rule.includeKeywords.join('、')} → ${rule.action}`}><input type="checkbox" checked={rule.enabled} onChange={(event) => updateRule({ ...rule, enabled: event.target.checked })} /><span className="truncate flex-1">{rule.name}</span><button className="text-muted-foreground hover:text-destructive" onClick={() => removeRule(rule.id)}>×</button></div>)}</div>
       <div className="overflow-auto flex-1 p-2 space-y-1">
         <button onClick={() => setSelectedFeed('all')} className={`w-full rounded px-2 py-2 text-left text-sm flex justify-between ${selectedFeed === 'all' ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span>全部文章</span><span>{unread()}</span></button>
         {state.subscriptions.map((feed) => <div key={feed.id} title={feed.error || `最后成功：${new Date(feed.lastFetchedAt).toLocaleString()}`} className={`group rounded flex items-center ${selectedFeed === feed.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span className={`ml-2 h-2 w-2 rounded-full shrink-0 ${feed.error ? 'bg-destructive' : 'bg-green-500'}`} /><button onClick={() => setSelectedFeed(feed.id)} className="flex-1 min-w-0 px-2 py-2 text-left text-sm"><span className="block truncate">{feed.title}</span><span className={`text-[10px] ${feed.error ? 'text-destructive' : 'text-muted-foreground'}`}>{feed.error ? '刷新失败' : feed.category} · {unread(feed.id)} 未读</span></button><button title="修改分类" className="px-1 text-[10px] opacity-0 group-hover:opacity-100 text-muted-foreground" onClick={() => { const category = window.prompt('订阅分类', feed.category); if (category?.trim()) save({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, category: category.trim() } : item) }, setState); }}>分类</button><button title="删除订阅" className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive" onClick={() => { const next = { subscriptions: state.subscriptions.filter((item) => item.id !== feed.id), articles: state.articles.filter((item) => item.feedId !== feed.id) }; save(next, setState); if (selectedFeed === feed.id) setSelectedFeed('all'); }}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
