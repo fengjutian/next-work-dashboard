@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { discoverFeedUrl, privateAddress } from '../../src/plugins/rss-reader/backend/rss-service';
+import { discoverFeedUrl, privateAddress, ruleMatches } from '../../src/plugins/rss-reader/backend/rss-service';
+import type { RssArticle, RssKeywordRule } from '../../src/plugins/rss-reader/types';
 
 describe('RSS network helpers', () => {
   it('discovers relative RSS and Atom links from normal web pages', () => {
@@ -15,5 +16,13 @@ describe('RSS network helpers', () => {
     for (const address of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '::1', 'fd00::1']) expect(privateAddress(address)).toBe(true);
     expect(privateAddress('8.8.8.8')).toBe(false);
     expect(privateAddress('2606:4700:4700::1111')).toBe(false);
+  });
+
+  it('applies include and exclude keyword rules case-insensitively', () => {
+    const article: RssArticle = { id: '1', feedId: 'feed', feedTitle: 'Tech', title: 'TypeScript Release', description: 'AI tooling update', author: 'OpenAI', link: '', publishedAt: null, read: false, starred: false };
+    const rule: RssKeywordRule = { id: 'r1', name: 'AI', includeKeywords: ['typescript', 'rust'], excludeKeywords: ['sponsored'], action: 'star', enabled: true };
+    expect(ruleMatches(article, rule)).toBe(true);
+    expect(ruleMatches(article, { ...rule, excludeKeywords: ['TOOLING'] })).toBe(false);
+    expect(ruleMatches(article, { ...rule, enabled: false })).toBe(false);
   });
 });

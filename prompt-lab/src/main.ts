@@ -107,9 +107,10 @@ if (started) {
       callback({ video: primaryScreen, audio: captureSystemAudio ? 'loopback' : undefined });
     }, { useSystemPicker: false });
 
-    openMainWindow();
-    // setupIPC configures the existing window and observes future windows.
+    // Register handlers before loading the renderer. Otherwise an eagerly mounted
+    // plugin can invoke its preload bridge before the matching main-process handler exists.
     setupIPC(webviewPreloadPath);
+    openMainWindow();
     setupDiskSpaceIPC();
     setupNetProbeIPC();
     setupRagWorkerIPC();

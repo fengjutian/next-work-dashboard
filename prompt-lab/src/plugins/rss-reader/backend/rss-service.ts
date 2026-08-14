@@ -79,7 +79,7 @@ function subscriptionId(url: string): string {
   return `feed-${(hash >>> 0).toString(36)}`;
 }
 
-function ruleMatches(article: RssArticle, rule: RssKeywordRule): boolean {
+export function ruleMatches(article: RssArticle, rule: RssKeywordRule): boolean {
   if (!rule.enabled) return false;
   const haystack = `${article.title} ${article.description} ${article.author}`.toLowerCase();
   const includes = rule.includeKeywords.map((word) => word.trim().toLowerCase()).filter(Boolean);
