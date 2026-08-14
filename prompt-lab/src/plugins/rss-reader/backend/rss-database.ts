@@ -49,6 +49,18 @@ export function getRssRefreshMinutes(): number {
 export function setRssRefreshMinutes(minutes: number): void {
   db().prepare("INSERT INTO rss_settings(key,value) VALUES('refreshMinutes',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(minutes));
 }
+export function getRssRetentionDays(): number {
+  const row = db().prepare("SELECT value FROM rss_settings WHERE key = 'retentionDays'").get() as { value: string } | undefined;
+  return row ? Number(row.value) : 90;
+}
+export function setRssRetentionDays(days: number): void {
+  db().prepare("INSERT INTO rss_settings(key,value) VALUES('retentionDays',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(days));
+}
+export function pruneRssArticles(days = getRssRetentionDays()): number {
+  if (!days) return 0;
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  return db().prepare("DELETE FROM rss_articles WHERE starred = 0 AND published_at IS NOT NULL AND datetime(published_at) < datetime(?)").run(cutoff).changes;
+}
 
 interface FeedRow { id: string; title: string; description: string; site_url: string; feed_url: string; category: string; added_at: number; last_fetched_at: number; error: string | null }
 interface ArticleRow { id: string; feed_id: string; feed_title: string; title: string; link: string; description: string; author: string; published_at: string | null; is_read: number; starred: number }

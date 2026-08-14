@@ -130,6 +130,8 @@ export interface ElectronAPI {
     saveState: (state: { subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }) => Promise<void>;
     refreshAll: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
     setRefreshMinutes: (minutes: number) => Promise<void>;
+    setRetentionDays: (days: number) => Promise<number>;
+    extractArticle: (url: string) => Promise<{ text: string; wordCount: number }>;
   };
   plugins: {
     loadDefinitions: () => Promise<unknown[]>;

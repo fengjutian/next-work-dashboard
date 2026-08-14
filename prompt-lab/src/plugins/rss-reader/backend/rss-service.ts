@@ -2,7 +2,8 @@ import { ipcMain } from 'electron';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { parseRssFeed } from './rss-parser';
-import { getRssHttpCache, getRssRefreshMinutes, loadRssState, saveRssHttpCache, saveRssState, setRssRefreshMinutes } from './rss-database';
+import { extractReadability } from '../../../core/work-browser/parser';
+import { getRssHttpCache, getRssRefreshMinutes, loadRssState, pruneRssArticles, saveRssHttpCache, saveRssState, setRssRefreshMinutes, setRssRetentionDays } from './rss-database';
 import type { RssArticle, RssFeed, RssSubscription } from '../types';
 
 const MAX_FEED_BYTES = 5 * 1024 * 1024;
@@ -104,6 +105,7 @@ async function refreshAllFeeds(): Promise<void> {
         saveRssState({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, lastFetchedAt: Date.now(), error: cause instanceof Error ? cause.message : String(cause) } : item) });
       }
     }
+    pruneRssArticles();
   } finally { refreshRunning = false; }
 }
 
@@ -127,5 +129,16 @@ export function registerRssIpc(): void {
   ipcMain.handle('rss:state:save', (_event, state: { subscriptions: RssSubscription[]; articles: RssArticle[] }) => saveRssState(state));
   ipcMain.handle('rss:refresh:all', async () => { await refreshAllFeeds(); return loadRssState(); });
   ipcMain.handle('rss:settings:refresh', (_event, minutes: number) => setRssRefreshMinutes([0, 15, 60, 240].includes(minutes) ? minutes : 60));
+  ipcMain.handle('rss:settings:retention', (_event, days: number) => { setRssRetentionDays([0, 30, 90, 180].includes(days) ? days : 90); return pruneRssArticles(days); });
+  ipcMain.handle('rss:article:extract', async (_event, rawUrl: string) => {
+    const { response, url, cachedBody } = await fetchSafely(rawUrl);
+    if (response.status !== 304 && !response.ok) throw new Error(`正文请求失败（HTTP ${response.status}）`);
+    const html = cachedBody ?? await response.text();
+    if (html.length > MAX_FEED_BYTES) throw new Error('网页超过 5 MB 限制');
+    if (!cachedBody) saveRssHttpCache(url.toString(), html, response.headers.get('etag'), response.headers.get('last-modified'));
+    const extracted = await extractReadability(html);
+    if (!extracted.contentText) throw new Error('未能提取到正文');
+    return { text: extracted.contentText, wordCount: extracted.wordCount };
+  });
   startRssBackgroundRefresh();
 }
