@@ -12,6 +12,7 @@ const STORAGE_KEY = 'plugin-rss-reader-v1';
 const REFRESH_KEY = 'plugin-rss-reader-refresh-minutes';
 const RETENTION_KEY = 'plugin-rss-reader-retention-days';
 const NOTIFICATIONS_KEY = 'plugin-rss-reader-notifications';
+const FEED_URL_KEY = 'plugin-rss-reader-last-url';
 
 function loadState(): RssState {
   try {
@@ -72,7 +73,7 @@ export const RssReaderPanel: React.FC = () => {
   const [state, setState] = useState<RssState>(loadState);
   const [selectedFeed, setSelectedFeed] = useState<string>('all');
   const [selectedArticle, setSelectedArticle] = useState<string | null>(null);
-  const [feedUrl, setFeedUrl] = useState('');
+  const [feedUrl, setFeedUrl] = useState(() => localStorage.getItem(FEED_URL_KEY) ?? '');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [busy, setBusy] = useState(false);
@@ -126,7 +127,7 @@ export const RssReaderPanel: React.FC = () => {
   const addFeed = async () => {
     if (!feedUrl.trim()) return;
     setBusy(true); setError('');
-    try { const next = await fetchOne(feedUrl.trim()); const added = next.subscriptions.find((item) => item.sourceUrl === new URL(feedUrl.trim()).toString()); save(next, setState); setSelectedFeed(added?.id ?? 'all'); setFeedUrl(''); }
+    try { const next = await fetchOne(feedUrl.trim()); const added = next.subscriptions.find((item) => item.sourceUrl === new URL(feedUrl.trim()).toString()); save(next, setState); setSelectedFeed(added?.id ?? 'all'); localStorage.setItem(FEED_URL_KEY, feedUrl.trim()); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '添加订阅失败'); }
     finally { setBusy(false); }
   };
@@ -198,7 +199,7 @@ export const RssReaderPanel: React.FC = () => {
     <aside className="w-60 shrink-0 border-r flex flex-col min-h-0">
       <div className="p-3 border-b">
         <div className="flex items-center gap-2 font-semibold"><Globe className="h-5 w-5 text-primary" />RSS 阅读器</div>
-        <div className="flex gap-1 mt-3"><Input value={feedUrl} onChange={(event) => setFeedUrl(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void addFeed(); }} placeholder="粘贴 RSS / Atom 地址" className="h-8 text-xs" /><Button size="sm" className="h-8 px-2" disabled={busy} onClick={() => void addFeed()}><Plus className="h-4 w-4" /></Button></div>
+        <div className="flex gap-1 mt-3"><Input value={feedUrl} onChange={(event) => { setFeedUrl(event.target.value); localStorage.setItem(FEED_URL_KEY, event.target.value); }} onKeyDown={(event) => { if (event.key === 'Enter') void addFeed(); }} placeholder="粘贴 RSS / Atom 地址" className="h-8 text-xs" title={feedUrl} /><Button size="sm" className="h-8 px-2" disabled={busy} onClick={() => void addFeed()}><Plus className="h-4 w-4" /></Button></div>
         {error && <p className="text-xs text-destructive mt-2">{error}</p>}
       </div>
       <div className="flex items-center justify-between px-3 py-2 border-b"><span className="text-xs text-muted-foreground">订阅源</span><div className="flex"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void importOpml()} title="导入 OPML"><Upload className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!state.subscriptions.length} onClick={exportOpml} title="导出 OPML"><Download className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={busy || !state.subscriptions.length} onClick={() => void refresh()} title="刷新全部"><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} /></Button></div></div>
@@ -209,7 +210,7 @@ export const RssReaderPanel: React.FC = () => {
       <div className="px-3 py-2 border-b"><div className="flex items-center justify-between"><span className="text-[11px] text-muted-foreground">关键词规则</span><button className="text-xs text-primary" onClick={() => void addRule()}>+ 添加</button></div>{rules.map((rule) => <div key={rule.id} className="flex items-center gap-1 mt-1 text-[10px]" title={`${rule.includeKeywords.join('、')} → ${rule.action}`}><input type="checkbox" checked={rule.enabled} onChange={(event) => updateRule({ ...rule, enabled: event.target.checked })} /><span className="truncate flex-1">{rule.name}</span><button className="text-muted-foreground hover:text-destructive" onClick={() => removeRule(rule.id)}>×</button></div>)}</div>
       <div className="overflow-auto flex-1 p-2 space-y-1">
         <button onClick={() => setSelectedFeed('all')} className={`w-full rounded px-2 py-2 text-left text-sm flex justify-between ${selectedFeed === 'all' ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span>全部文章</span><span>{unread()}</span></button>
-        {state.subscriptions.map((feed) => <div key={feed.id} title={feed.error || `最后成功：${new Date(feed.lastFetchedAt).toLocaleString()}`} className={`group rounded flex items-center ${selectedFeed === feed.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span className={`ml-2 h-2 w-2 rounded-full shrink-0 ${feed.error ? 'bg-destructive' : 'bg-green-500'}`} /><button onClick={() => setSelectedFeed(feed.id)} className="flex-1 min-w-0 px-2 py-2 text-left text-sm"><span className="block truncate">{feed.title}</span><span className={`text-[10px] ${feed.error ? 'text-destructive' : 'text-muted-foreground'}`}>{feed.error ? '刷新失败' : feed.category} · {unread(feed.id)} 未读</span></button><button title="修改分类" className="px-1 text-[10px] opacity-0 group-hover:opacity-100 text-muted-foreground" onClick={() => { const category = window.prompt('订阅分类', feed.category); if (category?.trim()) save({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, category: category.trim() } : item) }, setState); }}>分类</button><button title="删除订阅" className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive" onClick={() => { const next = { subscriptions: state.subscriptions.filter((item) => item.id !== feed.id), articles: state.articles.filter((item) => item.feedId !== feed.id) }; save(next, setState); if (selectedFeed === feed.id) setSelectedFeed('all'); }}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
+        {state.subscriptions.map((feed) => <div key={feed.id} title={feed.error || `最后成功：${new Date(feed.lastFetchedAt).toLocaleString()}`} className={`group rounded flex items-center ${selectedFeed === feed.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span className={`ml-2 h-2 w-2 rounded-full shrink-0 ${feed.error ? 'bg-destructive' : 'bg-green-500'}`} /><button onClick={() => { setSelectedFeed(feed.id); setFeedUrl(feed.sourceUrl); localStorage.setItem(FEED_URL_KEY, feed.sourceUrl); }} className="flex-1 min-w-0 px-2 py-2 text-left text-sm"><span className="block truncate">{feed.title}</span><span className={`text-[10px] ${feed.error ? 'text-destructive' : 'text-muted-foreground'}`}>{feed.error ? '刷新失败' : feed.category} · {unread(feed.id)} 未读</span><span className="block truncate text-[9px] text-muted-foreground/70 mt-0.5">{feed.sourceUrl}</span></button><button title="修改分类" className="px-1 text-[10px] opacity-0 group-hover:opacity-100 text-muted-foreground" onClick={() => { const category = window.prompt('订阅分类', feed.category); if (category?.trim()) save({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, category: category.trim() } : item) }, setState); }}>分类</button><button title="删除订阅" className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive" onClick={() => { const next = { subscriptions: state.subscriptions.filter((item) => item.id !== feed.id), articles: state.articles.filter((item) => item.feedId !== feed.id) }; save(next, setState); if (selectedFeed === feed.id) setSelectedFeed('all'); }}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
         {!state.subscriptions.length && <p className="px-2 py-8 text-center text-xs text-muted-foreground">添加一个订阅源开始阅读</p>}
       </div>
     </aside>

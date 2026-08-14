@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { notification } from 'antd';
-import { BookOpen, Check, FileText, FolderOpen, Loader2 } from '@/components/icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { BookOpen, Check, FileText, FolderOpen, Loader2, Save } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createChapterDocuments, createReadme, parseOutline, type OutlineNode, type SplitMode } from './outline';
 
@@ -43,11 +45,70 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [checking, setChecking] = useState(false);
+  const [view, setView] = useState<'generator' | 'documents'>('generator');
+  const [managedFiles, setManagedFiles] = useState<string[]>([]);
+  const [activeFile, setActiveFile] = useState('');
+  const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit');
+  const [documentContent, setDocumentContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
+  const [modifiedAt, setModifiedAt] = useState<number>();
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
 
   useEffect(() => { setConflicts([]); }, [files, target]);
+
+  const dirty = documentContent !== savedContent;
+
+  const switchView = (next: 'generator' | 'documents') => {
+    if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
+    setView(next);
+  };
+
+  const openDocument = async (path: string) => {
+    if (!target || (dirty && !window.confirm('当前文档尚未保存，确定切换吗？'))) return;
+    setDocumentLoading(true);
+    try {
+      const result = await window.electronAPI.workspace.readTextFile(target.path, path);
+      if (!result.success || !result.data) throw new Error(result.error);
+      setActiveFile(path); setDocumentContent(result.data.content); setSavedContent(result.data.content); setModifiedAt(result.data.modifiedAt);
+    } catch (error) {
+      notice.error({ message: '读取文档失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+    } finally { setDocumentLoading(false); }
+  };
+
+  const loadExistingDocuments = async () => {
+    if (!target) return;
+    setDocumentLoading(true);
+    try {
+      const result = await window.electronAPI.workspace.listFiles(target.path);
+      if (!result.success) throw new Error(result.error);
+      const prefix = subfolder.trim() ? `${subfolder.trim().replace(/\\/g, '/')}/` : '';
+      const paths = (result.data ?? []).filter((entry) => entry.type === 'file' && entry.path.toLowerCase().endsWith('.md'))
+        .map((entry) => entry.path.replace(/\\/g, '/')).filter((path) => !prefix || path.startsWith(prefix)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      setManagedFiles(paths); setView('documents');
+      if (paths.length) await openDocument(paths[0]);
+      else notice.info({ message: '没有找到 Markdown 文档', placement: 'bottomRight' });
+    } catch (error) {
+      notice.error({ message: '加载失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+    } finally { setDocumentLoading(false); }
+  };
+
+  const saveDocument = async () => {
+    if (!target || !activeFile || !dirty) return;
+    setSaving(true);
+    try {
+      const result = await window.electronAPI.workspace.writeTextFile(target.path, activeFile, documentContent, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: modifiedAt });
+      if (!result.success || !result.data) throw new Error(result.error);
+      setSavedContent(documentContent); setModifiedAt(result.data.modifiedAt);
+      notice.success({ message: '文档已保存', placement: 'bottomRight' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notice.error({ message: message.includes('FILE_MODIFIED_EXTERNALLY') ? '文件已被外部修改' : '保存失败', description: message.includes('FILE_MODIFIED_EXTERNALLY') ? '请重新加载文件，确认外部改动后再编辑。' : message, placement: 'bottomRight' });
+    } finally { setSaving(false); }
+  };
 
   const chooseFolder = async () => {
     const folder = await window.electronAPI.workspace.openFolder();
@@ -105,6 +166,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (!result.success) throw new Error(result.error);
       }
       notice.success({ message: '文档骨架创建完成', description: `已创建 ${documents.length} 个章节文档和 README.md。`, placement: 'bottomRight' });
+      const paths = documents.map((document) => document.path);
+      setManagedFiles(paths); setView('documents');
+      if (paths.length) await openDocument(paths[0]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notice.error({ message: '创建失败', description: message.includes('ALREADY_EXISTS') ? '目标中已有同名文件。为保护原内容，本次没有覆盖，请更换子目录名称。' : message, placement: 'bottomRight' });
@@ -115,9 +179,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
     {holder}
     <header className="flex items-center justify-between border-b border-border px-6 py-4">
       <div><h1 className="flex items-center gap-2 text-lg font-semibold"><BookOpen className="h-5 w-5" />章节文档生成器</h1><p className="mt-1 text-sm text-muted-foreground">粘贴目录，批量创建可自行填写的 Markdown 文档。</p></div>
-      <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{documents.length} 个文档</div>
+      <div className="flex items-center gap-2"><Button size="sm" variant={view === 'generator' ? 'default' : 'ghost'} onClick={() => switchView('generator')}>生成器</Button><Button size="sm" variant={view === 'documents' ? 'default' : 'ghost'} onClick={() => switchView('documents')}>文档工作区</Button><div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{documents.length} 个文档</div></div>
     </header>
-    <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
+    {view === 'generator' ? <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
       <section className="flex min-h-[520px] flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
         <label className="mb-2 text-sm font-medium">章节目录</label>
         <textarea value={source} onChange={(event) => setSource(event.target.value)} spellCheck={false} className="min-h-[420px] flex-1 resize-none rounded-lg border border-input bg-background p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="支持 Markdown 标题、第一章/第一节和数字编号目录" />
@@ -134,6 +198,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
             <button type="button" className="text-left text-xs text-primary hover:underline" onClick={() => setShowTemplate((value) => !value)}>{showTemplate ? '收起章节模板' : '编辑章节模板'}</button>
             {showTemplate && <><textarea value={template} onChange={(event) => setTemplate(event.target.value)} className="h-36 w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs" /><p className="text-xs text-muted-foreground">变量：{'{{title}}'}、{'{{headings}}'}、{'{{placeholder}}'}</p></>}
             <Button variant="outline" className="w-full justify-start" onClick={chooseFolder}><FolderOpen className="mr-2 h-4 w-4" />{target ? target.path : '选择输出目录'}</Button>
+            {target && <Button variant="outline" className="w-full" onClick={loadExistingDocuments}><BookOpen className="mr-2 h-4 w-4" />加载已有文档</Button>}
             {target && <Button variant="secondary" className="w-full" disabled={checking} onClick={checkExisting}>{checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}检查文件冲突</Button>}
             {conflicts.length > 0 && <div className="max-h-24 overflow-auto rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">发现 {conflicts.length} 个同名文件：{conflicts.slice(0, 3).join('、')}{conflicts.length > 3 ? '…' : ''}</div>}
             {target && !checking && conflicts.length === 0 && <p className="text-xs text-muted-foreground">生成前会再次检查；已有文件不会被覆盖。</p>}
@@ -145,6 +210,16 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </section>
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}生成 {documents.length || 0} 个章节文档</Button>
       </div>
-    </div>
+    </div> : <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
+      <aside className="flex min-h-0 flex-col border-r border-border bg-card">
+        <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold">章节文档</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{target ? <button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={loadExistingDocuments}>{target.path}</button> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
+        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
+      </aside>
+      <main className="flex min-h-0 min-w-0 flex-col">
+        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
+        <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
+        {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span>{documentContent.length} 字符</span></div>}
+      </main>
+    </div>}
   </div>;
 };

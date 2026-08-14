@@ -24,4 +24,9 @@ describe('parseRssFeed', () => {
   it('rejects documents that are not feeds', () => {
     expect(() => parseRssFeed('<html><body>no feed</body></html>', 'https://example.com')).toThrow('未识别');
   });
+
+  it('preserves paragraph boundaries in HTML descriptions', () => {
+    const feed = parseRssFeed(`<rss><channel><title>Feed</title><item><title>Post</title><description><![CDATA[<p>第一段内容。</p><p>第二段内容。<br>下一行。</p>]]></description></item></channel></rss>`, 'https://example.com/feed');
+    expect(feed.items[0].description).toBe('第一段内容。\n\n第二段内容。\n下一行。');
+  });
 });
