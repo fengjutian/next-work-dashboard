@@ -3,12 +3,14 @@ import { PROBLEMS } from '../src/plugins/calcpath/curriculum';
 import { calculateMastery, emptySkillState, evaluateAnswer, updateSkill } from '../src/plugins/calcpath/engine';
 import { LESSONS } from '../src/plugins/calcpath/lessons';
 import { CALCPATH_SYLLABUS, syllabusStats } from '../src/plugins/calcpath/syllabus';
+import { VISUALIZED_CHAPTERS } from '../src/plugins/calcpath/MathVisualLab';
 
 describe('CalcPath learning engine', () => {
   it('uses the documented five-dimension mastery weights', () => { const state = { ...emptySkillState('x'), concept: .9, calculation: .95, application: .7, transfer: .5, retention: .8 }; expect(calculateMastery(state)).toBeCloseTo(.7825); });
   it('normalizes equivalent authored answers', () => { expect(evaluateAnswer(PROBLEMS[2], ' 3x² ').correct).toBe(true); });
   it('detects a known chain-rule misconception', () => { const result = evaluateAnswer(PROBLEMS[3], '4x+2'); expect(result.correct).toBe(false); expect(result.misconception?.id).toBe('chain-rule.missing-inner-derivative'); });
   it('updates only the assessed dimension and schedules review', () => { const next = updateSkill(undefined, PROBLEMS[2], true, 0); expect(next.calculation).toBeGreaterThan(0); expect(next.concept).toBe(0); expect(next.nextReviewAt).toBeTruthy(); });
-  it('provides structured lessons for the complete landscape', () => { expect(Object.keys(LESSONS)).toHaveLength(13); expect(LESSONS.derivatives.prerequisites).toContain('极限与连续'); });
+  it('provides structured lessons for every syllabus chapter', () => { expect(CALCPATH_SYLLABUS.every(chapter => LESSONS[chapter.id]?.exposition?.length)).toBe(true); expect(LESSONS.derivatives.prerequisites).toContain('极限与连续'); });
   it('covers a full university calculus sequence', () => { expect(CALCPATH_SYLLABUS).toHaveLength(17); expect(syllabusStats.sections).toBeGreaterThan(90); expect(CALCPATH_SYLLABUS.at(-1)?.id).toBe('second-order-odes'); });
+  it('maps every syllabus chapter to an interactive visual', () => { expect(CALCPATH_SYLLABUS.every(chapter => VISUALIZED_CHAPTERS.includes(chapter.id as typeof VISUALIZED_CHAPTERS[number]))).toBe(true); });
 });

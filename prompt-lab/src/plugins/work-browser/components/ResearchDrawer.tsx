@@ -3,12 +3,11 @@
  *
  * user-visible 完成：用户点 🔬 Research 按钮 → 弹 Drawer → 输主题 → 看实时进度 → 看报告
  */
-import { Drawer, Input, Button, Space, Typography, Steps, Card, message, Tag, Spin } from '../ui';
-import { FlaskConical, Sparkles, FileText } from 'lucide-react';
+import { Drawer, Input, Button, Space, Typography, Steps, Card, message, Tag, Spin, Select } from '../ui';
+import { BookOpen, CheckCircle2, FileSearch, FlaskConical, FolderOpen, Globe2, Sparkles, FileText } from 'lucide-react';
 import { useState } from 'react';
 import { useResearch, type ResearchProgress } from '../hooks/useResearch';
 import type { Workspace } from '../../../core/work-browser/types';
-import { AiSummaryCard } from './AiSummary';
 
 export interface ResearchDrawerProps {
   open: boolean;
@@ -31,6 +30,13 @@ const STAGE_LABELS: Record<ResearchProgress['stage'], string> = {
 };
 
 const STAGE_ORDER: ResearchProgress['stage'][] = ['seed-query', 'multi-search', 'extract', 'analyze', 'save', 'done'];
+const RESEARCH_FLOW = [
+  { icon: FileSearch, label: '拆解问题' },
+  { icon: Globe2, label: '多源搜索' },
+  { icon: BookOpen, label: '阅读正文' },
+  { icon: Sparkles, label: '综合分析' },
+  { icon: CheckCircle2, label: '生成报告' },
+];
 
 export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, defaultTopic, onCompleted }: ResearchDrawerProps) {
   const [topic, setTopic] = useState(defaultTopic || '');
@@ -51,37 +57,30 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
 
   return (
     <Drawer
-      title={<Space><FlaskConical size={18} /> Research Mode</Space>}
+      title={<Space><span className="grid h-8 w-8 place-items-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950"><FlaskConical size={16} /></span><span><span className="block text-sm">Research Mode</span><span className="block text-[10px] font-normal text-muted-foreground">多源检索 · AI 分析 · 可追溯报告</span></span></Space>}
       open={open}
       onClose={onClose}
-      width={760}
+      width={720}
       destroyOnClose
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <Card size="small" style={{ background: '#fafbff', borderColor: '#d6e4ff' }}>
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
-            <Typography.Text strong>📚 主题</Typography.Text>
+      <div className="-m-5 min-h-full bg-gradient-to-b from-violet-50/70 via-background to-background p-5 dark:from-violet-950/20">
+      <Space direction="vertical" size={20} style={{ width: '100%' }}>
+        <Card className="overflow-hidden border-violet-200/70 bg-card p-0 shadow-md dark:border-violet-900/60">
+          <div className="border-b border-violet-100 bg-gradient-to-r from-violet-100/80 via-fuchsia-50 to-sky-50 px-6 py-5 dark:border-violet-900/50 dark:from-violet-950/50 dark:via-fuchsia-950/20 dark:to-sky-950/20">
+            <div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white text-violet-700 shadow-sm dark:bg-slate-900"><Sparkles size={18}/></span><div><h2 className="text-lg font-semibold tracking-tight">今天想研究什么？</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">描述一个具体问题，系统会拆解子问题、交叉检索并生成带引用的报告。</p></div></div>
+          </div>
+          <Space direction="vertical" size={14} className="p-6" style={{ width: '100%' }}>
+            <label className="space-y-2"><span className="text-xs font-semibold text-foreground">研究主题</span>
             <Input
               size="large"
-              placeholder="例如：ClickHouse 内存优化 / Rust 异步运行时对比 / WebGPU 落地状态"
+              placeholder="例如：比较 Rust 主流异步运行时的性能、生态与适用场景"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               onPressEnter={handleStart}
               disabled={loading}
-            />
-            <Space>
-              <Typography.Text strong>📁 Workspace</Typography.Text>
-              <select
-                value={workspaceId}
-                onChange={(e) => setWorkspaceId(e.target.value)}
-                disabled={loading}
-                style={{ padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4, minWidth: 200 }}
-              >
-                {workspaces.map((w) => (
-                  <option key={w.id} value={w.id}>{w.icon || '🌊'} {w.name}</option>
-                ))}
-              </select>
-            </Space>
+              className="h-12 rounded-xl bg-background shadow-sm"
+            /></label>
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"><label className="space-y-2"><span className="flex items-center gap-1.5 text-xs font-semibold"><FolderOpen size={13} className="text-violet-600"/>保存到 Workspace</span><Select value={workspaceId} onChange={setWorkspaceId} options={workspaces.map(w => ({ value:w.id, label:`${w.icon || '🌊'} ${w.name}` }))} className="h-11 w-full min-w-64 rounded-xl" /></label><div className="rounded-xl bg-muted/60 px-4 py-2.5 text-[11px] leading-5 text-muted-foreground">报告与引用将自动归档<br/>方便后续继续研究</div></div>
             {!result && (
               <Button
                 type="primary"
@@ -90,7 +89,7 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
                 onClick={handleStart}
                 loading={loading}
                 disabled={!topic.trim() || !workspaceId}
-                block
+                block className="h-12 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-500/15 hover:from-violet-500 hover:to-fuchsia-500"
               >
                 开始研究
               </Button>
@@ -98,8 +97,10 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
           </Space>
         </Card>
 
+        {!loading && !progress && !result && !error && <section className="rounded-2xl border border-border/70 bg-card/80 p-6 shadow-sm"><div className="text-center"><div className="text-xs font-semibold uppercase tracking-[.18em] text-violet-600">从问题到结论</div><h3 className="mt-2 text-base font-semibold">一次完整的研究流程</h3></div><div className="mt-6 grid grid-cols-5 gap-2">{RESEARCH_FLOW.map(({ icon: Icon, label },index)=><div key={label} className="relative text-center"><div className="mx-auto grid h-11 w-11 place-items-center rounded-2xl border border-violet-100 bg-violet-50 text-violet-600 dark:border-violet-900 dark:bg-violet-950"><Icon size={18}/></div><div className="mt-2 text-[11px] font-medium">{label}</div>{index<4&&<span className="absolute left-[65%] top-5 h-px w-[70%] bg-gradient-to-r from-violet-200 to-transparent dark:from-violet-800"/>}</div>)}</div><p className="mx-auto mt-6 max-w-md text-center text-xs leading-6 text-muted-foreground">建议使用清晰的问题句，并包含需要比较的对象、关注维度或时间范围。主题越具体，报告越有针对性。</p></section>}
+
         {(loading || progress) && (
-          <Card size="small" title={<Space><Spin size="small" /> 研究进度</Space>}>
+          <Card className="rounded-2xl p-5" title={<Space><Spin size="small" /> <span>研究正在进行</span></Space>}>
             <Steps
               size="small"
               direction="vertical"
@@ -114,7 +115,7 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
         )}
 
         {error && (
-          <Card size="small" style={{ borderColor: '#ffccc7' }}>
+          <Card className="rounded-2xl border-red-200 bg-red-50/60 p-5 dark:bg-red-950/20">
             <Typography.Text type="danger">研究失败：{error}</Typography.Text>
           </Card>
         )}
@@ -122,7 +123,7 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
         {result && (
           <>
             <Card
-              size="small"
+              className="rounded-2xl p-5"
               title={<Space><FileText size={14} /> 报告</Space>}
               extra={
                 result.reportPath && (
@@ -130,23 +131,12 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
                 )
               }
             >
-              <pre style={{
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                maxHeight: 400,
-                overflow: 'auto',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                fontSize: 12,
-                margin: 0,
-                padding: 12,
-                background: '#fafafa',
-                borderRadius: 4,
-              }}>
+              <pre className="m-0 max-h-[460px] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted/60 p-5 font-sans text-[13px] leading-7 text-foreground">
                 {result.report}
               </pre>
             </Card>
             {result.citations.length > 0 && (
-              <Card size="small" title={`📎 引用来源 (${result.citations.length})`}>
+              <Card className="rounded-2xl p-5" title={`引用来源 · ${result.citations.length}`}>
                 <Space direction="vertical" size={4} style={{ width: '100%' }}>
                   {result.citations.slice(0, 8).map((c, i) => (
                     <Typography.Text key={i} ellipsis style={{ width: '100%' }}>
@@ -162,7 +152,7 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
             </Space>
           </>
         )}
-      </Space>
+      </Space></div>
     </Drawer>
   );
 }

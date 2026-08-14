@@ -1,9 +1,12 @@
+import { CALCPATH_SYLLABUS } from './syllabus';
+
 export interface LessonContent {
   id: string; title: string; stage: string; question: string; insight: string; prerequisites: string[];
   concepts: { title: string; body: string; formula?: string }[];
   example: { question: string; steps: string[]; answer: string };
   next: string[];
   exposition?: { heading: string; paragraphs: string[]; definition?: string; formula?: string; caution?: string }[];
+  sections?: string[];
 }
 
 export const LESSONS: Record<string, LessonContent> = {
@@ -23,6 +26,34 @@ LESSONS.multivariable = future('multivariable', '多元微积分', '当输出同
 LESSONS.diffeq = future('diffeq', '微分方程', '已知变化规律，如何反推出系统随时间的状态？', ['导数', '积分']);
 LESSONS.series = future('series', '级数与 Taylor', '如何用无限多项式逼近复杂函数？', ['极限', '高阶导数']);
 LESSONS.linear = future('linear', '线代 · 概率', '微积分如何进入高维空间和随机世界？', ['积分', '向量与矩阵']);
+
+const chapter = (id: string, title: string, question: string, insight: string, prerequisites: string[], sections: string[], concepts: LessonContent['concepts'], example: LessonContent['example'], next: string[], exposition: NonNullable<LessonContent['exposition']>): LessonContent => ({ id, title, stage: '大学微积分课程', question, insight, prerequisites, sections, concepts, example, next, exposition });
+
+Object.assign(LESSONS, {
+  'derivative-applications': chapter('derivative-applications', '导数的应用', '知道变化率以后，我们能预测函数的行为吗？', '导数把局部变化信息转化为极值、形状、近似和优化决策。', ['导数', '不等式', '函数图像'], ['极值问题','中值定理','单调性与一阶导数检验','凹凸性与曲线描绘','不定式与洛必达法则','实际优化','Newton 方法','原函数'], [{ title:'符号决定趋势', body:'f′ 的正负控制递增与递减，f″ 的正负描述弯曲方向。', formula:'f′>0 ⇒ 递增；f″>0 ⇒ 凹向上' },{ title:'临界点', body:'极值候选出现在导数为零或不存在的定义域内点。' }], { question:'如何找 f(x)=x³−3x 的局部极值？', steps:['求 f′=3x²−3','令 f′=0 得 x=±1','用导数符号变化分类'], answer:'x=−1 为局部极大，x=1 为局部极小' }, ['积分','优化建模'], [{ heading:'1. 从局部信息重建整体图像', paragraphs:['导数像函数的速度表。逐段检查它的正负，可以判断原函数在哪些区间上升或下降。二阶导数进一步说明斜率本身如何变化，从而判断凹凸性。'], formula:'f′(x)=0 或不存在 → 临界点候选' },{ heading:'2. 中值定理', paragraphs:['若函数在闭区间连续、开区间可导，则至少有一点的瞬时变化率等于整个区间的平均变化率。它把局部导数与全局变化连接起来。'], definition:'存在 c∈(a,b)，使 f′(c)=[f(b)−f(a)]/(b−a)。', caution:'连续和可导条件不能省略。' },{ heading:'3. 优化不是只解 f′=0', paragraphs:['实际优化先要定义变量、目标函数和可行域；还必须比较临界点与边界值。求导只是整个建模流程中的一步。'] }]),
+  'integral-applications': chapter('integral-applications','定积分的应用','面积之外，积分还能累积什么？','只要总量由连续分布的微小贡献组成，就可以建立积分。',['定积分','几何','物理单位'],['截面法求体积','柱壳法','弧长','旋转曲面面积','功与流体压力','矩与质心'],[{title:'切片原则',body:'把对象切成薄片，写出单片近似量，再取极限。',formula:'总量 = ∫（单位贡献）d（位置）'},{title:'量纲检查',body:'面积、体积、功和质量的积分式必须具有正确单位。'}],{question:'半径随 x 变化的旋转体怎样求体积？',steps:['垂直于轴切片','每片近似为圆盘 πr²Δx','累加并令 Δx→0'],answer:'V=∫πr(x)²dx'},['积分技巧','多重积分'],[{heading:'1. 统一的切片思想',paragraphs:['体积、功、流体压力和质心看似不同，建模步骤却相同：选择位置变量，把整体切成微小部分，写出局部贡献，再积分。']},{heading:'2. 圆盘与柱壳',paragraphs:['垂直旋转轴切片产生圆盘或垫圈；平行旋转轴切片产生柱壳。两种方法应选择能让半径和高度表达最简单的一种。'],formula:'V=∫π(R²−r²)dx；V=∫2π(半径)(高度)dx'},{heading:'3. 物理积分',paragraphs:['变力做功等于力沿位移的积分；流体压力随深度变化，因此必须对水平薄条积分。'],caution:'积分变量和几何切片必须一致。'}]),
+  transcendental: chapter('transcendental','超越函数与增长模型','为什么自然增长总会遇到 e？','指数、对数与反三角函数扩展了微积分可描述的变化类型。',['指数与对数','反函数','导数'],['反函数及其导数','自然对数','指数函数','指数变化与可分离方程','反三角函数','双曲函数','增长率比较'],[{title:'自然指数',body:'eˣ 是导数等于自身的指数函数。',formula:'(eˣ)′=eˣ'},{title:'对数是累积',body:'ln x 也可由 1/t 的面积定义。',formula:'ln x=∫₁ˣ 1/t dt'}],{question:'连续增长模型 y′=ky 如何求解？',steps:['分离 dy/y=k dx','两边积分','指数化并吸收常数'],answer:'y=Ceᵏˣ'},['微分方程','积分技巧'],[{heading:'1. 为什么底数 e 自然出现',paragraphs:['对一般指数 aˣ 求导会多出一个常数因子。存在唯一底数使这个因子等于 1，它就是 e。于是 eˣ 成为连续增长的自然语言。'],definition:'自然对数 ln x 是 eˣ 的反函数。'},{heading:'2. 反函数求导',paragraphs:['反函数交换输入和输出，其图像关于 y=x 对称；对应切线斜率互为倒数。'],formula:'(f⁻¹)′(y)=1/f′(f⁻¹(y))'},{heading:'3. 增长率层级',paragraphs:['当 x→∞ 时，对数慢于任何正幂，正幂慢于任何底数大于 1 的指数。'],caution:'增长快慢必须说明趋近方向和参数范围。'}]),
+  'integration-techniques': chapter('integration-techniques','积分技巧','怎样识别一个积分应当用哪种结构？','积分技巧的本质是把陌生被积式改写为基本公式。',['基本积分','代数恒等式','三角函数'],['基本积分公式','分部积分','三角积分','三角换元','部分分式','计算机代数工具','数值积分','反常积分','概率密度'],[{title:'逆向链式法则',body:'换元法寻找内层函数及其微分。',formula:'∫f(g(x))g′(x)dx=∫f(u)du'},{title:'逆向乘积法则',body:'分部积分把乘积分配给两个更简单的积分。',formula:'∫u dv=uv−∫v du'}],{question:'如何计算 ∫x eˣ dx？',steps:['选 u=x，dv=eˣdx','求 du=dx，v=eˣ','应用分部积分'],answer:'xeˣ−eˣ+C'},['反常积分','概率'],[{heading:'1. 先识别结构',paragraphs:['换元对应链式法则，分部积分对应乘积法则，部分分式利用有理函数代数分解。选择方法前先观察复合、乘积和分母结构。']},{heading:'2. 精确与数值方法',paragraphs:['不是所有初等函数都有初等原函数。此时定积分仍可用梯形法、Simpson 法等数值方法逼近。']},{heading:'3. 反常积分',paragraphs:['无穷区间或无界被积函数必须通过极限定义积分，并判断极限是否存在。'],caution:'写出 ∞ 作为积分上限只是记号，计算时必须转成极限。'}]),
+  'first-order-odes': chapter('first-order-odes','一阶微分方程','如果知道变化规律，能否预测未来状态？','微分方程把“量本身”与“它的变化率”联系起来。',['导数','积分','指数函数'],['解、方向场与 Euler 方法','一阶线性方程','增长与混合模型','自治方程图解','方程组与相平面'],[{title:'方向场',body:'每个点的小线段显示解曲线在该处应有的斜率。'},{title:'Euler 方法',body:'用当前斜率向前走一小步。',formula:'yₙ₊₁=yₙ+h f(xₙ,yₙ)'}],{question:'y′=y，y(0)=1 的解是什么？',steps:['观察变化率等于状态本身','分离变量并积分','使用初值确定常数'],answer:'y=eˣ'},['二阶微分方程','动力系统'],[{heading:'1. 解是一条函数曲线',paragraphs:['微分方程不是求一个数，而是寻找满足导数关系的函数。初值从许多可能解中选出唯一轨迹。']},{heading:'2. 图形先于公式',paragraphs:['方向场无需先求解析解，就能显示增长、衰减、平衡点和长期行为。']},{heading:'3. 数值推进',paragraphs:['Euler 方法用切线作短距离近似。步长越小通常越准确，但计算量更大且仍会累积误差。'],caution:'数值图像是近似，不应与解析解混为一谈。'}]),
+  series: chapter('series','无穷数列与级数','无限多个数相加，什么时候会得到有限结果？','级数把离散无限过程与极限、积分和函数逼近连接起来。',['极限','积分','代数'],['数列','无穷级数','积分判别法','比较判别法','绝对收敛与比值、根值判别','交错级数','幂级数','Taylor 与 Maclaurin 级数','Taylor 级数的收敛'],[{title:'部分和',body:'无穷级数是否收敛，由有限部分和序列的极限决定。',formula:'Σaₙ 收敛 ⇔ Sₙ=a₁+…+aₙ 有有限极限'},{title:'Taylor 展开',body:'用函数在一点的各阶导数构造多项式。'}],{question:'几何级数 1+r+r²+…何时收敛？',steps:['写出有限部分和','化简为 (1−rⁿ⁺¹)/(1−r)','考察 rⁿ⁺¹ 的极限'],answer:'|r|<1 时和为 1/(1−r)'},['Taylor 逼近','微分方程级数解'],[{heading:'1. 数列与级数不同',paragraphs:['数列研究第 n 项的行为；级数研究前 n 项之和的行为。aₙ→0 是级数收敛的必要条件，但不是充分条件。']},{heading:'2. 判别策略',paragraphs:['正项级数可用比较、积分、比值或根值判别；符号交替时还要区分条件收敛与绝对收敛。']},{heading:'3. 函数的幂级数表示',paragraphs:['幂级数在收敛区间内像无限次多项式，可逐项求导积分。Taylor 级数还需要余项趋零才能真正等于原函数。'],caution:'写出 Taylor 系数不等于证明级数收敛到函数。'}]),
+});
+
+const advanced: Record<string, { question: string; insight: string; prerequisites: string[]; concept: string; formula: string; example: LessonContent['example']; next: string[] }> = {
+  'parametric-polar': { question:'一条曲线必须写成 y=f(x) 吗？', insight:'参数和极坐标允许我们描述回环、旋转和多值曲线。', prerequisites:['三角函数','导数','积分'], concept:'参数 t 同时控制 x(t)、y(t)；极坐标用距离 r 和方向 θ 定位。', formula:'dy/dx=(dy/dt)/(dx/dt)；x=r cosθ，y=r sinθ', example:{question:'圆怎样参数化？',steps:['让角度 t 作为参数','横坐标取 R cos t','纵坐标取 R sin t'],answer:'r(t)=⟨R cos t,R sin t⟩'}, next:['空间向量'] },
+  'space-vectors': { question:'怎样把平面微积分推广到三维空间？', insight:'向量同时编码大小与方向，是空间几何和运动的基本语言。', prerequisites:['坐标系','三角函数','几何'], concept:'点积测量方向相似性，叉积产生垂直方向和面积。', formula:'a·b=|a||b|cosθ；|a×b|=|a||b|sinθ', example:{question:'如何判断两个向量垂直？',steps:['对应分量相乘','把乘积相加','检查点积是否为 0'],answer:'a·b=0 时垂直（非零向量）'}, next:['向量值函数','多元函数'] },
+  'vector-functions': { question:'怎样描述粒子在空间中的运动？', insight:'向量值函数把时间映射为空间位置，其导数给出速度和加速度。', prerequisites:['向量','导数','参数曲线'], concept:'位置向量逐分量求导得到速度，再求导得到加速度。', formula:'r(t)=⟨x,y,z⟩，v=r′，a=r″', example:{question:'螺旋线 r(t)=⟨cos t,sin t,t⟩ 的速度？',steps:['分别求三个分量的导数','保持向量结构'],answer:'v(t)=⟨−sin t,cos t,1⟩'}, next:['曲率','向量场'] },
+  'partial-derivatives': { question:'一个输出同时受多个变量影响时，怎样分离每个方向的作用？', insight:'偏导数固定其他变量，只观察一个坐标方向的局部变化。', prerequisites:['导数','空间向量','多元函数图像'], concept:'梯度收集所有一阶偏导，并指向函数增长最快的方向。', formula:'∇f=⟨fₓ,fᵧ,f_z⟩；Dᵤf=∇f·u', example:{question:'f=x²+y² 在 (1,2) 的梯度？',steps:['对 x 求偏导得 2x','对 y 求偏导得 2y','代入点坐标'],answer:'∇f(1,2)=⟨2,4⟩'}, next:['多重积分','优化'] },
+  'multiple-integrals': { question:'二维和三维区域上的连续量怎样累积？', insight:'多重积分把一维切片扩展为小矩形、小柱体和小体积元。', prerequisites:['定积分','多元函数','空间几何'], concept:'迭代积分按一个方向累积后，再沿另一个方向累积。', formula:'∬ᴿ f dA；∭ᴱ f dV', example:{question:'矩形 [0,1]×[0,2] 的面积怎样写成二重积分？',steps:['被积函数取 1','先对 y 从 0 到 2 积分','再对 x 从 0 到 1 积分'],answer:'∫₀¹∫₀²1 dy dx=2'}, next:['质量与质心','向量积分定理'] },
+  'vector-calculus': { question:'局部的旋转和发散如何决定整个边界上的流动？', insight:'Green、Stokes 和散度定理把区域内部的微分量与边界积分统一起来。', prerequisites:['向量场','多重积分','偏导数'], concept:'环流测量沿边界的切向作用，通量测量穿过边界的流量。', formula:'∮∂S F·dr=∬S(∇×F)·n dS；∯∂E F·n dS=∭E∇·F dV', example:{question:'保守场沿闭合曲线做功是多少？',steps:['识别 F=∇φ','线积分只依赖端点','闭路起点终点相同'],answer:'0'}, next:['流体','电磁学'] },
+  'second-order-odes': { question:'振动、阻尼和共振怎样由变化规律预测？', insight:'二阶方程把加速度与位置、速度和外力联系起来。', prerequisites:['一阶方程','复数','级数'], concept:'线性常系数方程可通过特征方程把微分问题化为代数问题。', formula:'ay″+by′+cy=g(t)', example:{question:'y″+y=0 描述什么基本运动？',steps:['特征方程 r²+1=0','根为 ±i','实解由 sin、cos 组成'],answer:'y=A cos t+B sin t'}, next:['振动系统','Fourier 方法'] },
+};
+
+for (const item of CALCPATH_SYLLABUS) {
+  if (LESSONS[item.id]) { LESSONS[item.id].sections = item.sections; continue; }
+  const data = advanced[item.id];
+  if (!data) continue;
+  LESSONS[item.id] = chapter(item.id, item.title, data.question, data.insight, data.prerequisites, item.sections, [{ title:'核心结构', body:data.concept, formula:data.formula },{ title:'几何意义', body:'先从图形和方向理解对象，再进入坐标计算与符号规则。' }], data.example, data.next, [{ heading:'1. 研究对象与动机', paragraphs:[data.insight, data.concept], definition:data.formula },{ heading:'2. 从低维推广', paragraphs:['新概念并非另起炉灶，而是把单变量中的变化、累积和局部近似推广到更多方向与更复杂区域。'] },{ heading:'3. 条件与解释', paragraphs:['公式必须连同定义域、光滑性、方向和边界条件一起使用。图形提供直觉，代数给出可计算形式。'], caution:'不要只逐分量套公式；先确认几何对象、方向和积分区域。' }]);
+}
 
 LESSONS.functions.exposition = [
   { heading: '1. 从变化量开始', paragraphs: ['现实问题通常包含两个或更多互相依赖的量。圆的面积依赖半径，物体的位置依赖时间，生产成本依赖产量。微积分首先需要一种语言，把这种依赖关系写清楚。', '函数把每个允许的输入对应到唯一输出。这里的重点不是“代入算数”，而是辨认谁在变化、谁由谁决定，以及输入能取哪些值。'], definition: '若集合 D 中每个元素 x 都恰好对应集合中的一个值 f(x)，就称 f 是定义在 D 上的函数。D 称为定义域。' },
