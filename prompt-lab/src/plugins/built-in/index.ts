@@ -55,6 +55,7 @@ const mycast = preloadable(() => import('../mycast').then((m) => ({ default: m.M
 const phone = preloadable(() => import('../phone').then((m) => ({ default: m.PhonePanel })));
 const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ default: m.VoiceInputPanel })));
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
+const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ default: m.ThinkingLabPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
 const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default: m.CalcPathPanel })));
@@ -86,6 +87,7 @@ const MyCastPanel = mycast.component;
 const PhonePanel = phone.component;
 const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
+const ThinkingLabPanel = thinkingLab.component;
 const WorkBrowserPanel = workBrowser.component;
 const EnglishLookupPanel = englishLookup.component;
 const CalcPathPanel = calcPath.component;
@@ -643,6 +645,21 @@ const builtInPlugins: Plugin[] = [
       ],
     },
   },
+  {
+    id: 'thinking-lab',
+    name: '战略分析室',
+    icon: Sparkles,
+    component: ThinkingLabPanel,
+    enabled: false,
+    order: 28,
+    keepAlive: true,
+    contributions: {
+      commands: [
+        { id: 'thinking-lab.new', title: '新建战略分析', category: '战略分析室' },
+        { id: 'thinking-lab.history', title: '查看分析历史', category: '战略分析室' },
+      ],
+    },
+  },
 ];
 
 export function registerBuiltInPlugins(): void {
@@ -679,6 +696,7 @@ export function registerBuiltInPlugins(): void {
     mycast: mycast.preload,
     'voice-input': voiceInput.preload,
     'zodiac-perspectives': zodiacPerspectives.preload,
+    'thinking-lab': thinkingLab.preload,
     'english-lookup': englishLookup.preload,
     calcpath: calcPath.preload,
   };
