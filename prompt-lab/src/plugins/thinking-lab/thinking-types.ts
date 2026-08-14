@@ -13,11 +13,13 @@ export interface ThinkingFramework {
 }
 
 export type AnalysisStatus = 'pending' | 'running' | 'done' | 'failed';
+export type AnalysisMode = 'quick' | 'standard' | 'deep';
 
 export interface FrameworkResult {
   frameworkId: ThinkingFrameworkId;
   status: AnalysisStatus;
   content: string;
+  critique?: string;
   error?: string;
 }
 
@@ -25,8 +27,10 @@ export interface ThinkingRun {
   id: string;
   question: string;
   context: string;
+  mode: AnalysisMode;
   frameworkIds: ThinkingFrameworkId[];
   results: FrameworkResult[];
+  critique: string;
   synthesis: string;
   model: string;
   createdAt: number;

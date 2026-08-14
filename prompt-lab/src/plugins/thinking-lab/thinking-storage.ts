@@ -6,7 +6,11 @@ const MAX_RUNS = 40;
 export function loadThinkingRuns(): ThinkingRun[] {
   try {
     const value = JSON.parse(localStorage.getItem(KEY) ?? '[]');
-    return Array.isArray(value) ? value.slice(0, MAX_RUNS) as ThinkingRun[] : [];
+    if (!Array.isArray(value)) return [];
+    return value.slice(0, MAX_RUNS).flatMap((item): ThinkingRun[] => {
+      if (!item || typeof item !== 'object' || typeof item.question !== 'string' || !Array.isArray(item.results)) return [];
+      return [{ ...item, mode: item.mode ?? 'standard', critique: item.critique ?? '' } as ThinkingRun];
+    });
   } catch {
     return [];
   }

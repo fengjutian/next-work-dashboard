@@ -562,6 +562,10 @@ const builtInPlugins: Plugin[] = [
     enabled: false,
     order: 28,
     keepAlive: true,
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('thinking-lab.new', () => window.dispatchEvent(new CustomEvent('thinking-lab:command', { detail: { command: 'new' } }))));
+      context.subscriptions.add(context.commands.register('thinking-lab.history', () => window.dispatchEvent(new CustomEvent('thinking-lab:command', { detail: { command: 'history' } }))));
+    },
     contributions: {
       commands: [{ id: 'phone.refresh', title: '刷新局域网设备', category: 'Phone' }],
     },

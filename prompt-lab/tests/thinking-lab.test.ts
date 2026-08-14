@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FRAMEWORK_BY_ID, recommendFrameworks, THINKING_FRAMEWORKS } from '@/plugins/thinking-lab/framework-registry';
+import { settleWithConcurrency } from '@/plugins/thinking-lab/analysis-service';
+import { buildThinkingReport } from '@/plugins/thinking-lab/report';
 
 describe('thinking-lab framework registry', () => {
   it('contains unique, complete framework definitions', () => {
@@ -27,5 +29,33 @@ describe('thinking-lab framework registry', () => {
     expect(recommendFrameworks('帮我分析这个问题')).toEqual([
       'first-principles', 'systems', 'red-team', 'decision-tree',
     ]);
+  });
+
+  it('limits parallel analysis tasks', async () => {
+    let active = 0;
+    let peak = 0;
+    const tasks = Array.from({ length: 7 }, (_, index) => async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return index;
+    });
+    const results = await settleWithConcurrency(tasks, 3);
+    expect(peak).toBe(3);
+    expect(results).toHaveLength(7);
+    expect(results.every((item) => item.status === 'fulfilled')).toBe(true);
+  });
+
+  it('builds a portable Markdown report', () => {
+    const report = buildThinkingReport({
+      id: 'run-1', question: '是否重构？', context: '团队 5 人', mode: 'deep',
+      frameworkIds: ['first-principles'], results: [{ frameworkId: 'first-principles', status: 'done', content: '核心分析' }],
+      critique: '存在隐含假设', synthesis: '建议分阶段执行', model: 'test-model', createdAt: 0,
+    });
+    expect(report).toContain('# 战略分析报告');
+    expect(report).toContain('第一性原理');
+    expect(report).toContain('存在隐含假设');
+    expect(report).toContain('建议分阶段执行');
   });
 });
