@@ -208,6 +208,9 @@ function describeError(code: number | null, msg?: string): string {
 
 export const NetworkObservatoryPanel: React.FC = () => {
   const api = useMemo(() => getAPI(), []);
+  const historyCacheRef = useRef(new Map<string, NetProbeResult[]>());
+  const heatmapCacheRef = useRef(new Map<string, Array<{ dayOfWeek: number; hourOfDay: number; avgLatencyMs: number | null; sampleCount: number; lossPct: number }>>());
+  const selectionRequestRef = useRef(0);
   const [targets, setTargets] = useState<NetProbeTarget[]>([]);
   const [rules, setRules] = useState<NetProbeAlertRule[]>([]);
   const [incidents, setIncidents] = useState<NetProbeIncident[]>([]);
@@ -234,7 +237,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
   const [draftResolvers, setDraftResolvers] = useState<string>('1.1.1.1, 8.8.8.8, 9.9.9.9');
   const [draftUrl, setDraftUrl] = useState<string>('');
   const [draftPath, setDraftPath] = useState<string>('/');
-  const [draftMaxHops, setDraftMaxHops] = useState<number>(15);
+  const [draftMaxHops, setDraftMaxHops] = useState<number>(30);
 
   const targetMap = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
   const selectedTarget = selectedId ? targetMap.get(selectedId) ?? null : null;
@@ -254,6 +257,13 @@ export const NetworkObservatoryPanel: React.FC = () => {
       setIncidents(i);
       setDaemonState(s);
       setOverviewResults(recent);
+      const recentByTarget = new Map<string, NetProbeResult[]>();
+      for (const row of [...recent].sort((a, b) => a.timestampMs - b.timestampMs)) {
+        const rows = recentByTarget.get(row.targetId) ?? [];
+        rows.push(row);
+        recentByTarget.set(row.targetId, rows);
+      }
+      for (const [targetId, rows] of recentByTarget) historyCacheRef.current.set(targetId, rows);
     } catch (e) {
       setError(String((e as Error).message ?? e));
     }
@@ -313,32 +323,48 @@ export const NetworkObservatoryPanel: React.FC = () => {
           payloadJson: JSON.stringify(event.payload ?? {}),
         };
         setOverviewResults((prev) => [newRow, ...prev].slice(0, 500));
-        if (event.id === selectedId) setHistory((prev) => [newRow, ...prev].slice(0, 500));
+        const cached = historyCacheRef.current.get(event.id) ?? [];
+        const next = [...cached, newRow].slice(-500);
+        historyCacheRef.current.set(event.id, next);
+        if (event.id === selectedId) setHistory(next);
       }
     });
     return off;
   }, [api, selectedId]);
 
-  // Load history + heatmap when selection changes
+  // Show cached/recent history immediately. Fetch persisted history and the
+  // heavier seven-day heatmap independently so aggregation never blocks the
+  // target's primary content. The request token prevents a slow previous
+  // selection from overwriting a newer one.
   useEffect(() => {
+    const requestId = ++selectionRequestRef.current;
     if (!api || !selectedId) {
       setHistory([]);
       setHeatmap([]);
       return;
     }
-    (async () => {
-      try {
-        const [rows, hm] = await Promise.all([
-          api.listResults({ targetId: selectedId, limit: 500 }),
-          api.heatmap({ targetId: selectedId }),
-        ]);
-        const sorted = [...rows].sort((a, b) => a.timestampMs - b.timestampMs);
-        setHistory(sorted);
-        setHeatmap(hm);
-      } catch (e) {
-        setError(String((e as Error).message ?? e));
-      }
-    })();
+    const cachedHistory = historyCacheRef.current.get(selectedId);
+    setHistory(cachedHistory ?? []);
+    setHeatmap(heatmapCacheRef.current.get(selectedId) ?? []);
+
+    void api.listResults({ targetId: selectedId, limit: 500 }).then((rows) => {
+      const current = historyCacheRef.current.get(selectedId) ?? [];
+      const byId = new Map([...rows, ...current].map((row) => [row.id, row] as const));
+      const sorted = [...byId.values()].sort((a, b) => a.timestampMs - b.timestampMs).slice(-500);
+      historyCacheRef.current.set(selectedId, sorted);
+      if (selectionRequestRef.current === requestId) setHistory(sorted);
+    }).catch((e) => {
+      if (selectionRequestRef.current === requestId) setError(String((e as Error).message ?? e));
+    });
+
+    if (!heatmapCacheRef.current.has(selectedId)) {
+      void api.heatmap({ targetId: selectedId }).then((hm) => {
+        heatmapCacheRef.current.set(selectedId, hm);
+        if (selectionRequestRef.current === requestId) setHeatmap(hm);
+      }).catch((e) => {
+        if (selectionRequestRef.current === requestId) setError(String((e as Error).message ?? e));
+      });
+    }
   }, [api, selectedId]);
 
   const addTarget = useCallback(async () => {
@@ -368,6 +394,7 @@ export const NetworkObservatoryPanel: React.FC = () => {
         target: t,
         probe: draftKind,
         intervalMs: baseIntervalMs,
+        timeoutMs: draftKind === 'traceroute' ? 60_000 : undefined,
         options,
       });
       setTargets((prev) => [created, ...prev]);
@@ -392,6 +419,8 @@ export const NetworkObservatoryPanel: React.FC = () => {
       if (!api) return;
       try {
         await api.removeTarget(id);
+        historyCacheRef.current.delete(id);
+        heatmapCacheRef.current.delete(id);
         setTargets((prev) => prev.filter((t) => t.id !== id));
         if (selectedId === id) {
           setSelectedId(null);
@@ -1158,39 +1187,57 @@ const Stat: React.FC<{ label: string; value: number | null; unit: string }> = ({
 );
 
 const TraceroutePathView: React.FC<{ path: TraceroutePath }> = ({ path }) => {
+  const responsiveHops = path.hops.filter((hop) => hop.rttMs.some((value) => value >= 0)).length;
   return (
     <div className="flex-1 overflow-auto border-b border-border">
-      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
-        <span>Path · {path.hops.length} hops · total {path.totalMs.toFixed(0)} ms{path.complete ? ' · complete' : ' · partial'}</span>
-        <span className="font-mono text-[10px]">{new Date(path.timestampMs).toLocaleString()}</span>
+      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2 text-xs">
+        <div className="flex items-center gap-3">
+          <span className="font-medium">路由路径</span>
+          <span className="rounded-full bg-background px-2 py-0.5 text-muted-foreground">{path.hops.length} 跳</span>
+          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-600">{responsiveHops} 个节点响应</span>
+          <span className={path.complete ? 'text-emerald-600' : 'text-amber-600'}>{path.complete ? '已到达目标' : '路径未完成'}</span>
+        </div>
+        <div className="text-right text-[10px] text-muted-foreground">
+          <div>耗时 {path.totalMs.toFixed(0)} ms</div>
+          <div className="font-mono">{new Date(path.timestampMs).toLocaleString()}</div>
+        </div>
       </div>
-      <table className="w-full text-xs">
-        <thead className="sticky top-0 bg-muted/60 text-[10px] uppercase text-muted-foreground">
-          <tr>
-            <th className="px-3 py-2 text-right w-12">Hop</th>
-            <th className="px-3 py-2 text-left">Host</th>
-            <th className="px-3 py-2 text-right w-32">RTT #1</th>
-            <th className="px-3 py-2 text-right w-32">RTT #2</th>
-            <th className="px-3 py-2 text-right w-32">RTT #3</th>
-          </tr>
-        </thead>
-        <tbody>
-          {path.hops.map((h) => (
-            <tr key={h.hop} className="border-b border-border/40 hover:bg-muted/20">
-              <td className="px-3 py-1.5 text-right font-mono">{h.hop}</td>
-              <td className="px-3 py-1.5 font-mono text-[11px]">{h.host}</td>
-              {[0, 1, 2].map((i) => {
-                const v = h.rttMs[i];
-                return (
-                  <td key={i} className="px-3 py-1.5 text-right font-mono">
-                    {v == null || v < 0 ? <span className="text-muted-foreground">*</span> : `${v.toFixed(1)} ms`}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="mx-auto max-w-5xl px-5 py-3">
+        {path.hops.map((hop, index) => {
+          const values = hop.rttMs.filter((value) => value >= 0);
+          const timedOut = values.length === 0;
+          const average = timedOut ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+          const isLast = index === path.hops.length - 1;
+          const reachedTarget = isLast && path.complete;
+          return (
+            <div key={hop.hop} className="group grid grid-cols-[44px_24px_minmax(0,1fr)_260px] items-stretch gap-3">
+              <div className="pt-2 text-right font-mono text-[11px] text-muted-foreground">{String(hop.hop).padStart(2, '0')}</div>
+              <div className="relative flex justify-center">
+                {!isLast && <span className="absolute bottom-0 top-5 w-px bg-border" />}
+                <span className={`relative mt-2 h-3 w-3 rounded-full border-2 ${reachedTarget ? 'border-emerald-500 bg-emerald-500' : timedOut ? 'border-muted-foreground/40 bg-background' : 'border-primary bg-primary'}`} />
+              </div>
+              <div className="min-w-0 border-b border-border/40 py-1.5 group-last:border-0">
+                <div className={`truncate font-mono text-xs ${timedOut ? 'text-muted-foreground' : 'text-foreground'}`} title={hop.host}>
+                  {timedOut ? '请求超时（该节点可能禁用 ICMP 响应）' : hop.host}
+                </div>
+                <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  {reachedTarget ? '目标节点' : timedOut ? '继续探测下一跳' : `平均 ${average?.toFixed(1)} ms`}
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-1.5 border-b border-border/40 py-1.5 group-last:border-0">
+                {[0, 1, 2].map((i) => {
+                  const value = hop.rttMs[i];
+                  return (
+                    <span key={i} className={`min-w-[72px] rounded px-2 py-1 text-right font-mono text-[10px] ${value == null || value < 0 ? 'bg-muted/60 text-muted-foreground' : 'bg-primary/10 text-primary'}`}>
+                      {value == null || value < 0 ? '超时' : `${value.toFixed(1)} ms`}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };

@@ -38,7 +38,7 @@
 //! needed; the self-built path is the recommended one anyway.
 //!
 //! Options:
-//! - `max_hops` (u8, default 15): maximum number of hops
+//! - `max_hops` (u8, default 30): maximum number of hops
 //! - `queries` (u8, default 3): probes per hop
 //! - `per_probe_timeout_ms` (u32, default 2000): per-hop wait window
 //! - `port_base` (u16, default 33434): starting UDP port
@@ -81,7 +81,7 @@ impl Probe for TracerouteProbe {
             .get("max_hops")
             .and_then(|v| v.as_u64())
             .and_then(|n| u8::try_from(n).ok())
-            .unwrap_or(15)
+            .unwrap_or(30)
             .clamp(1, 64);
         let queries: u8 = options
             .get("queries")
@@ -526,24 +526,15 @@ fn parse_system_hops(output: &str) -> (Vec<Value>, bool) {
         if rest.len() < 3 {
             continue;
         }
-        let rtt_cells: Vec<f64> = rest
-            .iter()
-            .take(3)
-            .map(|s| {
-                if *s == "*" {
-                    -1.0
-                } else {
-                    s.parse::<f64>().unwrap_or(-1.0)
-                }
-            })
-            .collect();
+        let mut rtt_cells: Vec<f64> = Vec::with_capacity(3);
         let mut idx = 0;
-        let mut skip = 0;
-        while skip < 3 && idx < rest.len() {
+        while rtt_cells.len() < 3 && idx < rest.len() {
             let t = rest[idx];
             if t == "*" {
+                rtt_cells.push(-1.0);
                 idx += 1;
             } else if t.parse::<f64>().is_ok() {
+                rtt_cells.push(t.parse::<f64>().unwrap_or(-1.0));
                 idx += 1;
                 if idx < rest.len() && rest[idx] == "ms" {
                     idx += 1;
@@ -551,7 +542,9 @@ fn parse_system_hops(output: &str) -> (Vec<Value>, bool) {
             } else {
                 break;
             }
-            skip += 1;
+        }
+        while rtt_cells.len() < 3 {
+            rtt_cells.push(-1.0);
         }
         let host = rest[idx..].join(" ");
         if host.is_empty() {
@@ -564,4 +557,24 @@ fn parse_system_hops(output: &str) -> (Vec<Value>, bool) {
         }));
     }
     (hops, complete)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_system_hops;
+    use serde_json::json;
+
+    #[test]
+    fn parses_windows_rtt_columns_without_token_shift() {
+        let output = "  1     2 ms     1 ms     4 ms  192.168.2.1\r\n\
+                      2     *        8 ms     *     edge.example\r\n\
+                      3     *        *        *     Request timed out.\r\n\
+                      Trace complete.\r\n";
+        let (hops, complete) = parse_system_hops(output);
+        assert!(complete);
+        assert_eq!(hops.len(), 3);
+        assert_eq!(hops[0]["rtt_ms"], json!([2.0, 1.0, 4.0]));
+        assert_eq!(hops[1]["rtt_ms"], json!([-1.0, 8.0, -1.0]));
+        assert_eq!(hops[2]["host"], "Request timed out.");
+    }
 }

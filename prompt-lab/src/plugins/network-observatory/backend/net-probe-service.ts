@@ -631,8 +631,15 @@ export function setupNetProbeIPC(): void {
     void event;
     void payload;
   });
+  // The main window is created before IPC services are registered in main.ts.
+  // Track it immediately; listening only for browser-window-created would miss
+  // that window and silently drop every live probe_result event in the UI.
+  for (const win of BrowserWindow.getAllWindows()) {
+    const dispose = trackWindow(win);
+    win.once('closed', dispose);
+  }
   app.on('browser-window-created', (_event, win) => {
     const dispose = trackWindow(win);
-    win.on('closed', dispose);
+    win.once('closed', dispose);
   });
 }
