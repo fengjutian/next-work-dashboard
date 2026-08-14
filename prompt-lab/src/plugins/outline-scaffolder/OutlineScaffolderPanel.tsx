@@ -100,6 +100,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   }, [activeFile]);
 
   const dirty = documentContent !== savedContent;
+  const activeProject = recentProjects.find((project) => project.rootPath === target?.path && (!project.subfolder || managedFiles.some((path) => path.startsWith(`${project.subfolder}/`)))) ?? null;
 
   const switchView = (next: 'generator' | 'documents') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -188,7 +189,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { setSaving(false); }
   };
 
-  const runAi = async () => {
+  const runAi = async (writeToEditor = false) => {
     if (!activeFile || aiLoading) return;
     if (!aiApi.apiKey?.trim()) { setAiError('请先在应用设置中配置 AI API Key。'); return; }
     const requestId = ++aiRequestRef.current;
@@ -211,6 +212,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (chunk.delta) { result += chunk.delta; setAiResult(result); }
       }
       if (!result.trim()) throw new Error('AI 没有返回内容，请重试。');
+      if (writeToEditor && requestId === aiRequestRef.current) {
+        const next = aiMode === 'continue' ? `${documentContent.trimEnd()}\n\n${result.trim()}\n` : `${result.trimEnd()}\n`;
+        setDocumentContent(next); setEditorMode('edit'); setAiOpen(false);
+        notice.success({ message: 'AI 内容已写入编辑器', description: '请确认内容后点击“保存”写入磁盘。', placement: 'bottomRight' });
+      }
     } catch (error) {
       if (requestId === aiRequestRef.current) setAiError(error instanceof Error ? error.message : String(error));
     } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
@@ -302,7 +308,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     {holder}
     <header className="flex items-center justify-between border-b border-border px-6 py-4">
       <div><h1 className="flex items-center gap-2 text-lg font-semibold"><BookOpen className="h-5 w-5" />章节文档生成器</h1><p className="mt-1 text-sm text-muted-foreground">粘贴目录，批量创建可自行填写的 Markdown 文档。</p></div>
-      <div className="flex items-center gap-2"><Button size="sm" variant={view === 'generator' ? 'default' : 'ghost'} onClick={() => switchView('generator')}>生成器</Button><Button size="sm" variant={view === 'documents' ? 'default' : 'ghost'} onClick={() => switchView('documents')}>文档工作区</Button><div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{documents.length} 个文档</div></div>
+      <div className="flex items-center gap-2">{activeProject && <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-700" title={activeProject.rootPath}>项目已保存</div>}<Button size="sm" variant={view === 'generator' ? 'default' : 'ghost'} onClick={() => switchView('generator')}>生成器</Button><Button size="sm" variant={view === 'documents' ? 'default' : 'ghost'} onClick={() => switchView('documents')}>文档工作区</Button><div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{documents.length} 个文档</div></div>
     </header>
     {view === 'generator' ? <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
       <section className="flex min-h-[520px] flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -336,7 +342,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </div>
     </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
-        <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="text-sm font-semibold">章节文档</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{target ? <button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
+        <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="truncate text-sm font-semibold">{activeProject?.name || projectTitle || '章节文档'}</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{activeProject && <div className="mb-1 text-xs text-emerald-600">● 已保存项目</div>}{target ? <><button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button>{!activeProject && managedFiles.length > 0 && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => rememberProject(target, managedFiles)}>保存为项目</Button>}</> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
@@ -345,11 +351,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span>{documentContent.length} 字符</span></div>}
       </main>
       {aiOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
-        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />AI 章节助写</div><p className="mt-1 text-xs text-muted-foreground">结果不会自动覆盖文档，确认后再应用。</p></div>
+        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />AI 章节助写</div><p className="mt-1 text-xs text-muted-foreground">当前模型：{aiApi.model || '未配置'}</p></div>
         <div className="space-y-3 border-b border-border p-4">
           <label className="block text-xs text-muted-foreground">写作任务<select value={aiMode} onChange={(event) => setAiMode(event.target.value as typeof aiMode)} disabled={aiLoading} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="generate">生成本章正文</option><option value="continue">续写本章</option><option value="polish">润色全文</option></select></label>
           <label className="block text-xs text-muted-foreground">补充要求<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：面向初学者，约 2000 字，多用案例说明" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
-          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止生成</Button> : <Button className="w-full" onClick={runAi}><Sparkles className="mr-2 h-4 w-4" />开始生成</Button>}
+          {!aiApi.apiKey?.trim() && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">尚未配置 API Key，请先前往应用设置配置 AI。</div>}
+          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止生成</Button> : <div className="grid grid-cols-2 gap-2"><Button variant="outline" disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(false)}><Sparkles className="mr-1 h-4 w-4" />生成预览</Button><Button disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(true)}>生成并写入</Button></div>}
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown>{aiLoading && <span className="inline-block h-4 w-1 animate-pulse bg-primary" />}</article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">选择任务并填写要求，<br />AI 结果将在这里预览。</div>}</div>
