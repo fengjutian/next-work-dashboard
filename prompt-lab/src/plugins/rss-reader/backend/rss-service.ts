@@ -108,7 +108,7 @@ function mergeFeed(feed: RssFeed, category = '未分类'): void {
     }
     return article;
   });
-  const subscription: RssSubscription = { id: existingFeed?.id ?? id, title: feed.title, description: feed.description, siteUrl: feed.siteUrl, feedUrl: feed.feedUrl, category: existingFeed?.category ?? category, addedAt: existingFeed?.addedAt ?? Date.now(), lastFetchedAt: Date.now() };
+  const subscription: RssSubscription = { id: existingFeed?.id ?? id, title: feed.title, description: feed.description, siteUrl: feed.siteUrl, feedUrl: feed.feedUrl, sourceUrl: existingFeed?.sourceUrl ?? feed.feedUrl, category: existingFeed?.category ?? category, addedAt: existingFeed?.addedAt ?? Date.now(), lastFetchedAt: Date.now() };
   saveRssState({ subscriptions: [...state.subscriptions.filter((item) => item.id !== subscription.id), subscription], articles: [...articles, ...state.articles.filter((item) => item.feedId !== subscription.id)] });
   const newArticles = existingFeed ? articles.filter((article) => !knownIds.has(article.id)) : [];
   if (newArticles.length) showNotification(`${feed.title} 有 ${newArticles.length} 篇新文章`, newArticles.slice(0, 3).map((article) => article.title).join('、'));
@@ -163,8 +163,8 @@ export function registerRssIpc(): void {
     if (!cachedBody) saveRssHttpCache(url.toString(), html, response.headers.get('etag'), response.headers.get('last-modified'));
     const extracted = await extractReadability(html);
     if (!extracted.contentText) throw new Error('未能提取到正文');
-    saveRssArticleContent(feedId, articleId, extracted.contentText, extracted.wordCount);
-    return { text: extracted.contentText, wordCount: extracted.wordCount };
+    saveRssArticleContent(feedId, articleId, extracted.contentText, extracted.contentMarkdown, extracted.wordCount);
+    return { text: extracted.contentText, markdown: extracted.contentMarkdown, wordCount: extracted.wordCount };
   });
   ipcMain.handle('rss:search', (_event, query: string) => searchRssArticles(query));
   ipcMain.handle('rss:rules:list', () => listRssRules());

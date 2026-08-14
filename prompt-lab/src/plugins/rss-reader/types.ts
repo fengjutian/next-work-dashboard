@@ -20,6 +20,8 @@ export interface RssSubscription extends Omit<RssFeed, 'items'> {
   addedAt: number;
   lastFetchedAt: number;
   category: string;
+  /** 用户最初输入的地址；自动发现或重定向后仍保留。 */
+  sourceUrl: string;
   error?: string;
 }
 

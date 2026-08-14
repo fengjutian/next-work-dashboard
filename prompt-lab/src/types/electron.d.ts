@@ -132,7 +132,7 @@ export interface ElectronAPI {
     setRefreshMinutes: (minutes: number) => Promise<void>;
     setRetentionDays: (days: number) => Promise<number>;
     setNotificationsEnabled: (enabled: boolean) => Promise<void>;
-    extractArticle: (feedId: string, articleId: string, url: string) => Promise<{ text: string; wordCount: number }>;
+    extractArticle: (feedId: string, articleId: string, url: string) => Promise<{ text: string; markdown: string; wordCount: number }>;
     search: (query: string) => Promise<Array<{ feedId: string; articleId: string }>>;
     listRules: () => Promise<import('../plugins/rss-reader/types').RssKeywordRule[]>;
     saveRule: (rule: import('../plugins/rss-reader/types').RssKeywordRule) => Promise<void>;

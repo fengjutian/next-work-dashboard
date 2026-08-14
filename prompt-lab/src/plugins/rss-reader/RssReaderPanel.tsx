@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Download, ExternalLink, Globe, Loader2, Plus, RefreshCw, Search, Star, Trash2, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { RssArticle, RssFeed, RssKeywordRule, RssRuleAction, RssSubscription } from './types';
 
 interface RssState { subscriptions: RssSubscription[]; articles: RssArticle[] }
@@ -24,7 +26,7 @@ function subscriptionId(url: string): string {
   return `feed-${(hash >>> 0).toString(36)}`;
 }
 
-function mergeFeed(state: RssState, feed: RssFeed): RssState {
+function mergeFeed(state: RssState, feed: RssFeed, sourceUrl = feed.feedUrl): RssState {
   const now = Date.now();
   const id = subscriptionId(feed.feedUrl);
   const previous = new Map(state.articles.map((article) => [`${article.feedId}:${article.id}`, article]));
@@ -33,7 +35,7 @@ function mergeFeed(state: RssState, feed: RssFeed): RssState {
     return { ...item, feedId: id, feedTitle: feed.title, read: existing?.read ?? false, starred: existing?.starred ?? false };
   });
   const existingSubscription = state.subscriptions.find((item) => item.id === id);
-  const subscription: RssSubscription = { id, title: feed.title, description: feed.description, siteUrl: feed.siteUrl, feedUrl: feed.feedUrl, category: existingSubscription?.category ?? '未分类', addedAt: existingSubscription?.addedAt ?? now, lastFetchedAt: now };
+  const subscription: RssSubscription = { id, title: feed.title, description: feed.description, siteUrl: feed.siteUrl, feedUrl: feed.feedUrl, sourceUrl: existingSubscription?.sourceUrl ?? sourceUrl, category: existingSubscription?.category ?? '未分类', addedAt: existingSubscription?.addedAt ?? now, lastFetchedAt: now };
   return {
     subscriptions: [...state.subscriptions.filter((item) => item.id !== id), subscription],
     articles: [...incoming, ...state.articles.filter((article) => article.feedId !== id)],
@@ -77,7 +79,7 @@ export const RssReaderPanel: React.FC = () => {
   const [error, setError] = useState('');
   const [refreshMinutes, setRefreshMinutes] = useState(() => Number(localStorage.getItem(REFRESH_KEY) ?? 60));
   const [retentionDays, setRetentionDays] = useState(() => Number(localStorage.getItem(RETENTION_KEY) ?? 90));
-  const [fullTexts, setFullTexts] = useState<Record<string, { text: string; wordCount: number }>>({});
+  const [fullTexts, setFullTexts] = useState<Record<string, { text: string; markdown: string; wordCount: number }>>({});
   const [extracting, setExtracting] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem(NOTIFICATIONS_KEY) === 'true');
   const [rules, setRules] = useState<RssKeywordRule[]>([]);
@@ -90,7 +92,7 @@ export const RssReaderPanel: React.FC = () => {
     void window.electronAPI.rss.loadState().then((stored) => {
       const legacy = loadState();
       if (!stored.subscriptions.length && legacy.subscriptions.length) {
-        const migrated = { ...legacy, subscriptions: legacy.subscriptions.map((feed) => ({ ...feed, category: feed.category || '未分类' })) };
+        const migrated = { ...legacy, subscriptions: legacy.subscriptions.map((feed) => ({ ...feed, sourceUrl: feed.sourceUrl || feed.feedUrl, category: feed.category || '未分类' })) };
         save(migrated, setState); localStorage.removeItem(STORAGE_KEY);
       } else setState(stored);
     }).catch((cause) => setError(cause instanceof Error ? cause.message : '无法加载 RSS 数据库'));
@@ -111,18 +113,20 @@ export const RssReaderPanel: React.FC = () => {
     .filter((item) => !query.trim() || searchMatches?.has(`${item.feedId}:${item.id}`))
     .sort((a, b) => (Date.parse(b.publishedAt ?? '') || 0) - (Date.parse(a.publishedAt ?? '') || 0)), [state.articles, selectedFeed, filter, query, searchMatches]);
   const current = state.articles.find((item) => `${item.feedId}:${item.id}` === selectedArticle) ?? null;
+  const currentSubscription = state.subscriptions.find((item) => item.id === selectedFeed) ?? null;
   const unread = (feedId?: string) => state.articles.filter((item) => !item.read && (!feedId || item.feedId === feedId)).length;
 
   const fetchOne = async (url: string, source = state, category = '未分类') => {
     const feed = await window.electronAPI.rss.fetch(url);
-    const merged = mergeFeed(source, feed);
+    const normalizedSourceUrl = new URL(url).toString();
+    const merged = mergeFeed(source, feed, normalizedSourceUrl);
     const id = subscriptionId(feed.feedUrl);
-    return { ...merged, subscriptions: merged.subscriptions.map((item) => item.id === id ? { ...item, category } : item) };
+    return { ...merged, subscriptions: merged.subscriptions.map((item) => item.id === id ? { ...item, sourceUrl: item.sourceUrl || normalizedSourceUrl, category } : item) };
   };
   const addFeed = async () => {
     if (!feedUrl.trim()) return;
     setBusy(true); setError('');
-    try { const next = await fetchOne(feedUrl.trim()); save(next, setState); setSelectedFeed(subscriptionId(new URL(feedUrl.trim()).toString())); setFeedUrl(''); }
+    try { const next = await fetchOne(feedUrl.trim()); const added = next.subscriptions.find((item) => item.sourceUrl === new URL(feedUrl.trim()).toString()); save(next, setState); setSelectedFeed(added?.id ?? 'all'); setFeedUrl(''); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '添加订阅失败'); }
     finally { setBusy(false); }
   };
@@ -198,6 +202,7 @@ export const RssReaderPanel: React.FC = () => {
         {error && <p className="text-xs text-destructive mt-2">{error}</p>}
       </div>
       <div className="flex items-center justify-between px-3 py-2 border-b"><span className="text-xs text-muted-foreground">订阅源</span><div className="flex"><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void importOpml()} title="导入 OPML"><Upload className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!state.subscriptions.length} onClick={exportOpml} title="导出 OPML"><Download className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={busy || !state.subscriptions.length} onClick={() => void refresh()} title="刷新全部"><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} /></Button></div></div>
+      {currentSubscription && <div className="px-3 py-2 border-b bg-muted/30"><div className="text-[10px] text-muted-foreground mb-1">已保存的 RSS 地址</div><div className="flex items-center gap-1"><button className="min-w-0 flex-1 truncate text-left text-[11px] text-primary hover:underline" title={currentSubscription.sourceUrl} onClick={() => void window.electronAPI.shell.openExternal(currentSubscription.sourceUrl)}>{currentSubscription.sourceUrl}</button><button className="text-[10px] text-muted-foreground hover:text-foreground" title="复制地址" onClick={() => window.electronAPI.copyText(currentSubscription.sourceUrl)}>复制</button></div>{currentSubscription.sourceUrl !== currentSubscription.feedUrl && <div className="mt-1 truncate text-[10px] text-muted-foreground" title={currentSubscription.feedUrl}>发现源：{currentSubscription.feedUrl}</div>}</div>}
       <div className="px-3 py-2 border-b flex items-center justify-between"><span className="text-[11px] text-muted-foreground">后台刷新</span><select className="text-xs bg-background border rounded px-1 py-0.5" value={refreshMinutes} onChange={(event) => { const value = Number(event.target.value); setRefreshMinutes(value); localStorage.setItem(REFRESH_KEY, String(value)); void window.electronAPI.rss.setRefreshMinutes(value); }}><option value={0}>关闭</option><option value={15}>15 分钟</option><option value={60}>1 小时</option><option value={240}>4 小时</option></select></div>
       <div className="px-3 py-2 border-b flex items-center justify-between"><span className="text-[11px] text-muted-foreground">文章保留</span><select className="text-xs bg-background border rounded px-1 py-0.5" value={retentionDays} onChange={(event) => { const value = Number(event.target.value); setRetentionDays(value); localStorage.setItem(RETENTION_KEY, String(value)); void window.electronAPI.rss.setRetentionDays(value).then(() => window.electronAPI.rss.loadState()).then(setState); }}><option value={30}>30 天</option><option value={90}>90 天</option><option value={180}>180 天</option><option value={0}>永久</option></select></div>
       <label className="px-3 py-2 border-b flex items-center justify-between text-[11px] text-muted-foreground"><span>桌面通知</span><input type="checkbox" checked={notificationsEnabled} onChange={(event) => { const enabled = event.target.checked; setNotificationsEnabled(enabled); localStorage.setItem(NOTIFICATIONS_KEY, String(enabled)); void window.electronAPI.rss.setNotificationsEnabled(enabled); }} /></label>

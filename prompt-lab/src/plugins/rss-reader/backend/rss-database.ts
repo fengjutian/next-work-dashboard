@@ -16,7 +16,7 @@ function db(): DatabaseNS.Database {
     CREATE TABLE IF NOT EXISTS rss_feeds (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', site_url TEXT NOT NULL DEFAULT '',
       feed_url TEXT NOT NULL UNIQUE, category TEXT NOT NULL DEFAULT '未分类', added_at INTEGER NOT NULL,
-      last_fetched_at INTEGER NOT NULL DEFAULT 0, error TEXT
+      last_fetched_at INTEGER NOT NULL DEFAULT 0, error TEXT, source_url TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS rss_articles (
       id TEXT NOT NULL, feed_id TEXT NOT NULL REFERENCES rss_feeds(id) ON DELETE CASCADE, feed_title TEXT NOT NULL,
@@ -31,6 +31,7 @@ function db(): DatabaseNS.Database {
     CREATE TABLE IF NOT EXISTS rss_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS rss_article_content (
       feed_id TEXT NOT NULL, article_id TEXT NOT NULL, content_text TEXT NOT NULL, word_count INTEGER NOT NULL,
+      content_markdown TEXT NOT NULL DEFAULT '',
       cached_at INTEGER NOT NULL, PRIMARY KEY(feed_id, article_id),
       FOREIGN KEY(feed_id, article_id) REFERENCES rss_articles(feed_id, id) ON DELETE CASCADE
     );
@@ -40,6 +41,10 @@ function db(): DatabaseNS.Database {
       action TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1
     );
   `);
+  const feedColumns = new Set((database.prepare('PRAGMA table_info(rss_feeds)').all() as Array<{ name: string }>).map((column) => column.name));
+  if (!feedColumns.has('source_url')) database.exec("ALTER TABLE rss_feeds ADD COLUMN source_url TEXT NOT NULL DEFAULT ''");
+  const contentColumns = new Set((database.prepare('PRAGMA table_info(rss_article_content)').all() as Array<{ name: string }>).map((column) => column.name));
+  if (!contentColumns.has('content_markdown')) database.exec("ALTER TABLE rss_article_content ADD COLUMN content_markdown TEXT NOT NULL DEFAULT ''");
   return database;
 }
 
@@ -81,11 +86,11 @@ export function getRssNotificationsEnabled(): boolean {
 export function setRssNotificationsEnabled(enabled: boolean): void {
   db().prepare("INSERT INTO rss_settings(key,value) VALUES('notificationsEnabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(enabled));
 }
-export function saveRssArticleContent(feedId: string, articleId: string, text: string, wordCount: number): void {
+export function saveRssArticleContent(feedId: string, articleId: string, text: string, markdown: string, wordCount: number): void {
   const databaseHandle = db();
   databaseHandle.transaction(() => {
-    databaseHandle.prepare(`INSERT INTO rss_article_content VALUES(?,?,?,?,?) ON CONFLICT(feed_id,article_id)
-      DO UPDATE SET content_text=excluded.content_text,word_count=excluded.word_count,cached_at=excluded.cached_at`).run(feedId, articleId, text, wordCount, Date.now());
+    databaseHandle.prepare(`INSERT INTO rss_article_content(feed_id,article_id,content_text,word_count,content_markdown,cached_at) VALUES(?,?,?,?,?,?) ON CONFLICT(feed_id,article_id)
+      DO UPDATE SET content_text=excluded.content_text,word_count=excluded.word_count,content_markdown=excluded.content_markdown,cached_at=excluded.cached_at`).run(feedId, articleId, text, wordCount, markdown, Date.now());
     const article = databaseHandle.prepare('SELECT title,description,author FROM rss_articles WHERE feed_id=? AND id=?').get(feedId, articleId) as { title: string; description: string; author: string } | undefined;
     if (article) {
       databaseHandle.prepare('DELETE FROM rss_articles_fts WHERE feed_id=? AND article_id=?').run(feedId, articleId);
@@ -93,9 +98,9 @@ export function saveRssArticleContent(feedId: string, articleId: string, text: s
     }
   })();
 }
-export function getRssArticleContent(feedId: string, articleId: string): { text: string; wordCount: number } | null {
-  const row = db().prepare('SELECT content_text,word_count FROM rss_article_content WHERE feed_id=? AND article_id=?').get(feedId, articleId) as { content_text: string; word_count: number } | undefined;
-  return row ? { text: row.content_text, wordCount: row.word_count } : null;
+export function getRssArticleContent(feedId: string, articleId: string): { text: string; markdown: string; wordCount: number } | null {
+  const row = db().prepare('SELECT content_text,content_markdown,word_count FROM rss_article_content WHERE feed_id=? AND article_id=?').get(feedId, articleId) as { content_text: string; content_markdown: string; word_count: number } | undefined;
+  return row ? { text: row.content_text, markdown: row.content_markdown, wordCount: row.word_count } : null;
 }
 export function searchRssArticles(query: string, limit = 200): Array<{ feedId: string; articleId: string }> {
   const tokens = query.trim().split(/\s+/).filter(Boolean).map((token) => `"${token.replace(/"/g, '""')}"`);
@@ -110,28 +115,29 @@ export function saveRssRule(rule: RssKeywordRule): void {
 }
 export function deleteRssRule(id: string): void { db().prepare('DELETE FROM rss_keyword_rules WHERE id=?').run(id); }
 
-interface FeedRow { id: string; title: string; description: string; site_url: string; feed_url: string; category: string; added_at: number; last_fetched_at: number; error: string | null }
+interface FeedRow { id: string; title: string; description: string; site_url: string; feed_url: string; category: string; added_at: number; last_fetched_at: number; error: string | null; source_url: string }
 interface ArticleRow { id: string; feed_id: string; feed_title: string; title: string; link: string; description: string; author: string; published_at: string | null; is_read: number; starred: number }
 
 export function loadRssState(): { subscriptions: RssSubscription[]; articles: RssArticle[] } {
   const feeds = db().prepare('SELECT * FROM rss_feeds ORDER BY title').all() as FeedRow[];
   const articles = db().prepare('SELECT * FROM rss_articles ORDER BY published_at DESC').all() as ArticleRow[];
   return {
-    subscriptions: feeds.map((row) => ({ id: row.id, title: row.title, description: row.description, siteUrl: row.site_url, feedUrl: row.feed_url, category: row.category, addedAt: row.added_at, lastFetchedAt: row.last_fetched_at, error: row.error ?? undefined })),
+    subscriptions: feeds.map((row) => ({ id: row.id, title: row.title, description: row.description, siteUrl: row.site_url, feedUrl: row.feed_url, sourceUrl: row.source_url || row.feed_url, category: row.category, addedAt: row.added_at, lastFetchedAt: row.last_fetched_at, error: row.error ?? undefined })),
     articles: articles.map((row) => ({ id: row.id, feedId: row.feed_id, feedTitle: row.feed_title, title: row.title, link: row.link, description: row.description, author: row.author, publishedAt: row.published_at, read: !!row.is_read, starred: !!row.starred })),
   };
 }
 
 export function saveRssState(state: { subscriptions: RssSubscription[]; articles: RssArticle[] }): void {
   const databaseHandle = db();
-  const saveFeed = databaseHandle.prepare(`INSERT INTO rss_feeds VALUES (@id,@title,@description,@siteUrl,@feedUrl,@category,@addedAt,@lastFetchedAt,@error)
-    ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,site_url=excluded.site_url,feed_url=excluded.feed_url,category=excluded.category,last_fetched_at=excluded.last_fetched_at,error=excluded.error`);
+  const saveFeed = databaseHandle.prepare(`INSERT INTO rss_feeds(id,title,description,site_url,feed_url,category,added_at,last_fetched_at,error,source_url)
+    VALUES (@id,@title,@description,@siteUrl,@feedUrl,@category,@addedAt,@lastFetchedAt,@error,@sourceUrl)
+    ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,site_url=excluded.site_url,feed_url=excluded.feed_url,category=excluded.category,last_fetched_at=excluded.last_fetched_at,error=excluded.error,source_url=excluded.source_url`);
   const saveArticle = databaseHandle.prepare(`INSERT INTO rss_articles VALUES (@id,@feedId,@feedTitle,@title,@link,@description,@author,@publishedAt,@read,@starred)
     ON CONFLICT(feed_id,id) DO UPDATE SET feed_title=excluded.feed_title,title=excluded.title,link=excluded.link,description=excluded.description,author=excluded.author,published_at=excluded.published_at,is_read=excluded.is_read,starred=excluded.starred`);
   databaseHandle.transaction(() => {
     const feedIds = new Set(state.subscriptions.map((feed) => feed.id));
     for (const row of databaseHandle.prepare('SELECT id FROM rss_feeds').all() as Array<{ id: string }>) if (!feedIds.has(row.id)) databaseHandle.prepare('DELETE FROM rss_feeds WHERE id = ?').run(row.id);
-    for (const feed of state.subscriptions) saveFeed.run({ ...feed, category: feed.category || '未分类', error: feed.error ?? null });
+    for (const feed of state.subscriptions) saveFeed.run({ ...feed, sourceUrl: feed.sourceUrl || feed.feedUrl, category: feed.category || '未分类', error: feed.error ?? null });
     for (const article of state.articles) if (feedIds.has(article.feedId)) {
       saveArticle.run({ ...article, read: article.read ? 1 : 0, starred: article.starred ? 1 : 0 });
       const content = databaseHandle.prepare('SELECT content_text FROM rss_article_content WHERE feed_id=? AND article_id=?').get(article.feedId, article.id) as { content_text: string } | undefined;
