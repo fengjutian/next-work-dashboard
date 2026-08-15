@@ -353,7 +353,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } catch (error) {
       if (requestId === aiRequestRef.current) {
         const message = error instanceof Error ? error.message : String(error);
-        setAiError(/401|invalid api key|authorized_error/i.test(message) ? `API Key 未通过当前平台鉴权。当前请求地址：${reviewBaseUrl.includes('minimaxi.com') ? '国内站 api.minimaxi.com' : '全球站 api.minimax.io'}。请确认 Key 来自同一平台的“账户管理 → 接口密钥”，而不是 Token Plan 兑换码或网页登录凭据。` : message);
+        setAiError(/401|invalid api key|authorized_error/i.test(message)
+          ? `API Key 未通过当前平台鉴权。当前请求地址：${reviewBaseUrl.includes('minimaxi.com') ? '国内站 api.minimaxi.com' : '全球站 api.minimax.io'}。请确认 Key 来自同一平台的“账户管理 → 接口密钥”，而不是 Token Plan 兑换码或网页登录凭据。`
+          : /529|2064|overloaded_error|负载较高/i.test(message)
+            ? 'MiniMax M3 当前负载较高；系统已自动重试 3 次仍未成功。请稍后再次点击审校，或临时切换到 MiniMax-M2.7。'
+            : message);
       }
     } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
   };

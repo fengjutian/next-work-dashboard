@@ -329,16 +329,44 @@ export function setupIPC(webviewPreloadPath: string) {
       const apiKey = String(payload.apiKey ?? '').trim();
       if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
       if (!/^[\x21-\x7E]+$/.test(apiKey)) return { ok: false, status: 400, error: 'INVALID_API_KEY_FORMAT: API Key 只能包含 ASCII 字符，请勿填写中文说明、空格或占位文字' };
-      const body = { ...payload.body, stream: false };
+      const body = { ...payload.body, stream: false, ...(isMiniMaxM3 ? { max_tokens: 32_768 } : {}) };
       const controller = new AbortController();
       let timedOut = false;
       const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 300_000);
       try {
-        const response = await fetch(url, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
-        const text = await response.text();
-        let data: unknown;
-        try { data = text ? JSON.parse(text) : {}; } catch { data = undefined; }
-        return response.ok ? { ok: true, status: response.status, data } : { ok: false, status: response.status, error: text.slice(0, 1000) };
+        const retryDelays = [0, 2_000, 5_000, 10_000];
+        for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+          if (retryDelays[attempt] > 0) await new Promise<void>((resolve) => setTimeout(resolve, retryDelays[attempt]));
+          const response = await fetch(url, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) });
+          const text = await response.text();
+          let data: unknown;
+          try { data = text ? JSON.parse(text) : {}; } catch { data = undefined; }
+          if (response.ok) {
+            const miniMaxData = data as { base_resp?: { status_code?: number; status_msg?: string }; choices?: Array<{ finish_reason?: string; message?: { content?: unknown; reasoning_content?: unknown; reasoning_details?: Array<{ text?: string }> } }>; output_sensitive?: boolean } | undefined;
+            const businessCode = Number(miniMaxData?.base_resp?.status_code || 0);
+            if (businessCode !== 0) return { ok: false, status: 400, error: `MiniMax 业务错误 ${businessCode}: ${miniMaxData?.base_resp?.status_msg || '请求未成功'}` };
+            const choice = miniMaxData?.choices?.[0];
+            const content = choice?.message?.content;
+            const hasContent = Array.isArray(content) ? content.length > 0 : String(content ?? '').trim().length > 0;
+            if (isMiniMaxM3 && !hasContent) {
+              const reasoningLength = String(choice?.message?.reasoning_content ?? '').length
+                + (choice?.message?.reasoning_details ?? []).reduce((sum, item) => sum + String(item.text ?? '').length, 0);
+              const detail = miniMaxData?.output_sensitive
+                ? '输出触发内容安全策略'
+                : choice?.finish_reason === 'length'
+                  ? '推理过程耗尽了输出额度'
+                  : `响应正文为空${reasoningLength ? `（已产生 ${reasoningLength} 字符推理内容）` : ''}`;
+              return { ok: false, status: 422, error: `MiniMax-M3 未返回最终正文：${detail}。请缩短待审校文章或改用 MiniMax-M2.7。` };
+            }
+            return { ok: true, status: response.status, data };
+          }
+          const retryable = response.status === 429 || response.status === 529 || (response.status >= 500 && response.status <= 599);
+          if (!retryable || attempt === retryDelays.length - 1) {
+            const suffix = retryable ? `\n已自动重试 ${attempt} 次，服务仍然繁忙。` : '';
+            return { ok: false, status: response.status, error: `${text.slice(0, 1000)}${suffix}` };
+          }
+        }
+        return { ok: false, status: 503, error: '模型服务暂时不可用' };
       } catch (error) {
         if (timedOut || (error instanceof Error && error.name === 'AbortError')) {
           return { ok: false, status: 408, error: '模型生成超过 5 分钟，请缩短输入或更换响应更快的模型' };
