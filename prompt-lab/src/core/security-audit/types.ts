@@ -30,22 +30,48 @@ export interface SecurityFinding {
 }
 
 export type ScanMode = 'full' | 'incremental';
+export type ScannerNetworkPolicy = 'deny' | 'allow';
+export interface ScannerRunResult {
+  scannerId: string;
+  name: string;
+  status: 'succeeded' | 'failed' | 'skipped' | 'cancelled';
+  startedAt: number;
+  completedAt: number;
+  durationMs: number;
+  findingsCount: number;
+  version?: string;
+  exitCode?: number;
+  reason?: string;
+}
+export interface ScannerStatus {
+  id: string;
+  name: string;
+  installed: boolean;
+  ready: boolean;
+  builtIn: boolean;
+  version?: string;
+  reason?: string;
+  checkedAt: number;
+  requiresNetwork?: boolean;
+}
 export interface ScanRequest {
   projectDir: string;
   mode?: ScanMode;
   baselineRef?: string;
   scanners?: string[];
   aiReview?: boolean;
+  networkPolicy?: ScannerNetworkPolicy;
   /** Runtime-only application AI config. It is never persisted by Security Audit. */
   aiConfig?: { baseUrl: string; apiKey: string; model: string };
 }
 export interface ScanProgress { jobId: string; projectDir?: string; phase: 'scanning' | 'triaging' | 'completed' | 'failed' | 'cancelled'; percent: number; message: string; findingsCount?: number }
-export interface ScanContext { projectDir: string; files: string[]; signal: AbortSignal; emit(progress: Omit<ScanProgress, 'jobId'>): void }
+export interface ScanContext { projectDir: string; files: string[]; signal: AbortSignal; networkPolicy: ScannerNetworkPolicy; emit(progress: Omit<ScanProgress, 'jobId'>): void }
 export interface SecurityScanner {
   readonly id: string;
   readonly name: string;
   detect(context: ScanContext): Promise<boolean>;
   scan(context: ScanContext): Promise<SecurityFinding[]>;
+  version?: string;
 }
 
 export interface ScanRecord {
@@ -57,4 +83,5 @@ export interface ScanRecord {
   completedAt?: number;
   status: ScanProgress['phase'];
   findings: SecurityFinding[];
+  scannerRuns: ScannerRunResult[];
 }
