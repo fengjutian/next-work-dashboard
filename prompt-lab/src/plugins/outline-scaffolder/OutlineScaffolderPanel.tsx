@@ -23,6 +23,8 @@ const DEFAULT_TEMPLATE = `# {{title}}
 {{headings}}`;
 
 const RECENT_PROJECTS_KEY = 'outline-scaffolder.recent-projects.v1';
+const normalizeApiKey = (value: string) => value.trim().replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '').trim();
+const isValidApiKey = (value: string) => /^[\x21-\x7E]+$/.test(normalizeApiKey(value));
 
 interface SavedProject {
   id: string;
@@ -139,6 +141,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setProjectHistoryReady(true);
     }).catch(() => setProjectHistoryReady(true));
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    Promise.all([window.electronAPI.outlineSecrets.load('review'), window.electronAPI.outlineSecrets.load('minimax')]).then(([review, minimax]) => {
+      if (review.success && review.value) setReviewApiKey(review.value);
+      if (minimax.success && minimax.value) setMinimaxApiKey(minimax.value);
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -325,7 +334,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const runReview = async () => {
     if (!activeFile || aiLoading) return;
-    if (!reviewApiKey.trim() || !reviewBaseUrl.trim() || !reviewModel.trim()) { setAiError('请完整填写审校模型地址、API Key 和模型名。'); return; }
+    if (!normalizeApiKey(reviewApiKey) || !reviewBaseUrl.trim() || !reviewModel.trim()) { setAiError('请完整填写审校模型地址、API Key 和模型名。'); return; }
+    if (!isValidApiKey(reviewApiKey)) { setAiError('API Key 含有中文、空格或其他无效字符。请清空后从 MiniMax 控制台重新复制完整 Key。'); return; }
     const requestId = ++aiRequestRef.current;
     setAiLoading(true); setAiResult(''); setAiError('');
     const messages: ChatMessage[] = [
@@ -333,7 +343,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       { role: 'user', content: `${reviewInstruction.trim()}\n\n待审校文章：\n${documentContent}` },
     ];
     try {
-      const provider = createOpenAIProvider({ apiKey: reviewApiKey.trim(), baseUrl: reviewBaseUrl.trim(), chatProxy: window.electronAPI.llmChat });
+      const provider = createOpenAIProvider({ apiKey: normalizeApiKey(reviewApiKey), baseUrl: reviewBaseUrl.trim(), chatProxy: window.electronAPI.llmChat });
       let result = '';
       for await (const chunk of provider.chat(messages, { model: reviewModel.trim(), temperature: 0.35, maxTokens: 8_192, stream: false })) {
         if (requestId !== aiRequestRef.current) return;
@@ -341,21 +351,45 @@ export const OutlineScaffolderPanel: React.FC = () => {
       }
       if (!result.trim()) throw new Error('审校模型没有返回内容，请检查模型配置。');
     } catch (error) {
-      if (requestId === aiRequestRef.current) setAiError(error instanceof Error ? error.message : String(error));
+      if (requestId === aiRequestRef.current) {
+        const message = error instanceof Error ? error.message : String(error);
+        setAiError(/401|invalid api key|authorized_error/i.test(message) ? 'API Key 无效或与当前 MiniMax 区域不匹配。请重新复制完整 Key；全球站使用 api.minimax.io，国内站使用 api.minimaxi.com。' : message);
+      }
     } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
   };
 
   const generateIllustration = async () => {
     if (imageLoading || !activeFile) return;
-    if (!minimaxApiKey.trim() || !imagePrompt.trim()) { setImageError('请填写 MiniMax API Key 和插图描述。'); return; }
+    if (!normalizeApiKey(minimaxApiKey) || !imagePrompt.trim()) { setImageError('请填写 MiniMax API Key 和插图描述。'); return; }
+    if (!isValidApiKey(minimaxApiKey)) { setImageError('API Key 含有中文、空格或其他无效字符。请清空后从 MiniMax 控制台重新复制完整 Key。'); return; }
     setImageLoading(true); setImageDataUrl(''); setImageError('');
     try {
       const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
-      const result = await window.electronAPI.generateImage({ provider: 'minimax', baseUrl: 'https://api.minimax.io/v1', apiKey: minimaxApiKey.trim(), model: 'image-01', prompt: `为《${projectTitle}》的章节“${chapterName}”创作一幅出版级配图。${imagePrompt.trim()}。画面完整，构图清晰，不出现文字、水印、标识或界面元素。`, size: '1024x1024', quality: 'standard', aspectRatio: imageAspectRatio, promptOptimizer: true, aigcWatermark: false });
+      const result = await window.electronAPI.generateImage({ provider: 'minimax', baseUrl: reviewBaseUrl.includes('minimaxi.com') ? 'https://api.minimaxi.com/v1' : 'https://api.minimax.io/v1', apiKey: normalizeApiKey(minimaxApiKey), model: 'image-01', prompt: `为《${projectTitle}》的章节“${chapterName}”创作一幅出版级配图。${imagePrompt.trim()}。画面完整，构图清晰，不出现文字、水印、标识或界面元素。`, size: '1024x1024', quality: 'standard', aspectRatio: imageAspectRatio, promptOptimizer: true, aigcWatermark: false });
       if (!result.success || !result.imageDataUrl) throw new Error(result.error || 'MiniMax 没有返回图片。');
       setImageDataUrl(result.imageDataUrl);
-    } catch (error) { setImageError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setImageError(/401|invalid api key|authorized_error/i.test(message) ? 'MiniMax API Key 无效或区域不匹配，请重新复制完整 Key 后再试。' : message);
+    }
     finally { setImageLoading(false); }
+  };
+
+  const saveApiKey = async (kind: 'review' | 'minimax', value: string) => {
+    if (!isValidApiKey(value)) {
+      notice.error({ message: 'API Key 格式无效', description: 'Key 只能包含 ASCII 字符。请勿填写“无”“未配置”等说明文字。', placement: 'bottomRight' });
+      return;
+    }
+    const result = await window.electronAPI.outlineSecrets.save(kind, normalizeApiKey(value));
+    if (result.success) notice.success({ message: 'API Key 已加密保存', description: '密钥由系统安全存储保护，不会写入项目或 Git。', placement: 'bottomRight' });
+    else notice.error({ message: 'API Key 保存失败', description: result.error, placement: 'bottomRight' });
+  };
+
+  const clearApiKey = async (kind: 'review' | 'minimax') => {
+    const result = await window.electronAPI.outlineSecrets.save(kind, '');
+    if (kind === 'review') setReviewApiKey(''); else setMinimaxApiKey('');
+    if (result.success) notice.success({ message: '已清除保存的 API Key', placement: 'bottomRight' });
+    else notice.error({ message: '清除失败', description: result.error, placement: 'bottomRight' });
   };
 
   const saveAndInsertIllustration = async () => {
@@ -742,9 +776,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <div className="space-y-3 border-b border-border p-4">
           <label className="block text-xs text-muted-foreground">OpenAI 兼容地址<input value={reviewBaseUrl} onChange={(event) => setReviewBaseUrl(event.target.value)} placeholder="https://api.minimax.io/v1" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
           <label className="block text-xs text-muted-foreground">模型<input value={reviewModel} onChange={(event) => setReviewModel(event.target.value)} placeholder="MiniMax-M2.7" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
-          <label className="block text-xs text-muted-foreground">API Key<input type="password" value={reviewApiKey} onChange={(event) => setReviewApiKey(event.target.value)} autoComplete="off" placeholder="仅本次运行保存在内存中" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">API Key<input type="password" value={reviewApiKey} onChange={(event) => setReviewApiKey(event.target.value)} autoComplete="off" placeholder="粘贴完整 API Key" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <div className="grid grid-cols-2 gap-2"><Button type="button" size="sm" variant="outline" disabled={!isValidApiKey(reviewApiKey)} onClick={() => saveApiKey('review', reviewApiKey)}><Save className="mr-2 h-4 w-4" />加密保存</Button><Button type="button" size="sm" variant="ghost" onClick={() => clearApiKey('review')}>清除 Key</Button></div>
           <label className="block text-xs text-muted-foreground">审校要求<textarea value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /></label>
-          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止审校</Button> : <Button className="w-full" disabled={!reviewApiKey.trim() || !documentContent.trim()} onClick={runReview}><Check className="mr-2 h-4 w-4" />开始第二遍审校</Button>}
+          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止审校</Button> : <Button className="w-full" disabled={!isValidApiKey(reviewApiKey) || !documentContent.trim()} onClick={runReview}><Check className="mr-2 h-4 w-4" />开始第二遍审校</Button>}
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">审校稿将在这里预览。<br />确认后再替换当前文档。</div>}</div>
@@ -753,10 +788,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
       {imageOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />MiniMax 章节插图</div><p className="mt-1 text-xs text-muted-foreground">先生成预览，确认后保存到 assets/images 并插入文章。</p></div>
         <div className="space-y-3 border-b border-border p-4">
-          <label className="block text-xs text-muted-foreground">MiniMax API Key<input type="password" value={minimaxApiKey} onChange={(event) => setMinimaxApiKey(event.target.value)} autoComplete="off" placeholder="仅本次运行保存在内存中" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">MiniMax API Key<input type="password" value={minimaxApiKey} onChange={(event) => setMinimaxApiKey(event.target.value)} autoComplete="off" placeholder="粘贴完整 API Key" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <div className="grid grid-cols-2 gap-2"><Button type="button" size="sm" variant="outline" disabled={!isValidApiKey(minimaxApiKey)} onClick={() => saveApiKey('minimax', minimaxApiKey)}><Save className="mr-2 h-4 w-4" />加密保存</Button><Button type="button" size="sm" variant="ghost" onClick={() => clearApiKey('minimax')}>清除 Key</Button></div>
           <label className="block text-xs text-muted-foreground">画幅<select value={imageAspectRatio} onChange={(event) => setImageAspectRatio(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="16:9">横版 16:9</option><option value="4:3">横版 4:3</option><option value="1:1">方形 1:1</option><option value="3:4">竖版 3:4</option><option value="9:16">竖版 9:16</option></select></label>
           <label className="block text-xs text-muted-foreground">插图描述<textarea value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} maxLength={1000} placeholder="例如：秦代宫殿俯瞰图，历史绘本质感，暖灰与朱红配色，人物服饰符合时代特征" className="mt-1 h-28 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /></label>
-          <Button className="w-full" disabled={imageLoading || !minimaxApiKey.trim() || !imagePrompt.trim()} onClick={generateIllustration}>{imageLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成插图预览</Button>
+          <Button className="w-full" disabled={imageLoading || !isValidApiKey(minimaxApiKey) || !imagePrompt.trim()} onClick={generateIllustration}>{imageLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成插图预览</Button>
           {imageError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{imageError}</div>}
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/30 p-4">{imageDataUrl ? <img src={imageDataUrl} alt="MiniMax 生成的章节插图预览" className="max-h-full w-full rounded-lg object-contain shadow-sm" /> : <div className="text-center text-xs text-muted-foreground">MiniMax image-01 的生成结果<br />将在这里预览。</div>}</div>

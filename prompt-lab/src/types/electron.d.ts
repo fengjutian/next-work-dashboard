@@ -128,6 +128,10 @@ export interface ElectronAPI {
     load: () => Promise<ChapterProjectRecord[]>;
     save: (projects: ChapterProjectRecord[]) => Promise<{ success: boolean; error?: string }>;
   };
+  outlineSecrets: {
+    load: (kind: 'review' | 'minimax') => Promise<{ success: boolean; value?: string; error?: string }>;
+    save: (kind: 'review' | 'minimax', value: string) => Promise<{ success: boolean; error?: string }>;
+  };
   rss: {
     fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
     loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;

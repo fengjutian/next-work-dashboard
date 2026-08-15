@@ -8,6 +8,10 @@ const electronAPI: ElectronAPI = {
     load: () => ipcRenderer.invoke('outline-projects:load'),
     save: (projects) => ipcRenderer.invoke('outline-projects:save', projects),
   },
+  outlineSecrets: {
+    load: (kind) => ipcRenderer.invoke('outline-secrets:load', kind),
+    save: (kind, value) => ipcRenderer.invoke('outline-secrets:save', kind, value),
+  },
   rss: {
     fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
     loadState: () => ipcRenderer.invoke('rss:state:load'),

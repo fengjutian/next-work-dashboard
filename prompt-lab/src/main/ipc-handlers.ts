@@ -159,6 +159,20 @@ export function setupIPC(webviewPreloadPath: string) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+  ipcMain.handle('outline-secrets:load', (_event, kind: unknown) => {
+    const name = kind === 'review' ? 'outline-scaffolder-review' : kind === 'minimax' ? 'outline-scaffolder-minimax' : '';
+    if (!name) return { success: false, error: 'INVALID_SECRET_KIND' };
+    if (!isEncryptionAvailable()) return { success: false, error: '系统安全存储不可用，API Key 未从磁盘读取' };
+    return { success: true, value: getToken(name) ?? '' };
+  });
+  ipcMain.handle('outline-secrets:save', (_event, kind: unknown, value: unknown) => {
+    const name = kind === 'review' ? 'outline-scaffolder-review' : kind === 'minimax' ? 'outline-scaffolder-minimax' : '';
+    if (!name) return { success: false, error: 'INVALID_SECRET_KIND' };
+    if (!isEncryptionAvailable()) return { success: false, error: '系统安全存储不可用，无法安全保存 API Key' };
+    const token = String(value ?? '').trim();
+    if (!token) return { success: deleteToken(name) };
+    return saveToken(name, token, '章节文档生成器') ? { success: true } : { success: false, error: 'API Key 加密保存失败' };
+  });
   ipcMain.handle('plugins:definitions:load', () => loadPluginDefinitions());
   ipcMain.handle('plugins:definitions:save', (_event, definitions: unknown[]) => savePluginDefinitions(definitions));
   ipcMain.handle('plugins:marketplace:cached', () => loadCachedCatalog());
@@ -310,6 +324,7 @@ export function setupIPC(webviewPreloadPath: string) {
       }
       const apiKey = String(payload.apiKey ?? '').trim();
       if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
+      if (!/^[\x21-\x7E]+$/.test(apiKey)) return { ok: false, status: 400, error: 'INVALID_API_KEY_FORMAT: API Key 只能包含 ASCII 字符，请勿填写中文说明、空格或占位文字' };
       const body = { ...payload.body, stream: false };
       const controller = new AbortController();
       let timedOut = false;
@@ -339,6 +354,7 @@ export function setupIPC(webviewPreloadPath: string) {
       const prompt = String(payload.prompt || '').trim().slice(0, 8000);
       if (payload.provider === 'minimax') {
         if (!apiKey || !model || !prompt) return { success: false, error: '请填写 MiniMax API Key、模型和提示词' };
+        if (!/^[\x21-\x7E]+$/.test(apiKey)) return { success: false, error: 'API Key 格式无效：只能包含 ASCII 字符，请勿填写中文说明、空格或占位文字' };
         const allowedModels = new Set(['image-01', 'image-01-live']);
         const allowedRatios = new Set(['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9']);
         if (!allowedModels.has(model)) return { success: false, error: '不支持的 MiniMax 图像模型' };
