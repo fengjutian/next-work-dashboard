@@ -96,7 +96,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [reviewBaseUrl, setReviewBaseUrl] = useState('https://api.minimaxi.com/v1');
   const [reviewApiKey, setReviewApiKey] = useState('');
   const [reviewModel, setReviewModel] = useState('MiniMax-M3');
-  const [reviewInstruction, setReviewInstruction] = useState('核对错别字、语病、逻辑衔接、前后矛盾与可能失实的表述；保持原有 Markdown 结构和作者语气。');
+  const [reviewInstruction, setReviewInstruction] = useState('重点检查事实、时间线、人物关系、逻辑和语言问题，并指出值得补充背景、案例、数据或解释的位置。');
   const [imageOpen, setImageOpen] = useState(false);
   const [minimaxApiKey, setMinimaxApiKey] = useState('');
   const [imagePrompt, setImagePrompt] = useState('');
@@ -339,8 +339,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const requestId = ++aiRequestRef.current;
     setAiLoading(true); setAiResult(''); setAiError('');
     const messages: ChatMessage[] = [
-      { role: 'system', content: `你是独立于初稿作者的中文责任编辑和事实校对员。请对文章做第二遍审校。\n\n要求：\n1. 修正错别字、语病、标点、重复和生硬表达。\n2. 检查论证、时间线、人物关系、术语及上下文是否自洽。\n3. 对无法从原文确认的事实，不得擅自补造；改为审慎表述，并用“<!-- 待核实：原因 -->”就近标注。\n4. 保持原意、Markdown 标题层级和链接、图片等结构。\n5. 语言严谨但保留适量风趣，不把文章改成公文，也不堆网络梗。\n6. 只输出审校后的完整 Markdown，不输出说明、代码围栏或审校报告。` },
-      { role: 'user', content: `${reviewInstruction.trim()}\n\n待审校文章：\n${documentContent}` },
+      { role: 'system', content: `你是独立于作者的资深中文责任编辑、事实核查员和内容策划。你的任务是审阅文章并提交“审校报告”，不要重写全文。\n\n请严格使用以下 Markdown 结构：\n# 审校结论\n用 2—4 句话概括完成度、主要优点和最需要处理的问题。\n\n## 一、明确错误与修改建议\n按严重程度排序。每项必须包含：\n- **位置**：引用能唯一定位问题的原文短句，不超过 30 字；\n- **类型**：事实、时间线、人物关系、逻辑、术语、语病、错别字或标点；\n- **问题**：说明为什么有错或存在风险；\n- **建议**：给出具体修改方向；能确定时提供一句建议改法，不能确定时明确标记“需人工核实”。\n若没有明确错误，写“未发现明确错误”，不得为了凑数虚构问题。\n\n## 二、可能存疑、需要核实\n列出原文中的数字、日期、引语、因果判断和历史细节等高风险表述。区分“疑似错误”和“原文缺少依据”，不要把不确定内容武断判错。\n\n## 三、值得扩写的地方\n每项必须包含：\n- **位置**：对应标题或原文短句；\n- **为什么值得扩写**：它对读者理解有什么帮助；\n- **扩写方向**：建议补充的背景、案例、数据、对比、人物动机或因果链；\n- **建议篇幅**：例如 100—200 字。\n扩写必须服务于本章主题，不抢写其他章节，不重复已有内容。\n\n## 四、结构与表达建议\n指出段落顺序、衔接、重复、节奏、标题层级及风趣程度的问题。\n\n## 五、处理优先级\n分为“必须修改”“建议修改”“可选扩写”三个清单。\n\n审校原则：准确优先；证据不足就明确说不足；不编造事实、来源或引文；意见必须具体、可执行；只输出审校报告，不输出修改后的全文。` },
+      { role: 'user', content: `书名：${projectTitle}\n章节：${activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile}\n用户关注点：${reviewInstruction.trim()}\n\n请审阅以下文章：\n\n${documentContent}` },
     ];
     try {
       const provider = createOpenAIProvider({ apiKey: normalizeApiKey(reviewApiKey), baseUrl: reviewBaseUrl.trim(), chatProxy: window.electronAPI.llmChat });
@@ -776,18 +776,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>追加到文档</Button><Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button></div>
       </aside>}
       {reviewOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
-        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Check className="h-4 w-4 text-primary" />第二模型润色与校对</div><p className="mt-1 text-xs text-muted-foreground">使用独立模型复核初稿，结果不会自动覆盖文章。</p></div>
+        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Check className="h-4 w-4 text-primary" />第二模型审校报告</div><p className="mt-1 text-xs text-muted-foreground">指出错误、存疑内容和可扩写位置，不改动原文。</p></div>
         <div className="space-y-3 border-b border-border p-4">
           <label className="block text-xs text-muted-foreground">MiniMax 平台<select value={reviewBaseUrl} onChange={(event) => setReviewBaseUrl(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="https://api.minimaxi.com/v1">国内站 · api.minimaxi.com</option><option value="https://api.minimax.io/v1">全球站 · api.minimax.io</option></select></label>
           <label className="block text-xs text-muted-foreground">模型<input value={reviewModel} onChange={(event) => setReviewModel(event.target.value)} placeholder="MiniMax-M3" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
           <label className="block text-xs text-muted-foreground">API Key<input type="password" value={reviewApiKey} onChange={(event) => setReviewApiKey(event.target.value)} autoComplete="off" placeholder="粘贴完整 API Key" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
           <div className="grid grid-cols-2 gap-2"><Button type="button" size="sm" variant="outline" disabled={!isValidApiKey(reviewApiKey)} onClick={() => saveApiKey('review', reviewApiKey)}><Save className="mr-2 h-4 w-4" />加密保存</Button><Button type="button" size="sm" variant="ghost" onClick={() => clearApiKey('review')}>清除 Key</Button></div>
           <label className="block text-xs text-muted-foreground">审校要求<textarea value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /></label>
-          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止审校</Button> : <Button className="w-full" disabled={!isValidApiKey(reviewApiKey) || !documentContent.trim()} onClick={runReview}><Check className="mr-2 h-4 w-4" />开始第二遍审校</Button>}
+          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止审校</Button> : <Button className="w-full" disabled={!isValidApiKey(reviewApiKey) || !documentContent.trim()} onClick={runReview}><Check className="mr-2 h-4 w-4" />分析错误与扩写空间</Button>}
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">审校稿将在这里预览。<br />确认后再替换当前文档。</div>}</div>
-        <div className="border-t border-border p-3"><Button className="w-full" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>确认并替换文档</Button></div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">AI 将列出明确错误、待核实内容、<br />扩写方向和修改优先级。</div>}</div>
+        <div className="border-t border-border p-3"><Button className="w-full" variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制审校报告</Button></div>
       </aside>}
       {imageOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />MiniMax 章节插图</div><p className="mt-1 text-xs text-muted-foreground">先生成预览，确认后保存到 assets/images 并插入文章。</p></div>
