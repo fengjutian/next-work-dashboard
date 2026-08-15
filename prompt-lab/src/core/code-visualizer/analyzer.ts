@@ -159,6 +159,14 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
   const vueFiles = files.filter((file) => /\.(vue|tsx?|jsx?)$/i.test(file.path));
   const py = pythonFiles.map(extractPython);
   const functions = py.flatMap((item) => item.functions);
+  const globalModels = new Map<string, string>();
+  for (const item of py) for (const [model, table] of item.modelTables) globalModels.set(model, table);
+  for (const fn of functions) for (const [model, table] of globalModels) {
+    if (!fn.tables.some((entry) => entry.name === table) && new RegExp(`\\b${model}\\b`).test(fn.body)) {
+      const writes = /\.(add|delete|update|save|create)\s*\(|\.objects\.(create|update|delete)|\b(INSERT|UPDATE|DELETE)\b/i.test(fn.body);
+      fn.tables.push({ name: table, mode: writes ? 'writes' : 'reads' });
+    }
+  }
   const mountedPrefixes = findMountedRouterPrefixes(pythonFiles);
   const rawEndpoints = py.flatMap((item) => item.endpoints).map((endpoint) => ({
     ...endpoint,

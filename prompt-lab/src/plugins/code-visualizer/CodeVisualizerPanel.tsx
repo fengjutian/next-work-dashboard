@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Empty, Input, Spin, Tag, message } from 'antd';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
-import { Code, Database, FolderOpen, Network, RefreshCw, Rows3, Search, CircleX } from '@/components/icons';
+import { Code, Database, FolderOpen, Network, RefreshCw, Rows3, Search, XCircle } from '@/components/icons';
 import type { AnalysisNode, ApiEndpoint, RepositoryAnalysis } from '../../core/code-visualizer';
 import { RelationshipGraph } from './RelationshipGraph';
 
@@ -70,7 +70,7 @@ function SourcePanel({ tabs, active, onActivate, onClose }: { tabs: SourceTab[];
     editor.setPosition({ lineNumber: active.line, column: 1 });
     editor.focus();
   };
-  return <aside className="flex w-[46%] min-w-[440px] flex-col border-l bg-card"><div className="flex h-10 shrink-0 overflow-x-auto border-b bg-background">{tabs.map((tab) => <button key={tab.path} type="button" onClick={() => onActivate(tab.path)} className={`group flex max-w-56 shrink-0 items-center gap-2 border-r px-3 text-xs ${tab.path === active.path ? 'border-t-2 border-t-primary bg-card text-foreground' : 'text-muted-foreground hover:bg-accent'}`}><span className="truncate">{tab.path.split('/').at(-1)}</span><span role="button" tabIndex={0} aria-label={`关闭 ${tab.path}`} onClick={(event) => { event.stopPropagation(); onClose(tab.path); }} onKeyDown={(event) => { if (event.key === 'Enter') onClose(tab.path); }} className="rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100"><CircleX className="h-3 w-3"/></span></button>)}</div><div className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{active.path} · 第 {active.line} 行</div><div className="min-h-0 flex-1"><MonacoEditor key={`${active.path}:${active.line}`} value={active.content} language={language} theme={dark ? 'vs-dark' : 'light'} onMount={handleMount} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, lineNumbersMinChars: 3, fontSize: 12, scrollBeyondLastLine: false, renderLineHighlight: 'all', wordWrap: 'off' }}/></div></aside>;
+  return <aside className="flex w-[46%] min-w-[440px] flex-col border-l bg-card"><div className="flex h-10 shrink-0 overflow-x-auto border-b bg-background">{tabs.map((tab) => <button key={tab.path} type="button" onClick={() => onActivate(tab.path)} className={`group flex max-w-56 shrink-0 items-center gap-2 border-r px-3 text-xs ${tab.path === active.path ? 'border-t-2 border-t-primary bg-card text-foreground' : 'text-muted-foreground hover:bg-accent'}`}><span className="truncate">{tab.path.split('/').at(-1)}</span><span role="button" tabIndex={0} aria-label={`关闭 ${tab.path}`} onClick={(event) => { event.stopPropagation(); onClose(tab.path); }} onKeyDown={(event) => { if (event.key === 'Enter') onClose(tab.path); }} className="rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100"><XCircle className="h-3 w-3"/></span></button>)}</div><div className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{active.path} · 第 {active.line} 行</div><div className="min-h-0 flex-1"><MonacoEditor key={`${active.path}:${active.line}`} value={active.content} language={language} theme={dark ? 'vs-dark' : 'light'} onMount={handleMount} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, lineNumbersMinChars: 3, fontSize: 12, scrollBeyondLastLine: false, renderLineHighlight: 'all', wordWrap: 'off' }}/></div></aside>;
 }
 
 function orderNodes(endpoint: ApiEndpoint): AnalysisNode[] {
