@@ -67,6 +67,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [template, setTemplate] = useState(DEFAULT_TEMPLATE);
   const [showTemplate, setShowTemplate] = useState(false);
   const [target, setTarget] = useState<{ path: string; name: string } | null>(null);
+  const [outputIsGitRepository, setOutputIsGitRepository] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [checking, setChecking] = useState(false);
@@ -283,6 +284,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const result = await window.electronAPI.workspace.gitStatus(target.path);
       if (!result.success) throw new Error(result.error);
       setGitRepository(true);
+      setOutputIsGitRepository(true);
       const prefix = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
       const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json']);
       const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
@@ -334,7 +336,23 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const chooseFolder = async () => {
     const folder = await window.electronAPI.workspace.openFolder();
-    if (folder) setTarget(folder);
+    if (folder) { setTarget(folder); setOutputIsGitRepository(null); }
+  };
+
+  const chooseGitOutput = async () => {
+    const folder = await window.electronAPI.workspace.openFolder();
+    if (!folder) return;
+    setTarget(folder); setGitLoading(true); setGitError('');
+    try {
+      const status = await window.electronAPI.workspace.gitStatus(folder.path);
+      if (!status.success) throw new Error(status.error);
+      setOutputIsGitRepository(true); setGitRepository(true);
+      notice.success({ message: '已选择 Git 仓库', description: `文章将生成到 ${folder.path}`, placement: 'bottomRight' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setOutputIsGitRepository(false); setGitRepository(/not a git repository/i.test(message) ? false : null);
+      notice.warning({ message: '所选目录尚不是 Git 仓库', description: '可以初始化该目录，然后直接生成文档。', placement: 'bottomRight' });
+    } finally { setGitLoading(false); }
   };
 
   const checkExisting = async (): Promise<string[]> => {
@@ -429,7 +447,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={organizeByPart} disabled={splitMode === 'single'} onChange={(event) => setOrganizeByPart(event.target.checked)} />按“篇”创建文件夹</label>
             <button type="button" className="text-left text-xs text-primary hover:underline" onClick={() => setShowTemplate((value) => !value)}>{showTemplate ? '收起章节模板' : '编辑章节模板'}</button>
             {showTemplate && <><textarea value={template} onChange={(event) => setTemplate(event.target.value)} className="h-36 w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs" /><p className="text-xs text-muted-foreground">变量：{'{{title}}'}、{'{{headings}}'}、{'{{placeholder}}'}</p></>}
-            <Button variant="outline" className="w-full justify-start" onClick={chooseFolder}><FolderOpen className="mr-2 h-4 w-4" />{target ? target.path : '选择输出目录'}</Button>
+            <Button variant="outline" className="w-full justify-start" onClick={chooseFolder}><FolderOpen className="mr-2 h-4 w-4" />{target ? target.path : '选择普通输出目录'}</Button>
+            <Button variant={outputIsGitRepository ? 'secondary' : 'outline'} className="w-full justify-start" onClick={chooseGitOutput}><GitBranch className="mr-2 h-4 w-4" />{outputIsGitRepository ? '已指定 Git 仓库' : '指定 Git 仓库作为输出目录'}</Button>
+            {target && outputIsGitRepository === true && <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-700">文章将直接生成到该仓库的“{subfolder.trim() || '根目录'}”目录中。</div>}
+            {target && outputIsGitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化当前目录为 Git 仓库</Button>}
             {target && <Button variant="outline" className="w-full" onClick={() => loadExistingDocuments()}><BookOpen className="mr-2 h-4 w-4" />加载已有文档并保存为项目</Button>}
             {target && <Button variant="secondary" className="w-full" disabled={checking} onClick={checkExisting}>{checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}检查文件冲突</Button>}
             {conflicts.length > 0 && <div className="max-h-24 overflow-auto rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">发现 {conflicts.length} 个同名文件：{conflicts.slice(0, 3).join('、')}{conflicts.length > 3 ? '…' : ''}</div>}
