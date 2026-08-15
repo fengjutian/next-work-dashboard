@@ -8,14 +8,6 @@ import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { createChapterDocuments, createReadme, parseOutline, type OutlineNode, type SplitMode } from './outline';
 
-const EXAMPLE = `# 第一篇 基础知识
-## 第一章 产品介绍
-### 1.1 产品背景
-### 1.2 核心能力
-## 第二章 快速开始
-### 2.1 环境准备
-### 2.2 安装与配置`;
-
 const DEFAULT_TEMPLATE = `# {{title}}
 
 {{placeholder}}
@@ -52,6 +44,25 @@ const appendSourceReferences = (markdown: string, sources: string) => {
   const items = [...references].map(([url, title], index) => `${index + 1}. [${title}](${url})${sources.includes('搜索摘要（仅作线索') ? '（检索线索，引用前需核对原文）' : ''}`).join('\n');
   return `${markdown.trimEnd()}\n\n## 史料与参考资料\n\n${items}`;
 };
+const normalizeForComparison = (value: string) => value.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/[\s*_~`>，。！？；：、“”‘’（）()\[\]]+/g, '').toLowerCase();
+const removeRepeatedContinuation = (existing: string, generated: string) => {
+  const existingNormalized = normalizeForComparison(existing);
+  const blocks = generated.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, '').trim().split(/\n\s*\n/);
+  const uniqueBlocks = blocks.filter((block) => {
+    const normalized = normalizeForComparison(block);
+    if (!normalized) return false;
+    if (/^##?史料与参考资料/.test(block.trim())) return false;
+    return normalized.length < 12 || !existingNormalized.includes(normalized);
+  });
+  return uniqueBlocks.join('\n\n').trim();
+};
+const insertBeforeSourceReferences = (existing: string, addition: string) => {
+  const marker = existing.search(/^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m);
+  if (marker < 0) return `${existing.trimEnd()}\n\n${addition.trim()}\n`;
+  const body = existing.slice(0, marker).trimEnd();
+  const references = existing.slice(marker).trimStart();
+  return `${body}\n\n${addition.trim()}\n\n${references.trimEnd()}\n`;
+};
 
 interface SavedProject {
   id: string;
@@ -85,22 +96,24 @@ function loadSavedProjects(): SavedProject[] {
   } catch { return []; }
 }
 
-function OutlineTree({ nodes }: { nodes: OutlineNode[] }) {
-  return <ul className="space-y-1">
-    {nodes.map((node) => <li key={node.id}>
-      <div className="flex items-center gap-2 rounded px-2 py-1 text-sm text-foreground hover:bg-muted/60">
-        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{node.title}</span>
-      </div>
-      {node.children.length > 0 && <div className="ml-5 border-l border-border pl-2"><OutlineTree nodes={node.children} /></div>}
-    </li>)}
-  </ul>;
+const serializeOutline = (nodes: OutlineNode[]) => nodes.map((node) => `${'#'.repeat(Math.min(6, Math.max(1, node.level)))} ${node.title}${node.children.length ? `\n${serializeOutline(node.children)}` : ''}`).join('\n');
+
+function EditableOutlineTree({ nodes, onRename, onDelete }: { nodes: OutlineNode[]; onRename: (id: string, title: string) => void; onDelete: (id: string) => void }) {
+  const [editingId, setEditingId] = useState('');
+  const [draft, setDraft] = useState('');
+  return <ul className="space-y-1">{nodes.map((node) => <li key={node.id}>
+    <div className="group flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted/60"><FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />{editingId === node.id ? <input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && draft.trim()) { onRename(node.id, draft.trim()); setEditingId(''); } if (event.key === 'Escape') setEditingId(''); }} onBlur={() => { if (draft.trim()) onRename(node.id, draft.trim()); setEditingId(''); }} className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-sm" /> : <span className="min-w-0 flex-1 truncate">{node.title}</span>}<button type="button" className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100" onMouseDown={(event) => event.preventDefault()} onClick={() => { setEditingId(node.id); setDraft(node.title); }}>修改</button><button type="button" className="text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" onClick={() => onDelete(node.id)}>删除</button></div>
+    {node.children.length > 0 && <div className="ml-5 border-l border-border pl-2"><EditableOutlineTree nodes={node.children} onRename={onRename} onDelete={onDelete} /></div>}
+  </li>)}</ul>;
 }
 
 export const OutlineScaffolderPanel: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
   const [notice, holder] = notification.useNotification();
-  const [source, setSource] = useState(EXAMPLE);
+  const [source, setSource] = useState('');
+  const [bookRequirement, setBookRequirement] = useState('');
+  const [outlineGenerating, setOutlineGenerating] = useState(false);
+  const [outlineError, setOutlineError] = useState('');
   const [projectTitle, setProjectTitle] = useState('未命名书籍');
   const [subfolder, setSubfolder] = useState('我的文档');
   const [splitMode, setSplitMode] = useState<SplitMode>('chapter');
@@ -124,7 +137,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [recentProjects, setRecentProjects] = useState<SavedProject[]>(loadSavedProjects);
   const [projectHistoryReady, setProjectHistoryReady] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
-  const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish'>('generate');
+  const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish' | 'revise'>('generate');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiSources, setAiSources] = useState('');
   const [sourceResearchLoading, setSourceResearchLoading] = useState(false);
@@ -168,6 +181,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
   const articleWordCount = useMemo(() => countArticleWords(documentContent), [documentContent]);
+  const generatorStage = nodes.length ? (target ? 3 : 2) : bookRequirement.trim() ? 1 : 0;
 
   useEffect(() => {
     let active = true;
@@ -185,6 +199,38 @@ export const OutlineScaffolderPanel: React.FC = () => {
     }).catch(() => setProjectHistoryReady(true));
     return () => { active = false; };
   }, []);
+
+  const generateOutlineFromRequirement = async () => {
+    if (!bookRequirement.trim() || outlineGenerating) return;
+    if (!aiApi.apiKey?.trim()) { setOutlineError('请先在应用设置中配置助写模型和 API Key。'); return; }
+    setOutlineGenerating(true); setOutlineError('');
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const messages: ChatMessage[] = [
+        { role: 'system', content: '你是图书策划编辑。根据用户需求设计一份层级清晰、范围完整、章节之间不重复的中文目录。只输出 Markdown 标题：一级标题用于“篇”，二级标题用于“章”，三级标题用于“节”。每章应有明确任务并按时间、因果或主题逻辑推进。不要输出说明、正文、序言或代码围栏。建议 2—5 篇、每篇 3—8 章、每章 2—5 节；若篇幅较小可不分篇。' },
+        { role: 'user', content: `暂定书名：${projectTitle}\n写作需求：\n${bookRequirement.trim()}\n\n请生成可直接用于文档拆分的目录。` },
+      ];
+      let result = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.45, maxTokens: 4_096, stream: false })) result += chunk.delta || '';
+      const cleaned = result.replace(/^```(?:markdown)?\s*/i, '').replace(/```\s*$/i, '').trim();
+      if (!parseOutline(cleaned).length) throw new Error('AI 没有生成有效目录，请补充目标读者、范围和预计篇幅后重试。');
+      setSource(cleaned); setConflicts([]);
+      notice.success({ message: '目录初稿已生成', description: '请在目录树中修改或删除章节，确认后再生成文档。', placement: 'bottomRight' });
+    } catch (error) { setOutlineError(error instanceof Error ? error.message : String(error)); }
+    finally { setOutlineGenerating(false); }
+  };
+
+  const updateOutlineNodes = (transform: (nodes: OutlineNode[]) => OutlineNode[]) => setSource(serializeOutline(transform(nodes)));
+  const renameOutlineNode = (id: string, title: string) => updateOutlineNodes((items) => {
+    const visit = (list: OutlineNode[]): OutlineNode[] => list.map((item) => item.id === id ? { ...item, title } : { ...item, children: visit(item.children) });
+    return visit(items);
+  });
+  const deleteOutlineNode = (id: string) => {
+    const findNode = (items: OutlineNode[]): OutlineNode | undefined => { for (const item of items) { if (item.id === id) return item; const child = findNode(item.children); if (child) return child; } return undefined; };
+    const targetNode = findNode(nodes);
+    if (!targetNode || !window.confirm(`删除“${targetNode.title}”及其全部下级目录吗？`)) return;
+    updateOutlineNodes((items) => { const remove = (list: OutlineNode[]): OutlineNode[] => list.filter((item) => item.id !== id).map((item) => ({ ...item, children: remove(item.children) })); return remove(items); });
+  };
 
   useEffect(() => {
     Promise.all([window.electronAPI.outlineSecrets.load('review'), window.electronAPI.outlineSecrets.load('minimax')]).then(([review, minimax]) => {
@@ -327,14 +373,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const runAi = async (writeToEditor = false) => {
     if (!activeFile || aiLoading) return;
     if (!aiApi.apiKey?.trim()) { setAiError('请先在应用设置中配置 AI API Key。'); return; }
+    if (aiMode === 'revise' && !aiInstruction.trim()) { setAiError('请先填写具体修改要求，例如要修改的段落、事实、结构或语气。'); return; }
     const requestId = ++aiRequestRef.current;
     setAiLoading(true); setAiResult(''); setAiError('');
     const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
     const modePrompt = aiMode === 'generate'
       ? '根据章节标题和现有骨架撰写完整正文。保留一级标题和合理的标题层级，替换占位注释。'
       : aiMode === 'continue'
-        ? '承接现有正文继续写作。不要复述已有内容，只输出新增内容。'
-        : '润色现有正文，改善结构、准确性、连贯性和表达，同时保持原意与 Markdown 标题结构。输出润色后的完整正文。';
+        ? '从现有正文最后一句之后直接续写。只输出全新的段落，不输出文章标题、已有小标题、YAML 头信息、已有段落、摘要或承上复述；不要用“上文提到”等方式复述。需要新小节时只能创建尚未出现的标题。'
+        : aiMode === 'revise'
+          ? '严格按照用户的修改要求编辑现有文章。只改动要求涉及的事实、段落、结构或表达，未被要求修改的内容尽量逐字保留；不得借机重写全文、删减史料脚注或改变 Markdown 头信息。输出修改后的完整正文。'
+          : '润色现有正文，改善结构、准确性、连贯性和表达，同时保持原意与 Markdown 标题结构。输出润色后的完整正文。';
     const system = `你是“${projectTitle}”的资深作者兼责任编辑。目标不是把文字写得顺，而是写出信息密度高、论证可靠、具有叙事张力的中文正文。
 
 ## 严谨性
@@ -376,10 +425,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (chunk.delta) { result += chunk.delta; setAiResult(result); }
       }
       if (!result.trim()) throw new Error('AI 没有返回内容，请重试。');
-      result = appendSourceReferences(result, aiSources);
+      result = aiMode === 'continue' ? removeRepeatedContinuation(documentContent, result) : appendSourceReferences(result, aiSources);
+      if (!result.trim()) throw new Error('续写结果与现有文章重复，已阻止写入。请补充下一段要写的事件或新小节标题后重试。');
       setAiResult(result);
       if (writeToEditor && requestId === aiRequestRef.current) {
-        const next = aiMode === 'continue' ? `${documentContent.trimEnd()}\n\n${result.trim()}\n` : `${result.trimEnd()}\n`;
+        const next = aiMode === 'continue' ? insertBeforeSourceReferences(documentContent, result) : `${result.trimEnd()}\n`;
         setDocumentContent(next); setEditorMode('edit'); setAiOpen(false);
         notice.success({ message: 'AI 内容已写入编辑器', description: '请确认内容后点击“保存”写入磁盘。', placement: 'bottomRight' });
       }
@@ -392,7 +442,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const applyAiResult = (method: 'replace' | 'append') => {
     if (!aiResult.trim()) return;
-    setDocumentContent((current) => method === 'replace' ? aiResult.trimEnd() + '\n' : `${current.trimEnd()}\n\n${aiResult.trim()}\n`);
+    setDocumentContent((current) => method === 'replace' ? aiResult.trimEnd() + '\n' : insertBeforeSourceReferences(current, aiMode === 'continue' ? removeRepeatedContinuation(current, aiResult) : aiResult));
     setAiOpen(false); setReviewOpen(false); setEditorMode('edit');
   };
 
@@ -466,7 +516,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       notice.warning({ message: '请先配置助写模型', description: '审校报告已经保留；配置应用 AI 后可再次点击“交给助写修改”。', placement: 'bottomRight' });
       return;
     }
-    setAiMode('polish');
+    setAiMode('revise');
     setAiInstruction(`请依据下面的审校报告修改当前文章。逐项处理“必须修改”和“建议修改”；对“可选扩写”只采纳确实服务本章主题、且不会重复其他章节的建议。无法核实的事实不要擅自补造，应改为审慎表述或保留待核实标记。保持 Markdown 头信息、标题层级、链接和图片不变。输出修改后的完整文章。\n\n审校报告：\n${aiResult}`);
     setAiResult(''); setAiError(''); setReviewOpen(false); setAiOpen(true);
     notice.info({ message: '审校意见已交给助写', description: '请检查补充要求，然后点击“生成预览”；确认修订稿后再替换文档。', placement: 'bottomRight' });
@@ -860,14 +910,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
   return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
     {holder}
     <header className="flex items-center justify-between border-b border-border px-6 py-4">
-      <div><h1 className="flex items-center gap-2 text-lg font-semibold"><BookOpen className="h-5 w-5" />章节文档生成器</h1><p className="mt-1 text-sm text-muted-foreground">粘贴目录，批量创建可自行填写的 Markdown 文档。</p></div>
+      <div><h1 className="flex items-center gap-2 text-lg font-semibold"><BookOpen className="h-5 w-5" />章节文档生成器</h1><p className="mt-1 text-sm text-muted-foreground">描述需求，生成并调整目录，再批量创建 Markdown 文档。</p></div>
       <div className="flex items-center gap-2">{activeProject && <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-700" title={activeProject.rootPath}>项目已保存</div>}<Button size="sm" variant={view === 'generator' ? 'default' : 'ghost'} onClick={() => switchView('generator')}>生成器</Button><Button size="sm" variant={view === 'documents' ? 'default' : 'ghost'} onClick={() => switchView('documents')}>文档工作区</Button><div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{documents.length} 个文档</div></div>
     </header>
     {view === 'generator' ? <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
-      <section className="flex min-h-[520px] flex-col rounded-xl border border-border bg-card p-4 shadow-sm">
-        <label className="mb-2 text-sm font-medium">章节目录</label>
-        <textarea value={source} onChange={(event) => setSource(event.target.value)} spellCheck={false} className="min-h-[420px] flex-1 resize-none rounded-lg border border-input bg-background p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="支持 Markdown 标题、第一章/第一节和数字编号目录" />
-        <p className="mt-2 text-xs text-muted-foreground">默认按“章”创建文件，其下小节成为文档内标题。</p>
+      <div className="lg:col-span-2 grid grid-cols-4 overflow-hidden rounded-xl border border-border bg-card text-sm shadow-sm">{['1 填写需求', '2 生成目录', '3 修改确认', '4 生成文档'].map((step, index) => <div key={step} className={`px-4 py-3 text-center ${index === generatorStage ? 'bg-primary/10 font-medium text-primary' : index < generatorStage ? 'text-emerald-600' : 'text-muted-foreground'} ${index ? 'border-l border-border' : ''}`}>{index < generatorStage ? '✓ ' : ''}{step}</div>)}</div>
+      <section className="flex min-h-[620px] flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+        <div><label className="mb-2 block text-sm font-semibold">第一步：写作需求</label><textarea value={bookRequirement} onChange={(event) => setBookRequirement(event.target.value)} className="h-36 w-full resize-y rounded-lg border border-input bg-background p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="说明主题、目标读者、内容范围、时间跨度、预计章数、写作风格和必须覆盖的问题。例如：面向普通读者，系统讲述秦末到汉初的政权更替，约 25 章，兼顾制度、战争与人物选择。" /><Button className="mt-2 w-full" disabled={!bookRequirement.trim() || outlineGenerating} onClick={generateOutlineFromRequirement}>{outlineGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 生成目录初稿</Button>{outlineError && <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{outlineError}</div>}</div>
+        <div className="flex min-h-0 flex-1 flex-col"><div className="mb-2 flex items-center justify-between"><label className="text-sm font-semibold">第二步：目录 Markdown</label><button type="button" className="text-xs text-muted-foreground hover:text-destructive" onClick={() => { if (window.confirm('清空当前目录吗？')) setSource(''); }}>清空目录</button></div><textarea value={source} onChange={(event) => setSource(event.target.value)} spellCheck={false} className="min-h-[300px] flex-1 resize-none rounded-lg border border-input bg-background p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="AI 生成后可继续直接编辑；也支持手动粘贴 Markdown 目录" /><p className="mt-2 text-xs text-muted-foreground">目录仅是草稿。可直接编辑文本，也可在右侧目录树逐项修改或删除。</p></div>
       </section>
       <div className="flex min-h-0 flex-col gap-5">
         {recentProjects.length > 0 && <section className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">最近项目</h2><span className="text-xs text-muted-foreground">{recentProjects.length}</span></div><div className="max-h-36 space-y-1 overflow-auto">{recentProjects.map((project) => <div key={project.id} className="group flex items-center gap-2 rounded-md hover:bg-muted"><button type="button" className="min-w-0 flex-1 px-2 py-2 text-left" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.rootPath}{project.subfolder ? ` / ${project.subfolder}` : ''} · {project.files.length} 个文档</span></button><button type="button" className="px-2 text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" title="从列表移除（不会删除文件）" onClick={() => removeSavedProject(project.id)}>移除</button></div>)}</div></section>}
@@ -891,10 +941,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
           </div>
         </section>
         <section className="min-h-[230px] flex-1 overflow-auto rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">目录预览</h2>{nodes.length > 0 && <Check className="h-4 w-4 text-emerald-500" />}</div>
-          {nodes.length ? <OutlineTree nodes={nodes} /> : <p className="text-sm text-muted-foreground">输入目录后在这里预览层级。</p>}
+          <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold">第三步：修改并确认目录</h2><p className="mt-1 text-xs text-muted-foreground">悬停条目可修改或删除；删除父级会同时删除其下级。</p></div>{nodes.length > 0 && <Check className="h-4 w-4 text-emerald-500" />}</div>
+          {nodes.length ? <EditableOutlineTree nodes={nodes} onRename={renameOutlineNode} onDelete={deleteOutlineNode} /> : <p className="text-sm text-muted-foreground">填写需求生成目录，或在左侧手动输入目录。</p>}
         </section>
-        <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}生成 {documents.length || 0} 个章节文档</Button>
+        <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}第四步：生成 {documents.length || 0} 个章节文档</Button>
       </div>
     </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen || reviewOpen || imageOpen || gitOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
@@ -909,8 +959,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       {aiOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />AI 章节助写</div><p className="mt-1 text-xs text-muted-foreground">当前模型：{aiApi.model || '未配置'}</p></div>
         <div className="max-h-[52vh] space-y-3 overflow-auto border-b border-border p-4">
-          <label className="block text-xs text-muted-foreground">写作任务<select value={aiMode} onChange={(event) => setAiMode(event.target.value as typeof aiMode)} disabled={aiLoading} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="generate">生成本章正文</option><option value="continue">续写本章</option><option value="polish">润色全文</option></select></label>
-          <label className="block text-xs text-muted-foreground">补充要求与可靠资料<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：目标约 2500 字；核心史实、参考资料、必须解释的争议，以及希望采用的叙事视角" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
+          <label className="block text-xs text-muted-foreground">写作任务<select value={aiMode} onChange={(event) => setAiMode(event.target.value as typeof aiMode)} disabled={aiLoading} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="generate">生成本章正文</option><option value="continue">续写本章</option><option value="revise">按要求修改文章</option><option value="polish">润色全文</option></select></label>
+          <label className="block text-xs text-muted-foreground">{aiMode === 'revise' ? '具体修改要求' : '补充要求与可靠资料'}<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder={aiMode === 'revise' ? '例如：删除第三节重复内容；核正某个日期；扩写制度背景 300 字；其余段落保持不变' : '例如：目标约 2500 字；核心史实、参考资料、必须解释的争议，以及希望采用的叙事视角'} className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
           <label className="block text-xs text-muted-foreground">史料与参考资料<textarea value={aiSources} onChange={(event) => setAiSources(event.target.value)} disabled={aiLoading} placeholder="粘贴史书原文、考古材料、论文摘要、可靠网页摘录或自己整理的史实。建议同时注明书名、作者、篇章或链接。" className="mt-1 h-32 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
           <p className="text-xs text-muted-foreground">精确引文只从这里取用；未提供出处的内容不会伪造卷次、页码或原话。</p>
           <Button type="button" variant="outline" className="w-full" disabled={sourceResearchLoading || !activeFile} onClick={researchHistoricalSources}>{sourceResearchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 搜集史料</Button>
@@ -927,7 +977,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown>{aiLoading && <span className="inline-block h-4 w-1 animate-pulse bg-primary" />}</article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">选择任务并填写要求，<br />AI 结果将在这里预览。</div>}</div>
-        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>追加到文档</Button><Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button></div>
+        <div className={`grid gap-2 border-t border-border p-3 ${aiMode === 'continue' ? 'grid-cols-1' : 'grid-cols-2'}`}><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>{aiMode === 'continue' ? '追加续写内容' : '追加到文档'}</Button>{aiMode !== 'continue' && <Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button>}</div>
       </aside>}
       {reviewOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Check className="h-4 w-4 text-primary" />第二模型审校报告</div><p className="mt-1 text-xs text-muted-foreground">指出错误、存疑内容和可扩写位置，不改动原文。</p></div>
