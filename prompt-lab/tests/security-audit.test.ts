@@ -4,11 +4,14 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, redactSecrets } from '../src/core/security-audit';
 import { redactScannerOutput, runScannerProcess } from '../src/main/security-audit/external-process';
+import { parseGitleaksOutput, parseOsvOutput, parseSemgrepOutput, parseTrivyOutput, readLimitedJsonReport } from '../src/main/security-audit/external-scanners';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
 function temporaryRoot(): string { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'security-audit-')); roots.push(root); return root; }
+const fixture = (name: string) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'security-audit', `${name}.json`), 'utf8')) as Record<string, unknown>;
+const fixtureContext = { projectDir: 'D:/fixture-project', files: [], signal: new AbortController().signal, networkPolicy: 'deny' as const, emit: () => undefined };
 
 describe('security audit core', () => {
   it('redacts credentials from evidence', () => {
@@ -19,6 +22,18 @@ describe('security audit core', () => {
   it('rejects commands outside the scanner allowlist and NUL arguments', async () => {
     await expect(runScannerProcess('powershell' as 'semgrep', [], process.cwd(), new AbortController().signal)).rejects.toThrow('SCANNER_NOT_ALLOWED');
     await expect(runScannerProcess('semgrep', ['bad\0arg'], process.cwd(), new AbortController().signal)).rejects.toThrow('INVALID_SCANNER_ARGUMENT');
+  });
+
+  it('parses official scanner JSON field contracts', () => {
+    expect(parseSemgrepOutput(fixture('semgrep'), fixtureContext)[0]).toMatchObject({ scannerId: 'semgrep', ruleId: 'javascript.lang.security.audit.eval-detected', location: { line: 3 } });
+    expect(parseGitleaksOutput(fixture('gitleaks'), fixtureContext)[0]).toMatchObject({ scannerId: 'gitleaks', ruleId: 'generic-api-key', category: 'secret' });
+    expect(parseOsvOutput(fixture('osv'), fixtureContext)[0]).toMatchObject({ scannerId: 'osv-scanner', cve: 'CVE-2021-23337', category: 'sca' });
+    expect(parseTrivyOutput(fixture('trivy'), fixtureContext).map((item) => item.category)).toEqual(['sca', 'iac', 'secret']);
+  });
+
+  it('rejects oversized or untrusted scanner report paths', () => {
+    const root = temporaryRoot(); const report = path.join(root, 'report.json'); fs.writeFileSync(report, '{}');
+    expect(() => readLimitedJsonReport(report)).toThrow('SCANNER_REPORT_UNTRUSTED_PATH');
   });
 
   it('ignores dependencies and symbolic links while enumerating', () => {
@@ -33,7 +48,7 @@ describe('security audit core', () => {
     const file = 'main.ts';
     fs.writeFileSync(path.join(root, file), 'const api_key = "abcdefghijklmnop";\nnew BrowserWindow({ webPreferences: { nodeIntegration: true } });');
     const controller = new AbortController();
-    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: controller.signal, emit: () => undefined });
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: controller.signal, networkPolicy: 'deny', emit: () => undefined });
     expect(findings.map((item) => item.ruleId)).toEqual(['secret.generic-api-key', 'electron.node-integration']);
     expect(findings[0].evidence[0].excerpt).not.toContain('abcdefghijklmnop');
   });
@@ -41,7 +56,7 @@ describe('security audit core', () => {
   it('keeps first-seen state and marks missing findings fixed', async () => {
     const root = temporaryRoot(); const file = 'unsafe.ts';
     fs.writeFileSync(path.join(root, file), 'eval(input)');
-    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: new AbortController().signal, emit: () => undefined });
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     const merged = mergeWithBaseline([], findings, findings[0].lastSeenAt + 10);
     expect(merged[0].status).toBe('fixed');
     expect(merged[0].fixedAt).toBeDefined();
@@ -49,13 +64,13 @@ describe('security audit core', () => {
 
   it('does not resolve findings outside an incremental scan scope', async () => {
     const root = temporaryRoot(); fs.writeFileSync(path.join(root, 'unsafe.ts'), 'eval(input)');
-    const previous = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit: () => undefined });
+    const previous = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     expect(mergeWithBaseline([], previous, Date.now(), new Set(['other.ts']))[0].status).toBe('open');
   });
 
   it('exports active findings as SARIF with stable fingerprints', async () => {
     const root = temporaryRoot(); fs.writeFileSync(path.join(root, 'unsafe.ts'), 'eval(input)');
-    const findings = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit: () => undefined });
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     const sarif = findingsToSarif(findings, root) as { version: string; runs: Array<{ results: Array<{ partialFingerprints: { primaryLocationLineHash: string } }> }> };
     expect(sarif.version).toBe('2.1.0');
     expect(sarif.runs[0].results[0].partialFingerprints.primaryLocationLineHash).toBe(findings[0].fingerprint);

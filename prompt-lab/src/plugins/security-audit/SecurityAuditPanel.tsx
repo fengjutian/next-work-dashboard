@@ -139,6 +139,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [scannerStateReady, setScannerStateReady] = useState(false);
   const [scannerDetectionRunning, setScannerDetectionRunning] = useState(false);
   const [networkAllowed, setNetworkAllowed] = useState(false);
+  const [scannerRuns, setScannerRuns] = useState<import('../../core/security-audit').ScannerRunResult[]>([]);
 
   const loadScanners = useCallback((force = false) => {
     setScannerDetectionRunning(true);
@@ -187,12 +188,14 @@ export function SecurityAuditPanel(): JSX.Element {
       if (detail.phase === 'completed' && resultDir) {
         setScannedDir(resultDir);
         void api.findings.list(resultDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
+        void api.scans.list(resultDir).then((items) => setScannerRuns(items[0]?.scannerRuns ?? []));
       }
     });
   }, [scannedDir]);
 
   const runMockScan = useCallback(async () => {
     setFindings(null);
+    setScannerRuns([]);
     setScannedDir(null);
     setProgress({ phase: 'scanning', percent: 0, message: '准备扫描...' });
 
@@ -284,6 +287,11 @@ export function SecurityAuditPanel(): JSX.Element {
         </label>)}
         <label className="flex shrink-0 items-center gap-1 rounded border border-orange-300 bg-orange-50 px-2 py-1 text-orange-800"><input type="checkbox" checked={networkAllowed} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setNetworkAllowed(event.target.checked)} />允许扫描器联网（OSV/Trivy）</label>
         <Button className="ml-auto shrink-0" loading={scannerDetectionRunning} onClick={() => loadScanners(true)}>重新检测</Button>
+      </div>}
+
+      {scannerRuns.length > 0 && <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border px-5 py-2 text-[11px]">
+        <span className="shrink-0 text-muted-foreground">本次运行</span>
+        {scannerRuns.map((run) => <Tag key={`${run.scannerId}:${run.startedAt}`} color={run.status === 'succeeded' ? 'green' : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'orange' : 'blue'}>{run.name}: {run.status} · {run.findingsCount} · {run.durationMs}ms{run.exitCode !== undefined ? ` · exit ${run.exitCode}` : ''}</Tag>)}
       </div>}
 
       {/* Progress */}

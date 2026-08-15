@@ -1,0 +1,1 @@
+{"results":[{"source":"package-lock.json","packages":[{"package":{"name":"lodash","version":"4.17.20","ecosystem":"npm"},"vulnerabilities":[{"id":"CVE-2021-23337","summary":"Command Injection in lodash","database_specific":{"severity":"HIGH"}}]}]}]}
