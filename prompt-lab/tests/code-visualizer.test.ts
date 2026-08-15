@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeRepositoryFiles, diagnoseFrontendBackend, extractFrontendCalls, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzeRepositoryFiles, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, normalizeApiPath } from '../src/core/code-visualizer';
 
 describe('code visualizer', () => {
   it('normalizes frontend and backend route parameters', () => {
@@ -108,5 +108,26 @@ def users():
       { name: 'name', type: 'str', nullable: false },
       { name: 'team_id', foreignKey: 'teams.id', nullable: true },
     ]);
+  });
+
+  it('builds ER relations, data flow, test coverage and performance findings', () => {
+    const files = [
+      { path: 'models.py', content: `class Team(Base):\n    __tablename__ = 'teams'\n    id: Mapped[int] = mapped_column(Integer, primary_key=True)\n\nclass User(Base):\n    __tablename__ = 'users'\n    id: Mapped[int] = mapped_column(Integer, primary_key=True)\n    team_id: Mapped[int] = mapped_column(ForeignKey('teams.id'))` },
+      { path: 'api.py', content: `from models import User\n@app.get('/users/{user_id}')\ndef get_user(user_id: int):\n    for item in items:\n        session.query(User).filter(User.id == item).all()\n    return user_id` },
+      { path: 'tests/test_users.py', content: `def test_get_user():\n    client.get('/users/1')` },
+    ];
+    const result = enrichRepositoryArchitecture(analyzeRepositoryFiles('demo', files));
+    expect(result.databaseRelations).toContainEqual(expect.objectContaining({ sourceTable: 'users', sourceField: 'team_id', targetTable: 'teams', targetField: 'id' }));
+    expect(result.endpoints[0].dataFlow.some((step) => step.stage === 'parameter')).toBe(true);
+    expect(result.endpoints[0].tests).toHaveLength(1);
+    expect(result.endpoints[0].performanceRisks.some((risk) => risk.rule === 'query-in-loop')).toBe(true);
+  });
+
+  it('diffs endpoint contracts and database fields between snapshots', () => {
+    const before = enrichRepositoryArchitecture(analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users():\n    return []` }]));
+    const after = enrichRepositoryArchitecture(analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users(limit: int = 10):\n    return []\n@app.post('/users')\ndef create_user():\n    return {}` }]));
+    const diff = diffRepositorySnapshots(before, after);
+    expect(diff.addedEndpoints).toContain('POST /users');
+    expect(diff.changedContracts).toContain('GET /users');
   });
 });
