@@ -40,6 +40,18 @@ const countArticleWords = (markdown: string) => {
   const latinAndNumberCount = (text.match(/[A-Za-z0-9]+(?:[.'’-][A-Za-z0-9]+)*/g) ?? []).length;
   return cjkCount + latinAndNumberCount;
 };
+const appendSourceReferences = (markdown: string, sources: string) => {
+  if (!sources.trim() || /^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m.test(markdown)) return markdown.trimEnd();
+  const references = new Map<string, string>();
+  for (const match of sources.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g)) {
+    const title = match[1].trim();
+    const url = match[2].trim();
+    if (title && url && !references.has(url)) references.set(url, title);
+  }
+  if (!references.size) return markdown.trimEnd();
+  const items = [...references].map(([url, title], index) => `${index + 1}. [${title}](${url})${sources.includes('搜索摘要（仅作线索') ? '（检索线索，引用前需核对原文）' : ''}`).join('\n');
+  return `${markdown.trimEnd()}\n\n## 史料与参考资料\n\n${items}`;
+};
 
 interface SavedProject {
   id: string;
@@ -332,16 +344,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
 4. 抽象判断至少配一个具体事实、案例、对比或机制解释；案例不能只是换一种说法重复观点。
 5. 每一节尽量安排至少两个不同类型的“史料锚点”，可从时间节点、人物行动、制度条文、地理条件、器物考古、时人记载或现代研究观点中选择。史料必须被解释，不能只罗列名称。
 6. 用户提供的史料优先级最高。只有在用户资料中出现了原文和出处时才可以使用引号作精确引用；不得凭记忆伪造古籍原句、卷次、页码或学者观点。根据常识补充但无法核准出处的内容，只能概述，并标记“<!-- 待核实：需要核对的史料或出处 -->”。
+7. 使用用户提供的史料时，在相关句末使用 Markdown 脚注标记（如 [^s1]）；文章最下方必须添加“## 史料与参考资料”，列出对应脚注、材料名称、作者或篇章及链接。AI 搜索摘要只能标为“检索线索，引用前需核对原文”，不得当作正式引文。
 
 ## 内容与结构
-7. 开头直接进入本章的核心矛盾、关键场景或问题，不使用“在历史长河中”“众所周知”“随着时代发展”等万能套话。
-8. 每一节只解决一个清晰问题，段落之间用时间、因果、对比或递进关系推进。删除无信息量的承上启下和重复总结。
-9. 保持全书边界，不提前写完其他章节；需要铺垫时只提供理解本章所必需的背景。
+8. 开头直接进入本章的核心矛盾、关键场景或问题，不使用“在历史长河中”“众所周知”“随着时代发展”等万能套话。
+9. 每一节只解决一个清晰问题，段落之间用时间、因果、对比或递进关系推进。删除无信息量的承上启下和重复总结。
+10. 保持全书边界，不提前写完其他章节；需要铺垫时只提供理解本章所必需的背景。
 
 ## 文风
-10. 使用准确、具体、有画面感的现代中文。长短句交替，关键判断简洁有力；少用空泛形容词，多用动作、选择、条件和后果呈现内容。
-11. 风趣来自事实之间的反差、克制的比喻或机智转场，占比约 10%；不堆网络梗，不油滑，不拿灾难、战争或具体群体开玩笑。
-12. 避免 AI 腔：不用“值得注意的是”“不难发现”“综上所述”反复串联，不连续罗列“首先、其次、最后”，不在每节末尾机械升华。
+11. 使用准确、具体、有画面感的现代中文。长短句交替，关键判断简洁有力；少用空泛形容词，多用动作、选择、条件和后果呈现内容。
+12. 风趣来自事实之间的反差、克制的比喻或机智转场，占比约 10%；不堆网络梗，不油滑，不拿灾难、战争或具体群体开玩笑。
+13. 避免 AI 腔：不用“值得注意的是”“不难发现”“综上所述”反复串联，不连续罗列“首先、其次、最后”，不在每节末尾机械升华。
 
 ## 输出前自检（只在内部执行，不输出检查过程）
 - 删除任何没有新增信息的句子；
@@ -363,6 +376,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (chunk.delta) { result += chunk.delta; setAiResult(result); }
       }
       if (!result.trim()) throw new Error('AI 没有返回内容，请重试。');
+      result = appendSourceReferences(result, aiSources);
+      setAiResult(result);
       if (writeToEditor && requestId === aiRequestRef.current) {
         const next = aiMode === 'continue' ? `${documentContent.trimEnd()}\n\n${result.trim()}\n` : `${result.trimEnd()}\n`;
         setDocumentContent(next); setEditorMode('edit'); setAiOpen(false);
@@ -462,8 +477,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
     const fallbackQueries = [
       `${projectTitle} ${chapterName} 史料 原始文献`,
-      `${chapterName} 考古 研究 论文`,
-      `${chapterName} 制度 时间线 历史`,
+      `${chapterName} 论文 site:cnki.net OR site:wanfangdata.com.cn`,
+      `${chapterName} 研究 site:ncpssd.cn OR site:cssn.cn OR site:edu.cn`,
     ];
     setSourceResearchLoading(true); setSourceResearchError(''); setSourceResearchResults([]);
     try {
@@ -472,7 +487,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         try {
           const planner = createOpenAIProvider({ apiKey: normalizeApiKey(reviewApiKey), baseUrl: reviewBaseUrl.trim(), chatProxy: window.electronAPI.llmChat });
           const planningMessages: ChatMessage[] = [
-            { role: 'system', content: '你是历史研究助理。根据书名、章节名和正文主题，生成 3 条互补的中文检索词，分别寻找原始文献或史书、考古或制度材料、现代学术研究。只输出 JSON 字符串数组，不解释，不虚构来源名称。' },
+            { role: 'system', content: '你是历史研究助理。根据书名、章节名和正文主题，生成 3 条互补的中文检索词：第 1 条寻找原始文献、史书或考古材料；第 2 条必须用 site:cnki.net OR site:wanfangdata.com.cn 定向寻找中文论文；第 3 条必须用 site:ncpssd.cn OR site:cssn.cn OR site:edu.cn 寻找国家哲学社会科学文献中心、中国社会科学网或高校机构库资料。只输出 JSON 字符串数组，不解释，不虚构论文标题或来源。' },
             { role: 'user', content: `书名：${projectTitle}\n章节：${chapterName}\n正文片段：${documentContent.replace(/^---[\s\S]*?---/, '').slice(0, 1800)}` },
           ];
           let raw = '';
@@ -497,7 +512,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (!/^https?:\/\//i.test(url) || unique.has(url)) return;
         unique.set(url, { id: url, title: String(item.title || url), url, snippet: String(item.snippet || '').trim(), domain: String(item.domain || new URL(url).hostname), source: String(item.source || 'web'), selected: false });
       });
-      const cards = [...unique.values()].slice(0, 15);
+      const sourcePriority = (item: ResearchSourceCard) => {
+        if (/(?:cnki\.net|wanfangdata\.com\.cn|ncpssd\.cn|cssn\.cn|\.edu\.cn)$/i.test(item.domain)) return 0;
+        if (item.source === 'openalex' || item.source === 'crossref' || item.source === 'wikisource') return 1;
+        if (item.source === 'wikipedia') return 3;
+        return 2;
+      };
+      const cards = [...unique.values()].sort((a, b) => sourcePriority(a) - sourcePriority(b)).slice(0, 15);
       setSourceResearchResults(cards);
       if (!cards.length) {
         const workErrors = workSearches.flatMap((entry) => entry.status === 'rejected' ? [entry.reason instanceof Error ? entry.reason.message : String(entry.reason)] : entry.value.providers.filter((provider) => !provider.ok).map((provider) => `${provider.providerId}: ${provider.error || '失败'}`));
@@ -897,7 +918,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           {sourceResearchError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{sourceResearchError}</div>}
           {sourceResearchResults.length > 0 && <div className="space-y-2 rounded-md border border-border p-2">
             <div className="flex items-center justify-between"><span className="text-xs font-medium">史料来源候选</span><button type="button" className="text-xs text-primary hover:underline" onClick={() => setSourceResearchResults((current) => current.map((item) => ({ ...item, selected: true })))}>全选</button></div>
-            <div className="max-h-56 space-y-2 overflow-auto">{sourceResearchResults.map((item) => <label key={item.id} className="flex cursor-pointer gap-2 rounded-md border border-border p-2 hover:bg-muted/50"><input type="checkbox" checked={item.selected} onChange={(event) => setSourceResearchResults((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, selected: event.target.checked } : candidate))} className="mt-1" /><span className="min-w-0"><span className="block truncate text-xs font-medium" title={item.title}>{item.title}</span><span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{item.snippet || '无搜索摘要'}</span><button type="button" className="mt-1 text-xs text-primary hover:underline" onClick={(event) => { event.preventDefault(); event.stopPropagation(); window.electronAPI.shell.openExternal(item.url); }}>打开原文 · {item.domain}</button></span></label>)}</div>
+            <div className="max-h-56 space-y-2 overflow-auto">{sourceResearchResults.map((item) => <label key={item.id} className="flex cursor-pointer gap-2 rounded-md border border-border p-2 hover:bg-muted/50"><input type="checkbox" checked={item.selected} onChange={(event) => setSourceResearchResults((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, selected: event.target.checked } : candidate))} className="mt-1" /><span className="min-w-0"><span className="flex items-center gap-1"><span className="min-w-0 flex-1 truncate text-xs font-medium" title={item.title}>{item.title}</span><span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{item.source}</span></span><span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{item.snippet || '无搜索摘要'}</span><button type="button" className="mt-1 text-xs text-primary hover:underline" onClick={(event) => { event.preventDefault(); event.stopPropagation(); window.electronAPI.shell.openExternal(item.url); }}>打开原文 · {item.domain}</button></span></label>)}</div>
             <Button type="button" size="sm" className="w-full" disabled={!sourceResearchResults.some((item) => item.selected)} onClick={addSelectedResearchSources}>加入选中的史料线索</Button>
             <p className="text-xs text-amber-700">搜索摘要不是史料原文。请打开来源核对作者、日期和上下文后再引用。</p>
           </div>}

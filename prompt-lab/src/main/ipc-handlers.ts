@@ -212,10 +212,29 @@ export function setupIPC(webviewPreloadPath: string) {
       }
       providers.push({ providerId: 'openalex', ok: true, count, error: null });
     };
+    const searchCrossref = async () => {
+      let count = 0;
+      for (const query of queries) {
+        const response = await fetch(`https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(query.replace(/\s+site:\S+|\s+OR\s+/gi, ' '))}&rows=5&select=DOI,title,author,published,type,URL,publisher`, { signal: AbortSignal.timeout(12_000), headers: { 'User-Agent': 'next-work-dashboard/1.0 (mailto:support@localhost)' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as { message?: { items?: Array<{ DOI?: string; title?: string[]; author?: Array<{ given?: string; family?: string }>; published?: { 'date-parts'?: number[][] }; type?: string; URL?: string; publisher?: string }> } };
+        for (const item of data.message?.items ?? []) {
+          const title = String(item.title?.[0] || '').trim();
+          const url = String(item.URL || (item.DOI ? `https://doi.org/${item.DOI}` : '')).trim();
+          if (!title || !/^https?:\/\//i.test(url)) continue;
+          const authors = (item.author ?? []).slice(0, 3).map((author) => [author.family, author.given].filter(Boolean).join(' ')).filter(Boolean).join('、');
+          const year = item.published?.['date-parts']?.[0]?.[0];
+          results.push({ title, url, snippet: [authors, year, item.publisher, item.type].filter(Boolean).join(' · '), domain: new URL(url).hostname, source: 'crossref' });
+          count += 1;
+        }
+      }
+      providers.push({ providerId: 'crossref', ok: true, count, error: null });
+    };
     const tasks = [
       ['wikisource', () => searchMediaWiki('zh.wikisource.org', 'wikisource')],
       ['wikipedia', () => searchMediaWiki('zh.wikipedia.org', 'wikipedia')],
       ['openalex', searchOpenAlex],
+      ['crossref', searchCrossref],
     ] as const;
     await Promise.all(tasks.map(async ([id, run]) => {
       try { await run(); } catch (error) { providers.push({ providerId: id, ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }); }
