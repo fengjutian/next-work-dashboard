@@ -12,6 +12,7 @@ import {
   type DatabaseTableSchema,
   type DatabaseTableStats,
   type DatabaseColumnFilter,
+  type DatabaseFilterOperator,
 } from '@/db';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -26,6 +27,7 @@ interface TableInfo {
 type SortState = { column: string; direction: 'asc' | 'desc' } | null;
 type CellSelection = { column: string; value: unknown } | null;
 type ViewMode = 'data' | 'structure';
+type NavigationEntry = { table: string; page: number; sort: SortState; filters: DatabaseColumnFilter[] };
 
 function formatBytes(bytes?: number): string {
   if (!Number.isFinite(bytes) || !bytes || bytes <= 0) return '0 B';
@@ -81,7 +83,9 @@ export const DatabaseBrowser: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('data');
   const [filterColumn, setFilterColumn] = useState('');
   const [filterValue, setFilterValue] = useState('');
+  const [filterOperator, setFilterOperator] = useState<DatabaseFilterOperator>('contains');
   const [filters, setFilters] = useState<DatabaseColumnFilter[]>([]);
+  const [navigationStack, setNavigationStack] = useState<NavigationEntry[]>([]);
 
   const loadTables = useCallback(() => {
     if (!isDbReady()) return;
@@ -139,7 +143,9 @@ export const DatabaseBrowser: React.FC = () => {
     setFilters([]);
     setFilterColumn('');
     setFilterValue('');
+    setFilterOperator('contains');
     setViewMode('data');
+    setNavigationStack([]);
     setSelectedCell(null);
     loadTableData(table, 0, pageSize, null, [], undefined, true);
   };
@@ -173,9 +179,15 @@ export const DatabaseBrowser: React.FC = () => {
   };
 
   const applyFilter = () => {
-    if (!selectedTable || !filterColumn || !filterValue) return;
-    const nextFilters: DatabaseColumnFilter[] = [{ column: filterColumn, operator: 'contains', value: filterValue }];
+    const needsValue = filterOperator !== 'is-null' && filterOperator !== 'not-null';
+    if (!selectedTable || !filterColumn || (needsValue && !filterValue)) return;
+    const nextFilters: DatabaseColumnFilter[] = [...filters, {
+      column: filterColumn,
+      operator: filterOperator,
+      value: needsValue ? filterValue : undefined,
+    }];
     setFilters(nextFilters);
+    setFilterValue('');
     setPage(0);
     loadTableData(selectedTable, 0, pageSize, sort, nextFilters);
   };
@@ -186,6 +198,51 @@ export const DatabaseBrowser: React.FC = () => {
     setFilterValue('');
     setPage(0);
     loadTableData(selectedTable, 0, pageSize, sort, [], selectedStats?.rowCount);
+  };
+
+  const removeFilter = (index: number) => {
+    if (!selectedTable) return;
+    const nextFilters = filters.filter((_, filterIndex) => filterIndex !== index);
+    setFilters(nextFilters);
+    setPage(0);
+    loadTableData(selectedTable, 0, pageSize, sort, nextFilters, nextFilters.length ? undefined : selectedStats?.rowCount);
+  };
+
+  const jumpToForeignKey = (column: string, value: unknown) => {
+    if (!selectedTable || value === null) return;
+    const foreignKey = selectedSchema?.foreignKeys.find((item) => item.from === column);
+    if (!foreignKey || !tables.some((table) => table.table === foreignKey.targetTable)) return;
+    const targetSchema = getDatabaseTableSchema(foreignKey.targetTable);
+    const targetColumn = foreignKey.targetColumn
+      || targetSchema.columns.find((target) => target.primaryKeyOrder === 1)?.name;
+    if (!targetColumn) return;
+    setNavigationStack((stack) => [...stack, { table: selectedTable, page, sort, filters }]);
+    const nextFilters: DatabaseColumnFilter[] = [{ column: targetColumn, operator: 'equals', value: String(value) }];
+    setSelectedTable(foreignKey.targetTable);
+    setPage(0);
+    setSort(null);
+    setFilters(nextFilters);
+    setFilterColumn(targetColumn);
+    setFilterOperator('equals');
+    setFilterValue(String(value));
+    setViewMode('data');
+    setSelectedCell(null);
+    loadTableData(foreignKey.targetTable, 0, pageSize, null, nextFilters, undefined, true);
+  };
+
+  const navigateBack = () => {
+    const previous = navigationStack[navigationStack.length - 1];
+    if (!previous) return;
+    setNavigationStack((stack) => stack.slice(0, -1));
+    setSelectedTable(previous.table);
+    setPage(previous.page);
+    setSort(previous.sort);
+    setFilters(previous.filters);
+    setFilterColumn('');
+    setFilterValue('');
+    setViewMode('data');
+    setSelectedCell(null);
+    loadTableData(previous.table, previous.page, pageSize, previous.sort, previous.filters, undefined, true);
   };
 
   const exportDatabase = () => {
@@ -267,6 +324,7 @@ export const DatabaseBrowser: React.FC = () => {
         <main className="flex min-w-0 flex-1 flex-col">
           {selectedTable && data ? <>
             <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+              {navigationStack.length > 0 && <Button variant="ghost" size="sm" className="h-7" onClick={navigateBack}>← 返回</Button>}
               <div className="mr-auto"><h3 className="text-sm font-semibold">{tableDisplayName(selectedTable)}</h3><p className="font-mono text-[10px] text-muted-foreground">{selectedTable}</p></div>
               <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground">{data.columns.length} 列</span>
               <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground">{data.totalRows} 行</span>
@@ -277,11 +335,13 @@ export const DatabaseBrowser: React.FC = () => {
               <Button variant={viewMode === 'structure' ? 'secondary' : 'ghost'} size="sm" className="h-7" onClick={() => setViewMode('structure')}>结构</Button>
               {viewMode === 'data' && <><div className="mx-2 h-5 border-l" />
                 <select value={filterColumn} onChange={(event) => setFilterColumn(event.target.value)} className="h-7 max-w-40 rounded border bg-background px-2 text-xs"><option value="">选择筛选列</option>{data.columns.map((column) => <option key={column} value={column}>{column}</option>)}</select>
-                <input value={filterValue} onChange={(event) => setFilterValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applyFilter(); }} placeholder="包含文本…" className="h-7 w-48 rounded border bg-background px-2 text-xs outline-none focus:border-primary/50" />
-                <Button variant="outline" size="sm" className="h-7" disabled={!filterColumn || !filterValue} onClick={applyFilter}>筛选</Button>
+                <select value={filterOperator} onChange={(event) => setFilterOperator(event.target.value as DatabaseFilterOperator)} className="h-7 rounded border bg-background px-2 text-xs"><option value="contains">包含</option><option value="equals">等于</option><option value="is-null">为空</option><option value="not-null">非空</option></select>
+                {filterOperator !== 'is-null' && filterOperator !== 'not-null' && <input value={filterValue} onChange={(event) => setFilterValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applyFilter(); }} placeholder="筛选值…" className="h-7 w-40 rounded border bg-background px-2 text-xs outline-none focus:border-primary/50" />}
+                <Button variant="outline" size="sm" className="h-7" disabled={!filterColumn || ((filterOperator === 'contains' || filterOperator === 'equals') && !filterValue)} onClick={applyFilter}>添加条件</Button>
                 {filters.length > 0 && <Button variant="ghost" size="sm" className="h-7" onClick={clearFilter}>清除</Button>}
               </>}
             </div>
+            {viewMode === 'data' && filters.length > 0 && <div className="flex flex-wrap items-center gap-1.5 border-b bg-muted/20 px-4 py-2"><span className="mr-1 text-[10px] text-muted-foreground">AND</span>{filters.map((filter, index) => <button key={`${filter.column}-${filter.operator}-${index}`} type="button" onClick={() => removeFilter(index)} className="rounded-full border bg-background px-2 py-1 text-[10px] hover:border-destructive hover:text-destructive" title="点击移除此条件"><span className="font-mono">{filter.column}</span> {filter.operator === 'contains' ? '包含' : filter.operator === 'equals' ? '=' : filter.operator === 'is-null' ? '为空' : '非空'} {filter.value ? `“${filter.value}”` : ''} ×</button>)}</div>}
             {viewMode === 'data' ? <><div className="min-h-0 flex-1 overflow-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10"><tr className="bg-muted">
@@ -290,7 +350,11 @@ export const DatabaseBrowser: React.FC = () => {
                 </tr></thead>
                 <tbody>{data.values.length === 0 ? <tr><td colSpan={data.columns.length + 1} className="px-3 py-8 text-center text-muted-foreground">无数据</td></tr> : data.values.map((row, rowIndex) => <tr key={`${page}-${rowIndex}`} className={`border-t ${rowIndex % 2 === 0 ? 'bg-card' : 'bg-background/50'}`}>
                   <td className="sticky left-0 bg-inherit px-2 py-1.5 font-mono text-muted-foreground">{page * pageSize + rowIndex + 1}</td>
-                  {row.map((value, columnIndex) => <td key={columnIndex} className="max-w-80 truncate px-3 py-1.5 font-mono" title="双击查看完整内容" onDoubleClick={() => setSelectedCell({ column: data.columns[columnIndex], value })}>{value === null ? <span className="italic text-muted-foreground">NULL</span> : displayValue(value)}</td>)}
+                  {row.map((value, columnIndex) => {
+                    const column = data.columns[columnIndex];
+                    const isForeignKey = value !== null && selectedSchema?.foreignKeys.some((foreignKey) => foreignKey.from === column);
+                    return <td key={columnIndex} className="max-w-80 truncate px-3 py-1.5 font-mono" title={isForeignKey ? '单击跳转外键；双击查看完整内容' : '双击查看完整内容'} onDoubleClick={() => setSelectedCell({ column, value })}>{isForeignKey ? <button type="button" className="max-w-full truncate text-primary underline decoration-dotted underline-offset-2 hover:decoration-solid" onClick={() => jumpToForeignKey(column, value)}>{displayValue(value)} →</button> : value === null ? <span className="italic text-muted-foreground">NULL</span> : displayValue(value)}</td>;
+                  })}
                 </tr>)}</tbody>
               </table>
             </div>

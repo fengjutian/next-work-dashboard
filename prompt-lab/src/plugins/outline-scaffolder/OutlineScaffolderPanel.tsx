@@ -72,6 +72,7 @@ interface SavedProject {
   source: string;
   requirement?: string;
   chapterBriefs?: Record<string, ChapterWritingBrief>;
+  chapterStatuses?: Record<string, ChapterGenerationStatus>;
   splitMode: SplitMode;
   organizeByPart: boolean;
   template: string;
@@ -98,6 +99,9 @@ interface ChapterWritingBrief {
   requiredSources: string;
   avoidTopics: string;
 }
+
+type ChapterGenerationState = 'pending' | 'generating' | 'review' | 'complete' | 'error';
+interface ChapterGenerationStatus { state: ChapterGenerationState; error?: string; updatedAt: number }
 
 const EMPTY_CHAPTER_BRIEF: ChapterWritingBrief = { goal: '', targetWords: 2500, keyQuestions: '', requiredSources: '', avoidTopics: '' };
 const attachChapterBrief = (content: string, brief?: ChapterWritingBrief) => {
@@ -138,6 +142,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [outlineVersions, setOutlineVersions] = useState<Array<{ source: string; createdAt: number; label: string }>>([]);
   const [chapterBriefs, setChapterBriefs] = useState<Record<string, ChapterWritingBrief>>({});
   const [showChapterBriefs, setShowChapterBriefs] = useState(false);
+  const [chapterStatuses, setChapterStatuses] = useState<Record<string, ChapterGenerationStatus>>({});
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0, current: '' });
+  const batchStopRef = useRef(false);
   const [projectTitle, setProjectTitle] = useState('未命名书籍');
   const [subfolder, setSubfolder] = useState('我的文档');
   const [splitMode, setSplitMode] = useState<SplitMode>('chapter');
@@ -288,6 +296,58 @@ export const OutlineScaffolderPanel: React.FC = () => {
     notice.success({ message: '目录版本已保存', placement: 'bottomRight' });
   };
   const updateChapterBrief = (path: string, patch: Partial<ChapterWritingBrief>) => setChapterBriefs((current) => ({ ...current, [path]: { ...EMPTY_CHAPTER_BRIEF, ...current[path], ...patch } }));
+  const setChapterStatus = (path: string, state: ChapterGenerationState, error?: string) => setChapterStatuses((current) => ({ ...current, [path]: { state, error, updatedAt: Date.now() } }));
+
+  const runBatchGeneration = async () => {
+    if (!target || batchGenerating) return;
+    if (!aiApi.apiKey?.trim()) { notice.error({ message: '请先配置助写模型', placement: 'bottomRight' }); return; }
+    const candidates = managedFiles.filter((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending'));
+    if (!candidates.length) { notice.info({ message: '没有待生成或失败的章节', placement: 'bottomRight' }); return; }
+    if (!window.confirm(`将串行生成 ${candidates.length} 个章节。已有正文不会被覆盖，是否继续？`)) return;
+    batchStopRef.current = false; setBatchGenerating(true); setBatchProgress({ completed: 0, total: candidates.length, current: '' });
+    const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+    let completed = 0;
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (batchStopRef.current) break;
+      const path = candidates[index];
+      const chapterName = path.split('/').pop()?.replace(/\.md$/i, '').replace(/^\d+-/, '') ?? path;
+      setBatchProgress({ completed, total: candidates.length, current: chapterName }); setChapterStatus(path, 'generating');
+      try {
+        const read = await window.electronAPI.workspace.readTextFile(target.path, path);
+        if (!read.success || !read.data) throw new Error(read.error || '读取章节失败');
+        const skeleton = read.data.content;
+        const prose = skeleton.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, '').replace(/<!--[\s\S]*?-->/g, '').replace(/^#+\s+.*$/gm, '').trim();
+        if (countArticleWords(prose) > 150 && !skeleton.includes('<!-- 在这里添加内容 -->')) {
+          setChapterStatus(path, 'review'); completed += 1; continue;
+        }
+        const previousPath = managedFiles[managedFiles.indexOf(path) - 1];
+        const nextPath = managedFiles[managedFiles.indexOf(path) + 1];
+        let previousEnding = '';
+        if (previousPath) {
+          const previous = await window.electronAPI.workspace.readTextFile(target.path, previousPath);
+          if (previous.success && previous.data) previousEnding = previous.data.content.slice(-1200);
+        }
+        const messages: ChatMessage[] = [
+          { role: 'system', content: `你是“${projectTitle}”的资深中文作者。根据章节骨架和 chapter-writing-brief 完成本章正文。要求：观点必须有事实、材料或机制支撑；区分事实与推测；不得编造史料、引文、卷次、页码或数据；无法核实处添加“<!-- 待核实：原因 -->”。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释。不要复述上一章，不要提前展开下一章。语言严谨、具体、有叙事张力，直接输出完整 Markdown。` },
+          { role: 'user', content: `全书需求：${bookRequirement || '未单独填写'}\n当前章节：${chapterName}\n上一章结尾（仅用于衔接，不得复述）：${previousEnding || '无'}\n下一章：${nextPath?.split('/').pop()?.replace(/\.md$/i, '') || '无'}\n\n章节骨架：\n${skeleton}` },
+        ];
+        let result = '';
+        for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.55, maxTokens: 8_192, stream: true })) {
+          if (batchStopRef.current) break;
+          result += chunk.delta || '';
+        }
+        if (batchStopRef.current) { setChapterStatus(path, 'pending'); break; }
+        if (!result.trim()) throw new Error('模型未返回正文');
+        const written = await window.electronAPI.workspace.writeTextFile(target.path, path, `${result.trimEnd()}\n`, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: read.data.modifiedAt });
+        if (!written.success || !written.data) throw new Error(written.error || '写入章节失败');
+        setChapterStatus(path, 'review'); completed += 1;
+        if (activeFile === path) { setDocumentContent(`${result.trimEnd()}\n`); setSavedContent(`${result.trimEnd()}\n`); setModifiedAt(written.data.modifiedAt); }
+      } catch (error) { setChapterStatus(path, 'error', error instanceof Error ? error.message : String(error)); }
+      setBatchProgress({ completed, total: candidates.length, current: chapterName });
+    }
+    setBatchGenerating(false); setBatchProgress((current) => ({ ...current, completed, current: '' }));
+    notice.info({ message: batchStopRef.current ? '批量生成已停止' : '批量生成结束', description: `已处理 ${completed}/${candidates.length} 章；生成结果进入“待审校”状态。`, placement: 'bottomRight' });
+  };
 
   useEffect(() => {
     Promise.all([window.electronAPI.outlineSecrets.load('review'), window.electronAPI.outlineSecrets.load('minimax')]).then(([review, minimax]) => {
@@ -319,13 +379,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
         ...project,
         requirement: bookRequirement,
         chapterBriefs,
+        chapterStatuses,
       git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
         pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
         updatedAt: Date.now(),
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, bookRequirement, chapterBriefs, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
+  }, [activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
 
   const switchView = (next: 'generator' | 'documents') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -355,6 +416,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       source: overrides?.source ?? source,
       requirement: overrides?.requirement ?? bookRequirement,
       chapterBriefs: overrides?.chapterBriefs ?? chapterBriefs,
+      chapterStatuses: overrides?.chapterStatuses ?? chapterStatuses,
       splitMode: overrides?.splitMode ?? splitMode,
       organizeByPart: overrides?.organizeByPart ?? organizeByPart,
       template: overrides?.template ?? template,
@@ -395,6 +457,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setTarget(folder); setProjectTitle(project.name); setSubfolder(project.subfolder); setSource(project.source);
       setBookRequirement(project.requirement ?? '');
       setChapterBriefs(project.chapterBriefs ?? {});
+      setChapterStatuses(Object.fromEntries(Object.entries(project.chapterStatuses ?? {}).map(([path, status]) => [path, status.state === 'generating'
+        ? { state: 'error', error: '上次批量生成意外中断，可重新生成。', updatedAt: Date.now() } satisfies ChapterGenerationStatus
+        : status])));
       setSplitMode(project.splitMode); setOrganizeByPart(project.organizeByPart); setTemplate(project.template);
       setGitRemoteUrl(project.git?.remoteUrl ?? ''); setGitRemoteName(project.git?.remoteName ?? 'origin'); setGitBranch(project.git?.branch ?? 'main');
       const restoredBookTitle = !project.pages?.title || project.pages.title === '我的文档' ? (project.pages?.description?.replace(/在线阅读$/, '') || project.name) : project.pages.title;
@@ -426,6 +491,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const result = await window.electronAPI.workspace.writeTextFile(target.path, activeFile, documentContent, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: modifiedAt });
       if (!result.success || !result.data) throw new Error(result.error);
       setSavedContent(documentContent); setModifiedAt(result.data.modifiedAt);
+      if ((chapterStatuses[activeFile]?.state ?? 'pending') === 'pending') setChapterStatus(activeFile, 'review');
       notice.success({ message: '文档已保存', placement: 'bottomRight' });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -956,14 +1022,16 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const paths = documents.map((document) => document.path);
       const outputFolder = subfolder.trim() && documents[0]?.path.includes('/') ? documents[0].path.split('/')[0] : '';
       const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
-      const manifest = JSON.stringify({ version: 1, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
+      const initialStatuses: Record<string, ChapterGenerationStatus> = Object.fromEntries(paths.map((path) => [path, chapterStatuses[path] ?? { state: 'pending', updatedAt: Date.now() }]));
+      setChapterStatuses(initialStatuses);
+      const manifest = JSON.stringify({ version: 1, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
       const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
       if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
         if (!updated.success) throw new Error(updated.error);
       } else if (!manifestResult.success) throw new Error(manifestResult.error);
       setManagedFiles(paths); setView('documents');
-      rememberProject(target, paths);
+      rememberProject(target, paths, { chapterStatuses: initialStatuses });
       if (paths.length) await openDocument(paths[0], target, false);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1015,7 +1083,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen || reviewOpen || imageOpen || gitOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="truncate text-sm font-semibold">{activeProject?.name || projectTitle || '章节文档'}</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{activeProject && <div className="mb-1 text-xs text-emerald-600">● 已保存项目</div>}{target ? <><button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button>{!activeProject && managedFiles.length > 0 && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => rememberProject(target, managedFiles)}>保存为项目</Button>}</> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
-        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
+        {managedFiles.length > 0 && <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between text-xs"><span className="font-medium">批量生成队列</span><span className="text-muted-foreground">待生成 {managedFiles.filter((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending')).length}</span></div>{batchGenerating ? <><div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${batchProgress.total ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}%` }} /></div><div className="mb-2 truncate text-xs text-muted-foreground">{batchProgress.completed}/{batchProgress.total} · {batchProgress.current || '正在结束'}</div><Button size="sm" variant="outline" className="w-full" onClick={() => { batchStopRef.current = true; }}>完成当前请求后停止</Button></> : <Button size="sm" className="w-full" disabled={!aiApi.apiKey?.trim() || !managedFiles.some((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending'))} onClick={runBatchGeneration}><Sparkles className="mr-2 h-4 w-4" />生成待处理章节</Button>}{activeFile && chapterStatuses[activeFile]?.state === 'review' && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => setChapterStatus(activeFile, 'complete')}>当前章审校完成</Button>}</div>}
+        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => { const status = chapterStatuses[path] ?? { state: 'pending' as const, updatedAt: 0 }; const statusMeta = { pending: ['待生成', 'bg-slate-400'], generating: ['生成中', 'bg-primary animate-pulse'], review: ['待审校', 'bg-amber-500'], complete: ['已完成', 'bg-emerald-500'], error: ['生成失败', 'bg-destructive'] }[status.state]; return <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`} title={status.error || statusMeta[0]}><FileText className="h-4 w-4 shrink-0" /><span className={`h-2 w-2 shrink-0 rounded-full ${statusMeta[1]}`} aria-label={statusMeta[0]} /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" title="有未保存修改" />}</button>; }) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
         <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={gitOpen ? 'default' : 'ghost'} disabled={!target} onClick={() => { toggleGit(); setReviewOpen(false); setImageOpen(false); }}> <GitBranch className="mr-2 h-4 w-4" />Git</Button><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setAiOpen((value) => !value); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}><Sparkles className="mr-2 h-4 w-4" />助写</Button><Button size="sm" variant={reviewOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setReviewOpen((value) => !value); setAiOpen(false); setImageOpen(false); setGitOpen(false); setAiResult(''); setAiError(''); }}><Check className="mr-2 h-4 w-4" />审校</Button><Button size="sm" variant={imageOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setImageOpen((value) => !value); setAiOpen(false); setReviewOpen(false); setGitOpen(false); setImageError(''); }}><Sparkles className="mr-2 h-4 w-4" />插图</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>

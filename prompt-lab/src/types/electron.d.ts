@@ -802,6 +802,7 @@ export interface ChapterProjectRecord {
   source: string;
   requirement?: string;
   chapterBriefs?: Record<string, { goal: string; targetWords: number; keyQuestions: string; requiredSources: string; avoidTopics: string }>;
+  chapterStatuses?: Record<string, { state: 'pending' | 'generating' | 'review' | 'complete' | 'error'; error?: string; updatedAt: number }>;
   splitMode: 'chapter' | 'section' | 'single';
   organizeByPart: boolean;
   template: string;
