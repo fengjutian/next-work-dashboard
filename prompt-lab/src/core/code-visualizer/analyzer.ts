@@ -1,4 +1,4 @@
-import type { AnalysisEdge, AnalysisNode, ApiEndpoint, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
+import type { AnalysisDiagnostic, AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
 
 interface PythonFunction {
   id: string;
@@ -13,7 +13,7 @@ interface PythonFunction {
 }
 
 interface RawEndpoint {
-  framework: ApiEndpoint['framework']; method: HttpMethod; path: string; handler: string; fnId: string; routerName?: string; location: SourceLocation;
+  framework: ApiEndpoint['framework']; method: HttpMethod; path: string; handler: string; fnId: string; routerName?: string; contract: ApiContract; location: SourceLocation;
 }
 
 const METHODS = new Set<HttpMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']);
@@ -29,6 +29,23 @@ export function normalizeApiPath(value: string): string {
 function lineOf(content: string, index: number): number { return content.slice(0, index).split('\n').length; }
 function snippetAt(content: string, line: number): string { return content.split(/\r?\n/)[line - 1]?.trim() ?? ''; }
 function joinPath(prefix: string, route: string): string { return `/${[prefix, route].join('/').split('/').filter(Boolean).join('/')}`; }
+
+function parseContract(definition: string, routePath: string, decorator = ''): ApiContract {
+  const parameters = [] as ApiContract['parameters'];
+  const args = /\((.*)\)/.exec(definition)?.[1] ?? '';
+  for (const raw of args.split(',').map((item) => item.trim()).filter(Boolean)) {
+    const match = /^(\w+)\s*(?::\s*([^=]+?))?\s*(?:=\s*(.+))?$/.exec(raw);
+    if (!match || ['self', 'cls'].includes(match[1])) continue;
+    const defaultValue = match[3]?.trim();
+    const marker = /\b(Path|Query|Header|Cookie|Body)\s*\(/i.exec(defaultValue ?? '')?.[1]?.toLowerCase();
+    const source = routePath.includes(`{${match[1]}}`) ? 'path' : marker === 'header' || marker === 'cookie' || marker === 'body' || marker === 'path' ? marker : 'query';
+    parameters.push({ name: match[1], source, type: match[2]?.trim() ?? 'Any', required: defaultValue === undefined || /\.\.\./.test(defaultValue), defaultValue });
+  }
+  const responseModel = /\bresponse_model\s*=\s*([\w.\[\], ]+)/.exec(decorator)?.[1]?.trim() ?? /\)\s*->\s*([^:]+)/.exec(definition)?.[1]?.trim();
+  const status = Number(/\bstatus_code\s*=\s*(\d+)/.exec(decorator)?.[1] ?? 200);
+  const requestModel = parameters.find((parameter) => parameter.source === 'body' && !['str', 'int', 'float', 'bool', 'dict', 'list', 'Any'].includes(parameter.type))?.type;
+  return { parameters, requestModel, responseModel, statusCodes: [status] };
+}
 
 export function extractFrontendCalls(file: RepositorySourceFile): FrontendCall[] {
   if (!/\.(vue|tsx?|jsx?)$/i.test(file.path)) return [];
@@ -117,12 +134,12 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
     for (let j = i - 1; j >= 0 && (lines[j].trim().startsWith('@') || lines[j].trim() === ''); j -= 1) if (lines[j].trim()) decorators.unshift(lines[j].trim());
     for (const decorator of decorators) {
       const route = /^@(\w+)\.(get|post|put|patch|delete|options|head)\s*\(\s*["']([^"']+)/i.exec(decorator);
-      if (route) endpoints.push({ framework: 'fastapi', method: route[2].toUpperCase() as HttpMethod, path: joinPath(routerPrefixes.get(route[1]) ?? '', route[3]), handler: def[2], fnId: fn.id, routerName: route[1], location: { file: file.path, line: i + 1, endLine: end, snippet: lines[i].trim() } });
+      if (route) endpoints.push({ framework: 'fastapi', method: route[2].toUpperCase() as HttpMethod, path: joinPath(routerPrefixes.get(route[1]) ?? '', route[3]), handler: def[2], fnId: fn.id, routerName: route[1], contract: parseContract(lines[i], route[3], decorator), location: { file: file.path, line: i + 1, endLine: end, snippet: lines[i].trim() } });
       const flask = /^@(\w+)\.route\s*\(\s*["']([^"']+)["']/i.exec(decorator);
       if (flask) {
         const methodBlock = /methods\s*=\s*\[([^\]]+)\]/i.exec(decorator)?.[1];
         const methods = methodBlock?.match(/["'](\w+)["']/g)?.map((x) => x.replace(/["']/g, '')) ?? ['GET'];
-        for (const methodText of methods) endpoints.push({ framework: 'flask', method: methodText.toUpperCase() as HttpMethod, path: joinPath(routerPrefixes.get(flask[1]) ?? '', flask[2]), handler: def[2], fnId: fn.id, location: { file: file.path, line: i + 1, endLine: end, snippet: lines[i].trim() } });
+        for (const methodText of methods) endpoints.push({ framework: 'flask', method: methodText.toUpperCase() as HttpMethod, path: joinPath(routerPrefixes.get(flask[1]) ?? '', flask[2]), handler: def[2], fnId: fn.id, contract: parseContract(lines[i], flask[2], decorator), location: { file: file.path, line: i + 1, endLine: end, snippet: lines[i].trim() } });
       }
     }
   }
@@ -131,7 +148,7 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
     const handler = match[2].split('.').pop() ?? match[2];
     const fn = functions.find((item) => item.name === handler);
     const index = match.index ?? 0;
-    endpoints.push({ framework: /ViewSet|APIView/.test(match[2]) ? 'drf' : 'django', method: 'GET', path: `/${match[1]}`, handler, fnId: fn?.id ?? `django:${file.path}:${lineOf(file.content, index)}`, location: { file: file.path, line: lineOf(file.content, index), snippet: snippetAt(file.content, lineOf(file.content, index)) } });
+    endpoints.push({ framework: /ViewSet|APIView/.test(match[2]) ? 'drf' : 'django', method: 'GET', path: `/${match[1]}`, handler, fnId: fn?.id ?? `django:${file.path}:${lineOf(file.content, index)}`, contract: parseContract(fn ? lines[fn.line - 1] : '', match[1]), location: { file: file.path, line: lineOf(file.content, index), snippet: snippetAt(file.content, lineOf(file.content, index)) } });
   }
   return { functions, endpoints, modelTables };
 }
@@ -221,7 +238,7 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
       }
     };
     walk(functions.find((fn) => fn.id === raw.fnId) ?? byName.get(raw.handler)?.[0], endpointId, 0);
-    return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], nodes, edges };
+    return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], nodes, edges, contract: raw.contract, diagnostics: [] };
   });
   const unique = [...new Map(endpoints.map((endpoint) => [`${endpoint.method}:${endpoint.normalizedPath}:${endpoint.location.file}`, endpoint])).values()];
   return { rootPath, scannedAt: Date.now(), filesScanned: files.length, pythonFiles: pythonFiles.length, vueFiles: vueFiles.length, endpoints: unique.sort((a, b) => a.path.localeCompare(b.path)), warnings: rawEndpoints.length === 0 ? ['未发现静态可解析的 Python 接口；动态注册的路由暂不支持。'] : [] };

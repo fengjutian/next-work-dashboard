@@ -31,6 +31,31 @@ export interface FrontendCall {
   location: SourceLocation;
 }
 
+export interface ApiParameter {
+  name: string;
+  source: 'path' | 'query' | 'header' | 'cookie' | 'body';
+  type: string;
+  required: boolean;
+  defaultValue?: string;
+}
+
+export interface ApiContract {
+  parameters: ApiParameter[];
+  requestModel?: string;
+  responseModel?: string;
+  statusCodes: number[];
+}
+
+export interface AnalysisDiagnostic {
+  id: string;
+  kind: 'unused-endpoint' | 'missing-backend' | 'method-mismatch' | 'dynamic-url';
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+  endpointId?: string;
+  frontendCall?: FrontendCall;
+  location: SourceLocation;
+}
+
 export interface ApiEndpoint {
   id: string;
   framework: 'fastapi' | 'flask' | 'django' | 'drf';
@@ -43,6 +68,8 @@ export interface ApiEndpoint {
   tables: string[];
   nodes: AnalysisNode[];
   edges: AnalysisEdge[];
+  contract: ApiContract;
+  diagnostics: AnalysisDiagnostic[];
 }
 
 export interface RepositoryAnalysis {
@@ -52,7 +79,27 @@ export interface RepositoryAnalysis {
   pythonFiles: number;
   vueFiles: number;
   endpoints: ApiEndpoint[];
+  frontendCalls?: FrontendCall[];
+  diagnostics?: AnalysisDiagnostic[];
+  scan?: {
+    mode: 'full' | 'incremental';
+    changedFiles: number;
+    reusedFiles: number;
+    removedFiles: number;
+    durationMs: number;
+    snapshotId?: string;
+  };
   warnings: string[];
+}
+
+export interface CodeVisualizerScanSnapshot {
+  id: string;
+  rootPath: string;
+  scannedAt: number;
+  endpointCount: number;
+  diagnosticCount: number;
+  changedFiles: number;
+  mode: 'full' | 'incremental';
 }
 
 export interface CodeVisualizerProjectHistory {
