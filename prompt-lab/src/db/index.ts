@@ -1347,6 +1347,69 @@ export interface DatabaseTablePage {
   totalRows: number;
 }
 
+export interface DatabaseReadonlyQueryResult {
+  columns: string[];
+  values: unknown[][];
+  elapsedMs: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+const SAFE_PRAGMAS = new Set([
+  'compile_options', 'database_list', 'encoding', 'foreign_key_list', 'freelist_count',
+  'index_info', 'index_list', 'integrity_check', 'page_count', 'page_size',
+  'quick_check', 'table_info', 'table_xinfo',
+]);
+
+function sqlWithoutCommentsAndLiterals(sql: string): string {
+  return sql
+    .replace(/--[^\n\r]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:""|[^"])*"/g, '""')
+    .trim();
+}
+
+export function validateReadonlyDatabaseSql(sql: string): { valid: true } | { valid: false; message: string; offset?: number } {
+  const cleaned = sqlWithoutCommentsAndLiterals(sql).replace(/;+\s*$/, '').trim();
+  if (!cleaned) return { valid: false, message: '请输入 SQL 查询' };
+  const semicolon = cleaned.indexOf(';');
+  if (semicolon >= 0) return { valid: false, message: '只允许执行一条 SQL 语句', offset: semicolon };
+  const firstKeyword = cleaned.match(/^([a-z]+)/i)?.[1]?.toUpperCase();
+  if (!firstKeyword || !['SELECT', 'WITH', 'EXPLAIN', 'PRAGMA'].includes(firstKeyword)) {
+    return { valid: false, message: '只允许 SELECT、WITH、EXPLAIN 和安全 PRAGMA' };
+  }
+  const forbidden = /\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE|VACUUM|ATTACH|DETACH|REINDEX|ANALYZE)\b/i.exec(cleaned);
+  if (forbidden) return { valid: false, message: `只读模式禁止 ${forbidden[1].toUpperCase()}`, offset: forbidden.index };
+  if (firstKeyword === 'PRAGMA') {
+    if (/=/.test(cleaned)) return { valid: false, message: '只读模式禁止修改 PRAGMA' };
+    const pragma = cleaned.match(/^PRAGMA\s+(?:[a-z_][\w]*\.)?([a-z_][\w]*)/i)?.[1]?.toLowerCase();
+    if (!pragma || !SAFE_PRAGMAS.has(pragma)) return { valid: false, message: `不允许执行 PRAGMA ${pragma ?? ''}`.trim() };
+  }
+  return { valid: true };
+}
+
+export function runReadonlyDatabaseSql(sql: string, options: { offset?: number; limit?: number } = {}): DatabaseReadonlyQueryResult {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const validation = validateReadonlyDatabaseSql(sql);
+  if (!validation.valid) throw new Error(validation.offset === undefined ? validation.message : `${validation.message}（位置 ${validation.offset + 1}）`);
+  const offset = Math.max(0, Math.trunc(options.offset ?? 0));
+  const limit = Math.min(1000, Math.max(1, Math.trunc(options.limit ?? 200)));
+  const startedAt = performance.now();
+  const statement = _sqlDb.prepare(sql);
+  const columns = statement.getColumnNames();
+  const values: unknown[][] = [];
+  let seen = 0;
+  let hasMore = false;
+  while (statement.step()) {
+    if (seen++ < offset) continue;
+    if (values.length >= limit) { hasMore = true; break; }
+    values.push(statement.get());
+  }
+  statement.free();
+  return { columns, values, elapsedMs: performance.now() - startedAt, offset, hasMore };
+}
+
 export type DatabaseFilterOperator = 'contains' | 'equals' | 'is-null' | 'not-null';
 
 export interface DatabaseColumnFilter {
