@@ -800,6 +800,7 @@ export interface ChapterProjectRecord {
   rootPath: string;
   subfolder: string;
   source: string;
+  requirement?: string;
   splitMode: 'chapter' | 'section' | 'single';
   organizeByPart: boolean;
   template: string;

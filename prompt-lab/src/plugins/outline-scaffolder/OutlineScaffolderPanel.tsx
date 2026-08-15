@@ -70,6 +70,7 @@ interface SavedProject {
   rootPath: string;
   subfolder: string;
   source: string;
+  requirement?: string;
   splitMode: SplitMode;
   organizeByPart: boolean;
   template: string;
@@ -98,12 +99,12 @@ function loadSavedProjects(): SavedProject[] {
 
 const serializeOutline = (nodes: OutlineNode[]) => nodes.map((node) => `${'#'.repeat(Math.min(6, Math.max(1, node.level)))} ${node.title}${node.children.length ? `\n${serializeOutline(node.children)}` : ''}`).join('\n');
 
-function EditableOutlineTree({ nodes, onRename, onDelete }: { nodes: OutlineNode[]; onRename: (id: string, title: string) => void; onDelete: (id: string) => void }) {
+function EditableOutlineTree({ nodes, onRename, onDelete, onMove }: { nodes: OutlineNode[]; onRename: (id: string, title: string) => void; onDelete: (id: string) => void; onMove: (id: string, direction: -1 | 1) => void }) {
   const [editingId, setEditingId] = useState('');
   const [draft, setDraft] = useState('');
   return <ul className="space-y-1">{nodes.map((node) => <li key={node.id}>
-    <div className="group flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted/60"><FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />{editingId === node.id ? <input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && draft.trim()) { onRename(node.id, draft.trim()); setEditingId(''); } if (event.key === 'Escape') setEditingId(''); }} onBlur={() => { if (draft.trim()) onRename(node.id, draft.trim()); setEditingId(''); }} className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-sm" /> : <span className="min-w-0 flex-1 truncate">{node.title}</span>}<button type="button" className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100" onMouseDown={(event) => event.preventDefault()} onClick={() => { setEditingId(node.id); setDraft(node.title); }}>修改</button><button type="button" className="text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" onClick={() => onDelete(node.id)}>删除</button></div>
-    {node.children.length > 0 && <div className="ml-5 border-l border-border pl-2"><EditableOutlineTree nodes={node.children} onRename={onRename} onDelete={onDelete} /></div>}
+    <div className="group flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted/60"><FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />{editingId === node.id ? <input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && draft.trim()) { onRename(node.id, draft.trim()); setEditingId(''); } if (event.key === 'Escape') setEditingId(''); }} onBlur={() => { if (draft.trim()) onRename(node.id, draft.trim()); setEditingId(''); }} className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-sm" /> : <span className="min-w-0 flex-1 truncate">{node.title}</span>}<button type="button" title="上移" className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100" onClick={() => onMove(node.id, -1)}>↑</button><button type="button" title="下移" className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100" onClick={() => onMove(node.id, 1)}>↓</button><button type="button" className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100" onMouseDown={(event) => event.preventDefault()} onClick={() => { setEditingId(node.id); setDraft(node.title); }}>修改</button><button type="button" className="text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" onClick={() => onDelete(node.id)}>删除</button></div>
+    {node.children.length > 0 && <div className="ml-5 border-l border-border pl-2"><EditableOutlineTree nodes={node.children} onRename={onRename} onDelete={onDelete} onMove={onMove} /></div>}
   </li>)}</ul>;
 }
 
@@ -114,6 +115,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [bookRequirement, setBookRequirement] = useState('');
   const [outlineGenerating, setOutlineGenerating] = useState(false);
   const [outlineError, setOutlineError] = useState('');
+  const [outlineVersions, setOutlineVersions] = useState<Array<{ source: string; createdAt: number; label: string }>>([]);
   const [projectTitle, setProjectTitle] = useState('未命名书籍');
   const [subfolder, setSubfolder] = useState('我的文档');
   const [splitMode, setSplitMode] = useState<SplitMode>('chapter');
@@ -182,6 +184,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
   const articleWordCount = useMemo(() => countArticleWords(documentContent), [documentContent]);
   const generatorStage = nodes.length ? (target ? 3 : 2) : bookRequirement.trim() ? 1 : 0;
+  const outlineWarnings = useMemo(() => {
+    const flat = (items: OutlineNode[]): OutlineNode[] => items.flatMap((item) => [item, ...flat(item.children)]);
+    const all = flat(nodes);
+    const counts = new Map<string, number>();
+    all.forEach((item) => counts.set(item.title.trim().toLowerCase(), (counts.get(item.title.trim().toLowerCase()) ?? 0) + 1));
+    const warnings: string[] = [...counts].filter(([, count]) => count > 1).map(([title, count]) => `目录“${title}”重复 ${count} 次`);
+    if (nodes.some((item) => item.level > 1)) warnings.push('顶层目录不是一级标题，生成时可能无法正确按“篇”组织');
+    if (nodes.length > 0 && documents.length === 0) warnings.push('当前目录无法识别出可生成的章节');
+    if (documents.length > 80) warnings.push(`将生成 ${documents.length} 个文件，建议分批处理或减少拆分层级`);
+    return warnings;
+  }, [documents.length, nodes]);
 
   useEffect(() => {
     let active = true;
@@ -214,6 +227,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.45, maxTokens: 4_096, stream: false })) result += chunk.delta || '';
       const cleaned = result.replace(/^```(?:markdown)?\s*/i, '').replace(/```\s*$/i, '').trim();
       if (!parseOutline(cleaned).length) throw new Error('AI 没有生成有效目录，请补充目标读者、范围和预计篇幅后重试。');
+      if (source.trim() && source.trim() !== cleaned) setOutlineVersions((current) => [{ source, createdAt: Date.now(), label: 'AI 生成前' }, ...current].slice(0, 10));
       setSource(cleaned); setConflicts([]);
       notice.success({ message: '目录初稿已生成', description: '请在目录树中修改或删除章节，确认后再生成文档。', placement: 'bottomRight' });
     } catch (error) { setOutlineError(error instanceof Error ? error.message : String(error)); }
@@ -230,6 +244,25 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const targetNode = findNode(nodes);
     if (!targetNode || !window.confirm(`删除“${targetNode.title}”及其全部下级目录吗？`)) return;
     updateOutlineNodes((items) => { const remove = (list: OutlineNode[]): OutlineNode[] => list.filter((item) => item.id !== id).map((item) => ({ ...item, children: remove(item.children) })); return remove(items); });
+  };
+  const moveOutlineNode = (id: string, direction: -1 | 1) => updateOutlineNodes((items) => {
+    const move = (list: OutlineNode[]): OutlineNode[] => {
+      const index = list.findIndex((item) => item.id === id);
+      if (index >= 0) {
+        const targetIndex = index + direction;
+        if (targetIndex < 0 || targetIndex >= list.length) return list;
+        const next = [...list];
+        [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+        return next;
+      }
+      return list.map((item) => ({ ...item, children: move(item.children) }));
+    };
+    return move(items);
+  });
+  const saveOutlineVersion = (label = '手动快照') => {
+    if (!source.trim()) return;
+    setOutlineVersions((current) => [{ source, createdAt: Date.now(), label }, ...current.filter((item) => item.source !== source)].slice(0, 10));
+    notice.success({ message: '目录版本已保存', placement: 'bottomRight' });
   };
 
   useEffect(() => {
@@ -260,13 +293,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const timer = window.setTimeout(() => {
       setRecentProjects((current) => current.map((project) => project.id === activeProjectId ? {
         ...project,
+        requirement: bookRequirement,
       git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
         pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
         updatedAt: Date.now(),
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
+  }, [activeProjectId, bookRequirement, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
 
   const switchView = (next: 'generator' | 'documents') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -294,6 +328,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       rootPath: folder.path,
       subfolder: savedFolder,
       source: overrides?.source ?? source,
+      requirement: overrides?.requirement ?? bookRequirement,
       splitMode: overrides?.splitMode ?? splitMode,
       organizeByPart: overrides?.organizeByPart ?? organizeByPart,
       template: overrides?.template ?? template,
@@ -332,6 +367,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       if (!authorized.success) throw new Error('目录授权失败');
       const folder = { path: project.rootPath, name: project.name };
       setTarget(folder); setProjectTitle(project.name); setSubfolder(project.subfolder); setSource(project.source);
+      setBookRequirement(project.requirement ?? '');
       setSplitMode(project.splitMode); setOrganizeByPart(project.organizeByPart); setTemplate(project.template);
       setGitRemoteUrl(project.git?.remoteUrl ?? ''); setGitRemoteName(project.git?.remoteName ?? 'origin'); setGitBranch(project.git?.branch ?? 'main');
       const restoredBookTitle = !project.pages?.title || project.pages.title === '我的文档' ? (project.pages?.description?.replace(/在线阅读$/, '') || project.name) : project.pages.title;
@@ -892,7 +928,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const paths = documents.map((document) => document.path);
       const outputFolder = subfolder.trim() && documents[0]?.path.includes('/') ? documents[0].path.split('/')[0] : '';
       const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
-      const manifest = JSON.stringify({ version: 1, name: projectTitle, source, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
+      const manifest = JSON.stringify({ version: 1, name: projectTitle, requirement: bookRequirement, source, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
       const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
       if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
@@ -917,7 +953,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       <div className="lg:col-span-2 grid grid-cols-4 overflow-hidden rounded-xl border border-border bg-card text-sm shadow-sm">{['1 填写需求', '2 生成目录', '3 修改确认', '4 生成文档'].map((step, index) => <div key={step} className={`px-4 py-3 text-center ${index === generatorStage ? 'bg-primary/10 font-medium text-primary' : index < generatorStage ? 'text-emerald-600' : 'text-muted-foreground'} ${index ? 'border-l border-border' : ''}`}>{index < generatorStage ? '✓ ' : ''}{step}</div>)}</div>
       <section className="flex min-h-[620px] flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
         <div><label className="mb-2 block text-sm font-semibold">第一步：写作需求</label><textarea value={bookRequirement} onChange={(event) => setBookRequirement(event.target.value)} className="h-36 w-full resize-y rounded-lg border border-input bg-background p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="说明主题、目标读者、内容范围、时间跨度、预计章数、写作风格和必须覆盖的问题。例如：面向普通读者，系统讲述秦末到汉初的政权更替，约 25 章，兼顾制度、战争与人物选择。" /><Button className="mt-2 w-full" disabled={!bookRequirement.trim() || outlineGenerating} onClick={generateOutlineFromRequirement}>{outlineGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 生成目录初稿</Button>{outlineError && <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{outlineError}</div>}</div>
-        <div className="flex min-h-0 flex-1 flex-col"><div className="mb-2 flex items-center justify-between"><label className="text-sm font-semibold">第二步：目录 Markdown</label><button type="button" className="text-xs text-muted-foreground hover:text-destructive" onClick={() => { if (window.confirm('清空当前目录吗？')) setSource(''); }}>清空目录</button></div><textarea value={source} onChange={(event) => setSource(event.target.value)} spellCheck={false} className="min-h-[300px] flex-1 resize-none rounded-lg border border-input bg-background p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="AI 生成后可继续直接编辑；也支持手动粘贴 Markdown 目录" /><p className="mt-2 text-xs text-muted-foreground">目录仅是草稿。可直接编辑文本，也可在右侧目录树逐项修改或删除。</p></div>
+        <div className="flex min-h-0 flex-1 flex-col"><div className="mb-2 flex items-center justify-between"><label className="text-sm font-semibold">第二步：目录 Markdown</label><div className="flex gap-3"><button type="button" className="text-xs text-primary hover:underline" onClick={() => saveOutlineVersion()}>保存版本</button><button type="button" className="text-xs text-muted-foreground hover:text-destructive" onClick={() => { if (window.confirm('清空当前目录吗？')) { saveOutlineVersion('清空前'); setSource(''); } }}>清空目录</button></div></div><textarea value={source} onChange={(event) => setSource(event.target.value)} spellCheck={false} className="min-h-[300px] flex-1 resize-none rounded-lg border border-input bg-background p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="AI 生成后可继续直接编辑；也支持手动粘贴 Markdown 目录" />{outlineVersions.length > 0 && <div className="mt-2 rounded-md border border-border p-2"><div className="mb-1 text-xs font-medium">目录历史</div><div className="flex gap-2 overflow-x-auto">{outlineVersions.map((version) => <button type="button" key={`${version.createdAt}-${version.label}`} className="shrink-0 rounded bg-muted px-2 py-1 text-xs hover:bg-primary/10 hover:text-primary" title={new Date(version.createdAt).toLocaleString()} onClick={() => { saveOutlineVersion('恢复前'); setSource(version.source); }}>{version.label} · {new Date(version.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</button>)}</div></div>}<p className="mt-2 text-xs text-muted-foreground">目录仅是草稿。可直接编辑文本，也可在右侧目录树逐项修改、排序或删除。</p></div>
       </section>
       <div className="flex min-h-0 flex-col gap-5">
         {recentProjects.length > 0 && <section className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">最近项目</h2><span className="text-xs text-muted-foreground">{recentProjects.length}</span></div><div className="max-h-36 space-y-1 overflow-auto">{recentProjects.map((project) => <div key={project.id} className="group flex items-center gap-2 rounded-md hover:bg-muted"><button type="button" className="min-w-0 flex-1 px-2 py-2 text-left" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.rootPath}{project.subfolder ? ` / ${project.subfolder}` : ''} · {project.files.length} 个文档</span></button><button type="button" className="px-2 text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100" title="从列表移除（不会删除文件）" onClick={() => removeSavedProject(project.id)}>移除</button></div>)}</div></section>}
@@ -942,7 +978,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </section>
         <section className="min-h-[230px] flex-1 overflow-auto rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold">第三步：修改并确认目录</h2><p className="mt-1 text-xs text-muted-foreground">悬停条目可修改或删除；删除父级会同时删除其下级。</p></div>{nodes.length > 0 && <Check className="h-4 w-4 text-emerald-500" />}</div>
-          {nodes.length ? <EditableOutlineTree nodes={nodes} onRename={renameOutlineNode} onDelete={deleteOutlineNode} /> : <p className="text-sm text-muted-foreground">填写需求生成目录，或在左侧手动输入目录。</p>}
+          {outlineWarnings.length > 0 && <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">{outlineWarnings.map((warning) => <div key={warning}>• {warning}</div>)}</div>}
+          {nodes.length ? <EditableOutlineTree nodes={nodes} onRename={renameOutlineNode} onDelete={deleteOutlineNode} onMove={moveOutlineNode} /> : <p className="text-sm text-muted-foreground">填写需求生成目录，或在左侧手动输入目录。</p>}
         </section>
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}第四步：生成 {documents.length || 0} 个章节文档</Button>
       </div>
