@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Download, FolderOpen, Loader2, Pause, Play, Plus, RefreshCw, Sparkles, Trash2, Upload, Video as VideoIcon, AudioLines, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { notification } from 'antd';
+import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
+import { useStore } from '@/store/store';
 import type {
   StoredVideoRecord,
   VideoGenerationMode,
@@ -133,6 +135,54 @@ function inferReferenceKind(mimeType: string): ReferenceKind | null {
 
 function makeReferenceKey(): string {
   return `ref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * AI 扩写：把用户短句扩成 MiniMax-H3 视频生成能直接吃的提示词。
+ * 视频 prompt 跟图片 prompt 的核心区别：时间轴 + 运动 + 镜头调度。
+ * 输出要保持中文，220–500 字，覆盖主体 / 动作 / 镜头 / 光线 / 氛围。
+ */
+async function expandVideoPrompt(
+  aiApi: { apiKey: string; baseUrl: string; model: string; provider?: string },
+  idea: string,
+  mode: VideoGenerationMode,
+  onDelta: (delta: string) => void,
+): Promise<string> {
+  const provider = createOpenAIProvider({
+    apiKey: aiApi.apiKey,
+    baseUrl: aiApi.baseUrl,
+    chatProxy: aiApi.provider === 'qwen' ? window.electronAPI.llmChat : undefined,
+  });
+  const modeHint = mode === 'image-to-video' ? '这是首帧图生视频模式，重点描述首帧之后主体如何动起来、镜头怎么推。'
+    : mode === 'start-end-to-video' ? '这是首尾帧生视频模式，重点描述从首帧过渡到尾帧的过程。'
+    : mode === 'reference-to-video' ? '这是参考生视频模式，重点描述参考主体的特征延续 + 动作编排。'
+    : '这是文生视频模式，从零构建一个完整的画面。';
+  const systemPrompt = `你是专业视频导演和文生视频提示词设计师，擅长为 MiniMax-H3 多模态视频模型写提示词。${modeHint}
+
+将用户的简短想法扩写成一段具体、生动、可直接用于视频生成的中文描述。必须保留用户主体与意图，补充：
+- 主体在时间轴上的动作（开场 → 发展 → 收尾）
+- 镜头调度（景别 / 推拉摇移 / 跟拍 / 升降）
+- 环境与场景细节
+- 光线、色调、氛围、声音线索
+- 视觉风格（写实 / 电影感 / 动漫 / 纪录片等）
+
+要求：
+- 不要解释，不要标题，不要 Markdown，不要参数标签
+- 不要杜撰对白、文字或水印
+- 控制在 220 至 500 个中文字符
+- 写完后不要再补任何总结或追问`;
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `用户想法：${idea}` },
+  ];
+  const chunks: string[] = [];
+  for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.8, maxTokens: 1200, stream: true })) {
+    if (chunk.delta) {
+      chunks.push(chunk.delta);
+      onDelta(chunk.delta);
+    }
+  }
+  return chunks.join('').trim().replace(/^```(?:text)?\s*|\s*```$/g, '').replace(/^[“"]|[”"]$/g, '');
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -322,6 +372,7 @@ const ReferenceListUploader: React.FC<ReferenceListUploaderProps> = ({ label, ki
 
 export const VideoGenerationPanel: React.FC = () => {
   const [notifApi, contextHolder] = notification.useNotification();
+  const aiApi = useStore((state) => state.aiApi);
 
   const [apiKey, setApiKey] = useState<string>(() => readStoredApiKey());
   const [baseUrl, setBaseUrl] = useState<string>(() => readStoredBaseUrl());
@@ -330,6 +381,7 @@ export const VideoGenerationPanel: React.FC = () => {
   const [mode, setMode] = useState<VideoGenerationMode>('text-to-video');
   const [duration, setDuration] = useState<number>(6);
   const [resolution, setResolution] = useState<VideoResolution>('768P');
+  const [expanding, setExpanding] = useState<boolean>(false);
   const [ratio, setRatio] = useState<VideoRatio>('16:9');
   // 参考素材：本地图上传（litterbox 中转）或手动填 HTTPS URL。
   // 用 ReferenceItem 列表，提交时只取已上传 / 手动 URL 成功的项。

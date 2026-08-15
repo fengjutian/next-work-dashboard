@@ -43,6 +43,13 @@ export interface Finding {
   recommendation: string;
   ruleId?: string;
   detectedAt: number;
+  fingerprint?: string;
+  scannerId?: string;
+  category?: 'sast' | 'sca' | 'secret' | 'iac' | 'config';
+  confidence?: 'low' | 'medium' | 'high';
+  status?: 'open' | 'confirmed' | 'false-positive' | 'accepted' | 'fixed';
+  evidence?: Array<{ kind: string; excerpt: string }>;
+  aiReview?: { verdict: string; rationale: string; reviewedAt: number };
 }
 
 /** 扫描阶段 */

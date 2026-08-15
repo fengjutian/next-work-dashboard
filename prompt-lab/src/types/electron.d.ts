@@ -570,12 +570,14 @@ export interface ElectronAPI {
       set: (key: string, value: string) => Promise<{ ok: boolean }>;
     };
     scan: {
-      start: (input: { projectDir: string }) => Promise<{ ok: boolean; jobId: string; projectDir: string }>;
+      start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; aiReview?: boolean }) => Promise<{ ok: boolean; cancelled?: boolean; jobId?: string; projectDir?: string }>;
       cancel: (jobId: string) => Promise<{ ok: boolean }>;
+      onProgress: (callback: (progress: import('../core/security-audit').ScanProgress) => void) => () => void;
     };
     findings: {
-      list: (projectDir: string) => Promise<unknown[]>;
+      list: (projectDir: string) => Promise<import('../core/security-audit').SecurityFinding[]>;
     };
+    scans: { list: (projectDir: string) => Promise<import('../core/security-audit').ScanRecord[]> };
   };
 }
 
