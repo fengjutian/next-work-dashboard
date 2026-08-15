@@ -159,6 +159,27 @@ export function setupIPC(webviewPreloadPath: string) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+  ipcMain.handle('outline-github:pages-status', async (_event, remoteValue: unknown) => {
+    try {
+      const remote = String(remoteValue ?? '').trim();
+      const match = remote.match(/github\.com[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+      if (!match) throw new Error('仅支持查询 GitHub 仓库');
+      const owner = encodeURIComponent(match[1]);
+      const repository = encodeURIComponent(match[2].replace(/\.git$/i, ''));
+      const response = await fetch(`https://api.github.com/repos/${owner}/${repository}/actions/workflows/pages.yml/runs?per_page=1`, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'next-work-dashboard' },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (response.status === 404) return { success: false, error: '未找到 Pages workflow，或仓库为私有仓库且需要鉴权' };
+      if (!response.ok) throw new Error(`GitHub API ${response.status}`);
+      const payload = await response.json() as { workflow_runs?: Array<{ status?: string; conclusion?: string | null; html_url?: string; updated_at?: string; head_branch?: string }> };
+      const run = payload.workflow_runs?.[0];
+      if (!run) return { success: true, data: { state: 'not_run' } };
+      return { success: true, data: { state: run.status || 'unknown', conclusion: run.conclusion ?? undefined, url: run.html_url, updatedAt: run.updated_at, branch: run.head_branch } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
   ipcMain.handle('outline-secrets:load', (_event, kind: unknown) => {
     const name = kind === 'review' ? 'outline-scaffolder-review' : kind === 'minimax' ? 'outline-scaffolder-minimax' : '';
     if (!name) return { success: false, error: 'INVALID_SECRET_KIND' };
@@ -533,6 +554,142 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (error) {
       const message = error instanceof Error && error.name === 'AbortError' ? '图片生成超时（10 分钟）' : (error instanceof Error ? error.message : String(error));
       return { success: false, error: message };
+    }
+  });
+
+  // ── Video Generation (MiniMax-H3) ──────────────────────────────
+  // 异步三段式：submit → poll → download。下载后的 MP4 落到 userData/video-generation/，
+  // 元数据走 SQLite（避免 50MB+ 视频塞进 BLOB）。Renderer 按需拉 blob 播放。
+  const videoGenDir = path.join(app.getPath('userData'), 'video-generation');
+  fs.mkdirSync(videoGenDir, { recursive: true });
+
+  const readVideoAsBlob = async (filePath: string): Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }> => {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) return { success: false, error: '视频文件不存在或已被删除' };
+      const stat = fs.statSync(filePath);
+      if (stat.size > 200 * 1024 * 1024) return { success: false, error: `视频文件 ${(stat.size / 1024 / 1024).toFixed(1)} MB 超过 200 MB 单次读取上限` };
+      const buffer = fs.readFileSync(filePath);
+      const mimeType = filePath.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4';
+      // 转成 ArrayBuffer（IPC structured clone 友好）
+      return { success: true, bytes: stat.size, mimeType, data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  ipcMain.handle('video-generation:create', async (_event, payload: import('../plugins/video-generation/types').VideoGenerationRequest) => {
+    try {
+      const normalized = (await import('../plugins/video-generation/core/api')).normalizeRequest(payload);
+      if (!normalized.ok) return { success: false, error: normalized.error };
+      const api = normalized.value;
+      const { buildCreateRequest, parseSubmitResponse } = await import('../plugins/video-generation/core/api');
+      const { endpoint, init } = buildCreateRequest(api);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      let response: Response;
+      try {
+        response = await fetch(endpoint, { ...init, signal: controller.signal });
+      } finally { clearTimeout(timeout); }
+      const text = await response.text();
+      let data: unknown = null;
+      try { data = JSON.parse(text); } catch { /* keep null */ }
+      if (!response.ok) return { success: false, error: `提交失败（HTTP ${response.status}）：${text.slice(0, 500)}` };
+      const submit = parseSubmitResponse(data);
+      if (!submit.success || !submit.taskId) return { success: false, error: submit.error, baseResp: submit.baseResp };
+      return { success: true, taskId: submit.taskId, baseResp: submit.baseResp };
+    } catch (err) {
+      const message = err instanceof Error && err.name === 'AbortError' ? '提交视频生成任务超时（1 分钟）' : (err instanceof Error ? err.message : String(err));
+      return { success: false, error: message };
+    }
+  });
+
+  ipcMain.handle('video-generation:query', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string }) => {
+    try {
+      const apiKey = String(payload?.apiKey || '').trim();
+      const taskId = String(payload?.taskId || '').trim();
+      const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
+      if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
+      if (!taskId) return { success: false, error: 'taskId 不能为空' };
+      const { buildQueryRequest, parseTaskResponse } = await import('../plugins/video-generation/core/api');
+      const { endpoint, init } = buildQueryRequest(baseUrl, apiKey, taskId);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      let response: Response;
+      try {
+        response = await fetch(endpoint, { ...init, signal: controller.signal });
+      } finally { clearTimeout(timeout); }
+      const text = await response.text();
+      let data: unknown = null;
+      try { data = JSON.parse(text); } catch { /* keep null */ }
+      if (!response.ok) return { success: false, error: `查询失败（HTTP ${response.status}）：${text.slice(0, 500)}` };
+      const info = parseTaskResponse(data, taskId);
+      return { success: true, info };
+    } catch (err) {
+      const message = err instanceof Error && err.name === 'AbortError' ? '查询任务超时（30 秒）' : (err instanceof Error ? err.message : String(err));
+      return { success: false, error: message };
+    }
+  });
+
+  ipcMain.handle('video-generation:download', async (_event, payload: { taskId: string; videoUrl: string; recordId: string }) => {
+    try {
+      const videoUrl = String(payload?.videoUrl || '').trim();
+      const recordId = String(payload?.recordId || '').trim();
+      if (!/^https?:\/\//i.test(videoUrl)) return { success: false, error: '成片地址必须是 http(s) URL' };
+      if (!recordId) return { success: false, error: 'recordId 不能为空' };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 300_000);
+      let response: Response;
+      try {
+        response = await fetch(videoUrl, { signal: controller.signal });
+      } finally { clearTimeout(timeout); }
+      if (!response.ok) return { success: false, error: `下载成片失败（HTTP ${response.status}）` };
+      const arrayBuffer = await response.arrayBuffer();
+      const bytes = arrayBuffer.byteLength;
+      if (bytes === 0) return { success: false, error: '成片内容为空' };
+      if (bytes > 500 * 1024 * 1024) return { success: false, error: `成片 ${(bytes / 1024 / 1024).toFixed(1)} MB 超过 500 MB 存储上限` };
+      const ext = (response.headers.get('content-type') || '').includes('webm') ? 'webm' : 'mp4';
+      const safeName = `${recordId}.${ext}`;
+      const filePath = path.join(videoGenDir, safeName);
+      fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+      return { success: true, filePath, fileName: safeName, bytes, mimeType: ext === 'webm' ? 'video/webm' : 'video/mp4' };
+    } catch (err) {
+      const message = err instanceof Error && err.name === 'AbortError' ? '下载成片超时（5 分钟）' : (err instanceof Error ? err.message : String(err));
+      return { success: false, error: message };
+    }
+  });
+
+  ipcMain.handle('video-generation:read-blob', async (_event, filePath: string) => {
+    return readVideoAsBlob(String(filePath || ''));
+  });
+
+  ipcMain.handle('video-generation:reveal', async (_event, filePath: string) => {
+    try {
+      const target = String(filePath || '');
+      if (!target || !fs.existsSync(target)) return { success: false, error: '视频文件不存在' };
+      shell.showItemInFolder(target);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('video-generation:open-folder', async () => {
+    try { shell.openPath(videoGenDir); return { success: true, path: videoGenDir }; }
+    catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) }; }
+  });
+
+  ipcMain.handle('video-generation:cleanup', async (_event, filePath: string) => {
+    try {
+      const target = String(filePath || '');
+      if (!target) return { success: false, error: 'filePath 不能为空' };
+      // 安全护栏：只允许删除 userData/video-generation 下的文件
+      const resolved = path.resolve(target);
+      const allowedRoot = path.resolve(videoGenDir) + path.sep;
+      if (!resolved.startsWith(allowedRoot)) return { success: false, error: '禁止删除插件管理目录之外的文件' };
+      if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 

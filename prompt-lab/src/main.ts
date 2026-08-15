@@ -16,6 +16,7 @@ import { ragWorkerClient } from './main/rag-worker-client';
 import { startRagIndexCoordinator, stopRagIndexCoordinator } from './main/rag-index-coordinator';
 import { setupVideoPlayerIPC, videoPlayerService } from './plugins/video-player/backend/video-service';
 import { setupWorkBrowserIPC } from './main/work-browser';
+import { setupSecurityAuditIPC } from './main/security-audit';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -116,6 +117,7 @@ if (started) {
     setupRagWorkerIPC();
     setupVideoPlayerIPC();
     setupWorkBrowserIPC();
+    setupSecurityAuditIPC();
     startRagIndexCoordinator();
     createTray();
     configureWindowsJumpList();

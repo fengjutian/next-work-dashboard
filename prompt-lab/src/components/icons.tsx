@@ -134,6 +134,14 @@ function WorkBrowser({ className, ...props }: SVGProps<SVGSVGElement>) {
   </svg>;
 }
 
+/** Shield + checkmark, used by the Security Audit plugin. */
+function ShieldAudit({ className, ...props }: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className} {...props}>
+    <path d="M12 2.75 4 5.25v6.2c0 4.55 3.18 8.66 8 9.8 4.82-1.14 8-5.25 8-9.8v-6.2l-8-2.5Z" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinejoin="round" />
+    <path d="m8.6 12.2 2.4 2.4 4.4-4.7" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>;
+}
+
 export {
   ArrowLeft,
   ArrowLeftRight,
@@ -178,6 +186,7 @@ export {
   Loader2,
   Weread,
   WorkBrowser,
+  ShieldAudit,
   HanyuJinjie,
   Maximize2,
   Menu,

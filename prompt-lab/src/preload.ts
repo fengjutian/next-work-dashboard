@@ -1,6 +1,7 @@
 ﻿import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron';
 import type { ElectronAPI, MemoryFile } from './types/electron';
 import { workBrowserBridge } from './preload/work-browser';
+import { securityAuditBridge } from './preload/security-audit';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
@@ -14,6 +15,9 @@ const electronAPI: ElectronAPI = {
   },
   outlineResearch: {
     search: (queries) => ipcRenderer.invoke('outline-research:search', queries),
+  },
+  outlineGithub: {
+    pagesStatus: (remoteUrl) => ipcRenderer.invoke('outline-github:pages-status', remoteUrl),
   },
   rss: {
     fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
@@ -155,6 +159,19 @@ const electronAPI: ElectronAPI = {
   fetchFavicon: (siteUrl: string) => ipcRenderer.invoke('fetch-favicon', siteUrl),
   llmChat: (payload) => ipcRenderer.invoke('llm:chat', payload),
   generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
+  videoGeneration: {
+    create: (payload: import('./plugins/video-generation/types').VideoGenerationRequest) =>
+      ipcRenderer.invoke('video-generation:create', payload),
+    query: (payload: { baseUrl?: string; apiKey: string; taskId: string }) =>
+      ipcRenderer.invoke('video-generation:query', payload),
+    download: (payload: { taskId: string; videoUrl: string; recordId: string }) =>
+      ipcRenderer.invoke('video-generation:download', payload),
+    readBlob: (filePath: string) =>
+      ipcRenderer.invoke('video-generation:read-blob', filePath) as Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }>,
+    reveal: (filePath: string) => ipcRenderer.invoke('video-generation:reveal', filePath),
+    openFolder: () => ipcRenderer.invoke('video-generation:open-folder') as Promise<{ success: boolean; path?: string; error?: string }>,
+    cleanup: (filePath: string) => ipcRenderer.invoke('video-generation:cleanup', filePath),
+  },
   screenCapture: {
     setTarget: (target, systemAudio) => ipcRenderer.invoke('screen-capture:set-target', { target, systemAudio }),
     getPrimaryScreenSourceId: () => ipcRenderer.invoke('screen-capture:primary-source'),
@@ -541,6 +558,9 @@ const electronAPI: ElectronAPI = {
 
   // Work Browser（work-browser 插件）
   workBrowser: workBrowserBridge,
+
+  // Security Audit（security-audit 插件）
+  securityAudit: securityAuditBridge,
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

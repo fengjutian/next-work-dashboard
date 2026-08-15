@@ -138,6 +138,9 @@ export interface ElectronAPI {
       providers: Array<{ providerId: string; ok: boolean; count: number; error: string | null }>;
     }>;
   };
+  outlineGithub: {
+    pagesStatus: (remoteUrl: string) => Promise<{ success: boolean; data?: { state: string; conclusion?: string; url?: string; updatedAt?: string; branch?: string }; error?: string }>;
+  };
   rss: {
     fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
     loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
@@ -189,6 +192,15 @@ export interface ElectronAPI {
   fetchFavicon: (siteUrl: string) => Promise<string | null>;
   llmChat: (payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => Promise<{ ok: boolean; status: number; data?: any; error?: string }>;
   generateImage: (payload: import('../plugins/style-image/types').StyleImageRequest) => Promise<import('../plugins/style-image/types').StyleImageResult>;
+  videoGeneration: {
+    create: (payload: import('../plugins/video-generation/types').VideoGenerationRequest) => Promise<{ success: boolean; taskId?: string; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
+    query: (payload: { baseUrl?: string; apiKey: string; taskId: string }) => Promise<{ success: boolean; info?: import('../plugins/video-generation/types').VideoTaskInfo; error?: string }>;
+    download: (payload: { taskId: string; videoUrl: string; recordId: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; bytes?: number; mimeType?: string; error?: string }>;
+    readBlob: (filePath: string) => Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }>;
+    reveal: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+    openFolder: () => Promise<{ success: boolean; path?: string; error?: string }>;
+    cleanup: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  };
   screenCapture: {
     setTarget: (target: 'app' | 'screen', systemAudio: boolean) => Promise<{ target: 'app' | 'screen'; systemAudio: boolean }>;
     getPrimaryScreenSourceId: () => Promise<string>;
@@ -533,6 +545,19 @@ export interface ElectronAPI {
       suggest: (docSummary: { title: string; url: string; capturedAt: number }) => Promise<Array<{ workspaceId: string; score: number; reasons: string[] }>>;
     };
   };
+  securityAudit: {
+    settings: {
+      get: (key: string) => Promise<string | null>;
+      set: (key: string, value: string) => Promise<{ ok: boolean }>;
+    };
+    scan: {
+      start: (input: { projectDir: string }) => Promise<{ ok: boolean; jobId: string; projectDir: string }>;
+      cancel: (jobId: string) => Promise<{ ok: boolean }>;
+    };
+    findings: {
+      list: (projectDir: string) => Promise<unknown[]>;
+    };
+  };
 }
 
 export interface RagWorkerChunkInput {
@@ -803,6 +828,10 @@ export interface ChapterProjectRecord {
   requirement?: string;
   chapterBriefs?: Record<string, { goal: string; targetWords: number; keyQuestions: string; requiredSources: string; avoidTopics: string }>;
   chapterStatuses?: Record<string, { state: 'pending' | 'generating' | 'review' | 'complete' | 'error'; error?: string; updatedAt: number }>;
+  knowledgeEntries?: Array<{ id: string; kind: 'person' | 'event' | 'place' | 'term' | 'date'; name: string; canonical: string; aliases: string; notes: string }>;
+  evidenceRecords?: Array<{ id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; createdAt: number }>;
+  qualityReports?: Record<string, { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }>;
+  deploymentStatus?: { state: 'unconfigured' | 'configured' | 'publishing' | 'published' | 'failed'; url?: string; message?: string; updatedAt: number };
   splitMode: 'chapter' | 'section' | 'single';
   organizeByPart: boolean;
   template: string;

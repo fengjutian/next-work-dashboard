@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines, WorkBrowser } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines, WorkBrowser, ShieldAudit } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -57,6 +57,7 @@ const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ def
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ default: m.ThinkingLabPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
+const videoGeneration = preloadable(() => import('../video-generation').then((m) => ({ default: m.VideoGenerationPanel })));
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
 const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default: m.CalcPathPanel })));
 const rssReader = preloadable(() => import('../rss-reader').then((m) => ({ default: m.RssReaderPanel })));
@@ -91,6 +92,7 @@ const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const ThinkingLabPanel = thinkingLab.component;
 const WorkBrowserPanel = workBrowser.component;
+const VideoGenerationPanel = videoGeneration.component;
 const EnglishLookupPanel = englishLookup.component;
 const CalcPathPanel = calcPath.component;
 const RssReaderPanel = rssReader.component;
@@ -465,6 +467,30 @@ const builtInPlugins: Plugin[] = [
       commands: [{ id: 'lyric-studio.generate', title: 'AI 生成整首歌词', category: '歌词工坊' }],
       views: [{ id: 'lyric-studio.main', title: '歌词工坊', component: LyricStudioPanel, location: 'main' }],
       settings: [{ key: 'lyric-studio.autoSave', label: '自动保存项目', type: 'boolean', default: true }],
+    },
+  },
+  {
+    id: 'video-generation',
+    name: '视频生成',
+    icon: Video,
+    component: VideoGenerationPanel,
+    enabled: false,
+    order: 26.5,
+    keepAlive: true,
+    preload: () => import('../video-generation'),
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('video-generation.open', () => {
+        window.dispatchEvent(new CustomEvent('video-generation:command', { detail: { command: 'open' } }));
+      }));
+      context.subscriptions.add(context.commands.register('video-generation.refresh', () => {
+        window.dispatchEvent(new CustomEvent('video-generation:command', { detail: { command: 'refresh' } }));
+      }));
+    },
+    contributions: {
+      commands: [
+        { id: 'video-generation.open', title: '打开视频生成', category: '视频生成' },
+        { id: 'video-generation.refresh', title: '刷新视频生成历史', category: '视频生成' },
+      ],
     },
   },
   {

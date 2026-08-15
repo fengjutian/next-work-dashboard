@@ -323,6 +323,26 @@ function ensureSchema(): void {
       image BLOB NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_style_images_created ON style_generated_images(created_at DESC);
+    -- ── Video Generation (MiniMax-H3) ──
+    -- 视频文件落盘到 userData/video-generation/，这里只存元数据
+    CREATE TABLE IF NOT EXISTS video_generation_tasks (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL DEFAULT 'text-to-video',
+      duration INTEGER NOT NULL DEFAULT 6,
+      resolution TEXT NOT NULL DEFAULT '768P',
+      ratio TEXT NOT NULL DEFAULT '16:9',
+      file_name TEXT NOT NULL DEFAULT '',
+      file_path TEXT NOT NULL DEFAULT '',
+      bytes INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'processing',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_generation_created ON video_generation_tasks(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_video_generation_task_id ON video_generation_tasks(task_id);
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -1246,6 +1266,112 @@ export async function dbDeleteGeneratedImage(id: string): Promise<void> {
   await flushDbToDisk();
 }
 
+// ─── Video Generation (MiniMax-H3) ────────────────────────────────
+export interface DbVideoTaskRecord {
+  id: string;
+  taskId: string;
+  prompt: string;
+  model: string;
+  mode: string;
+  duration: number;
+  resolution: string;
+  ratio: string;
+  fileName: string;
+  filePath: string;
+  bytes: number;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function dbUpsertVideoTask(record: DbVideoTaskRecord): Promise<void> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  _sqlDb.run(`INSERT OR REPLACE INTO video_generation_tasks
+    (id, task_id, prompt, model, mode, duration, resolution, ratio, file_name, file_path, bytes, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+    record.id, record.taskId, record.prompt, record.model, record.mode, record.duration, record.resolution, record.ratio,
+    record.fileName, record.filePath, record.bytes, record.status, record.createdAt, record.updatedAt,
+  ]);
+  await flushDbToDisk();
+}
+
+export async function dbUpdateVideoTaskStatus(id: string, status: string, updatedAt = Date.now()): Promise<void> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  _sqlDb.run('UPDATE video_generation_tasks SET status = ?, updated_at = ? WHERE id = ?', [status, updatedAt, id]);
+  await flushDbToDisk();
+}
+
+export async function dbUpdateVideoTaskFile(id: string, fileName: string, filePath: string, bytes: number): Promise<void> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  _sqlDb.run('UPDATE video_generation_tasks SET file_name = ?, file_path = ?, bytes = ?, updated_at = ? WHERE id = ?',
+    [fileName, filePath, bytes, Date.now(), id]);
+  await flushDbToDisk();
+}
+
+export function dbListVideoTasks(limit = 100, status?: string): DbVideoTaskRecord[] {
+  if (!_sqlDb) return [];
+  const statement = status
+    ? _sqlDb.prepare('SELECT * FROM video_generation_tasks WHERE status = ? ORDER BY created_at DESC LIMIT ?')
+    : _sqlDb.prepare('SELECT * FROM video_generation_tasks ORDER BY created_at DESC LIMIT ?');
+  statement.bind(status ? [status, limit] : [limit]);
+  const records: DbVideoTaskRecord[] = [];
+  while (statement.step()) {
+    const row = statement.getAsObject();
+    records.push({
+      id: String(row.id),
+      taskId: String(row.task_id),
+      prompt: String(row.prompt),
+      model: String(row.model),
+      mode: String(row.mode),
+      duration: Number(row.duration),
+      resolution: String(row.resolution),
+      ratio: String(row.ratio),
+      fileName: String(row.file_name),
+      filePath: String(row.file_path),
+      bytes: Number(row.bytes),
+      status: String(row.status),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    });
+  }
+  statement.free();
+  return records;
+}
+
+export function dbGetVideoTask(id: string): DbVideoTaskRecord | null {
+  if (!_sqlDb) return null;
+  const statement = _sqlDb.prepare('SELECT * FROM video_generation_tasks WHERE id = ?');
+  statement.bind([id]);
+  if (!statement.step()) { statement.free(); return null; }
+  const row = statement.getAsObject();
+  statement.free();
+  return {
+    id: String(row.id),
+    taskId: String(row.task_id),
+    prompt: String(row.prompt),
+    model: String(row.model),
+    mode: String(row.mode),
+    duration: Number(row.duration),
+    resolution: String(row.resolution),
+    ratio: String(row.ratio),
+    fileName: String(row.file_name),
+    filePath: String(row.file_path),
+    bytes: Number(row.bytes),
+    status: String(row.status),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+export async function dbDeleteVideoTask(id: string): Promise<string | null> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const existing = dbGetVideoTask(id);
+  if (!existing) return null;
+  _sqlDb.run('DELETE FROM video_generation_tasks WHERE id = ?', [id]);
+  await flushDbToDisk();
+  return existing.filePath || null;
+}
+
 // ═══════════════════════════════════════════
 // 数据库浏览器（只读查询）
 // ═══════════════════════════════════════════
@@ -1396,7 +1522,15 @@ export function runReadonlyDatabaseSql(sql: string, options: { offset?: number; 
   const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const limit = Math.min(1000, Math.max(1, Math.trunc(options.limit ?? 200)));
   const startedAt = performance.now();
-  const statement = _sqlDb.prepare(sql);
+  let statement: ReturnType<SqlJsDatabase['prepare']>;
+  try {
+    statement = _sqlDb.prepare(sql);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const token = message.match(/near "([^"]+)"/)?.[1];
+    const offsetHint = token ? sql.toLocaleLowerCase().indexOf(token.toLocaleLowerCase()) : -1;
+    throw new Error(offsetHint >= 0 ? `${message}（位置 ${offsetHint + 1}）` : message);
+  }
   const columns = statement.getColumnNames();
   const values: unknown[][] = [];
   let seen = 0;
@@ -1423,6 +1557,78 @@ export interface DatabaseTableSchema {
   columns: Array<{ name: string; type: string; notNull: boolean; defaultValue: unknown; primaryKeyOrder: number }>;
   foreignKeys: Array<{ id: number; from: string; targetTable: string; targetColumn: string; onUpdate: string; onDelete: string }>;
   indexes: Array<{ name: string; unique: boolean; origin: string }>;
+}
+
+export interface DatabaseColumnAnalysis {
+  column: string;
+  totalRows: number;
+  nullCount: number;
+  distinctCount: number;
+  min: unknown;
+  max: unknown;
+  average: number | null;
+  minLength: number | null;
+  maxLength: number | null;
+  averageLength: number | null;
+  topValues: Array<{ value: unknown; count: number }>;
+  jsonChecked: number;
+  invalidJsonCount: number;
+}
+
+export function getDatabaseColumnAnalysis(table: string, column: string): DatabaseColumnAnalysis {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const columns = requireKnownTable(table);
+  if (!columns.some((item) => item.name === column)) throw new Error(`Unknown column: ${column}`);
+  const quotedTable = quoteIdentifier(table);
+  const quotedColumn = quoteIdentifier(column);
+  const aggregate = _sqlDb.exec(`SELECT COUNT(*), COUNT(*) - COUNT(${quotedColumn}), COUNT(DISTINCT ${quotedColumn}), MIN(${quotedColumn}), MAX(${quotedColumn}), AVG(${quotedColumn}), MIN(length(CAST(${quotedColumn} AS TEXT))), MAX(length(CAST(${quotedColumn} AS TEXT))), AVG(length(CAST(${quotedColumn} AS TEXT))) FROM ${quotedTable}`)[0]?.values[0] ?? [];
+  const topRows = _sqlDb.exec(`SELECT ${quotedColumn}, COUNT(*) AS frequency FROM ${quotedTable} WHERE ${quotedColumn} IS NOT NULL GROUP BY ${quotedColumn} ORDER BY frequency DESC LIMIT 10`)[0]?.values ?? [];
+  const sampleRows = _sqlDb.exec(`SELECT ${quotedColumn} FROM ${quotedTable} WHERE typeof(${quotedColumn}) = 'text' AND substr(trim(${quotedColumn}), 1, 1) IN ('{', '[') LIMIT 1000`)[0]?.values ?? [];
+  let invalidJsonCount = 0;
+  for (const row of sampleRows) {
+    try { JSON.parse(String(row[0])); } catch { invalidJsonCount += 1; }
+  }
+  const numberOrNull = (value: unknown): number | null => value === null || value === undefined ? null : Number(value);
+  return {
+    column,
+    totalRows: Number(aggregate[0] ?? 0),
+    nullCount: Number(aggregate[1] ?? 0),
+    distinctCount: Number(aggregate[2] ?? 0),
+    min: aggregate[3] ?? null,
+    max: aggregate[4] ?? null,
+    average: numberOrNull(aggregate[5]),
+    minLength: numberOrNull(aggregate[6]),
+    maxLength: numberOrNull(aggregate[7]),
+    averageLength: numberOrNull(aggregate[8]),
+    topValues: topRows.map((row) => ({ value: row[0], count: Number(row[1]) })),
+    jsonChecked: sampleRows.length,
+    invalidJsonCount,
+  };
+}
+
+export interface DatabaseSchemaDiagnostic { severity: 'info' | 'warning'; message: string }
+
+export function getDatabaseSchemaDiagnostics(table: string): DatabaseSchemaDiagnostic[] {
+  const schemaInfo = getDatabaseTableSchema(table);
+  const diagnostics: DatabaseSchemaDiagnostic[] = [];
+  if (!schemaInfo.columns.some((column) => column.primaryKeyOrder > 0)) diagnostics.push({ severity: 'warning', message: '该表没有显式主键，行级定位和维护操作存在风险。' });
+  for (const foreignKey of schemaInfo.foreignKeys) {
+    const covered = schemaInfo.indexes.some((index) => {
+      if (!_sqlDb) return false;
+      const rows = _sqlDb.exec(`PRAGMA index_info(${quoteIdentifier(index.name)})`)[0]?.values ?? [];
+      return rows.some((row) => String(row[2]) === foreignKey.from);
+    });
+    if (!covered) diagnostics.push({ severity: 'warning', message: `外键列 ${foreignKey.from} 没有索引，关联查询可能较慢。` });
+  }
+  const signatures = new Map<string, string>();
+  for (const index of schemaInfo.indexes) {
+    if (!_sqlDb) break;
+    const signature = (_sqlDb.exec(`PRAGMA index_info(${quoteIdentifier(index.name)})`)[0]?.values ?? []).map((row) => String(row[2])).join(',');
+    const existing = signatures.get(signature);
+    if (signature && existing) diagnostics.push({ severity: 'info', message: `索引 ${index.name} 与 ${existing} 覆盖相同字段。` });
+    else if (signature) signatures.set(signature, index.name);
+  }
+  return diagnostics;
 }
 
 export function getDatabaseTableSchema(table: string): DatabaseTableSchema {
@@ -1486,7 +1692,7 @@ export function getDatabaseTablePage(
   const resultColumns = dataStatement.getColumnNames();
   dataStatement.free();
   let totalRows = options.totalRows;
-  if (totalRows === undefined || filters.length > 0) {
+  if (totalRows === undefined) {
     const countStatement = _sqlDb.prepare(`SELECT COUNT(*) FROM ${quotedTable}${where}`);
     if (filterValues.length) countStatement.bind(filterValues);
     totalRows = countStatement.step() ? Number(countStatement.get()[0] ?? 0) : 0;
