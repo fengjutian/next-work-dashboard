@@ -28,7 +28,22 @@ export function setupWebsiteRegistryIPC(): void {
     const win = getMainWindow(); const result = await dialog.showOpenDialog(win!, { properties: ['openFile'], filters: [{ name: '网站资料', extensions: ['json', 'csv'] }] });
     if (result.canceled || !result.filePaths[0]) return { imported: 0, skipped: 0, invalid: 0 };
     const file = result.filePaths[0]; const text = await fs.readFile(file, 'utf8');
-    const parsed = file.toLowerCase().endsWith('.csv') ? parseWebsiteCsv(text) : ((JSON.parse(text).records || JSON.parse(text)) as WebsiteRecordInput[]);
+    let parsed: WebsiteRecordInput[];
+    if (file.toLowerCase().endsWith('.csv')) parsed = parseWebsiteCsv(text);
+    else {
+      const payload = JSON.parse(text) as { categories?: Array<{ id: string; name: string; color?: string }>; records?: WebsiteRecordInput[] } | WebsiteRecordInput[];
+      if (Array.isArray(payload)) parsed = payload;
+      else {
+        const existing = store.listCategories();
+        const categoryMap = new Map<string, string>();
+        for (const category of payload.categories || []) {
+          const target = existing.find((item) => item.name.toLowerCase() === category.name.toLowerCase()) || store.createCategory(category.name, category.color);
+          categoryMap.set(category.id, target.id);
+          if (!existing.some((item) => item.id === target.id)) existing.push(target);
+        }
+        parsed = (payload.records || []).map((record) => ({ ...record, categoryId: record.categoryId ? categoryMap.get(record.categoryId) || null : null }));
+      }
+    }
     let imported = 0; let skipped = 0; let invalid = 0;
     for (const input of parsed) { try { sanitizeWebsiteInput(input); store.create(input); imported += 1; } catch (error) { if (String(error).includes('已经存在')) skipped += 1; else invalid += 1; } }
     return { imported, skipped, invalid };

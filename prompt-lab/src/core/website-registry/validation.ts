@@ -27,7 +27,7 @@ export function sanitizeWebsiteInput(input: WebsiteRecordInput): WebsiteRecordIn
     categoryId: input.categoryId || null,
     tags: [...new Set((input.tags || []).map((tag) => tag.trim()).filter(Boolean))].slice(0, 30),
     notes: (input.notes || '').trim().slice(0, 10000),
-    faviconUrl: input.faviconUrl || `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(normalizedUrl).hostname)}&sz=64`,
+    faviconUrl: input.faviconUrl || `${new URL(normalizedUrl).origin}/favicon.ico`,
     favorite: !!input.favorite,
     archived: !!input.archived,
   };
