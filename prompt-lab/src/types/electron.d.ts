@@ -132,6 +132,12 @@ export interface ElectronAPI {
     load: (kind: 'review' | 'minimax') => Promise<{ success: boolean; value?: string; error?: string }>;
     save: (kind: 'review' | 'minimax', value: string) => Promise<{ success: boolean; error?: string }>;
   };
+  outlineResearch: {
+    search: (queries: string[]) => Promise<{
+      results: Array<{ title: string; url: string; snippet: string; domain: string; source: string }>;
+      providers: Array<{ providerId: string; ok: boolean; count: number; error: string | null }>;
+    }>;
+  };
   rss: {
     fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
     loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;

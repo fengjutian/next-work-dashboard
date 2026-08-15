@@ -56,6 +56,16 @@ interface SavedProject {
   pages?: { title: string; description: string; author: string; language: string; repositoryName: string; customDomain: string; accentColor?: string };
 }
 
+interface ResearchSourceCard {
+  id: string;
+  title: string;
+  url: string;
+  snippet: string;
+  domain: string;
+  source: string;
+  selected: boolean;
+}
+
 function loadSavedProjects(): SavedProject[] {
   try {
     const value = JSON.parse(localStorage.getItem(RECENT_PROJECTS_KEY) ?? '[]');
@@ -105,6 +115,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish'>('generate');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiSources, setAiSources] = useState('');
+  const [sourceResearchLoading, setSourceResearchLoading] = useState(false);
+  const [sourceResearchError, setSourceResearchError] = useState('');
+  const [sourceResearchQueries, setSourceResearchQueries] = useState<string[]>([]);
+  const [sourceResearchResults, setSourceResearchResults] = useState<ResearchSourceCard[]>([]);
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -441,6 +455,67 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setAiInstruction(`请依据下面的审校报告修改当前文章。逐项处理“必须修改”和“建议修改”；对“可选扩写”只采纳确实服务本章主题、且不会重复其他章节的建议。无法核实的事实不要擅自补造，应改为审慎表述或保留待核实标记。保持 Markdown 头信息、标题层级、链接和图片不变。输出修改后的完整文章。\n\n审校报告：\n${aiResult}`);
     setAiResult(''); setAiError(''); setReviewOpen(false); setAiOpen(true);
     notice.info({ message: '审校意见已交给助写', description: '请检查补充要求，然后点击“生成预览”；确认修订稿后再替换文档。', placement: 'bottomRight' });
+  };
+
+  const researchHistoricalSources = async () => {
+    if (!activeFile || sourceResearchLoading) return;
+    const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
+    const fallbackQueries = [
+      `${projectTitle} ${chapterName} 史料 原始文献`,
+      `${chapterName} 考古 研究 论文`,
+      `${chapterName} 制度 时间线 历史`,
+    ];
+    setSourceResearchLoading(true); setSourceResearchError(''); setSourceResearchResults([]);
+    try {
+      let queries = fallbackQueries;
+      if (isValidApiKey(reviewApiKey)) {
+        try {
+          const planner = createOpenAIProvider({ apiKey: normalizeApiKey(reviewApiKey), baseUrl: reviewBaseUrl.trim(), chatProxy: window.electronAPI.llmChat });
+          const planningMessages: ChatMessage[] = [
+            { role: 'system', content: '你是历史研究助理。根据书名、章节名和正文主题，生成 3 条互补的中文检索词，分别寻找原始文献或史书、考古或制度材料、现代学术研究。只输出 JSON 字符串数组，不解释，不虚构来源名称。' },
+            { role: 'user', content: `书名：${projectTitle}\n章节：${chapterName}\n正文片段：${documentContent.replace(/^---[\s\S]*?---/, '').slice(0, 1800)}` },
+          ];
+          let raw = '';
+          for await (const chunk of planner.chat(planningMessages, { model: reviewModel.trim(), temperature: 0.25, maxTokens: 600, stream: false })) raw += chunk.delta || '';
+          const json = raw.match(/\[[\s\S]*\]/)?.[0];
+          const parsed = json ? JSON.parse(json) : null;
+          if (Array.isArray(parsed)) {
+            const planned = parsed.map((item) => String(item).trim()).filter(Boolean).slice(0, 3);
+            if (planned.length === 3) queries = planned;
+          }
+        } catch { queries = fallbackQueries; }
+      }
+      setSourceResearchQueries(queries);
+      const [workSearches, historicalSearch] = await Promise.all([
+        Promise.allSettled(queries.map((text) => window.electronAPI.workBrowser.search.run({ text, locale: 'zh-CN', perPage: 6, scope: 'web' }))),
+        window.electronAPI.outlineResearch.search(queries).catch((error) => ({ results: [], providers: [{ providerId: 'historical-fallback', ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }] })),
+      ]);
+      const unique = new Map<string, ResearchSourceCard>();
+      const workResults = workSearches.flatMap((entry) => entry.status === 'fulfilled' ? entry.value.results ?? [] : []);
+      [...workResults, ...historicalSearch.results].forEach((item: { id?: string; title?: string; url?: string; snippet?: string; domain?: string; source?: string }) => {
+        const url = String(item.url || '').trim();
+        if (!/^https?:\/\//i.test(url) || unique.has(url)) return;
+        unique.set(url, { id: url, title: String(item.title || url), url, snippet: String(item.snippet || '').trim(), domain: String(item.domain || new URL(url).hostname), source: String(item.source || 'web'), selected: false });
+      });
+      const cards = [...unique.values()].slice(0, 15);
+      setSourceResearchResults(cards);
+      if (!cards.length) {
+        const workErrors = workSearches.flatMap((entry) => entry.status === 'rejected' ? [entry.reason instanceof Error ? entry.reason.message : String(entry.reason)] : entry.value.providers.filter((provider) => !provider.ok).map((provider) => `${provider.providerId}: ${provider.error || '失败'}`));
+        const fallbackErrors = historicalSearch.providers.filter((provider) => !provider.ok).map((provider) => `${provider.providerId}: ${provider.error || '失败'}`);
+        const details = [...new Set([...workErrors, ...fallbackErrors])].slice(0, 5).join('；');
+        setSourceResearchError(`没有搜索到可用结果。${details ? `搜索源返回：${details}` : '请检查当前网络或代理设置。'}`);
+      }
+    } catch (error) {
+      setSourceResearchError(error instanceof Error ? error.message : String(error));
+    } finally { setSourceResearchLoading(false); }
+  };
+
+  const addSelectedResearchSources = () => {
+    const selected = sourceResearchResults.filter((item) => item.selected);
+    if (!selected.length) return;
+    const material = selected.map((item, index) => `${index + 1}. [${item.title}](${item.url})\n   - 来源：${item.domain || item.source}\n   - 搜索摘要（仅作线索，写作前需打开原文核对）：${item.snippet || '无摘要'}`).join('\n');
+    setAiSources((current) => `${current.trim()}${current.trim() ? '\n\n' : ''}## AI 搜集的史料线索\n${material}\n`);
+    notice.success({ message: `已加入 ${selected.length} 条史料线索`, description: '这些是搜索摘要，建议打开原文核对后再生成文章。', placement: 'bottomRight' });
   };
 
   const saveAndInsertIllustration = async () => {
@@ -817,6 +892,15 @@ export const OutlineScaffolderPanel: React.FC = () => {
           <label className="block text-xs text-muted-foreground">补充要求与可靠资料<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：目标约 2500 字；核心史实、参考资料、必须解释的争议，以及希望采用的叙事视角" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
           <label className="block text-xs text-muted-foreground">史料与参考资料<textarea value={aiSources} onChange={(event) => setAiSources(event.target.value)} disabled={aiLoading} placeholder="粘贴史书原文、考古材料、论文摘要、可靠网页摘录或自己整理的史实。建议同时注明书名、作者、篇章或链接。" className="mt-1 h-32 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
           <p className="text-xs text-muted-foreground">精确引文只从这里取用；未提供出处的内容不会伪造卷次、页码或原话。</p>
+          <Button type="button" variant="outline" className="w-full" disabled={sourceResearchLoading || !activeFile} onClick={researchHistoricalSources}>{sourceResearchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 搜集史料</Button>
+          {sourceResearchQueries.length > 0 && <div className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground"><div className="mb-1 font-medium text-foreground">检索计划</div>{sourceResearchQueries.map((query) => <div key={query} className="truncate" title={query}>• {query}</div>)}</div>}
+          {sourceResearchError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{sourceResearchError}</div>}
+          {sourceResearchResults.length > 0 && <div className="space-y-2 rounded-md border border-border p-2">
+            <div className="flex items-center justify-between"><span className="text-xs font-medium">史料来源候选</span><button type="button" className="text-xs text-primary hover:underline" onClick={() => setSourceResearchResults((current) => current.map((item) => ({ ...item, selected: true })))}>全选</button></div>
+            <div className="max-h-56 space-y-2 overflow-auto">{sourceResearchResults.map((item) => <label key={item.id} className="flex cursor-pointer gap-2 rounded-md border border-border p-2 hover:bg-muted/50"><input type="checkbox" checked={item.selected} onChange={(event) => setSourceResearchResults((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, selected: event.target.checked } : candidate))} className="mt-1" /><span className="min-w-0"><span className="block truncate text-xs font-medium" title={item.title}>{item.title}</span><span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{item.snippet || '无搜索摘要'}</span><button type="button" className="mt-1 text-xs text-primary hover:underline" onClick={(event) => { event.preventDefault(); event.stopPropagation(); window.electronAPI.shell.openExternal(item.url); }}>打开原文 · {item.domain}</button></span></label>)}</div>
+            <Button type="button" size="sm" className="w-full" disabled={!sourceResearchResults.some((item) => item.selected)} onClick={addSelectedResearchSources}>加入选中的史料线索</Button>
+            <p className="text-xs text-amber-700">搜索摘要不是史料原文。请打开来源核对作者、日期和上下文后再引用。</p>
+          </div>}
           {!aiApi.apiKey?.trim() && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">尚未配置 API Key，请先前往应用设置配置 AI。</div>}
           {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止生成</Button> : <div className="grid grid-cols-2 gap-2"><Button variant="outline" disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(false)}><Sparkles className="mr-1 h-4 w-4" />生成预览</Button><Button disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(true)}>生成并写入</Button></div>}
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}

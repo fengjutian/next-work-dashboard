@@ -12,6 +12,9 @@ const electronAPI: ElectronAPI = {
     load: (kind) => ipcRenderer.invoke('outline-secrets:load', kind),
     save: (kind, value) => ipcRenderer.invoke('outline-secrets:save', kind, value),
   },
+  outlineResearch: {
+    search: (queries) => ipcRenderer.invoke('outline-research:search', queries),
+  },
   rss: {
     fetch: (url: string) => ipcRenderer.invoke('rss:fetch', url),
     loadState: () => ipcRenderer.invoke('rss:state:load'),

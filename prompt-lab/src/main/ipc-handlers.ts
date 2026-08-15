@@ -173,6 +173,55 @@ export function setupIPC(webviewPreloadPath: string) {
     if (!token) return { success: deleteToken(name) };
     return saveToken(name, token, '章节文档生成器') ? { success: true } : { success: false, error: 'API Key 加密保存失败' };
   });
+  ipcMain.handle('outline-research:search', async (_event, rawQueries: unknown) => {
+    const queries = Array.isArray(rawQueries) ? rawQueries.map((item) => String(item).trim().slice(0, 120)).filter(Boolean).slice(0, 3) : [];
+    if (!queries.length) return { results: [], providers: [] };
+    const results: Array<{ title: string; url: string; snippet: string; domain: string; source: string }> = [];
+    const providers: Array<{ providerId: string; ok: boolean; count: number; error: string | null }> = [];
+    const stripHtml = (value: unknown) => String(value ?? '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const searchMediaWiki = async (host: 'zh.wikipedia.org' | 'zh.wikisource.org', source: string) => {
+      let count = 0;
+      for (const query of queries) {
+        const url = `https://${host}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { 'User-Agent': 'next-work-dashboard/1.0 historical-research' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as { query?: { search?: Array<{ title?: string; snippet?: string }> } };
+        for (const item of data.query?.search ?? []) {
+          const title = String(item.title || '').trim();
+          if (!title) continue;
+          results.push({ title, url: `https://${host}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`, snippet: stripHtml(item.snippet), domain: host, source });
+          count += 1;
+        }
+      }
+      providers.push({ providerId: source, ok: true, count, error: null });
+    };
+    const searchOpenAlex = async () => {
+      let count = 0;
+      for (const query of queries) {
+        const response = await fetch(`https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=5`, { signal: AbortSignal.timeout(12_000), headers: { 'User-Agent': 'next-work-dashboard/1.0 historical-research' } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as { results?: Array<{ display_name?: string; publication_year?: number; doi?: string; id?: string; type?: string; authorships?: Array<{ author?: { display_name?: string } }> }> };
+        for (const item of data.results ?? []) {
+          const title = String(item.display_name || '').trim();
+          const url = String(item.doi || item.id || '').trim();
+          if (!title || !/^https?:\/\//i.test(url)) continue;
+          const authors = (item.authorships ?? []).slice(0, 3).map((entry) => entry.author?.display_name).filter(Boolean).join('、');
+          results.push({ title, url, snippet: [authors, item.publication_year, item.type].filter(Boolean).join(' · '), domain: new URL(url).hostname, source: 'openalex' });
+          count += 1;
+        }
+      }
+      providers.push({ providerId: 'openalex', ok: true, count, error: null });
+    };
+    const tasks = [
+      ['wikisource', () => searchMediaWiki('zh.wikisource.org', 'wikisource')],
+      ['wikipedia', () => searchMediaWiki('zh.wikipedia.org', 'wikipedia')],
+      ['openalex', searchOpenAlex],
+    ] as const;
+    await Promise.all(tasks.map(async ([id, run]) => {
+      try { await run(); } catch (error) { providers.push({ providerId: id, ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }); }
+    }));
+    return { results, providers };
+  });
   ipcMain.handle('plugins:definitions:load', () => loadPluginDefinitions());
   ipcMain.handle('plugins:definitions:save', (_event, definitions: unknown[]) => savePluginDefinitions(definitions));
   ipcMain.handle('plugins:marketplace:cached', () => loadCachedCatalog());
