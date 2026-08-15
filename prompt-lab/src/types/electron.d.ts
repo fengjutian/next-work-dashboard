@@ -565,12 +565,15 @@ export interface ElectronAPI {
     exportData: () => Promise<boolean>;
   };
   securityAudit: {
+    project: {
+      select: () => Promise<{ ok: boolean; cancelled?: boolean; projectDir?: string }>;
+    };
     settings: {
       get: (key: string) => Promise<string | null>;
       set: (key: string, value: string) => Promise<{ ok: boolean }>;
     };
     scan: {
-      start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; aiReview?: boolean }) => Promise<{ ok: boolean; cancelled?: boolean; jobId?: string; projectDir?: string }>;
+      start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => Promise<{ ok: boolean; cancelled?: boolean; jobId?: string; projectDir?: string }>;
       cancel: (jobId: string) => Promise<{ ok: boolean }>;
       onProgress: (callback: (progress: import('../core/security-audit').ScanProgress) => void) => () => void;
     };
@@ -578,6 +581,8 @@ export interface ElectronAPI {
       list: (projectDir: string) => Promise<import('../core/security-audit').SecurityFinding[]>;
     };
     scans: { list: (projectDir: string) => Promise<import('../core/security-audit').ScanRecord[]> };
+    scanners: { list: () => Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean }>> };
+    report: { exportSarif: (projectDir: string) => Promise<{ ok: boolean; cancelled?: boolean; filePath?: string }> };
   };
 }
 

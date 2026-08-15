@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { builtinRuleScanner, enumerateTextFiles, mergeWithBaseline, redactSecrets } from '../src/core/security-audit';
+import { builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, redactSecrets } from '../src/core/security-audit';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -44,5 +44,13 @@ describe('security audit core', () => {
     const root = temporaryRoot(); fs.writeFileSync(path.join(root, 'unsafe.ts'), 'eval(input)');
     const previous = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit() {} });
     expect(mergeWithBaseline([], previous, Date.now(), new Set(['other.ts']))[0].status).toBe('open');
+  });
+
+  it('exports active findings as SARIF with stable fingerprints', async () => {
+    const root = temporaryRoot(); fs.writeFileSync(path.join(root, 'unsafe.ts'), 'eval(input)');
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit() {} });
+    const sarif = findingsToSarif(findings, root) as { version: string; runs: Array<{ results: Array<{ partialFingerprints: { primaryLocationLineHash: string } }> }> };
+    expect(sarif.version).toBe('2.1.0');
+    expect(sarif.runs[0].results[0].partialFingerprints.primaryLocationLineHash).toBe(findings[0].fingerprint);
   });
 });

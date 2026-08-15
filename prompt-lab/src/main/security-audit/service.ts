@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, safeStorage, type WebContents } from 'electron';
-import { SecurityScanOrchestrator, builtinScanners, mergeWithBaseline, progressFor, resolveScanFiles, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
+import { SecurityScanOrchestrator, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
+import { externalScanners, listExternalScannerAvailability } from './external-scanners';
 
 interface StoredData { version: 1; settings: Record<string, string>; scans: ScanRecord[] }
 const jobs = new Map<string, AbortController>();
-const orchestrator = new SecurityScanOrchestrator(builtinScanners);
+const orchestrator = new SecurityScanOrchestrator([...builtinScanners, ...externalScanners]);
 
 function storageFile(): string { return path.join(app.getPath('userData'), 'security-audit', 'data.json'); }
 function load(): StoredData {
@@ -40,13 +41,13 @@ function lastFindings(data: StoredData, projectDir: string): SecurityFinding[] {
   return data.scans.find((scan) => scan.projectDir === projectDir && scan.status === 'completed')?.findings ?? [];
 }
 
-async function reviewWithAI(findings: SecurityFinding[], signal: AbortSignal): Promise<SecurityFinding[]> {
-  const apiKey = getSetting('securityAudit.ai.apiKey');
+async function reviewWithAI(findings: SecurityFinding[], signal: AbortSignal, runtime?: ScanRequest['aiConfig']): Promise<SecurityFinding[]> {
+  const apiKey = runtime?.apiKey?.trim();
   if (!apiKey || findings.length === 0) return findings;
-  const baseUrl = (getSetting('securityAudit.ai.baseUrl') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+  const baseUrl = (runtime?.baseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/$/, '');
   const endpoint = new URL(baseUrl);
   if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(endpoint.hostname))) || endpoint.username || endpoint.password) return findings;
-  const model = getSetting('securityAudit.ai.model') ?? 'gpt-4o-mini';
+  const model = runtime?.model?.trim() || 'gpt-4o-mini';
   const payload = findings.slice(0, 50).map(({ id, ruleId, title, description, location, evidence }) => ({ id, ruleId, title, description, location, evidence }));
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: '你是安全发现复核员。扫描器是事实来源；你只评估误报，不创造新发现。返回 JSON：{"reviews":[{"id":"...","verdict":"confirmed|likely|uncertain|false-positive","rationale":"简短理由"}]}' }, { role: 'user', content: JSON.stringify(payload) }] }) });
@@ -72,8 +73,9 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
     try {
       const files = await resolveScanFiles(input.projectDir, input.mode ?? 'full', input.baselineRef);
       emit({ phase: 'scanning', percent: 2, message: `已确定 ${files.length} 个扫描文件` });
-      let findings = await orchestrator.run({ projectDir: input.projectDir, files, signal: controller.signal, emit }, input.scanners);
-      if (input.aiReview) { emit({ phase: 'triaging', percent: 85, message: 'AI 正在复核确定性扫描结果', findingsCount: findings.length }); findings = await reviewWithAI(findings, controller.signal); }
+      const selectedScanners = [...new Set([...builtinScanners.map((scanner) => scanner.id), ...(input.scanners ?? [])])];
+      let findings = await orchestrator.run({ projectDir: input.projectDir, files, signal: controller.signal, emit }, selectedScanners);
+      if (input.aiReview) { emit({ phase: 'triaging', percent: 85, message: '系统默认 AI 正在复核确定性扫描结果', findingsCount: findings.length }); findings = await reviewWithAI(findings, controller.signal, input.aiConfig); }
       const current = load();
       findings = mergeWithBaseline(findings, lastFindings(current, input.projectDir), Date.now(), input.mode === 'incremental' ? new Set(files) : undefined);
       const saved = current.scans.find((scan) => scan.id === jobId);
@@ -94,3 +96,11 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
 export function cancelScan(jobId: string): boolean { const job = jobs.get(jobId); if (!job) return false; job.abort(); return true; }
 export function listFindings(projectDir: string): SecurityFinding[] { return lastFindings(load(), projectDir); }
 export function listScans(projectDir: string): ScanRecord[] { return load().scans.filter((scan) => scan.projectDir === projectDir); }
+export async function listScanners(): Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean }>> {
+  const external = await listExternalScannerAvailability();
+  return [
+    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, available: true, builtIn: true })),
+    ...external.map((scanner) => ({ ...scanner, builtIn: false })),
+  ];
+}
+export function createSarif(projectDir: string): string { return JSON.stringify(findingsToSarif(listFindings(projectDir), projectDir), null, 2); }

@@ -30,7 +30,15 @@ export interface SecurityFinding {
 }
 
 export type ScanMode = 'full' | 'incremental';
-export interface ScanRequest { projectDir: string; mode?: ScanMode; baselineRef?: string; scanners?: string[]; aiReview?: boolean }
+export interface ScanRequest {
+  projectDir: string;
+  mode?: ScanMode;
+  baselineRef?: string;
+  scanners?: string[];
+  aiReview?: boolean;
+  /** Runtime-only application AI config. It is never persisted by Security Audit. */
+  aiConfig?: { baseUrl: string; apiKey: string; model: string };
+}
 export interface ScanProgress { jobId: string; projectDir?: string; phase: 'scanning' | 'triaging' | 'completed' | 'failed' | 'cancelled'; percent: number; message: string; findingsCount?: number }
 export interface ScanContext { projectDir: string; files: string[]; signal: AbortSignal; emit(progress: Omit<ScanProgress, 'jobId'>): void }
 export interface SecurityScanner {

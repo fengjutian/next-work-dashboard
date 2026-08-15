@@ -12,7 +12,12 @@ export class SecurityScanOrchestrator {
       if (context.signal.aborted) throw new DOMException('Scan cancelled', 'AbortError');
       const scanner = enabled[index];
       context.emit({ phase: 'scanning', percent: Math.round((index / Math.max(enabled.length, 1)) * 80), message: `正在运行 ${scanner.name}`, findingsCount: findings.length });
-      findings.push(...await scanner.scan(context));
+      try {
+        findings.push(...await scanner.scan(context));
+      } catch (error) {
+        if (context.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) throw error;
+        context.emit({ phase: 'scanning', percent: Math.round(((index + 1) / Math.max(enabled.length, 1)) * 80), message: `${scanner.name} 不可用，已跳过：${error instanceof Error ? error.message : '未知错误'}`, findingsCount: findings.length });
+      }
     }
     const unique = new Map(findings.map((finding) => [finding.fingerprint, finding]));
     return [...unique.values()];

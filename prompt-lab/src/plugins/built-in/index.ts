@@ -575,9 +575,6 @@ const builtInPlugins: Plugin[] = [
         { id: 'security-audit.open-settings', title: 'Security Audit 设置', category: 'Security Audit' },
       ],
       settings: [
-        { key: 'securityAudit.ai.baseUrl', label: 'AI 服务 baseUrl（OpenAI-compatible）', type: 'string', default: 'https://api.openai.com/v1' },
-        { key: 'securityAudit.ai.apiKey', label: 'AI 服务 API Key', type: 'string' },
-        { key: 'securityAudit.ai.model', label: 'AI 模型', type: 'string', default: 'gpt-4o-mini' },
         { key: 'securityAudit.sandboxMode', label: '执行模式（v1 仅占位，v2 实现）', type: 'string', default: 'local' },
       ],
     },

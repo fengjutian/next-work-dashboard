@@ -12,7 +12,9 @@
 import { dialog, ipcMain } from 'electron';
 import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
 import type { ScanRequest } from '../../core/security-audit';
-import { cancelScan, getSetting, listFindings, listScans, setSetting, startScan } from './service';
+import fs from 'node:fs';
+import path from 'node:path';
+import { cancelScan, createSarif, getSetting, listFindings, listScanners, listScans, setSetting, startScan } from './service';
 
 let initialized = false;
 
@@ -23,6 +25,13 @@ let initialized = false;
 export function setupSecurityAuditIPC(): void {
   if (initialized) return;
   initialized = true;
+
+  ipcMain.handle('security-audit:project:select', async () => {
+    const selected = await dialog.showOpenDialog({ properties: ['openDirectory'], title: '选择安全扫描项目' });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
+    authorizeWorkspace(selected.filePaths[0]);
+    return { ok: true, projectDir: resolveWorkspacePath(selected.filePaths[0]) };
+  });
 
   // ── Settings: AI 配置（baseUrl / apiKey / model）+ sandboxMode 占位 ──
 
@@ -62,4 +71,14 @@ export function setupSecurityAuditIPC(): void {
   });
 
   ipcMain.handle('security-audit:scans:list', (_e, projectDir: string) => listScans(resolveWorkspacePath(projectDir)));
+
+  ipcMain.handle('security-audit:scanners:list', () => listScanners());
+
+  ipcMain.handle('security-audit:report:export-sarif', async (_e, projectDir: string) => {
+    const safeRoot = resolveWorkspacePath(projectDir);
+    const selected = await dialog.showSaveDialog({ title: '导出 SARIF 安全报告', defaultPath: `${path.basename(safeRoot)}-security-audit.sarif`, filters: [{ name: 'SARIF', extensions: ['sarif', 'json'] }] });
+    if (selected.canceled || !selected.filePath) return { ok: false, cancelled: true };
+    fs.writeFileSync(selected.filePath, createSarif(safeRoot), { encoding: 'utf8', mode: 0o600 });
+    return { ok: true, filePath: selected.filePath };
+  });
 }

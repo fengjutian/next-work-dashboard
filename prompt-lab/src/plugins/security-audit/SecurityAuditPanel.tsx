@@ -6,10 +6,12 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { FolderOpen, Play, ShieldAudit } from '@/components/icons';
+import { useStore } from '../../store';
 import { Alert, Button, Card, Empty, Modal, Progress, Space, Spin, Tag, ToastHost, message } from './ui';
 import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanProgress } from './constants';
 
 type SeverityColor = 'red' | 'orange' | 'blue' | 'green';
+type ScannerInfo = { id: string; name: string; available: boolean; builtIn: boolean };
 
 const SEVERITY_COLORS: Record<Finding['severity'], SeverityColor> = {
   P0: 'red',
@@ -114,6 +116,7 @@ const MOCK_PROGRESS_TIMELINE: ScanProgress[] = [
 // ── 主面板 ──
 
 export function SecurityAuditPanel(): JSX.Element {
+  const aiApi = useStore((state) => state.aiApi);
   const [progress, setProgress] = useState<ScanProgress>({ phase: 'idle', percent: 0, message: '待扫描' });
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [scannedDir, setScannedDir] = useState<string | null>(null);
@@ -122,6 +125,15 @@ export function SecurityAuditPanel(): JSX.Element {
   const [jobId, setJobId] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<'full' | 'incremental'>('incremental');
   const [commandScanRequested, setCommandScanRequested] = useState(false);
+  const [scanners, setScanners] = useState<ScannerInfo[]>([]);
+  const [selectedScanners, setSelectedScanners] = useState<string[]>([]);
+
+  useEffect(() => {
+    void window.electronAPI.securityAudit.scanners.list().then((items) => {
+      setScanners(items);
+      setSelectedScanners(items.filter((item) => item.available).map((item) => item.id));
+    }).catch(() => undefined);
+  }, []);
 
   // 监听命令面板触发的命令（"Security Scan" 等）
   useEffect(() => {
@@ -175,12 +187,22 @@ export function SecurityAuditPanel(): JSX.Element {
     if (!api) { void runMockScan(); return; }
     setFindings(null);
     setProgress({ phase: 'scanning', percent: 0, message: '请选择项目目录…' });
-    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef: 'HEAD', aiReview: true }).then((result) => {
+    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef: 'HEAD', scanners: selectedScanners, aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
       if (!result.ok || !result.projectDir || !result.jobId) { setProgress({ phase: 'idle', percent: 0, message: '已取消' }); return; }
       setScannedDir(result.projectDir);
       setJobId(result.jobId);
     }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: error instanceof Error ? error.message : '扫描启动失败' }));
-  }, [runMockScan, scanMode, scannedDir]);
+  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, runMockScan, scanMode, scannedDir, selectedScanners]);
+
+  const selectProject = useCallback(() => {
+    void window.electronAPI.securityAudit.project.select().then((result) => {
+      if (result.ok && result.projectDir) {
+        setScannedDir(result.projectDir);
+        setFindings(null);
+        setProgress({ phase: 'idle', percent: 0, message: '项目已选择' });
+      }
+    }).catch((error: unknown) => message.warning(error instanceof Error ? error.message : '项目选择失败'));
+  }, []);
 
   useEffect(() => {
     if (!commandScanRequested) return;
@@ -213,16 +235,28 @@ export function SecurityAuditPanel(): JSX.Element {
           {scannedDir && <Tag>{scannedDir}</Tag>}
         </Space>
         <Space>
+          <Button icon={<FolderOpen size={14} />} onClick={selectProject} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}>
+            {scannedDir ? '切换项目' : '选择项目'}
+          </Button>
           <select className="h-8 rounded border border-border bg-background px-2 text-xs" value={scanMode} onChange={(event) => setScanMode(event.target.value as 'full' | 'incremental')} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}>
             <option value="incremental">增量扫描</option>
             <option value="full">完整扫描</option>
           </select>
           {(progress.phase === 'scanning' || progress.phase === 'triaging') && jobId && <Button onClick={() => { void window.electronAPI.securityAudit.scan.cancel(jobId); }}>取消</Button>}
+          {scannedDir && findings && <Button onClick={() => { void window.electronAPI.securityAudit.report.exportSarif(scannedDir).then((result) => { if (result.ok) message.success(`SARIF 已导出：${result.filePath}`); }); }}>导出 SARIF</Button>}
           <Button icon={<Play size={14} />} type="primary" onClick={runScan} loading={progress.phase === 'scanning' || progress.phase === 'triaging'}>
             扫描项目
           </Button>
         </Space>
       </header>
+
+      {scanners.length > 0 && <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-muted/20 px-5 py-2 text-[11px]">
+        <span className="shrink-0 text-muted-foreground">扫描引擎</span>
+        {scanners.map((scanner) => <label key={scanner.id} className={`flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${scanner.available ? 'border-border bg-card' : 'cursor-not-allowed border-border/50 text-muted-foreground opacity-60'}`} title={scanner.available ? scanner.name : `${scanner.name} 未安装或不可执行`}>
+          <input type="checkbox" checked={selectedScanners.includes(scanner.id)} disabled={!scanner.available || scanner.builtIn || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setSelectedScanners((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id))} />
+          {scanner.name}{scanner.builtIn ? '（内置）' : scanner.available ? '' : '（未安装）'}
+        </label>)}
+      </div>}
 
       {/* Progress */}
       {progress.phase !== 'idle' && (
@@ -244,7 +278,7 @@ export function SecurityAuditPanel(): JSX.Element {
             description={
               <Space direction="vertical" size="small" className="items-center">
                 <span>命令面板输入 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">Security Scan</code> 或点上方按钮开始扫描</span>
-                <span className="text-[11px] text-muted-foreground">v1 用 mock 数据演示流程；v2 接入真实 deepsec CLI</span>
+                <span className="text-[11px] text-muted-foreground">内置规则始终可用；已安装的 Semgrep、Gitleaks、OSV-Scanner、Trivy 可按需启用</span>
               </Space>
             }
           />
@@ -328,7 +362,7 @@ export function SecurityAuditPanel(): JSX.Element {
           <Alert
             type="error"
             message="扫描失败"
-            description="请检查 deepsec CLI 是否安装，或在 Settings 里配置 AI key。"
+            description="请确认已选择并授权项目目录；AI 复核会自动使用系统默认 AI 配置。"
           />
         )}
       </div>

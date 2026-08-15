@@ -112,13 +112,13 @@ if (started) {
     // Register handlers before loading the renderer. Otherwise an eagerly mounted
     // plugin can invoke its preload bridge before the matching main-process handler exists.
     setupIPC(webviewPreloadPath);
+    setupSecurityAuditIPC();
     openMainWindow();
     setupDiskSpaceIPC();
     setupNetProbeIPC();
     setupRagWorkerIPC();
     setupVideoPlayerIPC();
     setupWorkBrowserIPC();
-    setupSecurityAuditIPC();
     setupWebsiteRegistryIPC();
     startRagIndexCoordinator();
     createTray();

@@ -143,6 +143,10 @@
 - ⏳ **Team Workspace**：多人共享 + 权限 + 审计
 - ⏳ **Marketplace**：第三方 SearchProvider / CleanerRules / TaskTemplate
 
+## Future evaluation（观望中，等条件满足再启动评估）
+
+- **[`microsandbox`](https://github.com/superradcompany/microsandbox)**：Y Combinator 背书的 local-first microVM 运行时（libkrun + smoltcp），Apache-2.0。**目前 beta**（README 自陈 "Expect breaking changes"），本项目要求 stable 才上桌。触发重评条件：官方发 stable release（去除 beta 标签 + 提供 LTS 兼容承诺）。详细评估见 [`docs/work-browser/SANDBOX-EVAL.md`](./SANDBOX-EVAL.md)。当前的沙箱加固路径是三档独立计划（[`sandbox-plans/`](./sandbox-plans/)），不依赖 microsandbox。
+
 ## 不在路线图
 
 - **浏览器引擎替换**（如自研）：方向偏离，不做。
