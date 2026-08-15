@@ -632,6 +632,31 @@ export const VideoGenerationPanel: React.FC = () => {
     return payload;
   }, [apiKey, prompt, duration, resolution, ratio, mode, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, firstFrameManualUrl, lastFrameManualUrl, referenceImagesManual, referenceVideosManual, referenceAudiosManual, baseUrl, model, showError]);
 
+  const handleExpand = useCallback(async () => {
+    if (!prompt.trim()) { showError('请先输入一句画面想法再点扩写'); return; }
+    if (!aiApi.apiKey || !aiApi.baseUrl || !aiApi.model) { showError('请先在设置中配置文本 AI 服务（用于 AI 扩写）'); return; }
+    setExpanding(true);
+    // 先把现有 prompt 作为种子，扩写结果会覆盖（用户当前内容写到通知里兜底）
+    const original = prompt;
+    try {
+      setPrompt(''); // 清空让流式输出从零填充
+      const expanded = await expandVideoPrompt(aiApi, original, mode, (delta) => {
+        setPrompt((current) => (current + delta).slice(0, MAX_PROMPT_LENGTH));
+      });
+      if (!expanded) {
+        setPrompt(original);
+        throw new Error('AI 没有返回画面描述');
+      }
+      setPrompt(expanded.slice(0, MAX_PROMPT_LENGTH));
+      notifApi.success({ message: '视频描述已扩写', description: '可以继续微调后再提交生成。', placement: 'bottomRight' });
+    } catch (err) {
+      setPrompt((current) => current || original);
+      showError(err instanceof Error ? err.message : 'AI 扩写失败');
+    } finally {
+      setExpanding(false);
+    }
+  }, [aiApi, mode, notifApi, prompt, showError]);
+
   const handleSubmit = useCallback(async () => {
     const payload = validateAndBuildPayload();
     if (!payload) return;
@@ -795,7 +820,12 @@ export const VideoGenerationPanel: React.FC = () => {
           ))}
         </div>
 
-        <label className="mb-2 block text-sm font-medium">视频描述</label>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-sm font-medium">视频描述</label>
+          <Button type="button" size="sm" variant="outline" disabled={expanding || !prompt.trim()} onClick={() => void handleExpand()} title={!aiApi.apiKey ? '请先在设置中配置文本 AI' : '用 AI 把简短想法扩成详细的视频提示词'}>
+            {expanding ? <><Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />AI 扩写中…</> : <><Sparkles className="mr-1 h-3.5 w-3.5" />AI 扩写</>}
+          </Button>
+        </div>
         <textarea
           className="mb-1 min-h-32 w-full resize-y rounded-md border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
           value={prompt}

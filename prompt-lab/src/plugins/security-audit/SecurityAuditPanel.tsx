@@ -119,6 +119,8 @@ export function SecurityAuditPanel(): JSX.Element {
   const [scannedDir, setScannedDir] = useState<string | null>(null);
   const [activeFinding, setActiveFinding] = useState<Finding | null>(null);
   const [severityFilter, setSeverityFilter] = useState<Finding['severity'] | 'all'>('all');
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [scanMode, setScanMode] = useState<'full' | 'incremental'>('incremental');
 
   // 监听命令面板触发的命令（"Security Scan" 等）
   useEffect(() => {
@@ -136,15 +138,17 @@ export function SecurityAuditPanel(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findings]);
 
-  // 监听 IPC 进度事件（Phase 2 启用，v1 stub 备用）
+  // 监听主进程真实扫描进度，并在完成后读取持久化结果。
   useEffect(() => {
-    const onProgress = (event: Event) => {
-      const detail = (event as CustomEvent<ScanProgress>).detail;
+    const api = window.electronAPI?.securityAudit;
+    if (!api) return undefined;
+    return api.scan.onProgress((detail) => {
       setProgress(detail);
-    };
-    window.addEventListener('security-audit:event:progress', onProgress);
-    return () => window.removeEventListener('security-audit:event:progress', onProgress);
-  }, []);
+      if (detail.phase === 'completed' && scannedDir) {
+        void api.findings.list(scannedDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
+      }
+    });
+  }, [scannedDir]);
 
   const runMockScan = useCallback(async () => {
     setFindings(null);
@@ -164,15 +168,16 @@ export function SecurityAuditPanel(): JSX.Element {
   }, []);
 
   const runScan = useCallback(() => {
-    // Phase 1: 走 mock；Phase 2 会改成调 IPC
-    if (window.electronAPI?.securityAudit?.scan) {
-      // 真实路径（暂时未启用，先注释掉以免触发未实现的 IPC）
-      // void window.electronAPI.securityAudit.scan.start({ projectDir: scannedDir ?? '' });
-      void runMockScan();
-    } else {
-      void runMockScan();
-    }
-  }, [runMockScan]);
+    const api = window.electronAPI?.securityAudit;
+    if (!api) { void runMockScan(); return; }
+    setFindings(null);
+    setProgress({ phase: 'scanning', percent: 0, message: '请选择项目目录…' });
+    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef: 'HEAD', aiReview: true }).then((result) => {
+      if (!result.ok || !result.projectDir || !result.jobId) { setProgress({ phase: 'idle', percent: 0, message: '已取消' }); return; }
+      setScannedDir(result.projectDir);
+      setJobId(result.jobId);
+    }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: error instanceof Error ? error.message : '扫描启动失败' }));
+  }, [runMockScan, scanMode, scannedDir]);
 
   const sortedFindings = findings
     ? [...findings].sort((a, b) => SEVERITY_WEIGHT[a.severity] - SEVERITY_WEIGHT[b.severity])
@@ -199,6 +204,11 @@ export function SecurityAuditPanel(): JSX.Element {
           {scannedDir && <Tag>{scannedDir}</Tag>}
         </Space>
         <Space>
+          <select className="h-8 rounded border border-border bg-background px-2 text-xs" value={scanMode} onChange={(event) => setScanMode(event.target.value as 'full' | 'incremental')} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}>
+            <option value="incremental">增量扫描</option>
+            <option value="full">完整扫描</option>
+          </select>
+          {(progress.phase === 'scanning' || progress.phase === 'triaging') && jobId && <Button onClick={() => { void window.electronAPI.securityAudit.scan.cancel(jobId); }}>取消</Button>}
           <Button icon={<Play size={14} />} type="primary" onClick={runScan} loading={progress.phase === 'scanning' || progress.phase === 'triaging'}>
             扫描项目
           </Button>
@@ -353,6 +363,7 @@ export function SecurityAuditPanel(): JSX.Element {
                 <Tag color="purple">{activeFinding.ruleId}</Tag>
               </div>
             )}
+            {activeFinding.aiReview && <div><div className="mb-1 text-xs text-muted-foreground">AI 复核（辅助判断）</div><Alert type={activeFinding.aiReview.verdict === 'false-positive' ? 'warning' : 'info'} message={activeFinding.aiReview.verdict} description={activeFinding.aiReview.rationale} /></div>}
           </Space>
         )}
       </Modal>
