@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, Spin, Tag, message } from 'antd';
+import { Button, Empty, Input, Select, Spin, Tag, message } from 'antd';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
 import { Code, Database, FolderOpen, History, Network, RefreshCw, Rows3, Search, XCircle } from '@/components/icons';
-import type { AnalysisNode, ApiEndpoint, CodeVisualizerProjectHistory, RepositoryAnalysis } from '../../core/code-visualizer';
+import type { AnalysisNode, ApiEndpoint, CodeVisualizerProjectHistory, CodeVisualizerScanSnapshot, RepositoryAnalysis } from '../../core/code-visualizer';
 import { RelationshipGraph } from './RelationshipGraph';
 import { configureMonaco } from '@/lib/monaco-setup';
 
@@ -18,6 +18,7 @@ export function CodeVisualizerPanel(): JSX.Element {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<CodeVisualizerProjectHistory[]>([]);
+  const [snapshots, setSnapshots] = useState<CodeVisualizerScanSnapshot[]>([]);
   const [sourceTabs, setSourceTabs] = useState<SourceTab[]>([]);
   const [activeSourcePath, setActiveSourcePath] = useState<string | null>(null);
   const source = sourceTabs.find((tab) => tab.path === activeSourcePath) ?? null;
@@ -37,7 +38,7 @@ export function CodeVisualizerPanel(): JSX.Element {
   };
   const scan = async (rootPath: string): Promise<void> => {
     setLoading(true); setSelected(null); setSourceTabs([]); setActiveSourcePath(null);
-    try { const next = await window.electronAPI.codeVisualizer.repository.scan(rootPath); setResult(next); if (next.endpoints[0]) setSelected(next.endpoints[0]); loadHistory(); }
+    try { const next = await window.electronAPI.codeVisualizer.repository.scan(rootPath); setResult(next); if (next.endpoints[0]) setSelected(next.endpoints[0]); setSnapshots(await window.electronAPI.codeVisualizer.snapshot.list(rootPath)); loadHistory(); }
     catch (error) { message.error(`扫描失败：${error instanceof Error ? error.message : String(error)}`); }
     finally { setLoading(false); }
   };
@@ -56,12 +57,12 @@ export function CodeVisualizerPanel(): JSX.Element {
       <div className="min-h-0 flex-1 overflow-auto p-2">{endpoints.length ? endpoints.map((endpoint) => <button key={endpoint.id + endpoint.location.file} type="button" onClick={() => setSelected(endpoint)} className={`mb-1 w-full rounded-lg border p-3 text-left transition ${selected === endpoint ? 'border-primary/50 bg-sidebar-active text-sidebar-active-foreground' : 'border-transparent hover:bg-sidebar-hover'}`}><div className="flex items-center gap-2"><Tag color={METHOD_COLOR[endpoint.method]}>{endpoint.method}</Tag><span className="truncate text-sm font-medium">{endpoint.path}</span></div><div className="mt-2 truncate text-xs text-muted-foreground">{endpoint.framework} · {endpoint.handler} · 前端 {endpoint.frontendCalls.length}</div></button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的接口"/>}</div>
       <div className="border-t border-sidebar-border p-3"><Button block icon={<FolderOpen className="h-4 w-4"/>} onClick={() => void chooseAndScan()}>更换仓库</Button></div>
     </aside>
-    <main className="min-w-0 flex-1 overflow-auto p-5">{selected ? <EndpointDetail endpoint={selected} onOpenSource={openSource}/> : <Empty description="选择一个接口开始分析"/>}</main>
+    <main className="min-w-0 flex-1 overflow-auto p-5"><div className="mx-auto mb-4 flex max-w-5xl items-center justify-between rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground"><div className="flex gap-4"><span>{result?.scan?.mode === 'incremental' ? '增量扫描' : '完整扫描'}</span><span>变化 {result?.scan?.changedFiles ?? result?.filesScanned} 文件</span><span>复用 {result?.scan?.reusedFiles ?? 0}</span><span>{result?.scan?.durationMs ?? 0} ms</span><span className={(result?.diagnostics?.filter((item) => item.severity === 'error').length ?? 0) ? 'text-destructive' : ''}>{result?.diagnostics?.length ?? 0} 个诊断</span></div><Select size="small" className="w-52" placeholder="扫描快照" value={result?.scan?.snapshotId} options={snapshots.map((snapshot) => ({ value: snapshot.id, label: `${new Date(snapshot.scannedAt).toLocaleString('zh-CN')} · ${snapshot.endpointCount} 接口` }))} onChange={(id) => result && void window.electronAPI.codeVisualizer.snapshot.load(result.rootPath, id).then((snapshot) => { setResult(snapshot); setSelected(snapshot.endpoints[0] ?? null); setSourceTabs([]); setActiveSourcePath(null); })}/></div>{selected && result ? <EndpointDetail endpoint={selected} result={result} onOpenSource={openSource}/> : <Empty description="选择一个接口开始分析"/>}</main>
     {source && <SourcePanel tabs={sourceTabs} active={source} onActivate={setActiveSourcePath} onClose={(path) => { const remaining = sourceTabs.filter((tab) => tab.path !== path); setSourceTabs(remaining); if (activeSourcePath === path) setActiveSourcePath(remaining.at(-1)?.path ?? null); }}/>} 
   </div>;
 }
 
-function EndpointDetail({ endpoint, onOpenSource }: { endpoint: ApiEndpoint; onOpenSource: (node: AnalysisNode) => void }): JSX.Element {
+export function LegacyEndpointDetail({ endpoint, onOpenSource }: { endpoint: ApiEndpoint; onOpenSource: (node: AnalysisNode) => void }): JSX.Element {
   const ordered = orderNodes(endpoint);
   const [view, setView] = useState<'graph' | 'chain'>('graph');
   return <div className="mx-auto max-w-5xl"><div className="mb-5 flex items-start justify-between"><div><div className="flex items-center gap-3"><Tag color={METHOD_COLOR[endpoint.method]}>{endpoint.method}</Tag><h2 className="text-xl font-semibold">{endpoint.path}</h2></div><div className="mt-2 text-sm text-muted-foreground">{endpoint.framework} · {endpoint.location.file}:{endpoint.location.line}</div></div><div className="flex gap-2">{endpoint.tables.map((table) => <Tag key={table} icon={<Database className="h-3 w-3"/>}>{table}</Tag>)}</div></div>

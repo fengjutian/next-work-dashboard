@@ -13,4 +13,8 @@ export const codeVisualizerBridge = {
     open: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:open', rootPath),
     remove: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:remove', rootPath),
   },
+  snapshot: {
+    list: (rootPath: string) => ipcRenderer.invoke('code-visualizer:snapshot:list', rootPath),
+    load: (rootPath: string, id: string) => ipcRenderer.invoke('code-visualizer:snapshot:load', rootPath, id),
+  },
 };

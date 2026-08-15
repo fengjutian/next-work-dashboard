@@ -560,6 +560,10 @@ export interface ElectronAPI {
       open: (rootPath: string) => Promise<{ ok: boolean; rootPath: string }>;
       remove: (rootPath: string) => Promise<{ ok: boolean }>;
     };
+    snapshot: {
+      list: (rootPath: string) => Promise<import('../core/code-visualizer').CodeVisualizerScanSnapshot[]>;
+      load: (rootPath: string, id: string) => Promise<import('../core/code-visualizer').RepositoryAnalysis>;
+    };
   };
   websiteRegistry: {
     record: {

@@ -6,7 +6,7 @@ const COLORS: Record<AnalysisNode['kind'], string> = {
   frontend: '#8b5cf6', endpoint: '#2563eb', controller: '#0891b2', service: '#059669', repository: '#d97706', model: '#db2777', database: '#dc2626',
 };
 
-export function RelationshipGraph({ endpoint, onOpenSource }: { endpoint: ApiEndpoint; onOpenSource: (node: AnalysisNode) => void }): JSX.Element {
+export function RelationshipGraph({ endpoint, onOpenSource, onSelectNode }: { endpoint: ApiEndpoint; onOpenSource: (node: AnalysisNode) => void; onSelectNode?: (node: AnalysisNode) => void }): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -28,9 +28,10 @@ export function RelationshipGraph({ endpoint, onOpenSource }: { endpoint: ApiEnd
     });
     cy.on('tap', 'node', (event) => {
       const node = event.target.data('node') as AnalysisNode;
+      onSelectNode?.(node);
       if (node.location) onOpenSource(node);
     });
     return () => cy.destroy();
-  }, [endpoint, onOpenSource]);
+  }, [endpoint, onOpenSource, onSelectNode]);
   return <div className="relative h-[520px] overflow-hidden rounded-xl border bg-card shadow-sm"><div ref={containerRef} className="h-full w-full"/><div className="pointer-events-none absolute bottom-3 left-3 rounded-md border bg-background/90 px-3 py-2 text-[11px] text-muted-foreground shadow-sm">实线：精确关系 · 虚线：推断关系 · 点击节点查看源码</div></div>;
 }

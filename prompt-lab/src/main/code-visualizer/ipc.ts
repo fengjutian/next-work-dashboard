@@ -4,6 +4,7 @@ import path from 'node:path';
 import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
 import { scanCodeRepository } from './scanner';
 import { listProjectHistory, recordProjectHistory, removeProjectHistory } from './history';
+import { listSnapshots, loadSnapshot, saveSnapshot } from './snapshots';
 
 let initialized = false;
 
@@ -19,6 +20,8 @@ export function setupCodeVisualizerIPC(): void {
   ipcMain.handle('code-visualizer:repository:scan', async (_event, rootPath: string) => {
     const safeRoot = resolveWorkspacePath(rootPath);
     const result = await scanCodeRepository(safeRoot);
+    const snapshot = await saveSnapshot(result);
+    if (result.scan) result.scan.snapshotId = snapshot.id;
     await recordProjectHistory(result);
     return result;
   });
@@ -33,6 +36,8 @@ export function setupCodeVisualizerIPC(): void {
     await removeProjectHistory(rootPath);
     return { ok: true };
   });
+  ipcMain.handle('code-visualizer:snapshot:list', (_event, rootPath: string) => listSnapshots(resolveWorkspacePath(rootPath)));
+  ipcMain.handle('code-visualizer:snapshot:load', (_event, rootPath: string, id: string) => loadSnapshot(resolveWorkspacePath(rootPath), id));
   ipcMain.handle('code-visualizer:source:read', async (_event, rootPath: string, relativePath: string) => {
     const safeRoot = resolveWorkspacePath(rootPath);
     const target = path.resolve(safeRoot, relativePath);
