@@ -13,6 +13,14 @@ import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanProgress
 type SeverityColor = 'red' | 'orange' | 'blue' | 'green';
 type ScannerInfo = { id: string; name: string; available: boolean; builtIn: boolean };
 
+function securityAuditErrorMessage(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (text.includes('No handler registered for') && text.includes('security-audit:')) {
+    return 'Security Audit 主进程尚未更新。请完整退出并重新启动应用（仅刷新页面无效）。';
+  }
+  return text || 'Security Audit 操作失败';
+}
+
 const SEVERITY_COLORS: Record<Finding['severity'], SeverityColor> = {
   P0: 'red',
   P1: 'orange',
@@ -191,7 +199,7 @@ export function SecurityAuditPanel(): JSX.Element {
       if (!result.ok || !result.projectDir || !result.jobId) { setProgress({ phase: 'idle', percent: 0, message: '已取消' }); return; }
       setScannedDir(result.projectDir);
       setJobId(result.jobId);
-    }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: error instanceof Error ? error.message : '扫描启动失败' }));
+    }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: securityAuditErrorMessage(error) }));
   }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, runMockScan, scanMode, scannedDir, selectedScanners]);
 
   const selectProject = useCallback(() => {
@@ -201,7 +209,7 @@ export function SecurityAuditPanel(): JSX.Element {
         setFindings(null);
         setProgress({ phase: 'idle', percent: 0, message: '项目已选择' });
       }
-    }).catch((error: unknown) => message.warning(error instanceof Error ? error.message : '项目选择失败'));
+    }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
   }, []);
 
   useEffect(() => {

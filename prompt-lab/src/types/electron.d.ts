@@ -561,6 +561,9 @@ export interface ElectronAPI {
       update: (id: string, patch: Partial<Pick<import('../core/website-registry/types').WebsiteCategory, 'name' | 'color' | 'position'>>) => Promise<import('../core/website-registry/types').WebsiteCategory>;
       remove: (id: string) => Promise<void>;
     };
+    assist: {
+      metadata: (url: string) => Promise<import('../core/website-registry/metadata').WebsiteMetadata>;
+    };
     importData: () => Promise<{ imported: number; skipped: number; invalid: number }>;
     exportData: () => Promise<boolean>;
   };

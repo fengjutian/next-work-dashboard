@@ -13,6 +13,9 @@ export const websiteRegistryBridge = {
     update: (id: string, patch: any) => ipcRenderer.invoke('website-registry:category:update', id, patch),
     remove: (id: string) => ipcRenderer.invoke('website-registry:category:delete', id),
   },
+  assist: {
+    metadata: (url: string) => ipcRenderer.invoke('website-registry:assist:metadata', url),
+  },
   importData: () => ipcRenderer.invoke('website-registry:import'),
   exportData: () => ipcRenderer.invoke('website-registry:export'),
 };

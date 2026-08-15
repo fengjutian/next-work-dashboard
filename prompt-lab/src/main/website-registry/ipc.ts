@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import { getMainWindow } from '../globals';
 import type { WebsiteRecordFilters, WebsiteRecordInput } from '../../core/website-registry/types';
 import { normalizeWebsiteUrl, parseWebsiteCsv, sanitizeWebsiteInput } from '../../core/website-registry/validation';
+import { extractWebsiteMetadata } from '../../core/website-registry/metadata';
 import { getWebsiteRegistryDatabase } from './database';
 import { WebsiteRegistryStore } from './store';
 
@@ -19,6 +20,18 @@ export function setupWebsiteRegistryIPC(): void {
   ipcMain.handle('website-registry:category:create', (_event, name: string, color?: string) => store.createCategory(name, color));
   ipcMain.handle('website-registry:category:update', (_event, id: string, patch: any) => store.updateCategory(id, patch));
   ipcMain.handle('website-registry:category:delete', (_event, id: string) => store.removeCategory(id));
+  ipcMain.handle('website-registry:assist:metadata', async (_event, rawUrl: string) => {
+    const url = normalizeWebsiteUrl(rawUrl);
+    const parsed = new URL(url);
+    if (isPrivateHost(parsed.hostname)) throw new Error('AI 辅助填写不抓取本机或局域网地址');
+    const response = await fetch(url, { signal: AbortSignal.timeout(12_000), redirect: 'follow', headers: { 'User-Agent': 'next-work-dashboard/0.2 WebsiteRegistryMetadata' } });
+    if (!response.ok) throw new Error(`网页读取失败（HTTP ${response.status}）`);
+    if (!String(response.headers.get('content-type') || '').toLowerCase().includes('text/html')) throw new Error('该地址不是 HTML 网页');
+    const finalUrl = new URL(response.url || url);
+    if (isPrivateHost(finalUrl.hostname)) throw new Error('网页重定向到了不允许抓取的地址');
+    const html = (await response.text()).slice(0, 300_000);
+    return extractWebsiteMetadata(html, finalUrl.toString());
+  });
   ipcMain.handle('website-registry:export', async () => {
     const win = getMainWindow(); const result = await dialog.showSaveDialog(win!, { defaultPath: 'website-registry.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (result.canceled || !result.filePath) return false;
@@ -48,4 +61,12 @@ export function setupWebsiteRegistryIPC(): void {
     for (const input of parsed) { try { sanitizeWebsiteInput(input); store.create(input); imported += 1; } catch (error) { if (String(error).includes('已经存在')) skipped += 1; else invalid += 1; } }
     return { imported, skipped, invalid };
   });
+}
+
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true;
+  const parts = host.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  return parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168);
 }

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Download, ExternalLink, FolderPlus, Globe2, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2, Upload, X } from 'lucide-react';
+import { Archive, Download, ExternalLink, FolderPlus, Globe2, LayoutGrid, List, Pencil, Plus, Search, Sparkles, Star, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { WebsiteCategory, WebsiteRecord, WebsiteRecordInput } from '../../core/website-registry/types';
+import { createOpenAIProvider } from '../../core/llm';
+import { useStore } from '../../store';
 
 type Scope = 'all' | 'favorites' | 'recent' | 'uncategorized' | 'archived' | string;
 type EditorState = { record?: WebsiteRecord; values: WebsiteRecordInput };
 const emptyValues = (): WebsiteRecordInput => ({ name: '', url: '', description: '', categoryId: null, tags: [], notes: '' });
 
 export function WebsiteRegistryPanel() {
+  const aiApi = useStore((state) => state.aiApi);
   const [records, setRecords] = useState<WebsiteRecord[]>([]);
   const [categories, setCategories] = useState<WebsiteCategory[]>([]);
   const [query, setQuery] = useState('');
@@ -63,6 +66,28 @@ export function WebsiteRegistryPanel() {
   const removeCategory = async (category: WebsiteCategory) => { if (!window.confirm(`删除分类“${category.name}”？其中的网站将移到未分类。`)) return; await window.electronAPI.websiteRegistry.category.remove(category.id); if (scope === category.id) setScope('all'); await refresh(); };
   const renameCategory = async (category: WebsiteCategory) => { const name = window.prompt('重命名分类', category.name)?.trim(); if (!name || name === category.name) return; try { await window.electronAPI.websiteRegistry.category.update(category.id, { name }); await refresh(); } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); } };
   const importData = async () => { const result = await window.electronAPI.websiteRegistry.importData(); setNotice(`导入 ${result.imported} 条，跳过重复 ${result.skipped} 条，无效 ${result.invalid} 条`); await refresh(); };
+  const assistFill = async (values: WebsiteRecordInput): Promise<WebsiteRecordInput> => {
+    if (!values.url.trim()) throw new Error('请先填写网站地址');
+    if (!aiApi.baseUrl?.trim() || !aiApi.apiKey?.trim() || !aiApi.model?.trim()) throw new Error('请先在设置中配置 AI API、Base URL 和模型');
+    const metadata = await window.electronAPI.websiteRegistry.assist.metadata(values.url);
+    const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl, chatProxy: aiApi.provider === 'qwen' ? window.electronAPI.llmChat : undefined });
+    const categoryNames = categories.map((category) => category.name);
+    let raw = '';
+    for await (const chunk of provider.chat([
+      { role: 'system', content: '你是网站资料整理助手。根据网页元数据生成简洁准确的中文资料。只返回 JSON，不要 Markdown。格式：{"name":"网站名称","description":"1到2句话说明用途","tags":["标签"],"category":"已有分类名或空字符串"}。标签最多5个，category只能从用户提供的已有分类中选择。不要编造账号、价格或隐私信息。' },
+      { role: 'user', content: JSON.stringify({ url: metadata.url, title: metadata.title, metaDescription: metadata.description, keywords: metadata.keywords, pageTextSample: metadata.textSample, existingCategories: categoryNames }) },
+    ], { model: aiApi.model, temperature: 0.2, maxTokens: 500, stream: false, responseFormat: 'json_object' })) raw += chunk.delta || '';
+    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw) as { name?: string; description?: string; tags?: string[]; category?: string };
+    const suggestedCategory = categories.find((category) => category.name === parsed.category);
+    return {
+      ...values,
+      name: values.name.trim() || String(parsed.name || metadata.title || new URL(metadata.url).hostname).trim(),
+      url: metadata.url,
+      description: values.description?.trim() || String(parsed.description || metadata.description || '').trim(),
+      tags: values.tags?.length ? values.tags : Array.isArray(parsed.tags) ? parsed.tags.map(String).slice(0, 5) : metadata.keywords.slice(0, 5),
+      categoryId: values.categoryId || suggestedCategory?.id || null,
+    };
+  };
 
   return <div className="flex h-full min-h-0 bg-background text-foreground">
     <aside className="flex w-56 shrink-0 flex-col border-r bg-card/70">
@@ -94,7 +119,7 @@ export function WebsiteRegistryPanel() {
           <div className={view === 'grid' ? 'grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3' : 'space-y-2'}>{visible.map((record) => <WebsiteItem key={record.id} record={record} category={categories.find((c) => c.id === record.categoryId)} compact={view === 'list'} onOpen={() => void openRecord(record)} onEdit={() => { setNotice(''); setEditor({ record, values: { ...record } }); }} onFavorite={() => void patchRecord(record, { favorite: !record.favorite })} onArchive={() => void patchRecord(record, { archived: !record.archived })} onDelete={() => void removeRecord(record)} />)}</div>}
       </div>
     </main>
-    {editor && <Editor editor={editor} categories={categories} busy={busy} notice={notice} onChange={(values) => setEditor({ ...editor, values })} onClose={() => setEditor(null)} onSave={() => void saveRecord()} />}
+    {editor && <Editor editor={editor} categories={categories} busy={busy} notice={notice} onChange={(values) => setEditor({ ...editor, values })} onAssist={assistFill} onNotice={setNotice} onClose={() => setEditor(null)} onSave={() => void saveRecord()} />}
   </div>;
 }
 
@@ -107,8 +132,10 @@ function WebsiteItem({ record, category, compact, onOpen, onEdit, onFavorite, on
   </article>;
 }
 
-function Editor({ editor, categories, busy, notice, onChange, onClose, onSave }: { editor: EditorState; categories: WebsiteCategory[]; busy: boolean; notice: string; onChange: (values: WebsiteRecordInput) => void; onClose: () => void; onSave: () => void }) {
+function Editor({ editor, categories, busy, notice, onChange, onAssist, onNotice, onClose, onSave }: { editor: EditorState; categories: WebsiteCategory[]; busy: boolean; notice: string; onChange: (values: WebsiteRecordInput) => void; onAssist: (values: WebsiteRecordInput) => Promise<WebsiteRecordInput>; onNotice: (message: string) => void; onClose: () => void; onSave: () => void }) {
+  const [assisting, setAssisting] = useState(false);
   const set = (patch: Partial<WebsiteRecordInput>) => onChange({ ...editor.values, ...patch });
-  return <div className="fixed inset-0 z-[1200] flex justify-end bg-black/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><section className="flex h-full w-full max-w-lg flex-col bg-card shadow-2xl"><header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">{editor.record ? '编辑网站' : '添加网站'}</h2><p className="text-xs text-muted-foreground">收藏并整理需要长期使用的网站资料</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button></header><div className="flex-1 space-y-4 overflow-auto p-5"><Field label="网站名称 *"><Input autoFocus value={editor.values.name} onChange={(e) => set({ name: e.target.value })} placeholder="例如：GitHub" /></Field><Field label="网站地址 *"><Input value={editor.values.url} onChange={(e) => set({ url: e.target.value })} placeholder="https://github.com" /></Field><Field label="描述"><textarea value={editor.values.description || ''} onChange={(e) => set({ description: e.target.value })} className="min-h-20 w-full rounded-md border bg-background p-3 text-sm" placeholder="这个网站有什么用途？" /></Field><Field label="分类"><select value={editor.values.categoryId || ''} onChange={(e) => set({ categoryId: e.target.value || null })} className="h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">未分类</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field><Field label="标签"><Input value={(editor.values.tags || []).join(', ')} onChange={(e) => set({ tags: e.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="开发, 工具, 文档" /></Field><Field label="备注"><textarea value={editor.values.notes || ''} onChange={(e) => set({ notes: e.target.value })} className="min-h-32 w-full rounded-md border bg-background p-3 text-sm" placeholder="补充使用方法、账号提示等（请勿保存密码）" /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!editor.values.favorite} onChange={(e) => set({ favorite: e.target.checked })} />加入收藏</label>{notice && <p className="rounded-md bg-destructive/10 p-3 text-xs text-destructive">{notice}</p>}</div><footer className="flex justify-end gap-2 border-t p-4"><Button variant="outline" onClick={onClose}>取消</Button><Button disabled={busy} onClick={onSave}>{busy ? '保存中…' : '保存'}</Button></footer></section></div>;
+  const runAssist = async () => { setAssisting(true); onNotice(''); try { onChange(await onAssist(editor.values)); onNotice('AI 已补充空白字段，请确认后保存'); } catch (error) { onNotice(error instanceof Error ? error.message : String(error)); } finally { setAssisting(false); } };
+  return <div className="fixed inset-0 z-[1200] flex justify-end bg-black/35" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><section className="flex h-full w-full max-w-lg flex-col bg-card shadow-2xl"><header className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-semibold">{editor.record ? '编辑网站' : '添加网站'}</h2><p className="text-xs text-muted-foreground">收藏并整理需要长期使用的网站资料</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button></header><div className="flex-1 space-y-4 overflow-auto p-5"><Field label="网站名称 *"><Input autoFocus value={editor.values.name} onChange={(e) => set({ name: e.target.value })} placeholder="例如：GitHub" /></Field><Field label="网站地址 *"><div className="flex gap-2"><Input value={editor.values.url} onChange={(e) => set({ url: e.target.value })} placeholder="https://github.com" /><Button type="button" variant="outline" disabled={assisting || !editor.values.url.trim()} onClick={() => void runAssist()} className="shrink-0"><Sparkles className="mr-2 h-4 w-4" />{assisting ? '分析中…' : 'AI 填写'}</Button></div></Field><Field label="描述"><textarea value={editor.values.description || ''} onChange={(e) => set({ description: e.target.value })} className="min-h-20 w-full rounded-md border bg-background p-3 text-sm" placeholder="这个网站有什么用途？" /></Field><Field label="分类"><select value={editor.values.categoryId || ''} onChange={(e) => set({ categoryId: e.target.value || null })} className="h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">未分类</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field><Field label="标签"><Input value={(editor.values.tags || []).join(', ')} onChange={(e) => set({ tags: e.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="开发, 工具, 文档" /></Field><Field label="备注"><textarea value={editor.values.notes || ''} onChange={(e) => set({ notes: e.target.value })} className="min-h-32 w-full rounded-md border bg-background p-3 text-sm" placeholder="补充使用方法、账号提示等（请勿保存密码）" /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!editor.values.favorite} onChange={(e) => set({ favorite: e.target.checked })} />加入收藏</label>{notice && <p className={`rounded-md p-3 text-xs ${notice.startsWith('AI 已') ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'}`}>{notice}</p>}</div><footer className="flex justify-end gap-2 border-t p-4"><Button variant="outline" onClick={onClose}>取消</Button><Button disabled={busy || assisting} onClick={onSave}>{busy ? '保存中…' : '保存'}</Button></footer></section></div>;
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block space-y-1.5"><span className="text-xs font-medium">{label}</span>{children}</label>; }
