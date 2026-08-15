@@ -66,7 +66,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
   const jobId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const controller = new AbortController();
   jobs.set(jobId, controller);
-  const record: ScanRecord = { id: jobId, projectDir: input.projectDir, mode: input.mode ?? 'full', baselineRef: input.baselineRef, startedAt: Date.now(), status: 'scanning', findings: [], scannerRuns: [] };
+  const record: ScanRecord = { id: jobId, projectDir: input.projectDir, mode: input.mode ?? 'full', baselineRef: input.baselineRef, networkPolicy: input.networkPolicy ?? 'deny', startedAt: Date.now(), status: 'scanning', findings: [], scannerRuns: [] };
   const data = load(); data.scans.unshift(record); data.scans = data.scans.slice(0, 100); save(data);
   const emit = (progress: Parameters<typeof progressFor>[1]): void => { if (!sender.isDestroyed()) sender.send('security-audit:event:progress', { ...progressFor(jobId, progress), projectDir: input.projectDir }); };
   void (async () => {

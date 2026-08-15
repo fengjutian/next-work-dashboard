@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { findingId, fingerprint, redactSecrets, type FindingCategory, type ScanContext, type SecurityFinding, type SecurityScanner, type SecuritySeverity } from '../../core/security-audit';
-import { commandAvailable, inspectScannerCommand, runScannerProcess, ScannerProcessError, type ExternalScannerCommand } from './external-process';
+import { inspectScannerCommand, runScannerProcess, ScannerProcessError, type ExternalScannerCommand } from './external-process';
 
 type JsonObject = Record<string, unknown>;
 const MAX_REPORT_BYTES = 20 * 1024 * 1024;
@@ -49,7 +49,7 @@ export function readLimitedJsonReport(reportPath: string): JsonObject {
 function externalScanner(command: ExternalScannerCommand, name: string, args: (context: ScanContext) => string[], parser: (json: JsonObject, context: ScanContext) => SecurityFinding[], projectDetect: (context: ScanContext) => boolean = () => true): SecurityScanner {
   return {
     id: command, name,
-    async detect(context) { return projectDetect(context) && commandAvailable(command); },
+    async detect(context) { const status = await inspectScannerCommand(command); this.version = status.version; return projectDetect(context) && status.available; },
     async scan(context) {
       const result = await runScannerProcess(command, args(context), context.projectDir, context.signal);
       // Security scanners commonly return non-zero when findings exist. Parse any JSON output first.
@@ -75,7 +75,7 @@ export function parseGitleaksOutput(json: JsonObject, context: ScanContext): Sec
 
 export const gitleaksScanner: SecurityScanner = {
   id: 'gitleaks', name: 'Gitleaks Secret Scan',
-  async detect() { return commandAvailable('gitleaks'); },
+  async detect() { const status = await inspectScannerCommand('gitleaks'); this.version = status.version; return status.available; },
   async scan(context) {
     const reportPath = path.join(os.tmpdir(), `nwd-gitleaks-${crypto.randomUUID()}.json`);
     try {

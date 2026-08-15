@@ -58,9 +58,9 @@ export interface ScanRequest {
   projectDir: string;
   mode?: ScanMode;
   baselineRef?: string;
+  networkPolicy?: ScannerNetworkPolicy;
   scanners?: string[];
   aiReview?: boolean;
-  networkPolicy?: ScannerNetworkPolicy;
   /** Runtime-only application AI config. It is never persisted by Security Audit. */
   aiConfig?: { baseUrl: string; apiKey: string; model: string };
 }
@@ -79,6 +79,7 @@ export interface ScanRecord {
   projectDir: string;
   mode: ScanMode;
   baselineRef?: string;
+  networkPolicy?: ScannerNetworkPolicy;
   startedAt: number;
   completedAt?: number;
   status: ScanProgress['phase'];
