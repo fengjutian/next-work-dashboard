@@ -290,8 +290,24 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('llm:chat', async (_event, payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => {
     try {
       const url = new URL(String(payload.baseUrl || '').replace(/\/+$/, '') + '/chat/completions');
-      const allowedHosts = new Set(['dashscope.aliyuncs.com', 'token-plan.cn-beijing.maas.aliyuncs.com']);
-      if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname)) return { ok: false, status: 400, error: 'UNSUPPORTED_LLM_PROXY_HOST' };
+      const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      const blockedHost = hostname === 'localhost'
+        || hostname.endsWith('.localhost')
+        || hostname.endsWith('.local')
+        || hostname === '0.0.0.0'
+        || hostname === '::'
+        || hostname === '::1'
+        || hostname.startsWith('fc')
+        || hostname.startsWith('fd')
+        || hostname.startsWith('fe80:')
+        || /^127\./.test(hostname)
+        || /^10\./.test(hostname)
+        || /^169\.254\./.test(hostname)
+        || /^192\.168\./.test(hostname)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+      if (url.protocol !== 'https:' || !hostname || url.username || url.password || blockedHost) {
+        return { ok: false, status: 400, error: `UNSUPPORTED_LLM_PROXY_HOST: ${hostname || 'invalid host'}（仅允许公网 HTTPS 地址）` };
+      }
       const apiKey = String(payload.apiKey ?? '').trim();
       if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
       const body = { ...payload.body, stream: false };
@@ -334,7 +350,9 @@ export function setupIPC(webviewPreloadPath: string) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 600_000);
         try {
-          const response = await fetch('https://api.minimaxi.com/v1/image_generation', {
+          const miniMaxHost = (() => { try { return new URL(baseUrl).hostname; } catch { return ''; } })();
+          const endpoint = miniMaxHost === 'api.minimaxi.com' ? 'https://api.minimaxi.com/v1/image_generation' : 'https://api.minimax.io/v1/image_generation';
+          const response = await fetch(endpoint, {
             method: 'POST', signal: controller.signal,
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({

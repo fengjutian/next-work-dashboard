@@ -90,6 +90,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewBaseUrl, setReviewBaseUrl] = useState('https://api.minimax.io/v1');
+  const [reviewApiKey, setReviewApiKey] = useState('');
+  const [reviewModel, setReviewModel] = useState('MiniMax-M2.7');
+  const [reviewInstruction, setReviewInstruction] = useState('核对错别字、语病、逻辑衔接、前后矛盾与可能失实的表述；保持原有 Markdown 结构和作者语气。');
+  const [imageOpen, setImageOpen] = useState(false);
+  const [minimaxApiKey, setMinimaxApiKey] = useState('');
+  const [imagePrompt, setImagePrompt] = useState('');
+  const [imageAspectRatio, setImageAspectRatio] = useState('16:9');
+  const [imageDataUrl, setImageDataUrl] = useState('');
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState('');
   const [gitOpen, setGitOpen] = useState(false);
   const [gitChanges, setGitChanges] = useState<Array<{ path: string; status: string }>>([]);
   const [gitMessage, setGitMessage] = useState('docs: update generated articles');
@@ -308,7 +320,69 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const applyAiResult = (method: 'replace' | 'append') => {
     if (!aiResult.trim()) return;
     setDocumentContent((current) => method === 'replace' ? aiResult.trimEnd() + '\n' : `${current.trimEnd()}\n\n${aiResult.trim()}\n`);
-    setAiOpen(false); setEditorMode('edit');
+    setAiOpen(false); setReviewOpen(false); setEditorMode('edit');
+  };
+
+  const runReview = async () => {
+    if (!activeFile || aiLoading) return;
+    if (!reviewApiKey.trim() || !reviewBaseUrl.trim() || !reviewModel.trim()) { setAiError('请完整填写审校模型地址、API Key 和模型名。'); return; }
+    const requestId = ++aiRequestRef.current;
+    setAiLoading(true); setAiResult(''); setAiError('');
+    const messages: ChatMessage[] = [
+      { role: 'system', content: `你是独立于初稿作者的中文责任编辑和事实校对员。请对文章做第二遍审校。\n\n要求：\n1. 修正错别字、语病、标点、重复和生硬表达。\n2. 检查论证、时间线、人物关系、术语及上下文是否自洽。\n3. 对无法从原文确认的事实，不得擅自补造；改为审慎表述，并用“<!-- 待核实：原因 -->”就近标注。\n4. 保持原意、Markdown 标题层级和链接、图片等结构。\n5. 语言严谨但保留适量风趣，不把文章改成公文，也不堆网络梗。\n6. 只输出审校后的完整 Markdown，不输出说明、代码围栏或审校报告。` },
+      { role: 'user', content: `${reviewInstruction.trim()}\n\n待审校文章：\n${documentContent}` },
+    ];
+    try {
+      const provider = createOpenAIProvider({ apiKey: reviewApiKey.trim(), baseUrl: reviewBaseUrl.trim(), chatProxy: window.electronAPI.llmChat });
+      let result = '';
+      for await (const chunk of provider.chat(messages, { model: reviewModel.trim(), temperature: 0.35, maxTokens: 8_192, stream: false })) {
+        if (requestId !== aiRequestRef.current) return;
+        if (chunk.delta) { result += chunk.delta; setAiResult(result); }
+      }
+      if (!result.trim()) throw new Error('审校模型没有返回内容，请检查模型配置。');
+    } catch (error) {
+      if (requestId === aiRequestRef.current) setAiError(error instanceof Error ? error.message : String(error));
+    } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
+  };
+
+  const generateIllustration = async () => {
+    if (imageLoading || !activeFile) return;
+    if (!minimaxApiKey.trim() || !imagePrompt.trim()) { setImageError('请填写 MiniMax API Key 和插图描述。'); return; }
+    setImageLoading(true); setImageDataUrl(''); setImageError('');
+    try {
+      const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
+      const result = await window.electronAPI.generateImage({ provider: 'minimax', baseUrl: 'https://api.minimax.io/v1', apiKey: minimaxApiKey.trim(), model: 'image-01', prompt: `为《${projectTitle}》的章节“${chapterName}”创作一幅出版级配图。${imagePrompt.trim()}。画面完整，构图清晰，不出现文字、水印、标识或界面元素。`, size: '1024x1024', quality: 'standard', aspectRatio: imageAspectRatio, promptOptimizer: true, aigcWatermark: false });
+      if (!result.success || !result.imageDataUrl) throw new Error(result.error || 'MiniMax 没有返回图片。');
+      setImageDataUrl(result.imageDataUrl);
+    } catch (error) { setImageError(error instanceof Error ? error.message : String(error)); }
+    finally { setImageLoading(false); }
+  };
+
+  const saveAndInsertIllustration = async () => {
+    if (!target || !activeFile || !imageDataUrl) return;
+    try {
+      const projectFolder = activeProject?.subfolder || (activeFile.includes('/') ? activeFile.split('/')[0] : '');
+      const assetFolder = projectFolder ? `${projectFolder}/assets/images` : 'assets/images';
+      const parts = assetFolder.split('/');
+      for (let index = 1; index <= parts.length; index += 1) {
+        const created = await window.electronAPI.workspace.createDirectory(target.path, parts.slice(0, index).join('/'));
+        if (!created.success && !/EEXIST|ALREADY_EXISTS/.test(String(created.error))) throw new Error(created.error);
+      }
+      const stem = (activeFile.split('/').pop() || 'chapter').replace(/\.md$/i, '').replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '').slice(0, 48) || 'chapter';
+      const imagePath = `${assetFolder}/${stem}-${Date.now()}.jpg`;
+      const base64 = imageDataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+      const written = await window.electronAPI.workspace.writeBinaryFile(target.path, imagePath, base64);
+      if (!written.success) throw new Error(written.error);
+      const from = activeFile.split('/').slice(0, -1);
+      const to = imagePath.split('/');
+      let common = 0;
+      while (common < from.length && common < to.length && from[common] === to[common]) common += 1;
+      const relativePath = `${'../'.repeat(from.length - common)}${to.slice(common).join('/')}`;
+      const alt = imagePrompt.trim().replace(/[\[\]]/g, '').slice(0, 80) || '章节插图';
+      setDocumentContent((current) => `${current.trimEnd()}\n\n![${alt}](${relativePath})\n`);
+      setImageOpen(false); setEditorMode('edit');
+      notice.success({ message: '插图已保存并插入', description: imagePath, placement: 'bottomRight' });
+    } catch (error) { setImageError(error instanceof Error ? error.message : String(error)); }
   };
 
   const getProjectGitChanges = async () => {
@@ -321,7 +395,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/index.md` : 'index.md', prefix ? `${prefix}/404.md` : '404.md', prefix ? `${prefix}/_config.yml` : '_config.yml', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json', prefix ? `${prefix}/_layouts/default.html` : '_layouts/default.html', prefix ? `${prefix}/_layouts/article.html` : '_layouts/article.html', prefix ? `${prefix}/_layouts/home.html` : '_layouts/home.html', prefix ? `${prefix}/assets/css/reader.css` : 'assets/css/reader.css', '.github/workflows/pages.yml']);
       const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
         .filter((item) => !item.path.startsWith('.history/') && !item.path.includes('/.history/'))
-        .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) || item.path === '.github/workflows/pages.yml' : known.has(item.path));
+        .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) || item.path === '.github/workflows/pages.yml' : known.has(item.path) || item.path.startsWith('assets/images/'));
       return changes;
   };
 
@@ -484,6 +558,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const accent = /^#[0-9a-f]{6}$/i.test(pagesAccentColor) ? pagesAccentColor : '#6d285f';
       const css = `:root{--accent:${accent};--accent-soft:color-mix(in srgb,var(--accent) 10%,white);--paper:#fbfaf8;--ink:#252220;--muted:#766f69;--line:#e7e1dc;--nav:300px}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;-webkit-font-smoothing:antialiased}.book-shell{min-height:100vh}.book-nav{position:fixed;inset:0 auto 0 0;width:var(--nav);display:flex;flex-direction:column;padding:32px 22px;background:#fff;border-right:1px solid var(--line);overflow:auto}.brand{display:flex;gap:13px;align-items:center;color:inherit;text-decoration:none}.brand-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:var(--accent);color:#fff;font-size:20px}.brand strong,.brand small{display:block}.brand strong{font-size:18px}.brand small{max-width:180px;margin-top:3px;color:var(--muted);font:12px/1.4 system-ui,sans-serif}.book-nav nav{margin-top:42px}.nav-label{margin:0 10px 12px;color:#aaa;font:600 11px system-ui,sans-serif;letter-spacing:.16em}.book-nav ol{margin:0;padding:0;list-style:none}.book-nav li a{display:flex;gap:12px;align-items:center;padding:9px 10px;border-radius:9px;color:#514b47;text-decoration:none;font:14px/1.45 system-ui,sans-serif}.book-nav li a span{color:#aaa;font-size:11px}.book-nav li a:hover,.book-nav li a.active{background:var(--accent-soft);color:var(--accent)}.book-nav footer{margin-top:auto;padding:28px 10px 0;color:#aaa;font:11px system-ui,sans-serif}.book-main{margin-left:var(--nav);min-height:100vh}.reading{max-width:820px;margin:0 auto;padding:80px 56px 120px}.reading .eyebrow,.hero-kicker{color:var(--accent);font:600 12px system-ui,sans-serif;letter-spacing:.18em}.reading h1{margin:12px 0 22px;font-size:42px;line-height:1.25}.divider{width:52px;height:3px;margin-bottom:46px;background:var(--accent)}.reading h2{margin:2.2em 0 .8em;font-size:26px}.reading h3{margin:1.8em 0 .7em;font-size:20px}.reading p,.reading li{font-size:18px;line-height:2;text-align:justify}.reading blockquote{margin:2em 0;padding:18px 24px;border-left:3px solid var(--accent);background:var(--accent-soft);color:#514b47}.reading img{max-width:100%;border-radius:12px}.reading code{padding:.15em .4em;border-radius:5px;background:#f0ece8;font-family:ui-monospace,monospace}.hero{padding:110px max(7vw,50px) 80px;background:radial-gradient(circle at 85% 10%,var(--accent-soft),transparent 34%),#fff;border-bottom:1px solid var(--line)}.hero h1{max-width:850px;margin:16px 0 20px;font-size:clamp(42px,6vw,76px);line-height:1.08}.hero p{max-width:680px;color:var(--muted);font-size:18px;line-height:1.8}.start-reading{display:inline-block;margin-top:24px;padding:13px 22px;border-radius:999px;background:var(--accent);color:#fff;text-decoration:none;font:600 14px system-ui,sans-serif}.chapter-section{padding:70px max(5vw,42px) 100px}.section-heading span{color:var(--accent);font:600 11px system-ui,sans-serif;letter-spacing:.2em}.section-heading h2{margin:8px 0 30px;font-size:32px}.chapter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.chapter-card{min-height:160px;padding:24px;border:1px solid var(--line);border-radius:16px;background:#fff;color:inherit;text-decoration:none;transition:.2s}.chapter-card:hover{transform:translateY(-3px);border-color:var(--accent);box-shadow:0 14px 35px rgba(45,33,27,.08)}.chapter-card>span{color:var(--accent);font:600 12px system-ui,sans-serif}.chapter-card h3{margin:18px 0 28px;font-size:19px}.chapter-card em{color:var(--muted);font:normal 12px system-ui,sans-serif}.mobile-header{display:none}@media(prefers-color-scheme:dark){:root{--paper:#191817;--ink:#eee9e4;--muted:#aaa29b;--line:#393532}.book-nav,.hero,.chapter-card{background:#211f1d}.reading code{background:#2d2926}}@media(max-width:840px){.mobile-header{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;padding:14px 18px;background:color-mix(in srgb,var(--paper) 92%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}.mobile-header a{color:inherit;text-decoration:none;font-weight:700}.mobile-header button{border:0;background:none;color:var(--accent)}.book-nav{z-index:30;transform:translateX(-102%);transition:.25s;box-shadow:12px 0 40px rgba(0,0,0,.12)}.nav-open .book-nav{transform:none}.book-main{margin-left:0}.reading{padding:54px 24px 90px}.reading h1{font-size:34px}.reading p,.reading li{font-size:17px;line-height:1.9}.hero{padding:70px 24px 60px}.chapter-section{padding:48px 20px 80px}}`;
       const collapseCss = `.nav-toggle{position:absolute;top:24px;right:14px;width:28px;height:28px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--accent);cursor:pointer;font-size:22px;line-height:22px;transition:.2s}.nav-collapsed .book-nav{width:78px;padding-inline:12px}.nav-collapsed .book-main{margin-left:78px}.nav-collapsed .brand{justify-content:center}.nav-collapsed .brand-copy,.nav-collapsed .nav-label,.nav-collapsed .book-nav li a b,.nav-collapsed .book-nav footer{display:none}.nav-collapsed .book-nav li a{justify-content:center;padding:10px 4px}.nav-collapsed .book-nav li a span{font-size:12px}.nav-collapsed .nav-toggle{right:8px;transform:rotate(180deg)}@media(max-width:840px){.nav-toggle{display:none}.nav-collapsed .book-nav{width:var(--nav);padding:32px 22px}.nav-collapsed .book-main{margin-left:0}.nav-collapsed .brand-copy,.nav-collapsed .nav-label,.nav-collapsed .book-nav li a b,.nav-collapsed .book-nav footer{display:block}.nav-collapsed .book-nav li a{justify-content:flex-start;padding:9px 10px}}`;
+      const togglePositionCss = `.nav-toggle,.nav-collapsed .nav-toggle{right:-14px;z-index:2}.nav-collapsed .nav-toggle{transform:rotate(180deg)}`;
       for (const directory of [inSite('_layouts'), inSite('assets'), inSite('assets/css')]) {
         const created = await window.electronAPI.workspace.createDirectory(target.path, directory);
         if (!created.success && !/EEXIST|ALREADY_EXISTS/.test(String(created.error))) throw new Error(created.error);
@@ -494,7 +569,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       await upsertWorkspaceFile(inSite('_layouts/default.html'), collapsibleLayout);
       await upsertWorkspaceFile(inSite('_layouts/article.html'), articleLayout);
       await upsertWorkspaceFile(inSite('_layouts/home.html'), homeLayout);
-      await upsertWorkspaceFile(inSite('assets/css/reader.css'), css + collapseCss);
+      await upsertWorkspaceFile(inSite('assets/css/reader.css'), css + collapseCss + togglePositionCss);
       for (const directory of ['.github', '.github/workflows']) {
         const created = await window.electronAPI.workspace.createDirectory(target.path, directory);
         if (!created.success && !/EEXIST|ALREADY_EXISTS/.test(String(created.error))) throw new Error(created.error);
@@ -640,13 +715,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </section>
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}生成 {documents.length || 0} 个章节文档</Button>
       </div>
-    </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen || gitOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
+    </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen || reviewOpen || imageOpen || gitOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="truncate text-sm font-semibold">{activeProject?.name || projectTitle || '章节文档'}</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{activeProject && <div className="mb-1 text-xs text-emerald-600">● 已保存项目</div>}{target ? <><button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button>{!activeProject && managedFiles.length > 0 && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => rememberProject(target, managedFiles)}>保存为项目</Button>}</> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
-        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={gitOpen ? 'default' : 'ghost'} disabled={!target} onClick={toggleGit}><GitBranch className="mr-2 h-4 w-4" />Git</Button><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setAiOpen((value) => !value); setGitOpen(false); }}><Sparkles className="mr-2 h-4 w-4" />AI 助写</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
+        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={gitOpen ? 'default' : 'ghost'} disabled={!target} onClick={() => { toggleGit(); setReviewOpen(false); setImageOpen(false); }}> <GitBranch className="mr-2 h-4 w-4" />Git</Button><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setAiOpen((value) => !value); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}><Sparkles className="mr-2 h-4 w-4" />助写</Button><Button size="sm" variant={reviewOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setReviewOpen((value) => !value); setAiOpen(false); setImageOpen(false); setGitOpen(false); setAiResult(''); setAiError(''); }}><Check className="mr-2 h-4 w-4" />审校</Button><Button size="sm" variant={imageOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setImageOpen((value) => !value); setAiOpen(false); setReviewOpen(false); setGitOpen(false); setImageError(''); }}><Sparkles className="mr-2 h-4 w-4" />插图</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
         <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span>{documentContent.length} 字符</span></div>}
       </main>
@@ -661,6 +736,31 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown>{aiLoading && <span className="inline-block h-4 w-1 animate-pulse bg-primary" />}</article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">选择任务并填写要求，<br />AI 结果将在这里预览。</div>}</div>
         <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>追加到文档</Button><Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button></div>
+      </aside>}
+      {reviewOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
+        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Check className="h-4 w-4 text-primary" />第二模型润色与校对</div><p className="mt-1 text-xs text-muted-foreground">使用独立模型复核初稿，结果不会自动覆盖文章。</p></div>
+        <div className="space-y-3 border-b border-border p-4">
+          <label className="block text-xs text-muted-foreground">OpenAI 兼容地址<input value={reviewBaseUrl} onChange={(event) => setReviewBaseUrl(event.target.value)} placeholder="https://api.minimax.io/v1" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">模型<input value={reviewModel} onChange={(event) => setReviewModel(event.target.value)} placeholder="MiniMax-M2.7" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">API Key<input type="password" value={reviewApiKey} onChange={(event) => setReviewApiKey(event.target.value)} autoComplete="off" placeholder="仅本次运行保存在内存中" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">审校要求<textarea value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /></label>
+          {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止审校</Button> : <Button className="w-full" disabled={!reviewApiKey.trim() || !documentContent.trim()} onClick={runReview}><Check className="mr-2 h-4 w-4" />开始第二遍审校</Button>}
+          {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">审校稿将在这里预览。<br />确认后再替换当前文档。</div>}</div>
+        <div className="border-t border-border p-3"><Button className="w-full" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>确认并替换文档</Button></div>
+      </aside>}
+      {imageOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
+        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />MiniMax 章节插图</div><p className="mt-1 text-xs text-muted-foreground">先生成预览，确认后保存到 assets/images 并插入文章。</p></div>
+        <div className="space-y-3 border-b border-border p-4">
+          <label className="block text-xs text-muted-foreground">MiniMax API Key<input type="password" value={minimaxApiKey} onChange={(event) => setMinimaxApiKey(event.target.value)} autoComplete="off" placeholder="仅本次运行保存在内存中" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">画幅<select value={imageAspectRatio} onChange={(event) => setImageAspectRatio(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="16:9">横版 16:9</option><option value="4:3">横版 4:3</option><option value="1:1">方形 1:1</option><option value="3:4">竖版 3:4</option><option value="9:16">竖版 9:16</option></select></label>
+          <label className="block text-xs text-muted-foreground">插图描述<textarea value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} maxLength={1000} placeholder="例如：秦代宫殿俯瞰图，历史绘本质感，暖灰与朱红配色，人物服饰符合时代特征" className="mt-1 h-28 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /></label>
+          <Button className="w-full" disabled={imageLoading || !minimaxApiKey.trim() || !imagePrompt.trim()} onClick={generateIllustration}>{imageLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成插图预览</Button>
+          {imageError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{imageError}</div>}
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/30 p-4">{imageDataUrl ? <img src={imageDataUrl} alt="MiniMax 生成的章节插图预览" className="max-h-full w-full rounded-lg object-contain shadow-sm" /> : <div className="text-center text-xs text-muted-foreground">MiniMax image-01 的生成结果<br />将在这里预览。</div>}</div>
+        <div className="border-t border-border p-3"><Button className="w-full" disabled={!imageDataUrl || imageLoading} onClick={saveAndInsertIllustration}>保存图片并插入文档末尾</Button></div>
       </aside>}
       {gitOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><label className="flex items-center gap-2 text-xs text-muted-foreground">网站主题色<input type="color" value={pagesAccentColor} onChange={(event) => setPagesAccentColor(event.target.value)} className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" /></label></div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
