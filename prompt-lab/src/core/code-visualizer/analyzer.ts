@@ -1,4 +1,4 @@
-import type { AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
+import type { AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, DatabaseField, DatabaseTable, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
 
 interface PythonFunction {
   id: string;
@@ -81,11 +81,12 @@ export function extractFrontendCalls(file: RepositorySourceFile): FrontendCall[]
   }
 }
 
-function extractPython(file: RepositorySourceFile): { functions: PythonFunction[]; endpoints: RawEndpoint[]; modelTables: Map<string, string> } {
+function extractPython(file: RepositorySourceFile): { functions: PythonFunction[]; endpoints: RawEndpoint[]; modelTables: Map<string, string>; modelSchemas: Map<string, DatabaseTable> } {
   const lines = file.content.split(/\r?\n/);
   const functions: PythonFunction[] = [];
   const endpoints: RawEndpoint[] = [];
   const modelTables = new Map<string, string>();
+  const modelSchemas = new Map<string, DatabaseTable>();
   const routerPrefixes = new Map<string, string>();
   const imports = new Map<string, string>();
   for (let i = 0; i < lines.length; i += 1) {
@@ -98,16 +99,34 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
     if (moduleImport) imports.set(moduleImport[2] ?? moduleImport[1].split('.')[0], moduleImport[1]);
     const prefix = /^\s*(\w+)\s*=\s*(?:APIRouter|Blueprint)\s*\([\s\S]*?(?:prefix|url_prefix)\s*=\s*["']([^"']*)/.exec(lines[i]);
     if (prefix) routerPrefixes.set(prefix[1], prefix[2]);
-    const classMatch = /^class\s+(\w+)\s*\([^)]*(?:Model|Base)[^)]*\)\s*:/.exec(lines[i]);
-    if (classMatch) {
+    const classMatch = /^class\s+(\w+)\s*\(([^)]*)\)\s*:/.exec(lines[i]);
+    const bases = classMatch?.[2].split(',').map((base) => base.trim()) ?? [];
+    const isOrmModel = bases.some((base) => base === 'Base' || base === 'db.Model' || base === 'models.Model' || base.endsWith('.Model')) && !bases.some((base) => /BaseModel|Service|Schema|Serializer/.test(base));
+    if (classMatch && isOrmModel) {
       let table = classMatch[1].replace(/(?<!^)([A-Z])/g, '_$1').toLowerCase();
-      for (let j = i + 1; j < Math.min(lines.length, i + 30); j += 1) {
+      const fields: DatabaseField[] = [];
+      let classEnd = i + 1;
+      while (classEnd < lines.length && !/^(?:class|def|async\s+def)\s+/.test(lines[classEnd])) classEnd += 1;
+      for (let j = i + 1; j < classEnd; j += 1) {
         if (/^class\s+/.test(lines[j])) break;
         const declared = /__tablename__\s*=\s*["']([^"']+)/.exec(lines[j])
           ?? (/class\s+Meta\s*:/.test(lines[j]) ? /db_table\s*=\s*["']([^"']+)/.exec(lines[j + 1] ?? '') : null);
         if (declared?.[1]) { table = declared[1]; break; }
       }
+      for (let j = i + 1; j < classEnd; j += 1) {
+        const sqlalchemy = /^\s+(\w+)\s*(?::\s*Mapped\[([^\]]+)\])?\s*=\s*(?:mapped_column|Column)\s*\((.*)\)\s*$/.exec(lines[j]);
+        const django = /^\s+(\w+)\s*=\s*models\.(\w+Field)\s*\((.*)\)\s*$/.exec(lines[j]);
+        const match = sqlalchemy ?? django;
+        if (!match) continue;
+        const options = match[3] ?? '';
+        const rawType = sqlalchemy ? sqlalchemy[2] ?? options.split(',')[0]?.trim() ?? 'Any' : django?.[2] ?? 'Any';
+        const foreignKey = sqlalchemy
+          ? /ForeignKey\s*\(\s*["']([^"']+)/.exec(options)?.[1]
+          : /^(?:ForeignKey|OneToOneField|ManyToManyField)$/.test(django?.[2] ?? '') ? /(?:to\s*=\s*)?["']([^"']+)["']/.exec(options)?.[1] : undefined;
+        fields.push({ name: match[1], type: rawType.replace(/^models\./, ''), primaryKey: /primary_key\s*=\s*True/.test(options), nullable: /nullable\s*=\s*True|null\s*=\s*True/.test(options), defaultValue: /default\s*=\s*([^,)]+)/.exec(options)?.[1]?.trim(), foreignKey, location: { file: file.path, line: j + 1, snippet: lines[j].trim() } });
+      }
       modelTables.set(classMatch[1], table);
+      modelSchemas.set(classMatch[1], { name: table, model: classMatch[1], fields, location: { file: file.path, line: i + 1, endLine: classEnd, snippet: lines[i].trim() } });
     }
   }
 
@@ -150,7 +169,7 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
     const index = match.index ?? 0;
     endpoints.push({ framework: /ViewSet|APIView/.test(match[2]) ? 'drf' : 'django', method: 'GET', path: `/${match[1]}`, handler, fnId: fn?.id ?? `django:${file.path}:${lineOf(file.content, index)}`, contract: parseContract(fn ? lines[fn.line - 1] : '', match[1]), location: { file: file.path, line: lineOf(file.content, index), snippet: snippetAt(file.content, lineOf(file.content, index)) } });
   }
-  return { functions, endpoints, modelTables };
+  return { functions, endpoints, modelTables, modelSchemas };
 }
 
 function findMountedRouterPrefixes(files: RepositorySourceFile[]): Map<string, string> {
@@ -177,7 +196,9 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
   const py = pythonFiles.map(extractPython);
   const functions = py.flatMap((item) => item.functions);
   const globalModels = new Map<string, string>();
+  const globalSchemas = new Map<string, DatabaseTable>();
   for (const item of py) for (const [model, table] of item.modelTables) globalModels.set(model, table);
+  for (const item of py) for (const schema of item.modelSchemas.values()) globalSchemas.set(schema.name, schema);
   for (const fn of functions) for (const [model, table] of globalModels) {
     if (!fn.tables.some((entry) => entry.name === table) && new RegExp(`\\b${model}\\b`).test(fn.body)) {
       const writes = /\.(add|delete|update|save|create)\s*\(|\.objects\.(create|update|delete)|\b(INSERT|UPDATE|DELETE)\b/i.test(fn.body);
@@ -238,7 +259,7 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
       }
     };
     walk(functions.find((fn) => fn.id === raw.fnId) ?? byName.get(raw.handler)?.[0], endpointId, 0);
-    return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], nodes, edges, contract: raw.contract, diagnostics: [] };
+    return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], databaseTables: [...tables].map((table) => globalSchemas.get(table) ?? { name: table, fields: [] }), nodes, edges, contract: raw.contract, diagnostics: [] };
   });
   const unique = [...new Map(endpoints.map((endpoint) => [`${endpoint.method}:${endpoint.normalizedPath}:${endpoint.location.file}`, endpoint])).values()];
   return { rootPath, scannedAt: Date.now(), filesScanned: files.length, pythonFiles: pythonFiles.length, vueFiles: vueFiles.length, endpoints: unique.sort((a, b) => a.path.localeCompare(b.path)), warnings: rawEndpoints.length === 0 ? ['未发现静态可解析的 Python 接口；动态注册的路由暂不支持。'] : [] };

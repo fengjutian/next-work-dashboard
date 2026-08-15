@@ -85,4 +85,28 @@ def update_user(user_id: int, payload: UserInput = Body(...), trace: str = Heade
     expect(diagnostics.some((item) => item.kind === 'method-mismatch')).toBe(true);
     expect(diagnostics.some((item) => item.kind === 'missing-backend')).toBe(true);
   });
+
+  it('extracts complete ORM fields and ignores Pydantic models', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'users.py', content: `
+class UserInput(BaseModel):
+    name: str
+
+class User(Base):
+    __tablename__ = 'users'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey('teams.id'), nullable=True)
+
+@app.get('/users')
+def users():
+    return session.query(User).all()
+` }]);
+    expect(result.endpoints[0].databaseTables).toHaveLength(1);
+    expect(result.endpoints[0].databaseTables[0].name).toBe('users');
+    expect(result.endpoints[0].databaseTables[0].fields).toMatchObject([
+      { name: 'id', primaryKey: true, nullable: false },
+      { name: 'name', type: 'str', nullable: false },
+      { name: 'team_id', foreignKey: 'teams.id', nullable: true },
+    ]);
+  });
 });

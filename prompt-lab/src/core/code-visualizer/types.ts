@@ -46,6 +46,23 @@ export interface ApiContract {
   statusCodes: number[];
 }
 
+export interface DatabaseField {
+  name: string;
+  type: string;
+  primaryKey: boolean;
+  nullable: boolean;
+  defaultValue?: string;
+  foreignKey?: string;
+  location?: SourceLocation;
+}
+
+export interface DatabaseTable {
+  name: string;
+  model?: string;
+  fields: DatabaseField[];
+  location?: SourceLocation;
+}
+
 export interface AnalysisDiagnostic {
   id: string;
   kind: 'unused-endpoint' | 'missing-backend' | 'method-mismatch' | 'dynamic-url';
@@ -66,6 +83,7 @@ export interface ApiEndpoint {
   location: SourceLocation;
   frontendCalls: FrontendCall[];
   tables: string[];
+  databaseTables: DatabaseTable[];
   nodes: AnalysisNode[];
   edges: AnalysisEdge[];
   contract: ApiContract;
