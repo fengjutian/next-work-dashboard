@@ -10,7 +10,7 @@ configureMonaco();
 
 const METHOD_COLOR: Record<string, string> = { GET: 'green', POST: 'blue', PUT: 'orange', PATCH: 'gold', DELETE: 'red' };
 const KIND_LABEL: Record<AnalysisNode['kind'], string> = { frontend: 'Vue', endpoint: '接口', controller: 'Controller', service: 'Service', repository: 'Repository', model: 'Model', database: '数据库' };
-type SourceTab = { path: string; content: string; line: number };
+type SourceTab = { path: string; content: string; line: number; endLine: number; label: string; kind: AnalysisNode['kind'] };
 
 export function CodeVisualizerPanel(): JSX.Element {
   const [result, setResult] = useState<RepositoryAnalysis | null>(null);
@@ -44,7 +44,7 @@ export function CodeVisualizerPanel(): JSX.Element {
   };
   const openSource = useCallback(async (node: AnalysisNode): Promise<void> => {
     if (!result || !node.location) return;
-    try { const file = await window.electronAPI.codeVisualizer.source.read(result.rootPath, node.location.file); setSourceTabs((tabs) => [...tabs.filter((tab) => tab.path !== file.path), { ...file, line: node.location?.line ?? 1 }]); setActiveSourcePath(file.path); }
+    try { const file = await window.electronAPI.codeVisualizer.source.read(result.rootPath, node.location.file); const line = node.location?.line ?? 1; setSourceTabs((tabs) => [...tabs.filter((tab) => tab.path !== file.path), { ...file, line, endLine: Math.max(line, node.location?.endLine ?? line), label: node.label, kind: node.kind }]); setActiveSourcePath(file.path); }
     catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
   }, [result]);
 
@@ -107,11 +107,13 @@ function SourcePanel({ tabs, active, onActivate, onClose }: { tabs: SourceTab[];
   const dark = document.documentElement.classList.contains('dark');
   const language = active.path.endsWith('.py') ? 'python' : active.path.endsWith('.vue') ? 'html' : active.path.endsWith('.ts') || active.path.endsWith('.tsx') ? 'typescript' : 'javascript';
   const handleMount: OnMount = (editor) => {
-    editor.revealLineInCenter(active.line);
+    const endLine = Math.min(active.endLine, editor.getModel()?.getLineCount() ?? active.endLine);
+    editor.deltaDecorations([], [{ range: { startLineNumber: active.line, startColumn: 1, endLineNumber: endLine, endColumn: 1 }, options: { isWholeLine: true, className: 'code-visualizer-source-highlight', linesDecorationsClassName: 'code-visualizer-source-gutter', overviewRuler: { color: 'rgba(126, 52, 121, 0.75)', position: 7 } } }]);
+    editor.revealLinesInCenter(active.line, endLine);
     editor.setPosition({ lineNumber: active.line, column: 1 });
     editor.focus();
   };
-  return <aside className="flex w-[46%] min-w-[440px] flex-col border-l bg-card"><div className="flex h-10 shrink-0 overflow-x-auto border-b bg-background">{tabs.map((tab) => <button key={tab.path} type="button" onClick={() => onActivate(tab.path)} className={`group flex max-w-56 shrink-0 items-center gap-2 border-r px-3 text-xs ${tab.path === active.path ? 'border-t-2 border-t-primary bg-card text-foreground' : 'text-muted-foreground hover:bg-accent'}`}><span className="truncate">{tab.path.split('/').at(-1)}</span><span role="button" tabIndex={0} aria-label={`关闭 ${tab.path}`} onClick={(event) => { event.stopPropagation(); onClose(tab.path); }} onKeyDown={(event) => { if (event.key === 'Enter') onClose(tab.path); }} className="rounded p-0.5 opacity-0 transition hover:bg-muted group-hover:opacity-100"><XCircle className="h-3 w-3"/></span></button>)}</div><div className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{active.path} · 第 {active.line} 行</div><div className="min-h-0 flex-1"><MonacoEditor key={`${active.path}:${active.line}`} value={active.content} language={language} theme={dark ? 'vs-dark' : 'light'} loading={<div className="grid h-full place-items-center text-xs text-muted-foreground">正在加载本地源码编辑器…</div>} onMount={handleMount} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, lineNumbersMinChars: 3, fontSize: 12, scrollBeyondLastLine: false, renderLineHighlight: 'all', wordWrap: 'off' }}/></div></aside>;
+  return <aside className="relative flex w-[48%] min-w-[460px] flex-col border-l-2 border-l-primary/40 bg-card shadow-[-8px_0_24px_rgba(0,0,0,0.08)]"><div className="flex h-10 shrink-0 overflow-x-auto border-b bg-background">{tabs.map((tab) => <button key={tab.path} type="button" onClick={() => onActivate(tab.path)} className={`group flex max-w-56 shrink-0 items-center gap-2 border-r px-3 text-xs ${tab.path === active.path ? 'border-t-2 border-t-primary bg-card text-foreground' : 'text-muted-foreground hover:bg-accent'}`}><span className="truncate">{tab.path.split('/').at(-1)}</span><span role="button" tabIndex={0} aria-label={`关闭 ${tab.path}`} onClick={(event) => { event.stopPropagation(); onClose(tab.path); }} onKeyDown={(event) => { if (event.key === 'Enter') onClose(tab.path); }} className="rounded p-0.5 opacity-0 transition hover:bg-muted group-hover:opacity-100"><XCircle className="h-3 w-3"/></span></button>)}</div><div className="flex items-center gap-2 border-b bg-primary/5 px-3 py-2"><Tag color="purple">{KIND_LABEL[active.kind]}</Tag><strong className="truncate text-xs">{active.label}</strong><span className="ml-auto truncate text-[11px] text-muted-foreground" title={active.path}>{active.path} · {active.line}{active.endLine > active.line ? `–${active.endLine}` : ''} 行</span></div><div className="min-h-0 flex-1"><MonacoEditor key={`${active.path}:${active.line}:${active.endLine}`} value={active.content} language={language} theme={dark ? 'vs-dark' : 'light'} loading={<div className="grid h-full place-items-center text-xs text-muted-foreground">正在加载本地源码编辑器…</div>} onMount={handleMount} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: true, showSlider: 'mouseover', size: 'fit' }, lineNumbersMinChars: 3, fontSize: 12, scrollBeyondLastLine: false, renderLineHighlight: 'all', wordWrap: 'off', overviewRulerBorder: false }}/></div></aside>;
 }
 
 function formatHistoryTime(timestamp: number): string {

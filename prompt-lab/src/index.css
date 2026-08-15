@@ -192,6 +192,17 @@
   background-clip: padding-box;
 }
 
+/* Code visualizer: make the source range selected from the graph unmistakable. */
+.code-visualizer-source-highlight {
+  background: hsl(var(--primary) / 0.1);
+  box-shadow: inset 3px 0 0 hsl(var(--primary) / 0.9);
+}
+
+.code-visualizer-source-gutter {
+  border-left: 3px solid hsl(var(--primary));
+  margin-left: 3px;
+}
+
 /* Keep nested panes from propagating wheel movement to the page behind them. */
 :where(.ant-modal-body, .ant-drawer-body, .ant-table-body, .ant-select-dropdown, .chat-markdown, pre) {
   overscroll-behavior: contain;
