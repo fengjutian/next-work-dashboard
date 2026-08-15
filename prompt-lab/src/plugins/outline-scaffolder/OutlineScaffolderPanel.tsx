@@ -93,9 +93,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewBaseUrl, setReviewBaseUrl] = useState('https://api.minimax.io/v1');
+  const [reviewBaseUrl, setReviewBaseUrl] = useState('https://api.minimaxi.com/v1');
   const [reviewApiKey, setReviewApiKey] = useState('');
-  const [reviewModel, setReviewModel] = useState('MiniMax-M2.7');
+  const [reviewModel, setReviewModel] = useState('MiniMax-M3');
   const [reviewInstruction, setReviewInstruction] = useState('核对错别字、语病、逻辑衔接、前后矛盾与可能失实的表述；保持原有 Markdown 结构和作者语气。');
   const [imageOpen, setImageOpen] = useState(false);
   const [minimaxApiKey, setMinimaxApiKey] = useState('');
@@ -353,7 +353,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } catch (error) {
       if (requestId === aiRequestRef.current) {
         const message = error instanceof Error ? error.message : String(error);
-        setAiError(/401|invalid api key|authorized_error/i.test(message) ? 'API Key 无效或与当前 MiniMax 区域不匹配。请重新复制完整 Key；全球站使用 api.minimax.io，国内站使用 api.minimaxi.com。' : message);
+        setAiError(/401|invalid api key|authorized_error/i.test(message) ? `API Key 未通过当前平台鉴权。当前请求地址：${reviewBaseUrl.includes('minimaxi.com') ? '国内站 api.minimaxi.com' : '全球站 api.minimax.io'}。请确认 Key 来自同一平台的“账户管理 → 接口密钥”，而不是 Token Plan 兑换码或网页登录凭据。` : message);
       }
     } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
   };
@@ -774,8 +774,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       {reviewOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Check className="h-4 w-4 text-primary" />第二模型润色与校对</div><p className="mt-1 text-xs text-muted-foreground">使用独立模型复核初稿，结果不会自动覆盖文章。</p></div>
         <div className="space-y-3 border-b border-border p-4">
-          <label className="block text-xs text-muted-foreground">OpenAI 兼容地址<input value={reviewBaseUrl} onChange={(event) => setReviewBaseUrl(event.target.value)} placeholder="https://api.minimax.io/v1" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
-          <label className="block text-xs text-muted-foreground">模型<input value={reviewModel} onChange={(event) => setReviewModel(event.target.value)} placeholder="MiniMax-M2.7" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+          <label className="block text-xs text-muted-foreground">MiniMax 平台<select value={reviewBaseUrl} onChange={(event) => setReviewBaseUrl(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="https://api.minimaxi.com/v1">国内站 · api.minimaxi.com</option><option value="https://api.minimax.io/v1">全球站 · api.minimax.io</option></select></label>
+          <label className="block text-xs text-muted-foreground">模型<input value={reviewModel} onChange={(event) => setReviewModel(event.target.value)} placeholder="MiniMax-M3" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
           <label className="block text-xs text-muted-foreground">API Key<input type="password" value={reviewApiKey} onChange={(event) => setReviewApiKey(event.target.value)} autoComplete="off" placeholder="粘贴完整 API Key" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
           <div className="grid grid-cols-2 gap-2"><Button type="button" size="sm" variant="outline" disabled={!isValidApiKey(reviewApiKey)} onClick={() => saveApiKey('review', reviewApiKey)}><Save className="mr-2 h-4 w-4" />加密保存</Button><Button type="button" size="sm" variant="ghost" onClick={() => clearApiKey('review')}>清除 Key</Button></div>
           <label className="block text-xs text-muted-foreground">审校要求<textarea value={reviewInstruction} onChange={(event) => setReviewInstruction(event.target.value)} className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /></label>

@@ -303,7 +303,11 @@ export function setupIPC(webviewPreloadPath: string) {
 
   ipcMain.handle('llm:chat', async (_event, payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => {
     try {
-      const url = new URL(String(payload.baseUrl || '').replace(/\/+$/, '') + '/chat/completions');
+      const baseUrl = String(payload.baseUrl || '').replace(/\/+$/, '');
+      const base = new URL(baseUrl);
+      const isMiniMaxM3 = String(payload.body?.model || '').toLowerCase() === 'minimax-m3'
+        && (base.hostname === 'api.minimaxi.com' || base.hostname === 'api.minimax.io');
+      const url = new URL(isMiniMaxM3 ? `${base.origin}/v1/text/chatcompletion_v2` : `${baseUrl}/chat/completions`);
       const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
       const blockedHost = hostname === 'localhost'
         || hostname.endsWith('.localhost')
