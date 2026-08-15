@@ -72,6 +72,8 @@ export interface SecurityScanner {
   detect(context: ScanContext): Promise<boolean>;
   scan(context: ScanContext): Promise<SecurityFinding[]>;
   version?: string;
+  lastExitCode?: number;
+  skipReason?: string;
 }
 
 export interface ScanRecord {

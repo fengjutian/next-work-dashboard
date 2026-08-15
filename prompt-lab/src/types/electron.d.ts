@@ -547,6 +547,15 @@ export interface ElectronAPI {
       suggest: (docSummary: { title: string; url: string; capturedAt: number }) => Promise<Array<{ workspaceId: string; score: number; reasons: string[] }>>;
     };
   };
+  codeVisualizer: {
+    repository: {
+      select: () => Promise<{ ok: boolean; cancelled?: boolean; rootPath?: string }>;
+      scan: (rootPath: string) => Promise<import('../core/code-visualizer').RepositoryAnalysis>;
+    };
+    source: {
+      read: (rootPath: string, relativePath: string) => Promise<{ path: string; content: string }>;
+    };
+  };
   websiteRegistry: {
     record: {
       list: (filters?: import('../core/website-registry/types').WebsiteRecordFilters) => Promise<import('../core/website-registry/types').WebsiteRecord[]>;

@@ -14,7 +14,7 @@ export class SecurityScanOrchestrator {
     for (const scanner of candidates) {
       const detectedAt = Date.now();
       if (await scanner.detect(context)) enabled.push(scanner);
-      else scannerRuns.push({ scannerId: scanner.id, name: scanner.name, status: 'skipped', startedAt: detectedAt, completedAt: Date.now(), durationMs: Date.now() - detectedAt, findingsCount: 0, version: scanner.version, reason: '未安装或未满足项目就绪条件' });
+      else scannerRuns.push({ scannerId: scanner.id, name: scanner.name, status: 'skipped', startedAt: detectedAt, completedAt: Date.now(), durationMs: Date.now() - detectedAt, findingsCount: 0, version: scanner.version, reason: scanner.skipReason ?? '未安装或未满足项目就绪条件' });
     }
     const findings: SecurityFinding[] = [];
     for (let index = 0; index < enabled.length; index += 1) {
@@ -25,7 +25,7 @@ export class SecurityScanOrchestrator {
       try {
         const scannerFindings = await scanner.scan(context);
         findings.push(...scannerFindings);
-        scannerRuns.push({ scannerId: scanner.id, name: scanner.name, status: 'succeeded', startedAt, completedAt: Date.now(), durationMs: Date.now() - startedAt, findingsCount: scannerFindings.length, version: scanner.version });
+        scannerRuns.push({ scannerId: scanner.id, name: scanner.name, status: 'succeeded', startedAt, completedAt: Date.now(), durationMs: Date.now() - startedAt, findingsCount: scannerFindings.length, version: scanner.version, exitCode: scanner.lastExitCode });
       } catch (error) {
         if (context.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
           scannerRuns.push({ scannerId: scanner.id, name: scanner.name, status: 'cancelled', startedAt, completedAt: Date.now(), durationMs: Date.now() - startedAt, findingsCount: 0, version: scanner.version, reason: '用户取消' });

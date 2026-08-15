@@ -57,6 +57,7 @@ const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ def
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ default: m.ThinkingLabPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
+const codeVisualizer = preloadable(() => import('../code-visualizer').then((m) => ({ default: m.CodeVisualizerPanel })));
 const websiteRegistry = preloadable(() => import('../website-registry').then((m) => ({ default: m.WebsiteRegistryPanel })));
 const securityAudit = preloadable(() => import('../security-audit').then((m) => ({ default: m.SecurityAuditPanel })));
 const videoGeneration = preloadable(() => import('../video-generation').then((m) => ({ default: m.VideoGenerationPanel })));
@@ -95,6 +96,7 @@ const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const ThinkingLabPanel = thinkingLab.component;
 const WorkBrowserPanel = workBrowser.component;
+const CodeVisualizerPanel = codeVisualizer.component;
 const WebsiteRegistryPanel = websiteRegistry.component;
 const SecurityAuditPanel = securityAudit.component;
 const VideoGenerationPanel = videoGeneration.component;
@@ -537,6 +539,19 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'code-visualizer',
+    name: '代码接口地图',
+    icon: Code,
+    component: CodeVisualizerPanel,
+    enabled: true,
+    order: 9.1,
+    keepAlive: true,
+    preload: () => import('../code-visualizer'),
+    contributions: {
+      commands: [{ id: 'code-visualizer.scan', title: '扫描 Python + Vue 仓库', category: '代码接口地图' }],
+    },
+  },
+  {
     id: 'website-registry',
     name: '网站收藏',
     icon: Globe,
@@ -811,6 +826,7 @@ export function registerBuiltInPlugins(): void {
     'english-lookup': englishLookup.preload,
     calcpath: calcPath.preload,
     'rss-reader': rssReader.preload,
+    'code-visualizer': codeVisualizer.preload,
   };
   pluginRegistry.registerAll(builtInPlugins.map((plugin) => ({
     ...plugin,

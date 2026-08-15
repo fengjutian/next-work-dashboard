@@ -42,6 +42,10 @@ describe('security audit core', () => {
   it('rejects oversized or untrusted scanner report paths', () => {
     const root = temporaryRoot(); const report = path.join(root, 'report.json'); fs.writeFileSync(report, '{}');
     expect(() => readLimitedJsonReport(report)).toThrow('SCANNER_REPORT_UNTRUSTED_PATH');
+    const oversized = path.join(os.tmpdir(), `nwd-oversized-${Date.now()}.json`);
+    const descriptor = fs.openSync(oversized, 'w');
+    try { fs.ftruncateSync(descriptor, 20 * 1024 * 1024 + 1); } finally { fs.closeSync(descriptor); }
+    try { expect(() => readLimitedJsonReport(oversized)).toThrow('SCANNER_REPORT_LIMIT'); } finally { fs.rmSync(oversized, { force: true }); }
   });
 
   it('ignores dependencies and symbolic links while enumerating', () => {

@@ -18,6 +18,7 @@ import { setupVideoPlayerIPC, videoPlayerService } from './plugins/video-player/
 import { setupWorkBrowserIPC } from './main/work-browser';
 import { setupSecurityAuditIPC } from './main/security-audit';
 import { setupWebsiteRegistryIPC } from './main/website-registry';
+import { setupCodeVisualizerIPC } from './main/code-visualizer';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -119,6 +120,7 @@ if (started) {
     setupRagWorkerIPC();
     setupVideoPlayerIPC();
     setupWorkBrowserIPC();
+    setupCodeVisualizerIPC();
     setupWebsiteRegistryIPC();
     startRagIndexCoordinator();
     createTray();

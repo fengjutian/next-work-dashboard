@@ -35,7 +35,7 @@ export function parseScannerJson(output: string): JsonObject {
 
 export function readLimitedJsonReport(reportPath: string): JsonObject {
   const realTemp = fs.realpathSync(os.tmpdir());
-  if (path.dirname(path.resolve(reportPath)) !== realTemp || fs.lstatSync(reportPath).isSymbolicLink()) throw new Error('SCANNER_REPORT_UNTRUSTED_PATH');
+  if (fs.realpathSync(path.dirname(path.resolve(reportPath))) !== realTemp || fs.lstatSync(reportPath).isSymbolicLink()) throw new Error('SCANNER_REPORT_UNTRUSTED_PATH');
   const descriptor = fs.openSync(reportPath, 'r');
   try {
     const stat = fs.fstatSync(descriptor);
@@ -49,9 +49,18 @@ export function readLimitedJsonReport(reportPath: string): JsonObject {
 function externalScanner(command: ExternalScannerCommand, name: string, args: (context: ScanContext) => string[], parser: (json: JsonObject, context: ScanContext) => SecurityFinding[], projectDetect: (context: ScanContext) => boolean = () => true): SecurityScanner {
   return {
     id: command, name,
-    async detect(context) { const status = await inspectScannerCommand(command); this.version = status.version; return projectDetect(context) && status.available; },
+    async detect(context) {
+      const status = await inspectScannerCommand(command); this.version = status.version;
+      if (!status.available) { this.skipReason = status.error ?? '扫描器未安装'; return false; }
+      if (!projectDetect(context)) {
+        this.skipReason = command === 'semgrep' ? '项目缺少本地 Semgrep 配置' : context.networkPolicy === 'deny' ? '网络策略禁止该扫描器联网' : '项目未满足扫描条件';
+        return false;
+      }
+      this.skipReason = undefined; return true;
+    },
     async scan(context) {
       const result = await runScannerProcess(command, args(context), context.projectDir, context.signal);
+      this.lastExitCode = result.exitCode;
       // Security scanners commonly return non-zero when findings exist. Parse any JSON output first.
       if (!result.stdout.trim()) throw new ScannerProcessError(`${command.toUpperCase().replace('-', '_')}_FAILED: ${redactSecrets(result.stderr).slice(0, 300)}`, result.exitCode);
       return parser(parseScannerJson(result.stdout), context);
@@ -75,11 +84,12 @@ export function parseGitleaksOutput(json: JsonObject, context: ScanContext): Sec
 
 export const gitleaksScanner: SecurityScanner = {
   id: 'gitleaks', name: 'Gitleaks Secret Scan',
-  async detect() { const status = await inspectScannerCommand('gitleaks'); this.version = status.version; return status.available; },
+  async detect() { const status = await inspectScannerCommand('gitleaks'); this.version = status.version; this.skipReason = status.available ? undefined : status.error ?? '扫描器未安装'; return status.available; },
   async scan(context) {
     const reportPath = path.join(os.tmpdir(), `nwd-gitleaks-${crypto.randomUUID()}.json`);
     try {
       const result = await runScannerProcess('gitleaks', ['dir', '.', '--report-format', 'json', '--report-path', reportPath, '--no-banner', '--redact=100'], context.projectDir, context.signal);
+      this.lastExitCode = result.exitCode;
       if (!fs.existsSync(reportPath)) {
         if (result.exitCode === 0) return [];
         throw new ScannerProcessError(`GITLEAKS_FAILED: ${redactSecrets(result.stderr).slice(0, 300)}`, result.exitCode);
@@ -100,7 +110,7 @@ export function parseOsvOutput(json: JsonObject, context: ScanContext): Security
   }
   return findings;
 }
-export const osvScanner = externalScanner('osv-scanner', 'OSV Dependency Scan', (context) => ['scan', 'source', '--format=json', '--verbosity=error', '--recursive', '.'], parseOsvOutput, (context) => context.networkPolicy === 'allow');
+export const osvScanner = externalScanner('osv-scanner', 'OSV Dependency Scan', () => ['scan', 'source', '--format=json', '--verbosity=error', '--recursive', '.'], parseOsvOutput, (context) => context.networkPolicy === 'allow');
 
 export function parseTrivyOutput(json: JsonObject, context: ScanContext): SecurityFinding[] {
   const results = Array.isArray(json.Results) ? json.Results as JsonObject[] : [];
@@ -116,7 +126,7 @@ export function parseTrivyOutput(json: JsonObject, context: ScanContext): Securi
   }
   return findings;
 }
-export const trivyScanner = externalScanner('trivy', 'Trivy Vulnerability/IaC Scan', () => ['fs', '--format', 'json', '--scanners', 'vuln,misconfig,secret', '.'], parseTrivyOutput, (context) => context.networkPolicy === 'allow');
+export const trivyScanner = externalScanner('trivy', 'Trivy Vulnerability/IaC Scan', (context) => ['fs', '--format', 'json', '--scanners', 'vuln,misconfig,secret', ...(context.networkPolicy === 'deny' ? ['--skip-db-update', '--skip-check-update'] : []), '.'], parseTrivyOutput);
 
 export const externalScanners: SecurityScanner[] = [semgrepScanner, gitleaksScanner, osvScanner, trivyScanner];
 export async function listExternalScannerAvailability(projectDir: string | undefined, networkPolicy: 'deny' | 'allow', force = false): Promise<Array<{ id: string; name: string; installed: boolean; ready: boolean; version?: string; reason?: string; checkedAt: number; requiresNetwork?: boolean }>> {
@@ -126,7 +136,16 @@ export async function listExternalScannerAvailability(projectDir: string | undef
     let reason = installed.error;
     const requiresNetwork = scanner.id === 'osv-scanner' || scanner.id === 'trivy';
     if (ready && scanner.id === 'semgrep' && (!projectDir || (!fs.existsSync(path.join(projectDir, '.semgrep.yml')) && !fs.existsSync(path.join(projectDir, '.semgrep.yaml'))))) { ready = false; reason = '项目缺少 .semgrep.yml 或 .semgrep.yaml'; }
-    if (ready && requiresNetwork && networkPolicy !== 'allow') { ready = false; reason = '网络策略为拒绝；当前适配器未验证本地离线数据库'; }
+    if (ready && scanner.id === 'osv-scanner' && networkPolicy !== 'allow') { ready = false; reason = '网络策略为拒绝；请显式允许 OSV 查询或配置受管离线数据库'; }
+    if (ready && scanner.id === 'trivy' && networkPolicy !== 'allow') {
+      try {
+        const versionResult = await runScannerProcess('trivy', ['version', '--format', 'json'], projectDir ?? process.cwd(), new AbortController().signal, 5_000);
+        const versionJson = parseScannerJson(versionResult.stdout);
+        const database = versionJson.VulnerabilityDB ?? versionJson.Database;
+        ready = Boolean(database && typeof database === 'object');
+        if (!ready) reason = '未检测到本地 Trivy Vulnerability DB；联网更新未获授权';
+      } catch { ready = false; reason = '无法验证本地 Trivy Vulnerability DB'; }
+    }
     return { id: scanner.id, name: scanner.name, installed: installed.available, ready, version: installed.version, reason, checkedAt: installed.checkedAt, requiresNetwork };
   }));
 }
