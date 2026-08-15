@@ -795,6 +795,8 @@ export interface ChapterProjectRecord {
   template: string;
   files: string[];
   updatedAt: number;
+  git?: { remoteUrl: string; remoteName: string; branch: string };
+  pages?: { title: string; description: string; author: string; language: string; repositoryName: string; customDomain: string };
 }
 
 export interface WorkspaceResult<T> {

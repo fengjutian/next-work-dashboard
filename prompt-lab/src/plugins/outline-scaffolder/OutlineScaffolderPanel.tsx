@@ -35,6 +35,8 @@ interface SavedProject {
   template: string;
   files: string[];
   updatedAt: number;
+  git?: { remoteUrl: string; remoteName: string; branch: string };
+  pages?: { title: string; description: string; author: string; language: string; repositoryName: string; customDomain: string };
 }
 
 function loadSavedProjects(): SavedProject[] {
@@ -97,6 +99,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [gitRemoteUrl, setGitRemoteUrl] = useState('');
   const [gitRemoteName, setGitRemoteName] = useState('origin');
   const [gitBranch, setGitBranch] = useState('main');
+  const [pagesOpen, setPagesOpen] = useState(false);
+  const [pagesTitle, setPagesTitle] = useState(projectTitle);
+  const [pagesDescription, setPagesDescription] = useState('我的文档在线阅读');
+  const [pagesAuthor, setPagesAuthor] = useState('作者');
+  const [pagesLanguage, setPagesLanguage] = useState('zh-CN');
+  const [pagesRepositoryName, setPagesRepositoryName] = useState('my-book');
+  const [pagesCustomDomain, setPagesCustomDomain] = useState('');
   const aiRequestRef = useRef(0);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
@@ -133,6 +142,20 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const dirty = documentContent !== savedContent;
   const activeProject = recentProjects.find((project) => project.rootPath === target?.path && (!project.subfolder || managedFiles.some((path) => path.startsWith(`${project.subfolder}/`)))) ?? null;
+  const activeProjectId = activeProject?.id;
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    const timer = window.setTimeout(() => {
+      setRecentProjects((current) => current.map((project) => project.id === activeProjectId ? {
+        ...project,
+        git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
+        pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain },
+        updatedAt: Date.now(),
+      } : project));
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [activeProjectId, gitBranch, gitRemoteName, gitRemoteUrl, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
 
   const switchView = (next: 'generator' | 'documents') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -165,6 +188,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       template: overrides?.template ?? template,
       files: paths,
       updatedAt: Date.now(),
+      git: overrides?.git ?? { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
+      pages: overrides?.pages ?? { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain },
     };
     setRecentProjects((current) => [project, ...current.filter((item) => item.id !== project.id)].slice(0, 20));
   };
@@ -197,6 +222,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const folder = { path: project.rootPath, name: project.name };
       setTarget(folder); setProjectTitle(project.name); setSubfolder(project.subfolder); setSource(project.source);
       setSplitMode(project.splitMode); setOrganizeByPart(project.organizeByPart); setTemplate(project.template);
+      setGitRemoteUrl(project.git?.remoteUrl ?? ''); setGitRemoteName(project.git?.remoteName ?? 'origin'); setGitBranch(project.git?.branch ?? 'main');
+      setPagesTitle(project.pages?.title ?? project.name); setPagesDescription(project.pages?.description ?? `${project.name}在线阅读`); setPagesAuthor(project.pages?.author ?? '作者');
+      setPagesLanguage(project.pages?.language ?? 'zh-CN'); setPagesRepositoryName(project.pages?.repositoryName ?? 'my-book'); setPagesCustomDomain(project.pages?.customDomain ?? '');
       setManagedFiles(project.files); setView('documents'); setActiveFile(''); setDocumentContent(''); setSavedContent('');
       await loadExistingDocuments(folder, project.subfolder, false, false);
       setRecentProjects((current) => current.map((item) => item.id === project.id ? { ...item, updatedAt: Date.now() } : item).sort((a, b) => b.updatedAt - a.updatedAt));
@@ -287,11 +315,19 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setGitRepository(true);
       setOutputIsGitRepository(true);
       const prefix = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
-      const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json']);
+      const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/index.md` : 'index.md', prefix ? `${prefix}/404.md` : '404.md', prefix ? `${prefix}/_config.yml` : '_config.yml', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json', '.github/workflows/pages.yml']);
       const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
         .filter((item) => !item.path.startsWith('.history/') && !item.path.includes('/.history/'))
-        .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) : known.has(item.path));
+        .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) || item.path === '.github/workflows/pages.yml' : known.has(item.path));
       return changes;
+  };
+
+  const persistDeploymentSettings = () => {
+    if (!target || !managedFiles.length) return;
+    rememberProject(target, managedFiles, {
+      git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
+      pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain },
+    });
   };
 
   const refreshGit = async () => {
@@ -299,6 +335,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setGitLoading(true); setGitError('');
     try {
       setGitChanges(await getProjectGitChanges());
+      const overview = await window.electronAPI.workspace.gitOperation<{ branch: string; remotes: string[] }>(target.path, 'overview');
+      if (overview.success && overview.data) {
+        if (overview.data.branch) setGitBranch(overview.data.branch);
+        const firstRemote = overview.data.remotes?.find((line) => /\(fetch\)$/.test(line));
+        const match = firstRemote?.match(/^(\S+)\s+(\S+)\s+\(fetch\)$/);
+        if (match) {
+          setGitRemoteName(match[1]); setGitRemoteUrl(match[2]);
+          const repository = match[2].split(/[/:]/).pop()?.replace(/\.git$/i, '');
+          if (repository) setPagesRepositoryName(repository);
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setGitChanges([]); setGitRepository(/not a git repository/i.test(message) ? false : null); setGitError(`当前输出目录不是可用的 Git 仓库：${message}`);
@@ -379,6 +426,63 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const pushed = await window.electronAPI.workspace.gitOperation(target.path, 'push', { remote: gitRemoteName.trim(), setUpstream: true });
       if (!pushed.success) throw new Error(pushed.error);
       notice.success({ message: '文章已提交并推送', description: `${gitRemoteName.trim()}/${gitBranch.trim()}`, placement: 'bottomRight' });
+      persistDeploymentSettings();
+      setGitChanges(await getProjectGitChanges());
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : String(error));
+    } finally { setGitLoading(false); }
+  };
+
+  const upsertWorkspaceFile = async (path: string, content: string) => {
+    if (!target) throw new Error('请先选择 Git 仓库');
+    const existing = await window.electronAPI.workspace.readTextFile(target.path, path);
+    if (existing.success && existing.data) {
+      const updated = await window.electronAPI.workspace.writeTextFile(target.path, path, content, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: existing.data.modifiedAt });
+      if (!updated.success) throw new Error(updated.error);
+      return;
+    }
+    const created = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path, content, encoding: 'utf8', lineEnding: 'LF' }]);
+    if (!created.success) throw new Error(created.error);
+  };
+
+  const configureGitHubPages = async () => {
+    if (!target || !managedFiles.length) return;
+    if (dirty) { setGitError('当前文档尚未保存，请先保存后再生成 Pages 配置。'); return; }
+    setGitLoading(true); setGitError('');
+    try {
+      const siteFolder = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
+      const inSite = (name: string) => siteFolder ? `${siteFolder}/${name}` : name;
+      for (const file of managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path))) {
+        const read = await window.electronAPI.workspace.readTextFile(target.path, file);
+        if (!read.success || !read.data) continue;
+        if (/^---\s*\r?\n/.test(read.data.content)) continue;
+        const title = file.split('/').pop()?.replace(/\.md$/i, '').replace(/^\d+-/, '') ?? '文章';
+        const content = `---\nlayout: default\ntitle: ${JSON.stringify(title)}\n---\n\n${read.data.content}`;
+        const updated = await window.electronAPI.workspace.writeTextFile(target.path, file, content, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: read.data.modifiedAt });
+        if (!updated.success) throw new Error(updated.error);
+      }
+      const chapterLinks = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path)).map((path) => {
+        const relative = siteFolder && path.startsWith(`${siteFolder}/`) ? path.slice(siteFolder.length + 1) : path;
+        const title = path.split('/').pop()?.replace(/\.md$/i, '').replace(/^\d+-/, '') ?? path;
+        return `- [${title}](${encodeURI(relative.replace(/\.md$/i, '.html'))})`;
+      }).join('\n');
+      const baseUrl = pagesRepositoryName.trim() ? `/${pagesRepositoryName.trim().replace(/^\/+|\/+$/g, '')}` : '';
+      const config = `title: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\ndescription: ${JSON.stringify(pagesDescription.trim())}\nauthor: ${JSON.stringify(pagesAuthor.trim())}\nlang: ${JSON.stringify(pagesLanguage.trim() || 'zh-CN')}\ntheme: minima\nbaseurl: ${JSON.stringify(baseUrl)}\nurl: ${JSON.stringify(pagesCustomDomain.trim() ? `https://${pagesCustomDomain.trim().replace(/^https?:\/\//, '')}` : '')}\nplugins:\n  - jekyll-feed\n  - jekyll-seo-tag\nexclude:\n  - .history\n  - .chapter-project.json\n`;
+      const index = `---\nlayout: home\ntitle: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\n---\n\n${pagesDescription.trim()}\n\n## 章节目录\n\n${chapterLinks}\n`;
+      const notFound = `---\nlayout: default\ntitle: 页面未找到\npermalink: /404.html\n---\n\n# 页面未找到\n\n这页似乎比作者先下班了。请返回[首页]({{ site.baseurl }}/)。\n`;
+      await upsertWorkspaceFile(inSite('_config.yml'), config);
+      await upsertWorkspaceFile(inSite('index.md'), index);
+      await upsertWorkspaceFile(inSite('404.md'), notFound);
+      for (const directory of ['.github', '.github/workflows']) {
+        const created = await window.electronAPI.workspace.createDirectory(target.path, directory);
+        if (!created.success && !/EEXIST|ALREADY_EXISTS/.test(String(created.error))) throw new Error(created.error);
+      }
+      const source = siteFolder ? `./${siteFolder}` : './';
+      const workflow = `name: Deploy GitHub Pages\n\non:\n  push:\n    branches: [${gitBranch.trim() || 'main'}]\n  workflow_dispatch:\n\npermissions:\n  contents: read\n  pages: write\n  id-token: write\n\nconcurrency:\n  group: pages\n  cancel-in-progress: false\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Checkout\n        uses: actions/checkout@v6\n      - name: Setup Pages\n        uses: actions/configure-pages@v5\n      - name: Build with Jekyll\n        uses: actions/jekyll-build-pages@v1\n        with:\n          source: ${JSON.stringify(source)}\n          destination: ./_site\n      - name: Upload artifact\n        uses: actions/upload-pages-artifact@v4\n\n  deploy:\n    environment:\n      name: github-pages\n      url: \${{ steps.deployment.outputs.page_url }}\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - name: Deploy\n        id: deployment\n        uses: actions/deploy-pages@v4\n`;
+      await upsertWorkspaceFile('.github/workflows/pages.yml', workflow);
+      if (activeFile) await openDocument(activeFile, target, false);
+      notice.success({ message: 'GitHub Pages 配置已生成', description: '提交并推送后，请在仓库 Settings → Pages 中选择 GitHub Actions。', placement: 'bottomRight' });
+      persistDeploymentSettings();
       setGitChanges(await getProjectGitChanges());
     } catch (error) {
       setGitError(error instanceof Error ? error.message : String(error));
@@ -538,7 +642,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </aside>}
       {gitOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
-        <div className="space-y-3 border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>本地提交 {gitChanges.length}</Button></div><div className="border-t border-border pt-3"><div className="mb-2 text-xs font-medium">推送到新的远程仓库</div><input value={gitRemoteUrl} onChange={(event) => setGitRemoteUrl(event.target.value)} placeholder="https://github.com/user/repo.git 或 git@..." className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><div className="grid grid-cols-2 gap-2"><input value={gitRemoteName} onChange={(event) => setGitRemoteName(event.target.value)} placeholder="origin" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><input value={gitBranch} onChange={(event) => setGitBranch(event.target.value)} placeholder="main" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></div><Button className="mt-2 w-full" disabled={gitLoading || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()} onClick={publishToRemote}>提交并推送到远程仓库</Button><p className="mt-2 text-xs text-muted-foreground">HTTPS 凭据由 Git Credential Manager 管理；SSH 地址使用系统 SSH Key。</p></div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
+        <div className="max-h-[58vh] space-y-3 overflow-auto border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>本地提交 {gitChanges.length}</Button></div><div className="border-t border-border pt-3"><div className="mb-2 text-xs font-medium">推送到新的远程仓库</div><input value={gitRemoteUrl} onChange={(event) => setGitRemoteUrl(event.target.value)} placeholder="https://github.com/user/repo.git 或 git@..." className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><div className="grid grid-cols-2 gap-2"><input value={gitRemoteName} onChange={(event) => setGitRemoteName(event.target.value)} placeholder="origin" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><input value={gitBranch} onChange={(event) => setGitBranch(event.target.value)} placeholder="main" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></div><Button className="mt-2 w-full" disabled={gitLoading || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()} onClick={publishToRemote}>提交并推送到远程仓库</Button><p className="mt-2 text-xs text-muted-foreground">HTTPS 凭据由 Git Credential Manager 管理；SSH 地址使用系统 SSH Key。</p></div><div className="border-t border-border pt-3"><button type="button" className="flex w-full items-center justify-between text-left text-xs font-medium" onClick={() => setPagesOpen((value) => !value)}><span>GitHub Pages 配置</span><span>{pagesOpen ? '收起' : '展开'}</span></button>{pagesOpen && <div className="mt-3 space-y-2"><input value={pagesTitle} onChange={(event) => setPagesTitle(event.target.value)} placeholder="站点标题" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><textarea value={pagesDescription} onChange={(event) => setPagesDescription(event.target.value)} placeholder="站点描述（用于首页与 SEO）" className="h-16 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /><div className="grid grid-cols-2 gap-2"><input value={pagesAuthor} onChange={(event) => setPagesAuthor(event.target.value)} placeholder="作者" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesLanguage} onChange={(event) => setPagesLanguage(event.target.value)} placeholder="zh-CN" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></div><input value={pagesRepositoryName} onChange={(event) => setPagesRepositoryName(event.target.value)} placeholder="仓库名（项目站点需要，例如 my-book）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesCustomDomain} onChange={(event) => setPagesCustomDomain(event.target.value)} placeholder="自定义域名（可选，例如 book.example.com）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><Button className="w-full" disabled={gitLoading || !managedFiles.length} onClick={configureGitHubPages}>生成 GitHub Pages 配置</Button><p className="text-xs text-muted-foreground">主题：Minima；包含 SEO、RSS、404、章节首页和自动部署 workflow。</p>{pagesCustomDomain.trim() && <p className="text-xs text-amber-700">自定义域名仍需在 GitHub 仓库 Settings → Pages 中配置并完成 DNS 验证。</p>}</div>}</div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-3">{gitChanges.length ? gitChanges.map((change) => <div key={change.path} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted"><span className="w-6 shrink-0 font-mono text-primary">{change.status.trim() || 'M'}</span><span className="truncate" title={change.path}>{change.path}</span></div>) : !gitLoading && !gitError ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">文章目录没有待提交的改动</div> : null}</div>
       </aside>}
     </div>}
