@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { findingId, fingerprint, redactSecrets, type FindingCategory, type ScanContext, type SecurityFinding, type SecurityScanner, type SecuritySeverity } from '../../core/security-audit';
 import { commandAvailable, runScannerProcess, type ExternalScannerCommand } from './external-process';
 
@@ -51,12 +53,30 @@ export const semgrepScanner = externalScanner('semgrep', 'Semgrep SAST', () => [
   });
 }, (context) => fs.existsSync(path.join(context.projectDir, '.semgrep.yml')) || fs.existsSync(path.join(context.projectDir, '.semgrep.yaml')));
 
-export const gitleaksScanner = externalScanner('gitleaks', 'Gitleaks Secret Scan', () => ['detect', '--source', '.', '--report-format', 'json', '--report-path', '-', '--no-banner', '--no-git'], (json, context) => {
+function parseGitleaks(json: JsonObject, context: ScanContext): SecurityFinding[] {
   const items = Array.isArray(json) ? json as unknown as JsonObject[] : Array.isArray(json.findings) ? json.findings as JsonObject[] : [];
   return items.map((item) => makeFinding('gitleaks', String(item.RuleID ?? item.ruleId ?? 'gitleaks.secret'), 'secret', 'critical', String(item.Description ?? 'Gitleaks 检测到密钥'), '扫描器确认文件中存在疑似凭据。', context.projectDir, item.File, item.StartLine, item.Match, '立即轮换凭据并从版本历史清除。'));
-});
+}
 
-export const osvScanner = externalScanner('osv-scanner', 'OSV Dependency Scan', () => ['scan', 'source', '--format', 'json', '.'], (json, context) => {
+export const gitleaksScanner: SecurityScanner = {
+  id: 'gitleaks', name: 'Gitleaks Secret Scan',
+  async detect() { return commandAvailable('gitleaks'); },
+  async scan(context) {
+    const reportPath = path.join(os.tmpdir(), `nwd-gitleaks-${crypto.randomUUID()}.json`);
+    try {
+      const result = await runScannerProcess('gitleaks', ['dir', '.', '--report-format', 'json', '--report-path', reportPath, '--no-banner', '--redact=100'], context.projectDir, context.signal);
+      if (!fs.existsSync(reportPath)) {
+        if (result.exitCode === 0) return [];
+        throw new Error(`GITLEAKS_FAILED: ${redactSecrets(result.stderr).slice(0, 300)}`);
+      }
+      return parseGitleaks(JSON.parse(fs.readFileSync(reportPath, 'utf8')) as JsonObject, context);
+    } finally {
+      try { fs.rmSync(reportPath, { force: true }); } catch { /* best-effort cleanup of exact temporary report */ }
+    }
+  },
+};
+
+export const osvScanner = externalScanner('osv-scanner', 'OSV Dependency Scan', () => ['scan', 'source', '--format=json', '--verbosity=error', '--recursive', '.'], (json, context) => {
   const results = Array.isArray(json.results) ? json.results as JsonObject[] : [];
   const findings: SecurityFinding[] = [];
   for (const result of results) for (const pkg of (Array.isArray(result.packages) ? result.packages as JsonObject[] : [])) for (const vulnerability of (Array.isArray(pkg.vulnerabilities) ? pkg.vulnerabilities as JsonObject[] : [])) {

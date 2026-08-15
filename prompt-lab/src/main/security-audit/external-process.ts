@@ -34,7 +34,9 @@ export function runScannerProcess(command: ExternalScannerCommand, args: string[
       settled = true;
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
-      if (error) reject(error); else resolve(result!);
+      if (error) reject(error);
+      else if (result) resolve(result);
+      else reject(new Error('SCANNER_NO_RESULT'));
     };
     const abort = (): void => { child.kill(); finish(new DOMException('Scan cancelled', 'AbortError')); };
     const append = (target: 'stdout' | 'stderr', chunk: Buffer): void => {

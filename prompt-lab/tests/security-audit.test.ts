@@ -26,7 +26,7 @@ describe('security audit core', () => {
     const file = 'main.ts';
     fs.writeFileSync(path.join(root, file), 'const api_key = "abcdefghijklmnop";\nnew BrowserWindow({ webPreferences: { nodeIntegration: true } });');
     const controller = new AbortController();
-    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: controller.signal, emit() {} });
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: controller.signal, emit: () => undefined });
     expect(findings.map((item) => item.ruleId)).toEqual(['secret.generic-api-key', 'electron.node-integration']);
     expect(findings[0].evidence[0].excerpt).not.toContain('abcdefghijklmnop');
   });
@@ -34,7 +34,7 @@ describe('security audit core', () => {
   it('keeps first-seen state and marks missing findings fixed', async () => {
     const root = temporaryRoot(); const file = 'unsafe.ts';
     fs.writeFileSync(path.join(root, file), 'eval(input)');
-    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: new AbortController().signal, emit() {} });
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: new AbortController().signal, emit: () => undefined });
     const merged = mergeWithBaseline([], findings, findings[0].lastSeenAt + 10);
     expect(merged[0].status).toBe('fixed');
     expect(merged[0].fixedAt).toBeDefined();
@@ -42,13 +42,13 @@ describe('security audit core', () => {
 
   it('does not resolve findings outside an incremental scan scope', async () => {
     const root = temporaryRoot(); fs.writeFileSync(path.join(root, 'unsafe.ts'), 'eval(input)');
-    const previous = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit() {} });
+    const previous = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit: () => undefined });
     expect(mergeWithBaseline([], previous, Date.now(), new Set(['other.ts']))[0].status).toBe('open');
   });
 
   it('exports active findings as SARIF with stable fingerprints', async () => {
     const root = temporaryRoot(); fs.writeFileSync(path.join(root, 'unsafe.ts'), 'eval(input)');
-    const findings = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit() {} });
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: ['unsafe.ts'], signal: new AbortController().signal, emit: () => undefined });
     const sarif = findingsToSarif(findings, root) as { version: string; runs: Array<{ results: Array<{ partialFingerprints: { primaryLocationLineHash: string } }> }> };
     expect(sarif.version).toBe('2.1.0');
     expect(sarif.runs[0].results[0].partialFingerprints.primaryLocationLineHash).toBe(findings[0].fingerprint);
