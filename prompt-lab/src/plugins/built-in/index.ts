@@ -486,9 +486,9 @@ const builtInPlugins: Plugin[] = [
     name: '视频生成',
     icon: Video,
     component: VideoGenerationPanel,
-    enabled: false,
-    order: 26.5,
+    enabled: true,
     keepAlive: true,
+    order: 22.5,
     preload: () => import('../video-generation'),
     activate: (context) => {
       context.subscriptions.add(context.commands.register('video-generation.open', () => {
