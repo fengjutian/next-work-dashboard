@@ -1,4 +1,4 @@
-import type { AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, DatabaseField, DatabaseTable, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
+import type { AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, DatabaseField, DatabaseTable, DataFlowStep, FrontendCall, HttpMethod, PerformanceRisk, RepositoryAnalysis, RepositorySourceFile, SourceLocation, TestReference } from './types';
 
 interface PythonFunction {
   id: string;
@@ -190,6 +190,46 @@ function findMountedRouterPrefixes(files: RepositorySourceFile[]): Map<string, s
   return prefixes;
 }
 
+function buildDataFlow(contract: ApiContract, handler: string, location: SourceLocation, frontend: FrontendCall[], tables: DatabaseTable[]): DataFlowStep[] {
+  const steps: DataFlowStep[] = frontend.map((call) => ({ id: `flow:${call.id}`, stage: 'frontend', label: call.path, detail: call.location.file, location: call.location }));
+  for (const parameter of contract.parameters) steps.push({ id: `flow:param:${parameter.source}:${parameter.name}`, stage: 'parameter', label: parameter.name, detail: `${parameter.source} · ${parameter.type}` });
+  if (contract.requestModel) steps.push({ id: `flow:model:${contract.requestModel}`, stage: 'model', label: contract.requestModel, detail: 'Request Model' });
+  steps.push({ id: `flow:handler:${handler}`, stage: 'handler', label: handler, location });
+  const parameterNames = new Set(contract.parameters.map((parameter) => parameter.name.replace(/_id$/, '')));
+  for (const table of tables) for (const field of table.fields) {
+    if (parameterNames.has(field.name) || parameterNames.has(field.name.replace(/_id$/, '')) || contract.requestModel) steps.push({ id: `flow:field:${table.name}:${field.name}`, stage: 'field', label: `${table.name}.${field.name}`, detail: field.type, location: field.location });
+  }
+  return steps;
+}
+
+function findTests(files: RepositorySourceFile[], endpoint: RawEndpoint): TestReference[] {
+  const references: TestReference[] = [];
+  for (const file of files) {
+    if (!/(^|\/)(tests?|__tests__|e2e)(\/|$)|\.(test|spec)\.[jt]sx?$/i.test(file.path)) continue;
+    const index = file.content.search(new RegExp(`${escapeRegExp(endpoint.handler)}|${escapeRegExp(endpoint.path)}`));
+    if (index < 0) continue;
+    references.push({ file: file.path, line: lineOf(file.content, index), kind: /e2e|playwright|cypress/i.test(file.path + file.content.slice(0, 300)) ? 'e2e' : file.path.endsWith('.py') ? 'backend' : 'frontend', evidence: snippetAt(file.content, lineOf(file.content, index)) });
+  }
+  return references;
+}
+
+function findPerformanceRisks(functions: PythonFunction[]): PerformanceRisk[] {
+  const risks: PerformanceRisk[] = [];
+  for (const fn of functions) {
+    const location = { file: fn.file, line: fn.line, endLine: fn.endLine, snippet: snippetAt(fn.body, 1) };
+    if (/\b(?:for|while)\b[\s\S]{0,800}?\.(?:query|execute|filter|get|all|first)\s*\(/.test(fn.body)) risks.push({ id: `perf:loop:${fn.id}`, rule: 'query-in-loop', severity: 'error', message: `${fn.name} 可能在循环中执行数据库查询`, location });
+    if (/\.(?:all|fetchall)\s*\(\)/.test(fn.body) && !/\.(?:limit|paginate)\s*\(/.test(fn.body)) risks.push({ id: `perf:all:${fn.id}`, rule: 'unbounded-query', severity: 'warning', message: `${fn.name} 存在未限制结果数量的查询`, location });
+    if (/^async\s+def/.test(fn.body.trim()) && /\b(?:time\.sleep|requests\.|subprocess\.(?:run|call)|open)\s*\(/.test(fn.body)) risks.push({ id: `perf:blocking:${fn.id}`, rule: 'blocking-in-async', severity: 'error', message: `${fn.name} 的异步函数中可能存在阻塞调用`, location });
+  }
+  if (functions.length > 7) risks.push({ id: `perf:depth:${functions[0]?.id}`, rule: 'deep-call-chain', severity: 'warning', message: `调用链深度达到 ${functions.length} 层`, location: { file: functions[0].file, line: functions[0].line } });
+  const tableReads = new Map<string, number>();
+  for (const fn of functions) for (const table of fn.tables.filter((item) => item.mode === 'reads')) tableReads.set(table.name, (tableReads.get(table.name) ?? 0) + 1);
+  for (const [table, count] of tableReads) if (count > 1) risks.push({ id: `perf:duplicate:${functions[0]?.id}:${table}`, rule: 'duplicate-table-read', severity: 'warning', message: `同一调用链读取 ${table} ${count} 次`, location: { file: functions[0].file, line: functions[0].line } });
+  return risks;
+}
+
+function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 export function analyzeRepositoryFiles(rootPath: string, files: RepositorySourceFile[]): RepositoryAnalysis {
   const pythonFiles = files.filter((file) => file.path.endsWith('.py'));
   const vueFiles = files.filter((file) => /\.(vue|tsx?|jsx?)$/i.test(file.path));
@@ -240,10 +280,12 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
       edges.push({ source: call.id, target: endpointId, kind: 'requests', confidence: 'exact' });
     }
     const visited = new Set<string>();
+    const walkedFunctions: PythonFunction[] = [];
     const tables = new Set<string>();
     const walk = (fn: PythonFunction | undefined, parentId: string, depth: number, relation?: { confidence: AnalysisEdge['confidence']; evidence: string }): void => {
       if (!fn || visited.has(fn.id) || depth > 8) return;
       visited.add(fn.id);
+      walkedFunctions.push(fn);
       const kind: AnalysisNode['kind'] = depth === 0 ? 'controller' : /repo|dao|crud/i.test(fn.name + fn.file) ? 'repository' : 'service';
       nodes.push({ id: fn.id, kind, label: fn.name, detail: fn.file, location: { file: fn.file, line: fn.line, endLine: fn.endLine, snippet: snippetAt(fn.body, 1) } });
       edges.push({ source: parentId, target: fn.id, kind: depth === 0 ? 'handles' : 'calls', confidence: depth === 0 ? 'exact' : relation?.confidence ?? 'inferred', evidence: depth === 0 ? '路由装饰器绑定' : relation?.evidence });
@@ -259,7 +301,8 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
       }
     };
     walk(functions.find((fn) => fn.id === raw.fnId) ?? byName.get(raw.handler)?.[0], endpointId, 0);
-    return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], databaseTables: [...tables].map((table) => globalSchemas.get(table) ?? { name: table, fields: [] }), nodes, edges, contract: raw.contract, diagnostics: [] };
+    const databaseTables = [...tables].map((table) => globalSchemas.get(table) ?? { name: table, fields: [] });
+    return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], databaseTables, dataFlow: buildDataFlow(raw.contract, raw.handler, raw.location, matchingFrontend, databaseTables), tests: findTests(files, raw), performanceRisks: findPerformanceRisks(walkedFunctions), nodes, edges, contract: raw.contract, diagnostics: [] };
   });
   const unique = [...new Map(endpoints.map((endpoint) => [`${endpoint.method}:${endpoint.normalizedPath}:${endpoint.location.file}`, endpoint])).values()];
   return { rootPath, scannedAt: Date.now(), filesScanned: files.length, pythonFiles: pythonFiles.length, vueFiles: vueFiles.length, endpoints: unique.sort((a, b) => a.path.localeCompare(b.path)), warnings: rawEndpoints.length === 0 ? ['未发现静态可解析的 Python 接口；动态注册的路由暂不支持。'] : [] };

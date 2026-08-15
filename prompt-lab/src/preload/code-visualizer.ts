@@ -16,5 +16,6 @@ export const codeVisualizerBridge = {
   snapshot: {
     list: (rootPath: string) => ipcRenderer.invoke('code-visualizer:snapshot:list', rootPath),
     load: (rootPath: string, id: string) => ipcRenderer.invoke('code-visualizer:snapshot:load', rootPath, id),
+    diff: (rootPath: string, fromId: string, toId: string) => ipcRenderer.invoke('code-visualizer:snapshot:diff', rootPath, fromId, toId),
   },
 };

@@ -563,6 +563,7 @@ export interface ElectronAPI {
     snapshot: {
       list: (rootPath: string) => Promise<import('../core/code-visualizer').CodeVisualizerScanSnapshot[]>;
       load: (rootPath: string, id: string) => Promise<import('../core/code-visualizer').RepositoryAnalysis>;
+      diff: (rootPath: string, fromId: string, toId: string) => Promise<import('../core/code-visualizer').CodeVisualizerSnapshotDiff>;
     };
   };
   websiteRegistry: {

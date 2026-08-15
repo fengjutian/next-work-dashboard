@@ -63,6 +63,37 @@ export interface DatabaseTable {
   location?: SourceLocation;
 }
 
+export interface DatabaseRelation {
+  sourceTable: string;
+  sourceField: string;
+  targetTable: string;
+  targetField: string;
+  kind: 'many-to-one' | 'one-to-one' | 'many-to-many';
+}
+
+export interface DataFlowStep {
+  id: string;
+  stage: 'frontend' | 'parameter' | 'model' | 'handler' | 'function' | 'field';
+  label: string;
+  detail?: string;
+  location?: SourceLocation;
+}
+
+export interface TestReference {
+  file: string;
+  line: number;
+  kind: 'backend' | 'frontend' | 'e2e';
+  evidence: string;
+}
+
+export interface PerformanceRisk {
+  id: string;
+  rule: 'query-in-loop' | 'unbounded-query' | 'blocking-in-async' | 'deep-call-chain' | 'duplicate-table-read';
+  severity: 'warning' | 'error';
+  message: string;
+  location: SourceLocation;
+}
+
 export interface AnalysisDiagnostic {
   id: string;
   kind: 'unused-endpoint' | 'missing-backend' | 'method-mismatch' | 'dynamic-url';
@@ -84,6 +115,9 @@ export interface ApiEndpoint {
   frontendCalls: FrontendCall[];
   tables: string[];
   databaseTables: DatabaseTable[];
+  dataFlow: DataFlowStep[];
+  tests: TestReference[];
+  performanceRisks: PerformanceRisk[];
   nodes: AnalysisNode[];
   edges: AnalysisEdge[];
   contract: ApiContract;
@@ -99,6 +133,9 @@ export interface RepositoryAnalysis {
   endpoints: ApiEndpoint[];
   frontendCalls?: FrontendCall[];
   diagnostics?: AnalysisDiagnostic[];
+  databaseTables?: DatabaseTable[];
+  databaseRelations?: DatabaseRelation[];
+  globalGraph?: { nodes: AnalysisNode[]; edges: AnalysisEdge[] };
   scan?: {
     mode: 'full' | 'incremental';
     changedFiles: number;
@@ -118,6 +155,19 @@ export interface CodeVisualizerScanSnapshot {
   diagnosticCount: number;
   changedFiles: number;
   mode: 'full' | 'incremental';
+}
+
+export interface CodeVisualizerSnapshotDiff {
+  fromId: string;
+  toId: string;
+  addedEndpoints: string[];
+  removedEndpoints: string[];
+  changedContracts: string[];
+  addedTables: string[];
+  removedTables: string[];
+  addedFields: string[];
+  removedFields: string[];
+  diagnosticDelta: number;
 }
 
 export interface CodeVisualizerProjectHistory {

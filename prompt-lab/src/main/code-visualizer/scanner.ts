@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { analyzeRepositoryFiles, diagnoseFrontendBackend, extractFrontendCalls, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
+import { analyzeRepositoryFiles, diagnoseFrontendBackend, enrichRepositoryArchitecture, extractFrontendCalls, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
 
 const INCLUDED = new Set(['.py', '.vue', '.js', '.jsx', '.ts', '.tsx']);
 const EXCLUDED = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', '.next', '.nuxt', 'coverage']);
@@ -34,6 +34,7 @@ export async function scanCodeRepository(rootPath: string): Promise<RepositoryAn
   const frontendCalls = files.flatMap(extractFrontendCalls);
   result.frontendCalls = frontendCalls;
   result.diagnostics = diagnoseFrontendBackend(result, frontendCalls);
+  enrichRepositoryArchitecture(result);
   result.scan = { mode: previous.size ? 'incremental' : 'full', changedFiles, reusedFiles, removedFiles, durationMs: Date.now() - startedAt };
   result.warnings.push(...warnings);
   const target = cacheFile(rootPath);
