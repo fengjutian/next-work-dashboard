@@ -94,6 +94,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
   const [gitRepository, setGitRepository] = useState<boolean | null>(null);
+  const [gitRemoteUrl, setGitRemoteUrl] = useState('');
+  const [gitRemoteName, setGitRemoteName] = useState('origin');
+  const [gitBranch, setGitBranch] = useState('main');
   const aiRequestRef = useRef(0);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
@@ -277,10 +280,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setAiOpen(false); setEditorMode('edit');
   };
 
-  const refreshGit = async () => {
-    if (!target) return;
-    setGitLoading(true); setGitError('');
-    try {
+  const getProjectGitChanges = async () => {
+    if (!target) return [];
       const result = await window.electronAPI.workspace.gitStatus(target.path);
       if (!result.success) throw new Error(result.error);
       setGitRepository(true);
@@ -290,7 +291,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
         .filter((item) => !item.path.startsWith('.history/') && !item.path.includes('/.history/'))
         .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) : known.has(item.path));
-      setGitChanges(changes);
+      return changes;
+  };
+
+  const refreshGit = async () => {
+    if (!target) return;
+    setGitLoading(true); setGitError('');
+    try {
+      setGitChanges(await getProjectGitChanges());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setGitChanges([]); setGitRepository(/not a git repository/i.test(message) ? false : null); setGitError(`当前输出目录不是可用的 Git 仓库：${message}`);
@@ -304,6 +312,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const result = await window.electronAPI.workspace.gitInit(target.path);
       if (!result.success) throw new Error(result.error);
       setGitRepository(true);
+      setOutputIsGitRepository(true);
       notice.success({ message: 'Git 仓库初始化成功', description: target.path, placement: 'bottomRight' });
       await refreshGit();
     } catch (error) {
@@ -329,6 +338,48 @@ export const OutlineScaffolderPanel: React.FC = () => {
       if (!committed.success) throw new Error(committed.error);
       notice.success({ message: '文章已提交到 Git 仓库', description: committed.data?.split('\n')[0], placement: 'bottomRight' });
       await refreshGit();
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : String(error));
+    } finally { setGitLoading(false); }
+  };
+
+  const publishToRemote = async () => {
+    if (!target || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()) return;
+    if (dirty) { setGitError('当前文档尚未保存，请先保存后再发布。'); return; }
+    setGitLoading(true); setGitError('');
+    try {
+      if (gitRepository !== true) {
+        const initialized = await window.electronAPI.workspace.gitInit(target.path);
+        if (!initialized.success) throw new Error(initialized.error);
+        setGitRepository(true); setOutputIsGitRepository(true);
+      }
+      const changes = await getProjectGitChanges();
+      if (changes.length) {
+        const paths = changes.map((change) => change.path);
+        const staged = await window.electronAPI.workspace.gitStage(target.path, paths);
+        if (!staged.success) throw new Error(staged.error);
+        const committed = await window.electronAPI.workspace.gitCommit(target.path, gitMessage.trim() || 'docs: publish generated articles', paths);
+        if (!committed.success) throw new Error(committed.error);
+      }
+      const overview = await window.electronAPI.workspace.gitOperation<{ branch: string; remotes: string[] }>(target.path, 'overview');
+      if (!overview.success) throw new Error(overview.error);
+      const remotePrefix = `${gitRemoteName.trim()}\t`;
+      const remoteLines = overview.data?.remotes?.filter((line) => line.startsWith(remotePrefix)) ?? [];
+      if (!remoteLines.length) {
+        const added = await window.electronAPI.workspace.gitOperation(target.path, 'addRemote', { name: gitRemoteName.trim(), url: gitRemoteUrl.trim() });
+        if (!added.success) throw new Error(added.error);
+      } else if (!remoteLines.some((line) => line.includes(gitRemoteUrl.trim()))) {
+        throw new Error(`远程名称“${gitRemoteName.trim()}”已经指向其他地址，请更换远程名称。`);
+      }
+      const currentBranch = overview.data?.branch;
+      if (currentBranch && currentBranch !== gitBranch.trim()) {
+        const renamed = await window.electronAPI.workspace.gitOperation(target.path, 'renameBranch', { from: currentBranch, to: gitBranch.trim() });
+        if (!renamed.success) throw new Error(renamed.error);
+      }
+      const pushed = await window.electronAPI.workspace.gitOperation(target.path, 'push', { remote: gitRemoteName.trim(), setUpstream: true });
+      if (!pushed.success) throw new Error(pushed.error);
+      notice.success({ message: '文章已提交并推送', description: `${gitRemoteName.trim()}/${gitBranch.trim()}`, placement: 'bottomRight' });
+      setGitChanges(await getProjectGitChanges());
     } catch (error) {
       setGitError(error instanceof Error ? error.message : String(error));
     } finally { setGitLoading(false); }
@@ -487,9 +538,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </aside>}
       {gitOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
-        <div className="space-y-3 border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>提交 {gitChanges.length} 个文件</Button></div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
+        <div className="space-y-3 border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>本地提交 {gitChanges.length}</Button></div><div className="border-t border-border pt-3"><div className="mb-2 text-xs font-medium">推送到新的远程仓库</div><input value={gitRemoteUrl} onChange={(event) => setGitRemoteUrl(event.target.value)} placeholder="https://github.com/user/repo.git 或 git@..." className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><div className="grid grid-cols-2 gap-2"><input value={gitRemoteName} onChange={(event) => setGitRemoteName(event.target.value)} placeholder="origin" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><input value={gitBranch} onChange={(event) => setGitBranch(event.target.value)} placeholder="main" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></div><Button className="mt-2 w-full" disabled={gitLoading || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()} onClick={publishToRemote}>提交并推送到远程仓库</Button><p className="mt-2 text-xs text-muted-foreground">HTTPS 凭据由 Git Credential Manager 管理；SSH 地址使用系统 SSH Key。</p></div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-3">{gitChanges.length ? gitChanges.map((change) => <div key={change.path} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted"><span className="w-6 shrink-0 font-mono text-primary">{change.status.trim() || 'M'}</span><span className="truncate" title={change.path}>{change.path}</span></div>) : !gitLoading && !gitError ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">文章目录没有待提交的改动</div> : null}</div>
-        <div className="border-t border-border p-3 text-xs text-muted-foreground">远程推送可继续使用仓库现有的 Git 工作流；本功能目前负责安全生成本地提交。</div>
       </aside>}
     </div>}
   </div>;
