@@ -555,6 +555,11 @@ export interface ElectronAPI {
     source: {
       read: (rootPath: string, relativePath: string) => Promise<{ path: string; content: string }>;
     };
+    history: {
+      list: () => Promise<import('../core/code-visualizer').CodeVisualizerProjectHistory[]>;
+      open: (rootPath: string) => Promise<{ ok: boolean; rootPath: string }>;
+      remove: (rootPath: string) => Promise<{ ok: boolean }>;
+    };
   };
   websiteRegistry: {
     record: {

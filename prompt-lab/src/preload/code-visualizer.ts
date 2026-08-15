@@ -8,4 +8,9 @@ export const codeVisualizerBridge = {
   source: {
     read: (rootPath: string, relativePath: string) => ipcRenderer.invoke('code-visualizer:source:read', rootPath, relativePath),
   },
+  history: {
+    list: () => ipcRenderer.invoke('code-visualizer:history:list'),
+    open: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:open', rootPath),
+    remove: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:remove', rootPath),
+  },
 };

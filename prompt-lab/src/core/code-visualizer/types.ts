@@ -55,6 +55,16 @@ export interface RepositoryAnalysis {
   warnings: string[];
 }
 
+export interface CodeVisualizerProjectHistory {
+  rootPath: string;
+  name: string;
+  lastScannedAt: number;
+  endpointCount: number;
+  pythonFiles: number;
+  vueFiles: number;
+  available: boolean;
+}
+
 export interface RepositorySourceFile {
   path: string;
   content: string;
