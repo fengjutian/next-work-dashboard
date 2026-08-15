@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, redactSecrets } from '../src/core/security-audit';
-import { redactScannerOutput, runScannerProcess } from '../src/main/security-audit/external-process';
+import { redactScannerOutput, resolveTrustedScannerExecutable, runScannerProcess } from '../src/main/security-audit/external-process';
 import { parseGitleaksOutput, parseOsvOutput, parseSemgrepOutput, parseTrivyOutput, readLimitedJsonReport } from '../src/main/security-audit/external-scanners';
 
 const roots: string[] = [];
@@ -22,6 +22,14 @@ describe('security audit core', () => {
   it('rejects commands outside the scanner allowlist and NUL arguments', async () => {
     await expect(runScannerProcess('powershell' as 'semgrep', [], process.cwd(), new AbortController().signal)).rejects.toThrow('SCANNER_NOT_ALLOWED');
     await expect(runScannerProcess('semgrep', ['bad\0arg'], process.cwd(), new AbortController().signal)).rejects.toThrow('INVALID_SCANNER_ARGUMENT');
+  });
+
+  it('rejects a scanner executable resolved from inside the project', () => {
+    const root = temporaryRoot();
+    const executable = path.join(root, process.platform === 'win32' ? 'semgrep.exe' : 'semgrep');
+    fs.writeFileSync(executable, 'fixture');
+    if (process.platform !== 'win32') fs.chmodSync(executable, 0o755);
+    expect(() => resolveTrustedScannerExecutable('semgrep', root, root)).toThrow('SCANNER_EXECUTABLE_NOT_FOUND');
   });
 
   it('parses official scanner JSON field contracts', () => {

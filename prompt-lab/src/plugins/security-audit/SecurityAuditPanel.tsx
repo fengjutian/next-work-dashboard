@@ -188,8 +188,8 @@ export function SecurityAuditPanel(): JSX.Element {
       if (detail.phase === 'completed' && resultDir) {
         setScannedDir(resultDir);
         void api.findings.list(resultDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
-        void api.scans.list(resultDir).then((items) => setScannerRuns(items[0]?.scannerRuns ?? []));
       }
+      if (resultDir && ['completed', 'failed', 'cancelled'].includes(detail.phase)) void api.scans.list(resultDir).then((items) => setScannerRuns(items[0]?.scannerRuns ?? []));
     });
   }, [scannedDir]);
 

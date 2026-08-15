@@ -20,12 +20,12 @@ function isInside(root: string, candidate: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-export function resolveTrustedScannerExecutable(command: ExternalScannerCommand, projectDir: string): string {
+export function resolveTrustedScannerExecutable(command: ExternalScannerCommand, projectDir: string, searchPath = process.env.PATH ?? ''): string {
   if (!ALLOWED_COMMANDS.has(command)) throw new ScannerProcessError('SCANNER_NOT_ALLOWED');
   const realProject = fs.realpathSync(projectDir);
   // Script shims (.cmd/.bat) require a command shell and are deliberately rejected.
   const extensions = process.platform === 'win32' ? ['.exe'] : [''];
-  for (const entry of (process.env.PATH ?? '').split(path.delimiter)) {
+  for (const entry of searchPath.split(path.delimiter)) {
     if (!entry || !path.isAbsolute(entry)) continue;
     for (const extension of extensions) {
       const candidate = path.join(entry, process.platform === 'win32' ? `${command}${extension.toLowerCase()}` : command);
