@@ -308,24 +308,39 @@ export const OutlineScaffolderPanel: React.FC = () => {
       : aiMode === 'continue'
         ? '承接现有正文继续写作。不要复述已有内容，只输出新增内容。'
         : '润色现有正文，改善结构、准确性、连贯性和表达，同时保持原意与 Markdown 标题结构。输出润色后的完整正文。';
-    const system = `你是一名严谨而不失风趣的专业中文作者。当前项目名为“${projectTitle}”。
+    const system = `你是“${projectTitle}”的资深作者兼责任编辑。目标不是把文字写得顺，而是写出信息密度高、论证可靠、具有叙事张力的中文正文。
 
-写作要求：
-1. 准确性优先：论点明确，概念、人物、时间和因果关系准确；不确定的信息必须使用审慎表述，禁止编造事实、数据、引文或出处。
-2. 结构严密：围绕本章主题展开，段落之间有清晰的递进、转折或因果关系，避免重复、空话和偏题。
-3. 解释充分：重要结论说明理由；复杂内容优先使用具体例子、类比或必要的背景信息帮助理解。
-4. 语言自然：使用流畅、简洁、有节奏的现代中文，避免机械套话、过度总结和明显的 AI 腔。
-5. 适度风趣：可以使用机智的比喻、轻微反差或幽默转场，但必须服务于理解；不要堆砌网络梗，不要油腔滑调，不拿严肃事件或具体群体开玩笑。
-6. 风趣程度约占整体表达的 10%—15%，正文仍以专业、可信、耐读为主。
-7. 保持全书章节边界，不抢写其他章节的核心内容；必要时可简短提示后文将继续讨论。
-8. 直接输出可写入文件的 Markdown，不使用代码围栏，不解释创作过程，不添加“以下是正文”等开场白。`;
+## 严谨性
+1. 每个重要段落遵循“明确观点 → 具体依据或事实 → 分析其意义”的内在结构。结论不能凭空出现，因果关系必须说明中间环节。
+2. 人物、时间、地点、制度、术语和数字应前后一致。不得编造史料、数据、引文、来源或人物心理；没有可靠依据时使用“可能”“大致”“现有材料不足以证明”等审慎表达，必要时加入“<!-- 待核实：具体问题 -->”。
+3. 区分事实、主流解释和作者判断，不把推测写成定论。存在争议时简洁交代争议边界，而不是假装只有一种答案。
+4. 抽象判断至少配一个具体事实、案例、对比或机制解释；案例不能只是换一种说法重复观点。
+
+## 内容与结构
+5. 开头直接进入本章的核心矛盾、关键场景或问题，不使用“在历史长河中”“众所周知”“随着时代发展”等万能套话。
+6. 每一节只解决一个清晰问题，段落之间用时间、因果、对比或递进关系推进。删除无信息量的承上启下和重复总结。
+7. 保持全书边界，不提前写完其他章节；需要铺垫时只提供理解本章所必需的背景。
+
+## 文风
+8. 使用准确、具体、有画面感的现代中文。长短句交替，关键判断简洁有力；少用空泛形容词，多用动作、选择、条件和后果呈现内容。
+9. 风趣来自事实之间的反差、克制的比喻或机智转场，占比约 10%；不堆网络梗，不油滑，不拿灾难、战争或具体群体开玩笑。
+10. 避免 AI 腔：不用“值得注意的是”“不难发现”“综上所述”反复串联，不连续罗列“首先、其次、最后”，不在每节末尾机械升华。
+
+## 输出前自检（只在内部执行，不输出检查过程）
+- 删除任何没有新增信息的句子；
+- 检查每个强结论是否有依据；
+- 检查日期、人物和因果是否自洽；
+- 把至少一处平白概述改成具体但不虚构的机制、对比或场景；
+- 确认 Markdown 头信息、标题、链接和图片结构完整。
+
+直接输出可写入文件的 Markdown，不使用代码围栏，不解释写作过程，不添加“以下是正文”等开场白。`;
     const context = managedFiles.slice(0, 100).map((path) => path.split('/').pop()?.replace(/\.md$/i, '')).filter(Boolean).join('、');
     const user = `当前章节：${chapterName}\n全书章节：${context}\n任务：${modePrompt}${aiInstruction.trim() ? `\n用户补充要求：${aiInstruction.trim()}` : ''}\n\n现有文档：\n${documentContent}`;
     try {
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
       let result = '';
-      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.72, maxTokens: 8_192, stream: true })) {
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.55, maxTokens: 8_192, stream: true })) {
         if (requestId !== aiRequestRef.current) return;
         if (chunk.delta) { result += chunk.delta; setAiResult(result); }
       }
@@ -410,6 +425,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (kind === 'review') setReviewApiKey(''); else setMinimaxApiKey('');
     if (result.success) notice.success({ message: '已清除保存的 API Key', placement: 'bottomRight' });
     else notice.error({ message: '清除失败', description: result.error, placement: 'bottomRight' });
+  };
+
+  const handReviewToWriter = () => {
+    if (!aiResult.trim()) return;
+    if (!aiApi.apiKey?.trim()) {
+      notice.warning({ message: '请先配置助写模型', description: '审校报告已经保留；配置应用 AI 后可再次点击“交给助写修改”。', placement: 'bottomRight' });
+      return;
+    }
+    setAiMode('polish');
+    setAiInstruction(`请依据下面的审校报告修改当前文章。逐项处理“必须修改”和“建议修改”；对“可选扩写”只采纳确实服务本章主题、且不会重复其他章节的建议。无法核实的事实不要擅自补造，应改为审慎表述或保留待核实标记。保持 Markdown 头信息、标题层级、链接和图片不变。输出修改后的完整文章。\n\n审校报告：\n${aiResult}`);
+    setAiResult(''); setAiError(''); setReviewOpen(false); setAiOpen(true);
+    notice.info({ message: '审校意见已交给助写', description: '请检查补充要求，然后点击“生成预览”；确认修订稿后再替换文档。', placement: 'bottomRight' });
   };
 
   const saveAndInsertIllustration = async () => {
@@ -783,7 +810,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />AI 章节助写</div><p className="mt-1 text-xs text-muted-foreground">当前模型：{aiApi.model || '未配置'}</p></div>
         <div className="space-y-3 border-b border-border p-4">
           <label className="block text-xs text-muted-foreground">写作任务<select value={aiMode} onChange={(event) => setAiMode(event.target.value as typeof aiMode)} disabled={aiLoading} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="generate">生成本章正文</option><option value="continue">续写本章</option><option value="polish">润色全文</option></select></label>
-          <label className="block text-xs text-muted-foreground">补充要求<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：面向初学者，约 2000 字，多用案例说明" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
+          <label className="block text-xs text-muted-foreground">补充要求与可靠资料<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：目标约 2500 字；核心史实、参考资料、必须解释的争议，以及希望采用的叙事视角" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
+          <p className="text-xs text-muted-foreground">只给章节名时，AI 无法真正核验事实。加入可信资料、关键日期或来源线索，严谨度会明显提升。</p>
           {!aiApi.apiKey?.trim() && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">尚未配置 API Key，请先前往应用设置配置 AI。</div>}
           {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止生成</Button> : <div className="grid grid-cols-2 gap-2"><Button variant="outline" disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(false)}><Sparkles className="mr-1 h-4 w-4" />生成预览</Button><Button disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(true)}>生成并写入</Button></div>}
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
@@ -803,7 +831,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">AI 将列出明确错误、待核实内容、<br />扩写方向和修改优先级。</div>}</div>
-        <div className="border-t border-border p-3"><Button className="w-full" variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制审校报告</Button></div>
+        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制报告</Button><Button disabled={!aiResult || aiLoading} onClick={handReviewToWriter}><Sparkles className="mr-2 h-4 w-4" />交给助写修改</Button></div>
       </aside>}
       {imageOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />MiniMax 章节插图</div><p className="mt-1 text-xs text-muted-foreground">先生成预览，确认后保存到 assets/images 并插入文章。</p></div>
