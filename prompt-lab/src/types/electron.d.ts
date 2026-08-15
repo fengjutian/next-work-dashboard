@@ -584,7 +584,7 @@ export interface ElectronAPI {
       list: (projectDir: string) => Promise<import('../core/security-audit').SecurityFinding[]>;
     };
     scans: { list: (projectDir: string) => Promise<import('../core/security-audit').ScanRecord[]> };
-    scanners: { list: () => Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean }>> };
+    scanners: { list: (force?: boolean) => Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean; version?: string; error?: string; checkedAt: number }>> };
     report: { exportSarif: (projectDir: string) => Promise<{ ok: boolean; cancelled?: boolean; filePath?: string }> };
   };
 }

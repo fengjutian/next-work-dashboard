@@ -72,7 +72,7 @@ export function setupSecurityAuditIPC(): void {
 
   ipcMain.handle('security-audit:scans:list', (_e, projectDir: string) => listScans(resolveWorkspacePath(projectDir)));
 
-  ipcMain.handle('security-audit:scanners:list', () => listScanners());
+  ipcMain.handle('security-audit:scanners:list', (_e, force?: boolean) => listScanners(Boolean(force)));
 
   ipcMain.handle('security-audit:report:export-sarif', async (_e, projectDir: string) => {
     const safeRoot = resolveWorkspacePath(projectDir);

@@ -5,6 +5,16 @@ const ALLOWED_COMMANDS = new Set<ExternalScannerCommand>(['semgrep', 'gitleaks',
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 
 export interface ExternalProcessResult { exitCode: number; stdout: string; stderr: string }
+export interface ScannerCommandStatus { available: boolean; version?: string; error?: string; checkedAt: number }
+const availabilityCache = new Map<ExternalScannerCommand, ScannerCommandStatus>();
+const AVAILABILITY_CACHE_MS = 60_000;
+
+export function redactScannerOutput(value: string): string {
+  return value
+    .replace(/(api[_-]?key|token|secret|password)(\s*[:=]\s*)["']?[^\s"']+/gi, '$1$2[REDACTED]')
+    .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
+    .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]');
+}
 
 export function runScannerProcess(command: ExternalScannerCommand, args: string[], cwd: string, signal: AbortSignal, timeoutMs = 120_000): Promise<ExternalProcessResult> {
   if (!ALLOWED_COMMANDS.has(command)) return Promise.reject(new Error('SCANNER_NOT_ALLOWED'));
@@ -57,9 +67,20 @@ export function runScannerProcess(command: ExternalScannerCommand, args: string[
   });
 }
 
-export async function commandAvailable(command: ExternalScannerCommand): Promise<boolean> {
+export async function inspectScannerCommand(command: ExternalScannerCommand, force = false): Promise<ScannerCommandStatus> {
+  const cached = availabilityCache.get(command);
+  if (!force && cached && Date.now() - cached.checkedAt < AVAILABILITY_CACHE_MS) return cached;
   try {
     const result = await runScannerProcess(command, ['--version'], process.cwd(), new AbortController().signal, 5_000);
-    return result.exitCode === 0;
-  } catch { return false; }
+    const version = redactScannerOutput(`${result.stdout}\n${result.stderr}`).trim().split(/\r?\n/).find(Boolean)?.slice(0, 160);
+    const status = { available: result.exitCode === 0, ...(version ? { version } : {}), ...(result.exitCode === 0 ? {} : { error: `exit ${result.exitCode}` }), checkedAt: Date.now() };
+    availabilityCache.set(command, status);
+    return status;
+  } catch (error) {
+    const status = { available: false, error: redactScannerOutput(error instanceof Error ? error.message : String(error)).slice(0, 160), checkedAt: Date.now() };
+    availabilityCache.set(command, status);
+    return status;
+  }
 }
+
+export async function commandAvailable(command: ExternalScannerCommand): Promise<boolean> { return (await inspectScannerCommand(command)).available; }

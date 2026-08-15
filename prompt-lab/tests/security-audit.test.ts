@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, redactSecrets } from '../src/core/security-audit';
+import { redactScannerOutput, runScannerProcess } from '../src/main/security-audit/external-process';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -12,6 +13,12 @@ function temporaryRoot(): string { const root = fs.mkdtempSync(path.join(os.tmpd
 describe('security audit core', () => {
   it('redacts credentials from evidence', () => {
     expect(redactSecrets('api_key = "super-secret-value"')).not.toContain('super-secret-value');
+    expect(redactScannerOutput('token=github_pat_abcdefghijklmnop')).not.toContain('abcdefghijklmnop');
+  });
+
+  it('rejects commands outside the scanner allowlist and NUL arguments', async () => {
+    await expect(runScannerProcess('powershell' as 'semgrep', [], process.cwd(), new AbortController().signal)).rejects.toThrow('SCANNER_NOT_ALLOWED');
+    await expect(runScannerProcess('semgrep', ['bad\0arg'], process.cwd(), new AbortController().signal)).rejects.toThrow('INVALID_SCANNER_ARGUMENT');
   });
 
   it('ignores dependencies and symbolic links while enumerating', () => {

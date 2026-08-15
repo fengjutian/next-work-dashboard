@@ -96,10 +96,10 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
 export function cancelScan(jobId: string): boolean { const job = jobs.get(jobId); if (!job) return false; job.abort(); return true; }
 export function listFindings(projectDir: string): SecurityFinding[] { return lastFindings(load(), projectDir); }
 export function listScans(projectDir: string): ScanRecord[] { return load().scans.filter((scan) => scan.projectDir === projectDir); }
-export async function listScanners(): Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean }>> {
-  const external = await listExternalScannerAvailability();
+export async function listScanners(force = false): Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean; version?: string; error?: string; checkedAt: number }>> {
+  const external = await listExternalScannerAvailability(force);
   return [
-    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, available: true, builtIn: true })),
+    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, available: true, builtIn: true, version: '内置', checkedAt: Date.now() })),
     ...external.map((scanner) => ({ ...scanner, builtIn: false })),
   ];
 }

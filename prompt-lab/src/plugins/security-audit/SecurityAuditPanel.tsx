@@ -11,7 +11,8 @@ import { Alert, Button, Card, Empty, Modal, Progress, Space, Spin, Tag, ToastHos
 import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanProgress } from './constants';
 
 type SeverityColor = 'red' | 'orange' | 'blue' | 'green';
-type ScannerInfo = { id: string; name: string; available: boolean; builtIn: boolean };
+type ScannerInfo = { id: string; name: string; available: boolean; builtIn: boolean; version?: string; error?: string; checkedAt: number };
+const SCANNER_SELECTION_KEY = 'security-audit:selected-scanners:v1';
 
 function securityAuditErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -135,13 +136,29 @@ export function SecurityAuditPanel(): JSX.Element {
   const [commandScanRequested, setCommandScanRequested] = useState(false);
   const [scanners, setScanners] = useState<ScannerInfo[]>([]);
   const [selectedScanners, setSelectedScanners] = useState<string[]>([]);
+  const [scannerStateReady, setScannerStateReady] = useState(false);
+  const [scannerDetectionRunning, setScannerDetectionRunning] = useState(false);
+
+  const loadScanners = useCallback((force = false) => {
+    setScannerDetectionRunning(true);
+    void window.electronAPI.securityAudit.scanners.list(force).then((items) => {
+      setScanners(items);
+      let saved: string[] = [];
+      try { saved = JSON.parse(localStorage.getItem(SCANNER_SELECTION_KEY) ?? '[]') as string[]; } catch { saved = []; }
+      const available = new Set(items.filter((item) => item.available).map((item) => item.id));
+      const defaults = items.filter((item) => item.available && (item.builtIn || saved.length === 0 || saved.includes(item.id))).map((item) => item.id);
+      setSelectedScanners(defaults.filter((id) => available.has(id)));
+      setScannerStateReady(true);
+    }).catch((error: unknown) => message.warning(`扫描器检测失败：${securityAuditErrorMessage(error)}`)).finally(() => setScannerDetectionRunning(false));
+  }, []);
 
   useEffect(() => {
-    void window.electronAPI.securityAudit.scanners.list().then((items) => {
-      setScanners(items);
-      setSelectedScanners(items.filter((item) => item.available).map((item) => item.id));
-    }).catch(() => undefined);
-  }, []);
+    loadScanners();
+  }, [loadScanners]);
+
+  useEffect(() => {
+    if (scannerStateReady) localStorage.setItem(SCANNER_SELECTION_KEY, JSON.stringify(selectedScanners));
+  }, [scannerStateReady, selectedScanners]);
 
   // 监听命令面板触发的命令（"Security Scan" 等）
   useEffect(() => {
@@ -260,10 +277,11 @@ export function SecurityAuditPanel(): JSX.Element {
 
       {scanners.length > 0 && <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-muted/20 px-5 py-2 text-[11px]">
         <span className="shrink-0 text-muted-foreground">扫描引擎</span>
-        {scanners.map((scanner) => <label key={scanner.id} className={`flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${scanner.available ? 'border-border bg-card' : 'cursor-not-allowed border-border/50 text-muted-foreground opacity-60'}`} title={scanner.available ? scanner.name : `${scanner.name} 未安装或不可执行`}>
+        {scanners.map((scanner) => <label key={scanner.id} className={`flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${scanner.available ? 'border-border bg-card' : 'cursor-not-allowed border-border/50 text-muted-foreground opacity-60'}`} title={scanner.available ? `${scanner.name}${scanner.version ? ` · ${scanner.version}` : ''}` : `${scanner.name} 未安装或不可执行${scanner.error ? `：${scanner.error}` : ''}`}>
           <input type="checkbox" checked={selectedScanners.includes(scanner.id)} disabled={!scanner.available || scanner.builtIn || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setSelectedScanners((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id))} />
           {scanner.name}{scanner.builtIn ? '（内置）' : scanner.available ? '' : '（未安装）'}
         </label>)}
+        <Button className="ml-auto shrink-0" loading={scannerDetectionRunning} onClick={() => loadScanners(true)}>重新检测</Button>
       </div>}
 
       {/* Progress */}

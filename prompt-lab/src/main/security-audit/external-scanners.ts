@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { findingId, fingerprint, redactSecrets, type FindingCategory, type ScanContext, type SecurityFinding, type SecurityScanner, type SecuritySeverity } from '../../core/security-audit';
-import { commandAvailable, runScannerProcess, type ExternalScannerCommand } from './external-process';
+import { commandAvailable, inspectScannerCommand, runScannerProcess, type ExternalScannerCommand } from './external-process';
 
 type JsonObject = Record<string, unknown>;
 const severity = (value: unknown): SecuritySeverity => {
@@ -45,7 +45,7 @@ function externalScanner(command: ExternalScannerCommand, name: string, args: (c
   };
 }
 
-export const semgrepScanner = externalScanner('semgrep', 'Semgrep SAST', () => ['scan', '--json', '--quiet', '--config', '.semgrep.yml', '.'], (json, context) => {
+export const semgrepScanner = externalScanner('semgrep', 'Semgrep SAST', (context) => ['scan', '--json', '--quiet', '--config', fs.existsSync(path.join(context.projectDir, '.semgrep.yml')) ? '.semgrep.yml' : '.semgrep.yaml', '.'], (json, context) => {
   const results = Array.isArray(json.results) ? json.results as JsonObject[] : [];
   return results.map((item) => {
     const extra = (item.extra ?? {}) as JsonObject; const start = (item.start ?? {}) as JsonObject;
@@ -96,11 +96,12 @@ export const trivyScanner = externalScanner('trivy', 'Trivy Vulnerability/IaC Sc
       const cause = (misconfiguration.CauseMetadata ?? {}) as JsonObject;
       findings.push(makeFinding('trivy', String(misconfiguration.ID ?? 'trivy.misconfiguration'), 'iac', misconfiguration.Severity, String(misconfiguration.Title ?? 'IaC 配置风险'), String(misconfiguration.Description ?? 'Trivy 检测到基础设施配置风险。'), context.projectDir, target, cause.StartLine, misconfiguration.Message, String(misconfiguration.Resolution ?? '按最小权限原则修复配置。')));
     }
+    for (const secret of (Array.isArray(result.Secrets) ? result.Secrets as JsonObject[] : [])) findings.push(makeFinding('trivy', String(secret.RuleID ?? 'trivy.secret'), 'secret', secret.Severity ?? 'critical', String(secret.Title ?? 'Trivy 检测到密钥'), 'Trivy 在项目文件中检测到疑似凭据。', context.projectDir, target, secret.StartLine, secret.Match, '立即轮换凭据，并从代码与版本历史中移除。'));
   }
   return findings;
 });
 
 export const externalScanners: SecurityScanner[] = [semgrepScanner, gitleaksScanner, osvScanner, trivyScanner];
-export async function listExternalScannerAvailability(): Promise<Array<{ id: string; name: string; available: boolean }>> {
-  return Promise.all(externalScanners.map(async (scanner) => ({ id: scanner.id, name: scanner.name, available: await commandAvailable(scanner.id as ExternalScannerCommand) })));
+export async function listExternalScannerAvailability(force = false): Promise<Array<{ id: string; name: string; available: boolean; version?: string; error?: string; checkedAt: number }>> {
+  return Promise.all(externalScanners.map(async (scanner) => ({ id: scanner.id, name: scanner.name, ...await inspectScannerCommand(scanner.id as ExternalScannerCommand, force) })));
 }

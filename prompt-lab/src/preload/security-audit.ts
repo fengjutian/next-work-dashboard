@@ -29,6 +29,6 @@ export const securityAuditBridge = {
     list: (projectDir: string) => ipcRenderer.invoke('security-audit:findings:list', projectDir),
   },
   scans: { list: (projectDir: string) => ipcRenderer.invoke('security-audit:scans:list', projectDir) },
-  scanners: { list: () => ipcRenderer.invoke('security-audit:scanners:list') },
+  scanners: { list: (force?: boolean) => ipcRenderer.invoke('security-audit:scanners:list', force) },
   report: { exportSarif: (projectDir: string) => ipcRenderer.invoke('security-audit:report:export-sarif', projectDir) },
 };
