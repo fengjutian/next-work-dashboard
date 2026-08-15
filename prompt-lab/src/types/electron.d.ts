@@ -801,6 +801,7 @@ export interface ChapterProjectRecord {
   subfolder: string;
   source: string;
   requirement?: string;
+  chapterBriefs?: Record<string, { goal: string; targetWords: number; keyQuestions: string; requiredSources: string; avoidTopics: string }>;
   splitMode: 'chapter' | 'section' | 'single';
   organizeByPart: boolean;
   template: string;

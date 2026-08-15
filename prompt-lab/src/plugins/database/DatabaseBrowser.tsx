@@ -1,8 +1,21 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { execSql, getTableInfo, getDatabaseStats, exportDb, isDbReady, type DatabaseStats } from '@/db';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  exportDb,
+  getDatabaseStats,
+  getDatabaseTablePage,
+  getDatabaseTableSchema,
+  getDatabaseTableStats,
+  getTableInfo,
+  isDbReady,
+  type DatabaseStats,
+  type DatabaseTablePage,
+  type DatabaseTableSchema,
+  type DatabaseTableStats,
+  type DatabaseColumnFilter,
+} from '@/db';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RefreshCw, Download, Copy, Check, Database, Search } from '@/components/icons';
+import { Check, Copy, Database, Download, RefreshCw, Search } from '@/components/icons';
 import { TABLE_CATEGORIES, tableCategoryId, tableDisplayName } from './tableCatalog';
 
 interface TableInfo {
@@ -10,34 +23,70 @@ interface TableInfo {
   columns: Array<{ name: string; type: string }>;
 }
 
-interface QueryResult {
-  columns: string[];
-  values: unknown[][];
-}
+type SortState = { column: string; direction: 'asc' | 'desc' } | null;
+type CellSelection = { column: string; value: unknown } | null;
+type ViewMode = 'data' | 'structure';
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+function formatBytes(bytes?: number): string {
+  if (!Number.isFinite(bytes) || !bytes || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
   const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** unit;
   return `${value.toFixed(unit === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
 }
 
+function displayValue(value: unknown): string {
+  if (value === null) return 'NULL';
+  if (value instanceof Uint8Array) return `<BLOB · ${formatBytes(value.byteLength)}>`;
+  return String(value);
+}
+
+function detailedValue(value: unknown): string {
+  if (value === null) return 'NULL';
+  if (value instanceof Uint8Array) {
+    return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join(' ');
+  }
+  if (typeof value !== 'string') return String(value);
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function download(name: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export const DatabaseBrowser: React.FC = () => {
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [data, setData] = useState<QueryResult | null>(null);
+  const [data, setData] = useState<DatabaseTablePage | null>(null);
+  const [stats, setStats] = useState<DatabaseStats | null>(null);
+  const [selectedStats, setSelectedStats] = useState<Required<DatabaseTableStats> | null>(null);
+  const [selectedSchema, setSelectedSchema] = useState<DatabaseTableSchema | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [tableQuery, setTableQuery] = useState('');
-  const [stats, setStats] = useState<DatabaseStats | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
+  const [sort, setSort] = useState<SortState>(null);
+  const [selectedCell, setSelectedCell] = useState<CellSelection>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('data');
+  const [filterColumn, setFilterColumn] = useState('');
+  const [filterValue, setFilterValue] = useState('');
+  const [filters, setFilters] = useState<DatabaseColumnFilter[]>([]);
 
   const loadTables = useCallback(() => {
     if (!isDbReady()) return;
     try {
-      const info = getTableInfo();
-      setTables(info);
+      setTables(getTableInfo());
       setStats(getDatabaseStats());
       setError(null);
     } catch (err) {
@@ -45,271 +94,235 @@ export const DatabaseBrowser: React.FC = () => {
     }
   }, []);
 
-  const loadTableData = useCallback((table: string) => {
+  const loadTableData = useCallback((table: string, nextPage: number, limit: number, nextSort: SortState, activeFilters: DatabaseColumnFilter[], totalRows?: number, refreshStats = false) => {
     if (!isDbReady()) return;
     setLoading(true);
     setError(null);
     try {
-      const results = execSql(`SELECT * FROM "${table}" LIMIT 1000`);
-      setData(results[0] ?? { columns: [], values: [] });
+      setData(getDatabaseTablePage(table, {
+        offset: nextPage * limit,
+        limit,
+        sortColumn: nextSort?.column,
+        sortDirection: nextSort?.direction,
+        totalRows,
+        filters: activeFilters,
+      }));
+      if (refreshStats) {
+        setSelectedStats(getDatabaseTableStats(table));
+        setSelectedSchema(getDatabaseTableSchema(table));
+      }
     } catch (err) {
       setError(String(err));
       setData(null);
+      setSelectedStats(null);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  useEffect(() => { loadTables(); }, [loadTables]);
   useEffect(() => {
-    loadTables();
-  }, [loadTables]);
-
-  // DB 异步初始化完成后的轮询加载
-  useEffect(() => {
-    if (tables.length > 0) return; // already loaded
-    const interval = setInterval(() => {
+    if (tables.length > 0) return;
+    const interval = window.setInterval(() => {
       if (isDbReady()) {
         loadTables();
-        clearInterval(interval);
+        window.clearInterval(interval);
       }
     }, 500);
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [tables.length, loadTables]);
 
-  const handleTableClick = (table: string) => {
+  const selectTable = (table: string) => {
     setSelectedTable(table);
-    loadTableData(table);
+    setPage(0);
+    setSort(null);
+    setFilters([]);
+    setFilterColumn('');
+    setFilterValue('');
+    setViewMode('data');
+    setSelectedCell(null);
+    loadTableData(table, 0, pageSize, null, [], undefined, true);
   };
 
-  const handleRefresh = () => {
+  const refresh = () => {
     loadTables();
-    if (selectedTable) loadTableData(selectedTable);
+    if (selectedTable) loadTableData(selectedTable, page, pageSize, sort, filters, undefined, true);
   };
 
-  const handleExport = async () => {
+  const changePage = (nextPage: number) => {
+    if (!selectedTable) return;
+    setPage(nextPage);
+    loadTableData(selectedTable, nextPage, pageSize, sort, filters, filters.length ? undefined : data?.totalRows);
+  };
+
+  const changePageSize = (limit: number) => {
+    if (!selectedTable) return;
+    setPageSize(limit);
+    setPage(0);
+    loadTableData(selectedTable, 0, limit, sort, filters, filters.length ? undefined : data?.totalRows);
+  };
+
+  const changeSort = (column: string) => {
+    if (!selectedTable) return;
+    const nextSort: SortState = sort?.column === column
+      ? sort.direction === 'asc' ? { column, direction: 'desc' } : null
+      : { column, direction: 'asc' };
+    setSort(nextSort);
+    setPage(0);
+    loadTableData(selectedTable, 0, pageSize, nextSort, filters, filters.length ? undefined : data?.totalRows);
+  };
+
+  const applyFilter = () => {
+    if (!selectedTable || !filterColumn || !filterValue) return;
+    const nextFilters: DatabaseColumnFilter[] = [{ column: filterColumn, operator: 'contains', value: filterValue }];
+    setFilters(nextFilters);
+    setPage(0);
+    loadTableData(selectedTable, 0, pageSize, sort, nextFilters);
+  };
+
+  const clearFilter = () => {
+    if (!selectedTable) return;
+    setFilters([]);
+    setFilterValue('');
+    setPage(0);
+    loadTableData(selectedTable, 0, pageSize, sort, [], selectedStats?.rowCount);
+  };
+
+  const exportDatabase = () => {
     try {
-      const buf = exportDb();
-      const blob = new Blob([buf], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `next-work-dashboard-${new Date().toISOString().slice(0, 10)}.db`;
-      a.click();
-      URL.revokeObjectURL(url);
+      download(`next-work-dashboard-${new Date().toISOString().slice(0, 10)}.db`, new Blob([exportDb()], { type: 'application/octet-stream' }));
     } catch (err) {
       setError(String(err));
     }
   };
 
-  const handleExportCSV = () => {
-    if (!data || data.values.length === 0) return;
-    const header = data.columns.join(',');
-    const rows = data.values.map((row) =>
-      row.map((v) => {
-        const s = v === null ? '' : String(v);
-        return s.includes(',') || s.includes('"') || s.includes('\n')
-          ? `"${s.replace(/"/g, '""')}"`
-          : s;
-      }).join(',')
-    );
-    const csv = [header, ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${selectedTable}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportCsv = () => {
+    if (!data || !selectedTable) return;
+    const encode = (value: unknown) => {
+      const text = value === null ? '' : displayValue(value);
+      return /[,"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const csv = [data.columns.map(encode).join(','), ...data.values.map((row) => row.map(encode).join(','))].join('\n');
+    download(`${selectedTable}-page-${page + 1}.csv`, new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   };
 
-  const handleCopyJSON = () => {
+  const copyJson = async () => {
     if (!data) return;
-    const json = data.values.map((row) => {
-      const obj: Record<string, unknown> = {};
-      data.columns.forEach((col, i) => { obj[col] = row[i]; });
-      return obj;
-    });
-    navigator.clipboard.writeText(JSON.stringify(json, null, 2));
+    const rows = data.values.map((row) => Object.fromEntries(data.columns.map((column, index) => [column, row[index]])));
+    await navigator.clipboard.writeText(JSON.stringify(rows, null, 2));
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    window.setTimeout(() => setCopied(false), 2000);
   };
 
-  const rowCount = data ? data.values.length : 0;
   const groupedTables = useMemo(() => {
     const query = tableQuery.trim().toLocaleLowerCase();
     return TABLE_CATEGORIES.map((category) => ({
       ...category,
-      tables: tables.filter((table) => tableCategoryId(table.table) === category.id && (!query || `${table.table} ${tableDisplayName(table.table)}`.toLocaleLowerCase().includes(query))),
+      tables: tables.filter((table) => tableCategoryId(table.table) === category.id
+        && (!query || `${table.table} ${tableDisplayName(table.table)}`.toLocaleLowerCase().includes(query))),
     })).filter((category) => category.tables.length > 0);
   }, [tableQuery, tables]);
+
   const selectedInfo = tables.find((table) => table.table === selectedTable);
-  const selectedStats = stats?.tables.find((table) => table.table === selectedTable);
-  const largestTables = useMemo(() => [...(stats?.tables ?? [])].sort((a, b) => b.payloadBytes - a.payloadBytes).slice(0, 8), [stats]);
+  const totalPages = Math.max(1, Math.ceil((data?.totalRows ?? 0) / pageSize));
+  const firstRow = data?.totalRows ? page * pageSize + 1 : 0;
+  const lastRow = Math.min((page + 1) * pageSize, data?.totalRows ?? 0);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* 工具栏 */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b bg-card">
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-1 border-b bg-card px-3 py-2">
         <h2 className="text-sm font-semibold text-foreground">数据库浏览器</h2>
-        {stats && <span className="ml-2 rounded-full border bg-background px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground" title="SQLite 数据库文件精确大小">总占用 {formatBytes(stats.totalBytes)}</span>}
+        {stats && <span className="ml-2 rounded-full border bg-background px-2 py-0.5 text-[10px] tabular-nums text-muted-foreground">总占用 {formatBytes(stats.totalBytes)}</span>}
+        <span className="rounded-full border bg-background px-2 py-0.5 text-[10px] text-muted-foreground">只读</span>
         <div className="flex-1" />
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} title="刷新">
-          <RefreshCw className="h-3.5 w-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleExport} title="导出 SQLite 文件">
-          <Download className="h-3.5 w-3.5" />
-        </Button>
-        {selectedTable && data && data.values.length > 0 && (
-          <>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleExportCSV} title="导出 CSV">
-              <span className="text-xs font-mono">CSV</span>
-            </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopyJSON} title="复制 JSON">
-              {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-            </Button>
-          </>
-        )}
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={refresh} title="刷新"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /></Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={exportDatabase} title="导出 SQLite 文件"><Download className="h-3.5 w-3.5" /></Button>
+        {selectedTable && data && <>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={exportCsv}>CSV</Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={copyJson} title="复制当前页 JSON">{copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}</Button>
+        </>}
       </div>
 
-      {/* 错误提示 */}
-      {error && (
-        <div className="px-3 py-2 text-xs text-destructive bg-destructive/10 bg-destructive/10 border-b">
-          {error}
-        </div>
-      )}
+      {error && <div className="border-b bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div>}
 
       <div className="flex min-h-0 flex-1">
-        {/* 分类表导航 */}
         <aside className="flex w-64 shrink-0 flex-col border-r bg-muted/15">
-          <div className="border-b p-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-              <input value={tableQuery} onChange={(event) => setTableQuery(event.target.value)} placeholder="搜索数据表…" className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10" />
-            </div>
-          </div>
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-4 p-2">
-              {tables.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">数据库为空</p>}
-              {tables.length > 0 && groupedTables.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">没有匹配的数据表</p>}
-              {groupedTables.map((category) => <section key={category.id}>
-                <div className="flex items-center gap-2 px-2 pb-1.5">
-                  <h3 className="text-[11px] font-semibold text-foreground">{category.label}</h3>
-                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground">{category.tables.length}</span>
-                </div>
-                <div className="space-y-0.5">{category.tables.map((table) => <button key={table.table} type="button" onClick={() => handleTableClick(table.table)} title={`${category.description}\n${table.table}`} className={`group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${selectedTable === table.table ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
-                  <Database className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                  <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{tableDisplayName(table.table)}</span><span className={`block truncate font-mono text-[9px] ${selectedTable === table.table ? 'text-primary-foreground/70' : 'text-muted-foreground/70'}`}>{table.table}</span></span>
-                  <span className={`shrink-0 text-right text-[9px] tabular-nums ${selectedTable === table.table ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}><span className="block">{table.columns.length} 列</span><span className="block">{formatBytes(stats?.tables.find((item) => item.table === table.table)?.payloadBytes ?? 0)}</span></span>
-                </button>)}</div>
-              </section>)}
-            </div>
-          </ScrollArea>
-          <div className="border-t px-3 py-2 text-[10px] text-muted-foreground">共 {tables.length} 张表 · {TABLE_CATEGORIES.filter((category) => tables.some((table) => tableCategoryId(table.table) === category.id)).length} 个分类</div>
+          <div className="border-b p-3"><div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <input value={tableQuery} onChange={(event) => setTableQuery(event.target.value)} placeholder="搜索数据表…" className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-xs outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10" />
+          </div></div>
+          <ScrollArea className="min-h-0 flex-1"><div className="space-y-4 p-2">
+            {tables.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">数据库为空</p>}
+            {tables.length > 0 && groupedTables.length === 0 && <p className="px-2 py-8 text-center text-xs text-muted-foreground">没有匹配的数据表</p>}
+            {groupedTables.map((category) => <section key={category.id}>
+              <div className="flex items-center gap-2 px-2 pb-1.5"><h3 className="text-[11px] font-semibold">{category.label}</h3><span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">{category.tables.length}</span></div>
+              <div className="space-y-0.5">{category.tables.map((table) => <button key={table.table} type="button" onClick={() => selectTable(table.table)} className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left ${selectedTable === table.table ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+                <Database className="h-3.5 w-3.5 shrink-0 opacity-70" /><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{tableDisplayName(table.table)}</span><span className="block truncate font-mono text-[9px] opacity-70">{table.table}</span></span><span className="text-[9px] opacity-70">{table.columns.length} 列</span>
+              </button>)}</div>
+            </section>)}
+          </div></ScrollArea>
+          <div className="border-t px-3 py-2 text-[10px] text-muted-foreground">共 {tables.length} 张表</div>
         </aside>
 
-        {/* 主内容 */}
-        <ScrollArea className="min-w-0 flex-1">
-          <div className="p-4">
-          {selectedTable && data ? (
-            <>
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-                <div><div className="flex items-center gap-2"><Database className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">{tableDisplayName(selectedTable)}</h3></div><p className="mt-1 font-mono text-[10px] text-muted-foreground">{selectedTable}</p></div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="rounded-full border bg-background px-2 py-1">{data.columns.length} 列</span>
-                <span className="rounded-full border bg-background px-2 py-1">{selectedStats?.rowCount ?? rowCount} 行</span>
-                <span className="rounded-full border bg-background px-2 py-1" title="字段数据载荷估算，不包含索引与 SQLite 页开销">约 {formatBytes(selectedStats?.payloadBytes ?? 0)}</span>
-                {rowCount === 1000 && <span className="text-warning">（最多 1000 行）</span>}
-                </div>
-              </div>
-
-              {/* 数据表格 */}
-              <div className="overflow-auto rounded-lg border">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-muted">
-                      <th className="sticky left-0 bg-muted px-2 py-1.5 text-left font-mono text-muted-foreground w-8">#</th>
-                      {data.columns.map((col) => (
-                        <th key={col} className="px-3 py-1.5 text-left font-semibold text-muted-foreground text-foreground whitespace-nowrap">
-                          {col}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.values.length === 0 ? (
-                      <tr>
-                        <td colSpan={data.columns.length + 1} className="px-3 py-4 text-center text-muted-foreground">
-                          无数据
-                        </td>
-                      </tr>
-                    ) : (
-                      data.values.map((row, i) => (
-                        <tr
-                          key={i}
-                          className={`border-t ${
-                            i % 2 === 0 ? 'bg-card' : 'bg-background/50'
-                          }`}
-                        >
-                          <td className="sticky left-0 px-2 py-1 font-mono text-muted-foreground bg-inherit">
-                            {i + 1}
-                          </td>
-                          {row.map((val, j) => (
-                            <td
-                              key={j}
-                              className="px-3 py-1 font-mono text-foreground max-w-80 truncate"
-                              title={val === null ? 'NULL' : String(val)}
-                            >
-                              {val === null ? (
-                                <span className="text-foreground italic">NULL</span>
-                              ) : (
-                                String(val)
-                              )}
-                            </td>
-                          ))}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : selectedTable && loading ? (
-            <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
-              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-              加载中...
+        <main className="flex min-w-0 flex-1 flex-col">
+          {selectedTable && data ? <>
+            <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+              <div className="mr-auto"><h3 className="text-sm font-semibold">{tableDisplayName(selectedTable)}</h3><p className="font-mono text-[10px] text-muted-foreground">{selectedTable}</p></div>
+              <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground">{data.columns.length} 列</span>
+              <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground">{data.totalRows} 行</span>
+              <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground">约 {formatBytes(selectedStats?.payloadBytes)}</span>
             </div>
-          ) : selectedTable ? (
-            <div className="flex items-center justify-center py-20 text-sm text-muted-foreground">
-              查询失败
+            <div className="flex items-center gap-1 border-b px-4 py-2">
+              <Button variant={viewMode === 'data' ? 'secondary' : 'ghost'} size="sm" className="h-7" onClick={() => setViewMode('data')}>数据</Button>
+              <Button variant={viewMode === 'structure' ? 'secondary' : 'ghost'} size="sm" className="h-7" onClick={() => setViewMode('structure')}>结构</Button>
+              {viewMode === 'data' && <><div className="mx-2 h-5 border-l" />
+                <select value={filterColumn} onChange={(event) => setFilterColumn(event.target.value)} className="h-7 max-w-40 rounded border bg-background px-2 text-xs"><option value="">选择筛选列</option>{data.columns.map((column) => <option key={column} value={column}>{column}</option>)}</select>
+                <input value={filterValue} onChange={(event) => setFilterValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applyFilter(); }} placeholder="包含文本…" className="h-7 w-48 rounded border bg-background px-2 text-xs outline-none focus:border-primary/50" />
+                <Button variant="outline" size="sm" className="h-7" disabled={!filterColumn || !filterValue} onClick={applyFilter}>筛选</Button>
+                {filters.length > 0 && <Button variant="ghost" size="sm" className="h-7" onClick={clearFilter}>清除</Button>}
+              </>}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl border bg-muted/30"><Database className="h-7 w-7" /></div>
-              <p className="mt-4 text-sm font-medium text-foreground">{tables.length > 0 ? '选择一张数据表' : '数据库为空'}</p>
-              <p className="mt-1 max-w-xs text-xs leading-5">{tables.length > 0 ? '数据表已按业务功能分类，选择左侧项目查看字段和数据。' : '保存数据后，这里会显示表结构和记录。'}</p>
-              {stats && tables.length > 0 && <div className="mt-6 w-full max-w-2xl text-left">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-lg border bg-card p-3"><p className="text-[10px] text-muted-foreground">数据库总占用</p><p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{formatBytes(stats.totalBytes)}</p></div>
-                  <div className="rounded-lg border bg-card p-3"><p className="text-[10px] text-muted-foreground">SQLite 页面</p><p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{stats.pageCount}</p><p className="text-[9px] text-muted-foreground">每页 {formatBytes(stats.pageSize)}</p></div>
-                  <div className="rounded-lg border bg-card p-3"><p className="text-[10px] text-muted-foreground">空闲页面</p><p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{stats.freePages}</p><p className="text-[9px] text-muted-foreground">约 {formatBytes(stats.freePages * stats.pageSize)}</p></div>
-                </div>
-                <div className="mt-3 overflow-hidden rounded-lg border bg-card">
-                  <div className="border-b px-3 py-2 text-xs font-semibold text-foreground">数据载荷最大的表</div>
-                  {largestTables.map((table) => <button key={table.table} type="button" onClick={() => handleTableClick(table.table)} className="flex w-full items-center gap-3 border-b px-3 py-2 text-left last:border-b-0 hover:bg-accent">
-                    <span className="min-w-0 flex-1"><span className="block truncate text-xs text-foreground">{tableDisplayName(table.table)}</span><span className="block truncate font-mono text-[9px] text-muted-foreground">{table.table}</span></span>
-                    <span className="text-[10px] tabular-nums text-muted-foreground">{table.rowCount} 行</span><span className="w-16 text-right text-[10px] font-medium tabular-nums text-foreground">{formatBytes(table.payloadBytes)}</span>
-                  </button>)}
-                  <p className="border-t px-3 py-2 text-[9px] text-muted-foreground">表级大小为字段载荷估算；数据库总占用为精确值。</p>
-                </div>
+            {viewMode === 'data' ? <><div className="min-h-0 flex-1 overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 z-10"><tr className="bg-muted">
+                  <th className="sticky left-0 z-20 w-12 bg-muted px-2 py-2 text-left font-mono text-muted-foreground">#</th>
+                  {data.columns.map((column) => <th key={column} className="whitespace-nowrap px-3 py-2 text-left font-semibold"><button type="button" onClick={() => changeSort(column)} className="hover:text-primary" title="点击排序">{column}{sort?.column === column ? sort.direction === 'asc' ? ' ↑' : ' ↓' : ''}</button></th>)}
+                </tr></thead>
+                <tbody>{data.values.length === 0 ? <tr><td colSpan={data.columns.length + 1} className="px-3 py-8 text-center text-muted-foreground">无数据</td></tr> : data.values.map((row, rowIndex) => <tr key={`${page}-${rowIndex}`} className={`border-t ${rowIndex % 2 === 0 ? 'bg-card' : 'bg-background/50'}`}>
+                  <td className="sticky left-0 bg-inherit px-2 py-1.5 font-mono text-muted-foreground">{page * pageSize + rowIndex + 1}</td>
+                  {row.map((value, columnIndex) => <td key={columnIndex} className="max-w-80 truncate px-3 py-1.5 font-mono" title="双击查看完整内容" onDoubleClick={() => setSelectedCell({ column: data.columns[columnIndex], value })}>{value === null ? <span className="italic text-muted-foreground">NULL</span> : displayValue(value)}</td>)}
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <div className="flex items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+              <span>显示 {firstRow}–{lastRow}，共 {data.totalRows} 行</span><div className="flex-1" />
+              <label>每页 <select value={pageSize} onChange={(event) => changePageSize(Number(event.target.value))} className="rounded border bg-background px-1 py-0.5"><option value={50}>50</option><option value={100}>100</option><option value={250}>250</option><option value={500}>500</option></select></label>
+              <Button variant="outline" size="sm" className="h-7" disabled={page === 0 || loading} onClick={() => changePage(page - 1)}>上一页</Button>
+              <span>{page + 1} / {totalPages}</span>
+              <Button variant="outline" size="sm" className="h-7" disabled={page + 1 >= totalPages || loading} onClick={() => changePage(page + 1)}>下一页</Button>
+            </div></> : <div className="min-h-0 flex-1 overflow-auto p-4">
+              {selectedSchema && <div className="space-y-5">
+                <section><h4 className="mb-2 text-xs font-semibold">字段</h4><div className="overflow-auto rounded-lg border"><table className="w-full text-xs"><thead><tr className="bg-muted"><th className="px-3 py-2 text-left">名称</th><th className="px-3 py-2 text-left">类型</th><th className="px-3 py-2 text-left">约束</th><th className="px-3 py-2 text-left">默认值</th></tr></thead><tbody>{selectedSchema.columns.map((column) => <tr key={column.name} className="border-t"><td className="px-3 py-2 font-mono">{column.name}</td><td className="px-3 py-2 font-mono text-muted-foreground">{column.type || '—'}</td><td className="px-3 py-2">{[column.primaryKeyOrder ? `PK ${column.primaryKeyOrder}` : '', column.notNull ? 'NOT NULL' : ''].filter(Boolean).join(' · ') || '—'}</td><td className="px-3 py-2 font-mono">{column.defaultValue === null ? '—' : String(column.defaultValue)}</td></tr>)}</tbody></table></div></section>
+                {selectedSchema.foreignKeys.length > 0 && <section><h4 className="mb-2 text-xs font-semibold">外键</h4><div className="space-y-1">{selectedSchema.foreignKeys.map((foreignKey) => <div key={`${foreignKey.id}-${foreignKey.from}`} className="rounded border px-3 py-2 font-mono text-xs">{foreignKey.from} → {foreignKey.targetTable}.{foreignKey.targetColumn} <span className="text-muted-foreground">ON UPDATE {foreignKey.onUpdate} · ON DELETE {foreignKey.onDelete}</span></div>)}</div></section>}
+                {selectedSchema.indexes.length > 0 && <section><h4 className="mb-2 text-xs font-semibold">索引</h4><div className="space-y-1">{selectedSchema.indexes.map((index) => <div key={index.name} className="rounded border px-3 py-2 font-mono text-xs">{index.name}{index.unique ? ' · UNIQUE' : ''}<span className="ml-2 text-muted-foreground">{index.origin}</span></div>)}</div></section>}
+                <section><h4 className="mb-2 text-xs font-semibold">建表 SQL</h4><pre className="overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-3 text-xs leading-5">{selectedSchema.createSql || '无建表 SQL'}</pre></section>
               </div>}
-            </div>
-          )}
-        </div>
-      </ScrollArea>
+            </div>}
+          </> : selectedTable && loading ? <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />加载中…</div> : <div className="flex flex-1 flex-col items-center justify-center text-center text-muted-foreground">
+            <div className="grid h-14 w-14 place-items-center rounded-2xl border bg-muted/30"><Database className="h-7 w-7" /></div><p className="mt-4 text-sm font-medium text-foreground">{tables.length ? '选择一张数据表' : '数据库为空'}</p><p className="mt-1 text-xs">分页浏览、点击列名排序，双击单元格查看完整内容。</p>
+            {stats && <div className="mt-6 grid grid-cols-3 gap-3 text-left"><div className="rounded-lg border bg-card p-3"><p className="text-[10px]">数据库占用</p><p className="mt-1 text-lg font-semibold">{formatBytes(stats.totalBytes)}</p></div><div className="rounded-lg border bg-card p-3"><p className="text-[10px]">SQLite 页面</p><p className="mt-1 text-lg font-semibold">{stats.pageCount}</p></div><div className="rounded-lg border bg-card p-3"><p className="text-[10px]">数据表</p><p className="mt-1 text-lg font-semibold">{tables.length}</p></div></div>}
+          </div>}
+        </main>
       </div>
 
-      {/* 底部统计栏 */}
-      <div className="flex h-7 items-center gap-3 border-t bg-background px-3 text-[10px] text-muted-foreground">{selectedInfo ? <><span>{tableDisplayName(selectedInfo.table)}</span><span>·</span><span>{selectedInfo.columns.length} 个字段</span><span>{selectedStats?.rowCount ?? 0} 行</span><span>约 {formatBytes(selectedStats?.payloadBytes ?? 0)}</span><span className="font-mono">{selectedInfo.table}</span></> : stats ? <><span>数据库总占用 {formatBytes(stats.totalBytes)}</span><span>·</span><span>{stats.tables.reduce((sum, table) => sum + table.rowCount, 0)} 行</span><span>·</span><span>{stats.tables.length} 张表</span></> : null}</div>
+      {selectedCell && <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm" onMouseDown={() => setSelectedCell(null)}>
+        <div className="flex max-h-[75%] w-full max-w-2xl flex-col rounded-lg border bg-card shadow-xl" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="flex items-center border-b px-4 py-3"><div><p className="text-sm font-semibold">单元格内容</p><p className="font-mono text-[10px] text-muted-foreground">{selectedCell.column}</p></div><div className="flex-1" /><Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(detailedValue(selectedCell.value))}>复制</Button><Button variant="ghost" size="sm" onClick={() => setSelectedCell(null)}>关闭</Button></div>
+          <pre className="min-h-0 overflow-auto whitespace-pre-wrap break-words p-4 text-xs leading-5">{detailedValue(selectedCell.value)}</pre>
+        </div>
+      </div>}
+
+      <div className="flex h-7 items-center gap-3 border-t bg-background px-3 text-[10px] text-muted-foreground">{selectedInfo ? <><span>{tableDisplayName(selectedInfo.table)}</span><span>·</span><span>{selectedInfo.columns.length} 个字段</span><span>{selectedStats?.rowCount ?? 0} 行</span><span className="font-mono">{selectedInfo.table}</span></> : stats ? <><span>数据库总占用 {formatBytes(stats.totalBytes)}</span><span>·</span><span>{tables.length} 张表</span></> : null}</div>
     </div>
   );
 };

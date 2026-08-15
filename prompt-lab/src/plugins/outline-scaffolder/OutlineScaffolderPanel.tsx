@@ -71,6 +71,7 @@ interface SavedProject {
   subfolder: string;
   source: string;
   requirement?: string;
+  chapterBriefs?: Record<string, ChapterWritingBrief>;
   splitMode: SplitMode;
   organizeByPart: boolean;
   template: string;
@@ -89,6 +90,25 @@ interface ResearchSourceCard {
   source: string;
   selected: boolean;
 }
+
+interface ChapterWritingBrief {
+  goal: string;
+  targetWords: number;
+  keyQuestions: string;
+  requiredSources: string;
+  avoidTopics: string;
+}
+
+const EMPTY_CHAPTER_BRIEF: ChapterWritingBrief = { goal: '', targetWords: 2500, keyQuestions: '', requiredSources: '', avoidTopics: '' };
+const attachChapterBrief = (content: string, brief?: ChapterWritingBrief) => {
+  if (!brief || (!brief.goal.trim() && !brief.keyQuestions.trim() && !brief.requiredSources.trim() && !brief.avoidTopics.trim())) return content;
+  const clean = (value: string) => value.trim().replace(/-->/g, '→');
+  const block = `<!-- chapter-writing-brief\n目标字数：${Math.max(100, brief.targetWords || 2500)}\n写作目标：${clean(brief.goal)}\n核心问题：${clean(brief.keyQuestions)}\n必用史料：${clean(brief.requiredSources)}\n避免重复：${clean(brief.avoidTopics)}\n-->`;
+  const titleEnd = content.match(/^#\s+.*$/m);
+  if (!titleEnd?.index && titleEnd?.index !== 0) return `${block}\n\n${content}`;
+  const position = titleEnd.index + titleEnd[0].length;
+  return `${content.slice(0, position)}\n\n${block}${content.slice(position)}`;
+};
 
 function loadSavedProjects(): SavedProject[] {
   try {
@@ -116,6 +136,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [outlineGenerating, setOutlineGenerating] = useState(false);
   const [outlineError, setOutlineError] = useState('');
   const [outlineVersions, setOutlineVersions] = useState<Array<{ source: string; createdAt: number; label: string }>>([]);
+  const [chapterBriefs, setChapterBriefs] = useState<Record<string, ChapterWritingBrief>>({});
+  const [showChapterBriefs, setShowChapterBriefs] = useState(false);
   const [projectTitle, setProjectTitle] = useState('未命名书籍');
   const [subfolder, setSubfolder] = useState('我的文档');
   const [splitMode, setSplitMode] = useState<SplitMode>('chapter');
@@ -180,7 +202,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [pagesAccentColor, setPagesAccentColor] = useState('#6d285f');
   const aiRequestRef = useRef(0);
   const nodes = useMemo(() => parseOutline(source), [source]);
-  const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
+  const baseDocuments = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
+  const documents = useMemo(() => baseDocuments.map((document) => ({ ...document, content: attachChapterBrief(document.content, chapterBriefs[document.path]) })), [baseDocuments, chapterBriefs]);
   const files = useMemo(() => [...documents, createReadme(documents, projectTitle, subfolder)], [documents, projectTitle, subfolder]);
   const articleWordCount = useMemo(() => countArticleWords(documentContent), [documentContent]);
   const generatorStage = nodes.length ? (target ? 3 : 2) : bookRequirement.trim() ? 1 : 0;
@@ -264,6 +287,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setOutlineVersions((current) => [{ source, createdAt: Date.now(), label }, ...current.filter((item) => item.source !== source)].slice(0, 10));
     notice.success({ message: '目录版本已保存', placement: 'bottomRight' });
   };
+  const updateChapterBrief = (path: string, patch: Partial<ChapterWritingBrief>) => setChapterBriefs((current) => ({ ...current, [path]: { ...EMPTY_CHAPTER_BRIEF, ...current[path], ...patch } }));
 
   useEffect(() => {
     Promise.all([window.electronAPI.outlineSecrets.load('review'), window.electronAPI.outlineSecrets.load('minimax')]).then(([review, minimax]) => {
@@ -294,13 +318,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setRecentProjects((current) => current.map((project) => project.id === activeProjectId ? {
         ...project,
         requirement: bookRequirement,
+        chapterBriefs,
       git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
         pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
         updatedAt: Date.now(),
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, bookRequirement, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
+  }, [activeProjectId, bookRequirement, chapterBriefs, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
 
   const switchView = (next: 'generator' | 'documents') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -329,6 +354,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       subfolder: savedFolder,
       source: overrides?.source ?? source,
       requirement: overrides?.requirement ?? bookRequirement,
+      chapterBriefs: overrides?.chapterBriefs ?? chapterBriefs,
       splitMode: overrides?.splitMode ?? splitMode,
       organizeByPart: overrides?.organizeByPart ?? organizeByPart,
       template: overrides?.template ?? template,
@@ -368,6 +394,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const folder = { path: project.rootPath, name: project.name };
       setTarget(folder); setProjectTitle(project.name); setSubfolder(project.subfolder); setSource(project.source);
       setBookRequirement(project.requirement ?? '');
+      setChapterBriefs(project.chapterBriefs ?? {});
       setSplitMode(project.splitMode); setOrganizeByPart(project.organizeByPart); setTemplate(project.template);
       setGitRemoteUrl(project.git?.remoteUrl ?? ''); setGitRemoteName(project.git?.remoteName ?? 'origin'); setGitBranch(project.git?.branch ?? 'main');
       const restoredBookTitle = !project.pages?.title || project.pages.title === '我的文档' ? (project.pages?.description?.replace(/在线阅读$/, '') || project.name) : project.pages.title;
@@ -432,6 +459,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 7. 使用用户提供的史料时，在相关句末使用 Markdown 脚注标记（如 [^s1]）；文章最下方必须添加“## 史料与参考资料”，列出对应脚注、材料名称、作者或篇章及链接。AI 搜索摘要只能标为“检索线索，引用前需核对原文”，不得当作正式引文。
 
 ## 内容与结构
+如现有文档含有 chapter-writing-brief 注释，其中的目标字数、写作目标、核心问题、必用史料和避免重复内容是本章最高优先级约束；保留该注释，不要把注释文字写进正文。
 8. 开头直接进入本章的核心矛盾、关键场景或问题，不使用“在历史长河中”“众所周知”“随着时代发展”等万能套话。
 9. 每一节只解决一个清晰问题，段落之间用时间、因果、对比或递进关系推进。删除无信息量的承上启下和重复总结。
 10. 保持全书边界，不提前写完其他章节；需要铺垫时只提供理解本章所必需的背景。
@@ -928,7 +956,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const paths = documents.map((document) => document.path);
       const outputFolder = subfolder.trim() && documents[0]?.path.includes('/') ? documents[0].path.split('/')[0] : '';
       const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
-      const manifest = JSON.stringify({ version: 1, name: projectTitle, requirement: bookRequirement, source, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
+      const manifest = JSON.stringify({ version: 1, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, splitMode, organizeByPart, template, files: paths, updatedAt: Date.now() }, null, 2) + '\n';
       const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
       if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
@@ -980,6 +1008,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold">第三步：修改并确认目录</h2><p className="mt-1 text-xs text-muted-foreground">悬停条目可修改或删除；删除父级会同时删除其下级。</p></div>{nodes.length > 0 && <Check className="h-4 w-4 text-emerald-500" />}</div>
           {outlineWarnings.length > 0 && <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">{outlineWarnings.map((warning) => <div key={warning}>• {warning}</div>)}</div>}
           {nodes.length ? <EditableOutlineTree nodes={nodes} onRename={renameOutlineNode} onDelete={deleteOutlineNode} onMove={moveOutlineNode} /> : <p className="text-sm text-muted-foreground">填写需求生成目录，或在左侧手动输入目录。</p>}
+          {baseDocuments.length > 0 && <div className="mt-4 border-t border-border pt-3"><button type="button" className="flex w-full items-center justify-between text-left text-sm font-semibold" onClick={() => setShowChapterBriefs((value) => !value)}><span>单章写作卡片 <span className="ml-1 text-xs font-normal text-muted-foreground">{baseDocuments.filter((document) => chapterBriefs[document.path]).length}/{baseDocuments.length}</span></span><span className="text-xs text-muted-foreground">{showChapterBriefs ? '收起' : '展开'}</span></button>{showChapterBriefs && <div className="mt-3 max-h-[460px] space-y-3 overflow-auto pr-1">{baseDocuments.map((document) => { const brief = { ...EMPTY_CHAPTER_BRIEF, ...chapterBriefs[document.path] }; return <div key={document.path} className="rounded-lg border border-border p-3"><div className="mb-2 truncate text-sm font-medium" title={document.title}>{document.title}</div><div className="grid grid-cols-[1fr_90px] gap-2"><input value={brief.goal} onChange={(event) => updateChapterBrief(document.path, { goal: event.target.value })} placeholder="本章写作目标" className="rounded-md border border-input bg-background px-2 py-1.5 text-xs" /><input type="number" min={100} step={100} value={brief.targetWords} onChange={(event) => updateChapterBrief(document.path, { targetWords: Math.max(100, Number(event.target.value) || 2500) })} title="目标字数" className="rounded-md border border-input bg-background px-2 py-1.5 text-xs" /></div><textarea value={brief.keyQuestions} onChange={(event) => updateChapterBrief(document.path, { keyQuestions: event.target.value })} placeholder="核心问题：本章必须回答什么？" className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs" /><textarea value={brief.requiredSources} onChange={(event) => updateChapterBrief(document.path, { requiredSources: event.target.value })} placeholder="必用史料：书名、篇章、论文或材料编号" className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs" /><textarea value={brief.avoidTopics} onChange={(event) => updateChapterBrief(document.path, { avoidTopics: event.target.value })} placeholder="避免重复：哪些内容已由其他章节负责？" className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs" /></div>; })}</div>}</div>}
         </section>
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}第四步：生成 {documents.length || 0} 个章节文档</Button>
       </div>

@@ -1285,8 +1285,8 @@ export function getTableInfo(): Array<{ table: string; columns: Array<{ name: st
 
 export interface DatabaseTableStats {
   table: string;
-  rowCount: number;
-  payloadBytes: number;
+  rowCount?: number;
+  payloadBytes?: number;
 }
 
 export interface DatabaseStats {
@@ -1297,30 +1297,142 @@ export interface DatabaseStats {
   tables: DatabaseTableStats[];
 }
 
-/** 数据库文件大小为精确值；表级大小是字段数据载荷估算，不包含索引和 SQLite 页开销。 */
+/** 轻量数据库概览。表级统计按需通过 getDatabaseTableStats 获取，避免打开浏览器时扫描全库。 */
 export function getDatabaseStats(): DatabaseStats {
   if (!_sqlDb) throw new Error('DB not initialized');
   const tableInfo = getTableInfo();
   const pragmaNumber = (name: 'page_size' | 'page_count' | 'freelist_count'): number =>
     Number(_sqlDb?.exec(`PRAGMA ${name}`)[0]?.values[0]?.[0] ?? 0);
-  const tables = tableInfo.map(({ table, columns }) => {
-    const escapedTable = table.replace(/"/g, '""');
-    const payloadExpression = columns.length
-      ? columns.map(({ name }) => `COALESCE(length(CAST("${name.replace(/"/g, '""')}" AS BLOB)), 0)`).join(' + ')
-      : '0';
-    const result = _sqlDb!.exec(`SELECT COUNT(*), COALESCE(SUM(${payloadExpression}), 0) FROM "${escapedTable}"`)[0];
-    return {
-      table,
-      rowCount: Number(result?.values[0]?.[0] ?? 0),
-      payloadBytes: Number(result?.values[0]?.[1] ?? 0),
-    };
-  });
+  const tables = tableInfo.map(({ table }) => ({ table }));
+  const pageSize = pragmaNumber('page_size');
+  const pageCount = pragmaNumber('page_count');
   return {
-    totalBytes: _sqlDb.export().byteLength,
-    pageSize: pragmaNumber('page_size'),
-    pageCount: pragmaNumber('page_count'),
+    totalBytes: pageSize * pageCount,
+    pageSize,
+    pageCount,
     freePages: pragmaNumber('freelist_count'),
     tables,
+  };
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function requireKnownTable(table: string): { name: string; type: string }[] {
+  const info = getTableInfo().find((item) => item.table === table);
+  if (!info) throw new Error(`Unknown table: ${table}`);
+  return info.columns;
+}
+
+export function getDatabaseTableStats(table: string): Required<DatabaseTableStats> {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const columns = requireKnownTable(table);
+  const payloadExpression = columns.length
+    ? columns.map(({ name }) => `COALESCE(length(CAST(${quoteIdentifier(name)} AS BLOB)), 0)`).join(' + ')
+    : '0';
+  const result = _sqlDb.exec(
+    `SELECT COUNT(*), COALESCE(SUM(${payloadExpression}), 0) FROM ${quoteIdentifier(table)}`
+  )[0];
+  return {
+    table,
+    rowCount: Number(result?.values[0]?.[0] ?? 0),
+    payloadBytes: Number(result?.values[0]?.[1] ?? 0),
+  };
+}
+
+export interface DatabaseTablePage {
+  columns: string[];
+  values: unknown[][];
+  totalRows: number;
+}
+
+export type DatabaseFilterOperator = 'contains' | 'equals' | 'is-null' | 'not-null';
+
+export interface DatabaseColumnFilter {
+  column: string;
+  operator: DatabaseFilterOperator;
+  value?: string;
+}
+
+export interface DatabaseTableSchema {
+  createSql: string;
+  columns: Array<{ name: string; type: string; notNull: boolean; defaultValue: unknown; primaryKeyOrder: number }>;
+  foreignKeys: Array<{ id: number; from: string; targetTable: string; targetColumn: string; onUpdate: string; onDelete: string }>;
+  indexes: Array<{ name: string; unique: boolean; origin: string }>;
+}
+
+export function getDatabaseTableSchema(table: string): DatabaseTableSchema {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  requireKnownTable(table);
+  const quotedTable = quoteIdentifier(table);
+  const schemaStatement = _sqlDb.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?");
+  schemaStatement.bind([table]);
+  const createSql = schemaStatement.step() ? String(schemaStatement.get()[0] ?? '') : '';
+  schemaStatement.free();
+  const columnRows = _sqlDb.exec(`PRAGMA table_info(${quotedTable})`)[0]?.values ?? [];
+  const foreignKeyRows = _sqlDb.exec(`PRAGMA foreign_key_list(${quotedTable})`)[0]?.values ?? [];
+  const indexRows = _sqlDb.exec(`PRAGMA index_list(${quotedTable})`)[0]?.values ?? [];
+  return {
+    createSql,
+    columns: columnRows.map((row) => ({
+      name: String(row[1]), type: String(row[2]), notNull: Boolean(row[3]),
+      defaultValue: row[4], primaryKeyOrder: Number(row[5]),
+    })),
+    foreignKeys: foreignKeyRows.map((row) => ({
+      id: Number(row[0]), targetTable: String(row[2]), from: String(row[3]), targetColumn: String(row[4]),
+      onUpdate: String(row[5]), onDelete: String(row[6]),
+    })),
+    indexes: indexRows.map((row) => ({ name: String(row[1]), unique: Boolean(row[2]), origin: String(row[3]) })),
+  };
+}
+
+export function getDatabaseTablePage(
+  table: string,
+  options: { offset?: number; limit?: number; sortColumn?: string; sortDirection?: 'asc' | 'desc'; totalRows?: number; filters?: DatabaseColumnFilter[] } = {},
+): DatabaseTablePage {
+  if (!_sqlDb) throw new Error('DB not initialized');
+  const columns = requireKnownTable(table);
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 100), 1), 500);
+  const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
+  const filters = (options.filters ?? []).filter((filter) => {
+    if (!columns.some((column) => column.name === filter.column)) throw new Error(`Unknown column: ${filter.column}`);
+    return filter.operator === 'is-null' || filter.operator === 'not-null' || Boolean(filter.value?.length);
+  });
+  const filterValues: string[] = [];
+  const whereParts = filters.map((filter) => {
+    const column = quoteIdentifier(filter.column);
+    if (filter.operator === 'is-null') return `${column} IS NULL`;
+    if (filter.operator === 'not-null') return `${column} IS NOT NULL`;
+    filterValues.push(filter.operator === 'contains' ? `%${filter.value}%` : String(filter.value));
+    return filter.operator === 'contains' ? `CAST(${column} AS TEXT) LIKE ?` : `CAST(${column} AS TEXT) = ?`;
+  });
+  const where = whereParts.length ? ` WHERE ${whereParts.join(' AND ')}` : '';
+  let orderBy = '';
+  if (options.sortColumn) {
+    if (!columns.some((column) => column.name === options.sortColumn)) {
+      throw new Error(`Unknown column: ${options.sortColumn}`);
+    }
+    orderBy = ` ORDER BY ${quoteIdentifier(options.sortColumn)} ${options.sortDirection === 'desc' ? 'DESC' : 'ASC'}`;
+  }
+  const quotedTable = quoteIdentifier(table);
+  const dataStatement = _sqlDb.prepare(`SELECT * FROM ${quotedTable}${where}${orderBy} LIMIT ${limit} OFFSET ${offset}`);
+  if (filterValues.length) dataStatement.bind(filterValues);
+  const values: unknown[][] = [];
+  while (dataStatement.step()) values.push(dataStatement.get());
+  const resultColumns = dataStatement.getColumnNames();
+  dataStatement.free();
+  let totalRows = options.totalRows;
+  if (totalRows === undefined || filters.length > 0) {
+    const countStatement = _sqlDb.prepare(`SELECT COUNT(*) FROM ${quotedTable}${where}`);
+    if (filterValues.length) countStatement.bind(filterValues);
+    totalRows = countStatement.step() ? Number(countStatement.get()[0] ?? 0) : 0;
+    countStatement.free();
+  }
+  return {
+    columns: resultColumns.length ? resultColumns : columns.map((column) => column.name),
+    values,
+    totalRows,
   };
 }
 
