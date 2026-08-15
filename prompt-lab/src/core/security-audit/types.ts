@@ -31,7 +31,7 @@ export interface SecurityFinding {
 
 export type ScanMode = 'full' | 'incremental';
 export interface ScanRequest { projectDir: string; mode?: ScanMode; baselineRef?: string; scanners?: string[]; aiReview?: boolean }
-export interface ScanProgress { jobId: string; phase: 'scanning' | 'triaging' | 'completed' | 'failed' | 'cancelled'; percent: number; message: string; findingsCount?: number }
+export interface ScanProgress { jobId: string; projectDir?: string; phase: 'scanning' | 'triaging' | 'completed' | 'failed' | 'cancelled'; percent: number; message: string; findingsCount?: number }
 export interface ScanContext { projectDir: string; files: string[]; signal: AbortSignal; emit(progress: Omit<ScanProgress, 'jobId'>): void }
 export interface SecurityScanner {
   readonly id: string;

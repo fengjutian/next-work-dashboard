@@ -114,6 +114,7 @@ export const DatabaseBrowser: React.FC = () => {
   const [pinnedColumns, setPinnedColumns] = useState(0);
   const [columnManagerOpen, setColumnManagerOpen] = useState(false);
   const [gridSelection, setGridSelection] = useState<{ row: number; visibleColumn: number } | null>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(() => new Set());
   const filterInputRef = useRef<HTMLInputElement>(null);
   const exportCancelledRef = useRef(false);
   const [exportProgress, setExportProgress] = useState<number | null>(null);
@@ -132,6 +133,7 @@ export const DatabaseBrowser: React.FC = () => {
   const loadTableData = useCallback((table: string, nextPage: number, limit: number, nextSort: SortState, activeFilters: DatabaseColumnFilter[], totalRows?: number, refreshStats = false) => {
     if (!isDbReady()) return;
     setLoading(true);
+    setSelectedRows(new Set());
     setError(null);
     try {
       setData(getDatabaseTablePage(table, {
@@ -186,6 +188,7 @@ export const DatabaseBrowser: React.FC = () => {
     setViewMode('data');
     setNavigationStack([]);
     setAnalysis(null);
+    setSelectedRows(new Set());
     setSelectedCell(null);
     loadTableData(table, 0, pageSize, preferences.sort, preferences.filters, undefined, true);
   };
@@ -322,6 +325,20 @@ export const DatabaseBrowser: React.FC = () => {
       text = `| ${visibleColumns.map((item) => item.column).join(' | ')} |\n| ${visibleColumns.map(() => '---').join(' | ')} |\n| ${visibleColumns.map((item) => displayValue(data.values[gridSelection.row]?.[item.index]).replace(/\|/g, '\\|')).join(' | ')} |`;
     }
     await navigator.clipboard.writeText(text);
+  };
+
+  const exportSelectedRows = (format: 'csv' | 'json' | 'markdown') => {
+    if (!data || !selectedTable || selectedRows.size === 0) return;
+    const rows = [...selectedRows].sort((a, b) => a - b).map((rowIndex) => data.values[rowIndex]).filter(Boolean);
+    const columns = visibleColumns;
+    const escapeCsv = (value: unknown) => { const text = value === null ? '' : displayValue(value); return /[,"\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+    if (format === 'json') {
+      download(`${selectedTable}-selected.json`, new Blob([JSON.stringify(rows.map((row) => Object.fromEntries(columns.map((item) => [item.column, row[item.index]]))), null, 2)], { type: 'application/json' })); return;
+    }
+    const lines = [`${format === 'markdown' ? '| ' : ''}${columns.map((item) => format === 'markdown' ? item.column : escapeCsv(item.column)).join(format === 'markdown' ? ' | ' : ',')}${format === 'markdown' ? ' |' : ''}`];
+    if (format === 'markdown') lines.push(`| ${columns.map(() => '---').join(' | ')} |`);
+    lines.push(...rows.map((row) => format === 'markdown' ? `| ${columns.map((item) => displayValue(row[item.index]).replace(/\|/g, '\\|')).join(' | ')} |` : columns.map((item) => escapeCsv(row[item.index])).join(',')));
+    download(`${selectedTable}-selected.${format === 'markdown' ? 'md' : 'csv'}`, new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }));
   };
 
   const exportDatabase = () => {
@@ -503,14 +520,15 @@ export const DatabaseBrowser: React.FC = () => {
             {viewMode === 'data' && columnManagerOpen && <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-4 py-2"><span className="text-[10px] text-muted-foreground">显示列</span>{data.columns.map((column) => <label key={column} className="flex items-center gap-1 text-[10px]"><input type="checkbox" checked={!hiddenColumns.includes(column)} onChange={() => setHiddenColumns((hidden) => hidden.includes(column) ? hidden.filter((item) => item !== column) : [...hidden, column])} />{column}</label>)}<div className="flex-1" /><label className="text-[10px]">固定前 <select value={pinnedColumns} onChange={(event) => setPinnedColumns(Number(event.target.value))} className="rounded border bg-background px-1 py-0.5">{Array.from({ length: Math.min(visibleColumns.length, 5) + 1 }, (_, index) => <option key={index} value={index}>{index}</option>)}</select> 列</label><Button variant="ghost" size="sm" className="h-6" onClick={() => { setHiddenColumns([]); setColumnWidths({}); setPinnedColumns(0); }}>重置</Button></div>}
             {viewMode === 'data' && filters.length > 0 && <div className="flex flex-wrap items-center gap-1.5 border-b bg-muted/20 px-4 py-2"><span className="mr-1 text-[10px] text-muted-foreground">AND</span>{filters.map((filter, index) => <button key={`${filter.column}-${filter.operator}-${index}`} type="button" onClick={() => removeFilter(index)} className="rounded-full border bg-background px-2 py-1 text-[10px] hover:border-destructive hover:text-destructive" title="点击移除此条件"><span className="font-mono">{filter.column}</span> {filter.operator === 'contains' ? '包含' : filter.operator === 'equals' ? '=' : filter.operator === 'is-null' ? '为空' : '非空'} {filter.value ? `“${filter.value}”` : ''} ×</button>)}</div>}
             {viewMode === 'data' && gridSelection && <div className="flex items-center gap-1 border-b px-4 py-1.5 text-[10px] text-muted-foreground"><span>已选择第 {page * pageSize + gridSelection.row + 1} 行 · {visibleColumns[gridSelection.visibleColumn]?.column}</span><div className="flex-1" /><Button variant="ghost" size="sm" className="h-6" onClick={() => void copyGridSelection('cell')}>复制单元格</Button><Button variant="ghost" size="sm" className="h-6" onClick={() => void copyGridSelection('row')}>复制行</Button><Button variant="ghost" size="sm" className="h-6" onClick={() => void copyGridSelection('column')}>复制列</Button><Button variant="ghost" size="sm" className="h-6" onClick={() => void copyGridSelection('markdown')}>Markdown 行</Button></div>}
+            {viewMode === 'data' && selectedRows.size > 0 && <div className="flex items-center gap-1 border-b bg-primary/5 px-4 py-1.5 text-[10px]"><span>已选择 {selectedRows.size} 行</span><div className="flex-1" /><Button variant="ghost" size="sm" className="h-6" onClick={() => exportSelectedRows('csv')}>导出 CSV</Button><Button variant="ghost" size="sm" className="h-6" onClick={() => exportSelectedRows('json')}>导出 JSON</Button><Button variant="ghost" size="sm" className="h-6" onClick={() => exportSelectedRows('markdown')}>导出 Markdown</Button><Button variant="ghost" size="sm" className="h-6" onClick={() => setSelectedRows(new Set())}>取消选择</Button></div>}
             {viewMode === 'data' ? <><div className="min-h-0 flex-1 overflow-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10"><tr className="bg-muted">
-                  <th className="sticky left-0 z-20 w-12 bg-muted px-2 py-2 text-left font-mono text-muted-foreground">#</th>
+                  <th className="sticky left-0 z-20 w-12 bg-muted px-2 py-2 text-left font-mono text-muted-foreground"><input type="checkbox" aria-label="选择当前页全部行" checked={data.values.length > 0 && selectedRows.size === data.values.length} onChange={(event) => setSelectedRows(event.target.checked ? new Set(data.values.map((_, index) => index)) : new Set())} /></th>
                   {visibleColumns.map(({ column }, visibleIndex) => <th key={column} style={{ width: columnWidths[column] ?? 180, minWidth: columnWidths[column] ?? 180, left: visibleIndex < pinnedColumns ? pinnedLeft(visibleIndex) : undefined }} className={`relative whitespace-nowrap bg-muted px-3 py-2 text-left font-semibold ${visibleIndex < pinnedColumns ? 'sticky z-10 border-r' : ''}`}><button type="button" onClick={() => changeSort(column)} className="hover:text-primary" title="点击排序">{column}{sort?.column === column ? sort.direction === 'asc' ? ' ↑' : ' ↓' : ''}</button><button type="button" onClick={() => analyzeColumn(column)} className="ml-2 text-[9px] font-normal text-muted-foreground hover:text-primary" title="分析此列">分析</button><button type="button" aria-label={`调整 ${column} 列宽`} className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-primary" onMouseDown={(event) => { event.preventDefault(); resizeColumn(column, event.clientX); }} /></th>)}
                 </tr></thead>
                 <tbody>{data.values.length === 0 ? <tr><td colSpan={visibleColumns.length + 1} className="px-3 py-8 text-center text-muted-foreground">无数据</td></tr> : data.values.map((row, rowIndex) => <tr key={`${page}-${rowIndex}`} className={`border-t ${rowIndex % 2 === 0 ? 'bg-card' : 'bg-background/50'}`}>
-                  <td className="sticky left-0 bg-inherit px-2 py-1.5 font-mono text-muted-foreground">{page * pageSize + rowIndex + 1}</td>
+                  <td className="sticky left-0 bg-inherit px-2 py-1.5 font-mono text-muted-foreground"><label className="flex items-center gap-1"><input type="checkbox" checked={selectedRows.has(rowIndex)} onChange={() => setSelectedRows((current) => { const next = new Set(current); if (next.has(rowIndex)) next.delete(rowIndex); else next.add(rowIndex); return next; })} />{page * pageSize + rowIndex + 1}</label></td>
                   {visibleColumns.map(({ column, index: columnIndex }, visibleIndex) => {
                     const value = row[columnIndex];
                     const isForeignKey = value !== null && (selectedSchema?.foreignKeys.some((foreignKey) => foreignKey.from === column) || inferredRelations.some((relation) => relation.from === column));
@@ -528,8 +546,9 @@ export const DatabaseBrowser: React.FC = () => {
               <Button variant="outline" size="sm" className="h-7" disabled={page + 1 >= totalPages || loading} onClick={() => changePage(page + 1)}>下一页</Button>
             </div></> : viewMode === 'analysis' ? <div className="min-h-0 flex-1 overflow-auto p-4">
               {analysis && <div className="space-y-5"><div><h4 className="text-sm font-semibold">列分析：<span className="font-mono">{analysis.column}</span></h4><p className="mt-1 text-xs text-muted-foreground">统计基于当前整张表，不受界面筛选条件影响。</p></div>
+                {(analysis.totalRows > 0 && (analysis.nullCount / analysis.totalRows >= 0.5 || analysis.distinctCount / Math.max(1, analysis.totalRows - analysis.nullCount) <= 0.05)) && <div className="space-y-1">{analysis.nullCount / analysis.totalRows >= 0.5 && <div className="rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs">NULL 占比达到 {(analysis.nullCount / analysis.totalRows * 100).toFixed(1)}%，请确认字段是否仍有业务价值。</div>}{analysis.distinctCount / Math.max(1, analysis.totalRows - analysis.nullCount) <= 0.05 && <div className="rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs">非空值重复率较高：{analysis.totalRows - analysis.nullCount} 条记录只有 {analysis.distinctCount} 个唯一值。</div>}</div>}
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-lg border p-3"><p className="text-[10px] text-muted-foreground">NULL</p><p className="mt-1 text-lg font-semibold">{analysis.nullCount}</p><p className="text-[9px] text-muted-foreground">{analysis.totalRows ? (analysis.nullCount / analysis.totalRows * 100).toFixed(1) : '0'}%</p></div><div className="rounded-lg border p-3"><p className="text-[10px] text-muted-foreground">唯一值</p><p className="mt-1 text-lg font-semibold">{analysis.distinctCount}</p></div><div className="rounded-lg border p-3"><p className="text-[10px] text-muted-foreground">最小 / 最大</p><p className="mt-1 truncate font-mono text-xs">{displayValue(analysis.min)} / {displayValue(analysis.max)}</p></div><div className="rounded-lg border p-3"><p className="text-[10px] text-muted-foreground">数值平均</p><p className="mt-1 text-lg font-semibold">{analysis.average === null ? '—' : analysis.average.toFixed(2)}</p></div></div>
-                <section><h4 className="mb-2 text-xs font-semibold">文本长度</h4><div className="rounded-lg border px-3 py-2 text-xs">最短 {analysis.minLength ?? '—'} · 最长 {analysis.maxLength ?? '—'} · 平均 {analysis.averageLength === null ? '—' : analysis.averageLength.toFixed(1)}</div></section>
+                <section><h4 className="mb-2 text-xs font-semibold">文本长度</h4><div className="rounded-lg border p-3 text-xs"><p>最短 {analysis.minLength ?? '—'} · 最长 {analysis.maxLength ?? '—'} · 平均 {analysis.averageLength === null ? '—' : analysis.averageLength.toFixed(1)}</p><div className="mt-3 flex h-24 items-end gap-2">{analysis.lengthDistribution.map((bucket) => { const maximum = Math.max(...analysis.lengthDistribution.map((item) => item.count), 1); return <div key={bucket.label} className="flex min-w-10 flex-1 flex-col items-center gap-1"><span className="text-[9px] text-muted-foreground">{bucket.count}</span><div className="w-full rounded-t bg-primary/70" style={{ height: `${Math.max(2, bucket.count / maximum * 64)}px` }} /><span className="text-[9px]">{bucket.label}</span></div>; })}</div></div></section>
                 <section><h4 className="mb-2 text-xs font-semibold">高频值</h4><div className="overflow-hidden rounded-lg border">{analysis.topValues.map((item, index) => <div key={index} className="flex border-b px-3 py-2 text-xs last:border-b-0"><span className="min-w-0 flex-1 truncate font-mono">{displayValue(item.value)}</span><span className="tabular-nums text-muted-foreground">{item.count}</span></div>)}</div></section>
                 <section><h4 className="mb-2 text-xs font-semibold">JSON 有效性</h4><div className="rounded-lg border px-3 py-2 text-xs">检查 {analysis.jsonChecked} 个疑似 JSON 值 · {analysis.invalidJsonCount ? <span className="text-destructive">{analysis.invalidJsonCount} 个无效</span> : '未发现无效 JSON'}</div></section>
               </div>}

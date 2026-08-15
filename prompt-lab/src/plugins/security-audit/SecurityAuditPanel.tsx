@@ -121,13 +121,14 @@ export function SecurityAuditPanel(): JSX.Element {
   const [severityFilter, setSeverityFilter] = useState<Finding['severity'] | 'all'>('all');
   const [jobId, setJobId] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<'full' | 'incremental'>('incremental');
+  const [commandScanRequested, setCommandScanRequested] = useState(false);
 
   // 监听命令面板触发的命令（"Security Scan" 等）
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<CommandEventDetail>).detail;
       if (detail.command === 'run-scan') {
-        void runMockScan();
+        setCommandScanRequested(true);
       } else if (detail.command === 'show-finding') {
         const f = findings?.find((x) => x.id === detail.findingId);
         if (f) setActiveFinding(f);
@@ -144,8 +145,10 @@ export function SecurityAuditPanel(): JSX.Element {
     if (!api) return undefined;
     return api.scan.onProgress((detail) => {
       setProgress(detail);
-      if (detail.phase === 'completed' && scannedDir) {
-        void api.findings.list(scannedDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
+      const resultDir = detail.projectDir ?? scannedDir;
+      if (detail.phase === 'completed' && resultDir) {
+        setScannedDir(resultDir);
+        void api.findings.list(resultDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
       }
     });
   }, [scannedDir]);
@@ -178,6 +181,12 @@ export function SecurityAuditPanel(): JSX.Element {
       setJobId(result.jobId);
     }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: error instanceof Error ? error.message : '扫描启动失败' }));
   }, [runMockScan, scanMode, scannedDir]);
+
+  useEffect(() => {
+    if (!commandScanRequested) return;
+    setCommandScanRequested(false);
+    runScan();
+  }, [commandScanRequested, runScan]);
 
   const sortedFindings = findings
     ? [...findings].sort((a, b) => SEVERITY_WEIGHT[a.severity] - SEVERITY_WEIGHT[b.severity])

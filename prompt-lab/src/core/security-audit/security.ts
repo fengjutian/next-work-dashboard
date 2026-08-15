@@ -50,11 +50,17 @@ export function enumerateTextFiles(root: string): string[] {
 export async function resolveScanFiles(root: string, mode: ScanMode, baselineRef = 'HEAD'): Promise<string[]> {
   if (mode === 'full') return enumerateTextFiles(root);
   try {
-    const { stdout } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=ACMR', `${baselineRef}...HEAD`], {
+    const [{ stdout }, { stdout: untracked }] = await Promise.all([
+      execFileAsync('git', ['diff', '--name-only', '--diff-filter=ACMR', baselineRef], {
       cwd: root, windowsHide: true, timeout: 15_000, maxBuffer: 2 * 1024 * 1024,
       env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
-    });
-    const files = stdout.split(/\r?\n/).map((file) => safeRelative(root, file)).filter((file): file is string => Boolean(file));
+      }),
+      execFileAsync('git', ['ls-files', '--others', '--exclude-standard'], {
+        cwd: root, windowsHide: true, timeout: 15_000, maxBuffer: 2 * 1024 * 1024,
+        env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
+      }),
+    ]);
+    const files = [...new Set(`${stdout}\n${untracked}`.split(/\r?\n/).map((file) => safeRelative(root, file)).filter((file): file is string => Boolean(file)))];
     return files.filter((file) => {
       try { return fs.statSync(path.join(root, file)).isFile() && fs.statSync(path.join(root, file)).size <= MAX_FILE_BYTES; } catch { return false; }
     });
@@ -63,12 +69,14 @@ export async function resolveScanFiles(root: string, mode: ScanMode, baselineRef
   }
 }
 
-export function mergeWithBaseline(current: SecurityFinding[], previous: SecurityFinding[], now = Date.now()): SecurityFinding[] {
+export function mergeWithBaseline(current: SecurityFinding[], previous: SecurityFinding[], now = Date.now(), scopedFiles?: Set<string>): SecurityFinding[] {
   const before = new Map(previous.map((item) => [item.fingerprint, item]));
   const active = current.map((item) => {
     const old = before.get(item.fingerprint);
     return old ? { ...item, status: old.status === 'fixed' ? 'open' as const : old.status, firstSeenAt: old.firstSeenAt, lastSeenAt: now } : item;
   });
   const currentKeys = new Set(current.map((item) => item.fingerprint));
-  return [...active, ...previous.filter((item) => !currentKeys.has(item.fingerprint) && item.status !== 'fixed').map((item) => ({ ...item, status: 'fixed' as const, fixedAt: now, lastSeenAt: now }))];
+  const untouched = previous.filter((item) => !currentKeys.has(item.fingerprint) && scopedFiles && !scopedFiles.has(item.location.file));
+  const resolved = previous.filter((item) => !currentKeys.has(item.fingerprint) && (!scopedFiles || scopedFiles.has(item.location.file)) && item.status !== 'fixed').map((item) => ({ ...item, status: 'fixed' as const, fixedAt: now, lastSeenAt: now }));
+  return [...active, ...untouched, ...resolved];
 }

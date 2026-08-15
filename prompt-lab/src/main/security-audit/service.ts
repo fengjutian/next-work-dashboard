@@ -30,7 +30,8 @@ export function getSetting(key: string): string | null {
 export function setSetting(key: string, value: string): void {
   if (!/^securityAudit\.(?:ai\.(?:baseUrl|apiKey|model)|sandboxMode)$/.test(key)) throw new Error('INVALID_SETTING');
   const data = load();
-  data.settings[key] = key.endsWith('apiKey') && value && safeStorage.isEncryptionAvailable()
+  if (key.endsWith('apiKey') && value && !safeStorage.isEncryptionAvailable()) throw new Error('SECURE_STORAGE_UNAVAILABLE');
+  data.settings[key] = key.endsWith('apiKey') && value
     ? `encrypted:${safeStorage.encryptString(value).toString('base64')}` : value;
   save(data);
 }
@@ -43,13 +44,15 @@ async function reviewWithAI(findings: SecurityFinding[], signal: AbortSignal): P
   const apiKey = getSetting('securityAudit.ai.apiKey');
   if (!apiKey || findings.length === 0) return findings;
   const baseUrl = (getSetting('securityAudit.ai.baseUrl') ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+  const endpoint = new URL(baseUrl);
+  if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(endpoint.hostname))) || endpoint.username || endpoint.password) return findings;
   const model = getSetting('securityAudit.ai.model') ?? 'gpt-4o-mini';
   const payload = findings.slice(0, 50).map(({ id, ruleId, title, description, location, evidence }) => ({ id, ruleId, title, description, location, evidence }));
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: '你是安全发现复核员。扫描器是事实来源；你只评估误报，不创造新发现。返回 JSON：{"reviews":[{"id":"...","verdict":"confirmed|likely|uncertain|false-positive","rationale":"简短理由"}]}' }, { role: 'user', content: JSON.stringify(payload) }] }) });
     if (!response.ok) return findings;
     const body = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const parsed = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as { reviews?: Array<{ id: string; verdict: SecurityFinding['aiReview'] extends infer R ? R extends { verdict: infer V } ? V : never : never; rationale: string }> };
+    const parsed = JSON.parse(body.choices?.[0]?.message?.content ?? '{}') as { reviews?: Array<{ id: string; verdict: 'confirmed' | 'likely' | 'uncertain' | 'false-positive'; rationale: string }> };
     const reviews = new Map((parsed.reviews ?? []).map((item) => [item.id, item]));
     return findings.map((finding) => {
       const review = reviews.get(finding.id);
@@ -64,7 +67,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
   jobs.set(jobId, controller);
   const record: ScanRecord = { id: jobId, projectDir: input.projectDir, mode: input.mode ?? 'full', baselineRef: input.baselineRef, startedAt: Date.now(), status: 'scanning', findings: [] };
   const data = load(); data.scans.unshift(record); data.scans = data.scans.slice(0, 100); save(data);
-  const emit = (progress: Parameters<typeof progressFor>[1]): void => { if (!sender.isDestroyed()) sender.send('security-audit:event:progress', progressFor(jobId, progress)); };
+  const emit = (progress: Parameters<typeof progressFor>[1]): void => { if (!sender.isDestroyed()) sender.send('security-audit:event:progress', { ...progressFor(jobId, progress), projectDir: input.projectDir }); };
   void (async () => {
     try {
       const files = await resolveScanFiles(input.projectDir, input.mode ?? 'full', input.baselineRef);
@@ -72,7 +75,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
       let findings = await orchestrator.run({ projectDir: input.projectDir, files, signal: controller.signal, emit }, input.scanners);
       if (input.aiReview) { emit({ phase: 'triaging', percent: 85, message: 'AI 正在复核确定性扫描结果', findingsCount: findings.length }); findings = await reviewWithAI(findings, controller.signal); }
       const current = load();
-      findings = mergeWithBaseline(findings, lastFindings(current, input.projectDir));
+      findings = mergeWithBaseline(findings, lastFindings(current, input.projectDir), Date.now(), input.mode === 'incremental' ? new Set(files) : undefined);
       const saved = current.scans.find((scan) => scan.id === jobId);
       if (saved) Object.assign(saved, { findings, status: 'completed', completedAt: Date.now() });
       save(current);

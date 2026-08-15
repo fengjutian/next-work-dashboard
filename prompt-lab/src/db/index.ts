@@ -1615,6 +1615,7 @@ export interface DatabaseColumnAnalysis {
   minLength: number | null;
   maxLength: number | null;
   averageLength: number | null;
+  lengthDistribution: Array<{ label: string; count: number }>;
   topValues: Array<{ value: unknown; count: number }>;
   jsonChecked: number;
   invalidJsonCount: number;
@@ -1629,6 +1630,7 @@ export function getDatabaseColumnAnalysis(table: string, column: string): Databa
   const aggregate = _sqlDb.exec(`SELECT COUNT(*), COUNT(*) - COUNT(${quotedColumn}), COUNT(DISTINCT ${quotedColumn}), MIN(${quotedColumn}), MAX(${quotedColumn}), AVG(${quotedColumn}), MIN(length(CAST(${quotedColumn} AS TEXT))), MAX(length(CAST(${quotedColumn} AS TEXT))), AVG(length(CAST(${quotedColumn} AS TEXT))) FROM ${quotedTable}`)[0]?.values[0] ?? [];
   const topRows = _sqlDb.exec(`SELECT ${quotedColumn}, COUNT(*) AS frequency FROM ${quotedTable} WHERE ${quotedColumn} IS NOT NULL GROUP BY ${quotedColumn} ORDER BY frequency DESC LIMIT 10`)[0]?.values ?? [];
   const sampleRows = _sqlDb.exec(`SELECT ${quotedColumn} FROM ${quotedTable} WHERE typeof(${quotedColumn}) = 'text' AND substr(trim(${quotedColumn}), 1, 1) IN ('{', '[') LIMIT 1000`)[0]?.values ?? [];
+  const lengthRows = _sqlDb.exec(`SELECT CASE WHEN length(CAST(${quotedColumn} AS TEXT)) <= 10 THEN '0–10' WHEN length(CAST(${quotedColumn} AS TEXT)) <= 50 THEN '11–50' WHEN length(CAST(${quotedColumn} AS TEXT)) <= 200 THEN '51–200' WHEN length(CAST(${quotedColumn} AS TEXT)) <= 1000 THEN '201–1000' ELSE '1000+' END AS bucket, COUNT(*) FROM ${quotedTable} WHERE ${quotedColumn} IS NOT NULL GROUP BY bucket ORDER BY MIN(length(CAST(${quotedColumn} AS TEXT)))`)[0]?.values ?? [];
   let invalidJsonCount = 0;
   for (const row of sampleRows) {
     try { JSON.parse(String(row[0])); } catch { invalidJsonCount += 1; }
@@ -1645,6 +1647,7 @@ export function getDatabaseColumnAnalysis(table: string, column: string): Databa
     minLength: numberOrNull(aggregate[6]),
     maxLength: numberOrNull(aggregate[7]),
     averageLength: numberOrNull(aggregate[8]),
+    lengthDistribution: lengthRows.map((row) => ({ label: String(row[0]), count: Number(row[1]) })),
     topValues: topRows.map((row) => ({ value: row[0], count: Number(row[1]) })),
     jsonChecked: sampleRows.length,
     invalidJsonCount,

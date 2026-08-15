@@ -27,7 +27,8 @@ export function setupSecurityAuditIPC(): void {
   // ── Settings: AI 配置（baseUrl / apiKey / model）+ sandboxMode 占位 ──
 
   ipcMain.handle('security-audit:settings:get', (_e, key: string) => {
-    return getSetting(key);
+    const value = getSetting(key);
+    return key.endsWith('apiKey') && value ? '••••••••' : value;
   });
 
   ipcMain.handle('security-audit:settings:set', (_e, key: string, value: string) => {

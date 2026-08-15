@@ -1111,7 +1111,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const openAiGateFix = async (targetIssue = gateFixTargets[0]) => {
     if (!targetIssue || !target) return;
+    if (!aiApi.apiKey?.trim()) { notice.warning({ message: '请先配置助写模型', placement: 'bottomRight' }); return; }
     await openDocument(targetIssue.path, target, true);
+    const read = await window.electronAPI.workspace.readTextFile(target.path, targetIssue.path);
+    if (!read.success || !read.data) { notice.error({ message: '无法读取待修复章节', description: read.error, placement: 'bottomRight' }); return; }
     const brief = { ...EMPTY_CHAPTER_BRIEF, ...chapterBriefs[targetIssue.path] };
     const hasVerificationIssue = targetIssue.blockers.some((item) => item.includes('待核实'));
     const hasLengthIssue = targetIssue.blockers.some((item) => item.includes('字'));
@@ -1127,7 +1130,24 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const chapterEvidence = evidenceRecords.filter((item) => item.chapter === targetIssue.path).map((item) => `- [${item.title}](${item.url})｜${item.status === 'verified' ? '已核实' : item.status === 'disputed' ? '存在争议' : '仅为检索线索'}｜${item.notes}`).join('\n');
     setAiSources(chapterEvidence || '本章没有已登记史料。不得生成精确引文、卷次、页码或未经证实的具体数据。');
     setView('documents'); setGitOpen(false); setReviewOpen(false); setImageOpen(false); setAiOpen(true); setEditorMode('edit');
-    notice.info({ message: 'AI 修复任务已准备', description: '请在右侧检查修复要求，点击“生成预览”，确认后再替换文档。', placement: 'bottomRight' });
+    const requestId = ++aiRequestRef.current;
+    setAiLoading(true);
+    try {
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const messages: ChatMessage[] = [
+        { role: 'system', content: '你是严谨的中文图书责任编辑。修复发布门禁问题时，准确性优先于顺畅：不得编造史料、引文、页码、数字或人物心理；没有证据时应删除无依据的精确细节或改为审慎表述。扩写必须增加事实、机制、因果和必要背景，不能复述原文或用空话凑字数。只输出修改后的完整 Markdown，不解释过程。' },
+        { role: 'user', content: `书名：${projectTitle}\n章节：${targetIssue.path.split('/').pop()}\n\n修复要求：\n${instructions}\n\n项目知识库：\n${knowledgeEntries.map((item) => `- ${item.name}｜标准：${item.canonical || item.name}｜${item.notes}`).join('\n') || '暂无'}\n\n可用证据：\n${chapterEvidence || '无。不得虚构来源。'}\n\n当前正文：\n${read.data.content}` },
+      ];
+      let result = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.35, maxTokens: 10_000, stream: true })) {
+        if (requestId !== aiRequestRef.current) return;
+        result += chunk.delta || ''; setAiResult(result);
+      }
+      if (!result.trim()) throw new Error('模型没有返回修订内容');
+      notice.success({ message: 'AI 门禁修复预览已生成', description: '请核对右侧结果，确认无误后点击“替换文档”并保存。', placement: 'bottomRight' });
+    } catch (error) {
+      if (requestId === aiRequestRef.current) setAiError(error instanceof Error ? error.message : String(error));
+    } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
   };
 
   const publishToRemote = async () => {
