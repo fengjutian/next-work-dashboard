@@ -10,6 +10,7 @@ function directory(rootPath: string): string { return path.join(app.getPath('use
 export async function saveSnapshot(result: RepositoryAnalysis): Promise<CodeVisualizerScanSnapshot> {
   const id = `${result.scannedAt}-${Math.random().toString(36).slice(2, 8)}`;
   const snapshot: CodeVisualizerScanSnapshot = { id, rootPath: result.rootPath, scannedAt: result.scannedAt, endpointCount: result.endpoints.length, diagnosticCount: result.diagnostics?.length ?? 0, changedFiles: result.scan?.changedFiles ?? result.filesScanned, mode: result.scan?.mode ?? 'full' };
+  if (result.scan) result.scan.snapshotId = id;
   const dir = directory(result.rootPath);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, `${id}.json`), JSON.stringify(result), { encoding: 'utf8', mode: 0o600 });
