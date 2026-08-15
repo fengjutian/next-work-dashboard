@@ -633,6 +633,41 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  // 取消 / 删除上游任务（DELETE /v2/video_generation/{task_id}）。
+  // MiniMax 文档：取消排队中的任务，或删除成功和失败的任务记录。
+  // 终态已 succeed / failed / cancelled 的任务也会被服务端清理记录。
+  ipcMain.handle('video-generation:cancel', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string }) => {
+    try {
+      const apiKey = String(payload?.apiKey || '').trim();
+      const taskId = String(payload?.taskId || '').trim();
+      const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
+      if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
+      if (!taskId) return { success: false, error: 'taskId 不能为空' };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/v2/video_generation/${encodeURIComponent(taskId)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: controller.signal,
+        });
+      } finally { clearTimeout(timeout); }
+      const text = await response.text();
+      let data: { base_resp?: { status_code?: number; status_msg?: string } } | null = null;
+      try { data = JSON.parse(text); } catch { /* keep null */ }
+      if (!response.ok) return { success: false, error: `取消任务失败（HTTP ${response.status}）：${text.slice(0, 300)}` };
+      const statusCode = data?.base_resp?.status_code;
+      if (statusCode && statusCode !== 0) {
+        return { success: false, baseResp: data?.base_resp, error: data?.base_resp?.status_msg || `MiniMax 返回 status_code=${statusCode}` };
+      }
+      return { success: true, baseResp: data?.base_resp };
+    } catch (err) {
+      const message = err instanceof Error && err.name === 'AbortError' ? '取消任务超时（30 秒）' : (err instanceof Error ? err.message : String(err));
+      return { success: false, error: message };
+    }
+  });
+
   ipcMain.handle('video-generation:download', async (_event, payload: { taskId: string; videoUrl: string; recordId: string }) => {
     try {
       const videoUrl = String(payload?.videoUrl || '').trim();
@@ -657,6 +692,60 @@ export function setupIPC(webviewPreloadPath: string) {
       return { success: true, filePath, fileName: safeName, bytes, mimeType: ext === 'webm' ? 'video/webm' : 'video/mp4' };
     } catch (err) {
       const message = err instanceof Error && err.name === 'AbortError' ? '下载成片超时（5 分钟）' : (err instanceof Error ? err.message : String(err));
+      return { success: false, error: message };
+    }
+  });
+
+  // 把用户选的本地图传到 litterbox.catbox.moe（免认证，1 小时 TTL，专为短时分享设计），
+  // 拿到 HTTPS URL 后再喂给 MiniMax 视频生成 API。MiniMax 端要求素材必须 https 可公网访问。
+  const LITTERBOX_ENDPOINT = 'https://litterbox.catbox.moe/resources/internals/api.php';
+  const ALLOWED_REFERENCE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif', 'video/mp4', 'video/quicktime', 'audio/wav', 'audio/mpeg', 'audio/x-wav']);
+  const ALLOWED_REFERENCE_EXT = /\.(png|jpe?g|webp|heic|heif|mp4|mov|wav|mp3)$/i;
+
+  ipcMain.handle('video-generation:upload-reference', async (_event, payload: { name: string; mimeType: string; data: ArrayBuffer; ttlHours?: number }) => {
+    try {
+      const name = String(payload?.name || 'reference').slice(0, 120);
+      const mimeType = String(payload?.mimeType || '').toLowerCase();
+      if (!ALLOWED_REFERENCE_MIME.has(mimeType)) {
+        return { success: false, error: `不支持的素材类型：${mimeType || '未知'}。MiniMax 仅接收 PNG/JPEG/WEBP/HEIC 图片与 MP4/MOV 视频、WAV/MP3 音频。` };
+      }
+      if (!ALLOWED_REFERENCE_EXT.test(name)) {
+        return { success: false, error: '文件扩展名需为 png/jpg/jpeg/webp/heic/heif/mp4/mov/wav/mp3 之一' };
+      }
+      const data = payload?.data;
+      if (!(data instanceof ArrayBuffer)) return { success: false, error: '素材数据缺失' };
+      const bytes = Buffer.from(data);
+      const imageMax = 30 * 1024 * 1024;
+      const videoMax = 50 * 1024 * 1024;
+      const audioMax = 15 * 1024 * 1024;
+      const isImage = mimeType.startsWith('image/');
+      const isVideo = mimeType.startsWith('video/');
+      const isAudio = mimeType.startsWith('audio/');
+      const cap = isImage ? imageMax : isVideo ? videoMax : isAudio ? audioMax : 0;
+      if (!cap) return { success: false, error: '无法识别的素材类别' };
+      if (bytes.byteLength === 0) return { success: false, error: '文件为空' };
+      if (bytes.byteLength > cap) return { success: false, error: `${name} 超过 ${(cap / 1024 / 1024).toFixed(0)} MB 上限（当前 ${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB）` };
+
+      const ttlHours = Math.max(1, Math.min(72, Number(payload?.ttlHours) || 1));
+      const form = new FormData();
+      form.append('reqtype', 'fileupload');
+      form.append('time', `${ttlHours}h`);
+      form.append('fileToUpload', new Blob([bytes], { type: mimeType }), name);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+      let response: Response;
+      try {
+        response = await fetch(LITTERBOX_ENDPOINT, { method: 'POST', body: form, signal: controller.signal });
+      } finally { clearTimeout(timeout); }
+      const text = (await response.text()).trim();
+      if (!response.ok) return { success: false, error: `litterbox 上传失败（HTTP ${response.status}）：${text.slice(0, 300)}` };
+      if (!/^https:\/\/litterbox\.catbox\.moe\//.test(text)) {
+        return { success: false, error: `litterbox 返回非预期内容：${text.slice(0, 300)}` };
+      }
+      return { success: true, url: text, ttlHours, bytes: bytes.byteLength };
+    } catch (err) {
+      const message = err instanceof Error && err.name === 'AbortError' ? '上传参考素材超时（2 分钟）' : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
     }
   });

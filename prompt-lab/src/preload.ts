@@ -166,6 +166,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke('video-generation:query', payload),
     download: (payload: { taskId: string; videoUrl: string; recordId: string }) =>
       ipcRenderer.invoke('video-generation:download', payload),
+    cancel: (payload: { baseUrl?: string; apiKey: string; taskId: string }) =>
+      ipcRenderer.invoke('video-generation:cancel', payload),
+    uploadReference: (payload: { name: string; mimeType: string; data: ArrayBuffer; ttlHours?: number }) =>
+      ipcRenderer.invoke('video-generation:upload-reference', payload) as Promise<{ success: boolean; url?: string; ttlHours?: number; bytes?: number; error?: string }>,
     readBlob: (filePath: string) =>
       ipcRenderer.invoke('video-generation:read-blob', filePath) as Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }>,
     reveal: (filePath: string) => ipcRenderer.invoke('video-generation:reveal', filePath),

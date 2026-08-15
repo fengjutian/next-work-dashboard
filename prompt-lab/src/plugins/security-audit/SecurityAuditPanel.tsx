@@ -5,9 +5,9 @@
  * Phase 2 会把 mock 数据换成真实 deepsec 进程输出流。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { FolderOpen, Play, ShieldAudit, X } from '@/components/icons';
+import { FolderOpen, Play, ShieldAudit } from '@/components/icons';
 import { Alert, Button, Card, Empty, Modal, Progress, Space, Spin, Tag, ToastHost, message } from './ui';
-import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanPhase, type ScanProgress } from './constants';
+import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanProgress } from './constants';
 
 type SeverityColor = 'red' | 'orange' | 'blue' | 'green';
 

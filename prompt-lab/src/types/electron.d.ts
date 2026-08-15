@@ -196,6 +196,8 @@ export interface ElectronAPI {
     create: (payload: import('../plugins/video-generation/types').VideoGenerationRequest) => Promise<{ success: boolean; taskId?: string; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
     query: (payload: { baseUrl?: string; apiKey: string; taskId: string }) => Promise<{ success: boolean; info?: import('../plugins/video-generation/types').VideoTaskInfo; error?: string }>;
     download: (payload: { taskId: string; videoUrl: string; recordId: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; bytes?: number; mimeType?: string; error?: string }>;
+    cancel: (payload: { baseUrl?: string; apiKey: string; taskId: string }) => Promise<{ success: boolean; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
+    uploadReference: (payload: { name: string; mimeType: string; data: ArrayBuffer; ttlHours?: number }) => Promise<{ success: boolean; url?: string; ttlHours?: number; bytes?: number; error?: string }>;
     readBlob: (filePath: string) => Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }>;
     reveal: (filePath: string) => Promise<{ success: boolean; error?: string }>;
     openFolder: () => Promise<{ success: boolean; path?: string; error?: string }>;

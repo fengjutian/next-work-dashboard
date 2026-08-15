@@ -88,10 +88,6 @@ function readStoredBaseUrl(): string {
   return localStorage.getItem(MINIMAX_BASE_URL_STORAGE) || 'https://api.minimaxi.com';
 }
 
-function isTerminalStatus(status: VideoTaskStatus): boolean {
-  return status === 'succeeded' || status === 'failed' || status === 'cancelled';
-}
-
 function inferMode(record: StoredVideoRecord): VideoGenerationMode {
   return (record.mode as VideoGenerationMode) || 'text-to-video';
 }
@@ -116,7 +112,6 @@ export const VideoGenerationPanel: React.FC = () => {
   const [tasks, setTasks] = useState<StoredVideoRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
-  const [busyRecordId, setBusyRecordId] = useState<string>('');
   const [activePolls, setActivePolls] = useState<ActivePoll[]>(() => loadActivePolls());
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [videoMeta, setVideoMeta] = useState<{ recordId: string; mimeType: string } | null>(null);
