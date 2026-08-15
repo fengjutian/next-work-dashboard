@@ -127,6 +127,21 @@ describe('video-generation / core / api', () => {
     });
   });
 
+  describe('buildCancelRequest', () => {
+    it('targets /v2/video_generation/{taskId} with DELETE and bearer auth', () => {
+      const { endpoint, init } = buildCancelRequest('https://api.minimaxi.com/', 'sk-test', 'task-1');
+      expect(endpoint).toBe('https://api.minimaxi.com/v2/video_generation/task-1');
+      expect(init.method).toBe('DELETE');
+      const headers = init.headers as Record<string, string>;
+      expect(headers.Authorization).toBe('Bearer sk-test');
+    });
+
+    it('encodes taskId and strips trailing slashes', () => {
+      const { endpoint } = buildCancelRequest('https://api.minimaxi.com////', 'sk', 'a/b c');
+      expect(endpoint).toBe('https://api.minimaxi.com/v2/video_generation/a%2Fb%20c');
+    });
+  });
+
   describe('parseSubmitResponse', () => {
     it('returns the task_id when base_resp is clean', () => {
       const result = parseSubmitResponse({ task_id: 'task-1', base_resp: { status_code: 0, status_msg: 'success' } });
