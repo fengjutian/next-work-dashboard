@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeRepositoryFiles, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzeRepositoryFiles, diagnoseFrontendBackend, extractFrontendCalls, normalizeApiPath } from '../src/core/code-visualizer';
 
 describe('code visualizer', () => {
   it('normalizes frontend and backend route parameters', () => {
@@ -63,5 +63,26 @@ def me(user = Depends(current_user)):
     return user
 ` }]);
     expect(result.endpoints[0].nodes.some((node) => node.label === 'current_user')).toBe(true);
+  });
+
+  it('extracts endpoint contracts', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `
+@app.post('/users/{user_id}', response_model=UserResponse, status_code=201)
+def update_user(user_id: int, payload: UserInput = Body(...), trace: str = Header(None)):
+    return payload
+` }]);
+    expect(result.endpoints[0].contract).toMatchObject({ requestModel: 'UserInput', responseModel: 'UserResponse', statusCodes: [201] });
+    expect(result.endpoints[0].contract.parameters.map((item) => [item.name, item.source])).toEqual([['user_id', 'path'], ['payload', 'body'], ['trace', 'header']]);
+  });
+
+  it('diagnoses missing backend routes and method mismatches', () => {
+    const files = [
+      { path: 'app.py', content: `@app.get('/users')\ndef users():\n    return []` },
+      { path: 'web.ts', content: `axios.post('/users')\naxios.get('/missing')` },
+    ];
+    const result = analyzeRepositoryFiles('demo', files);
+    const diagnostics = diagnoseFrontendBackend(result, files.flatMap(extractFrontendCalls));
+    expect(diagnostics.some((item) => item.kind === 'method-mismatch')).toBe(true);
+    expect(diagnostics.some((item) => item.kind === 'missing-backend')).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Children, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, Select, Spin, Tag, message } from 'antd';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
 import { Code, Database, FolderOpen, History, Network, RefreshCw, Rows3, Search, XCircle } from '@/components/icons';
@@ -85,7 +85,7 @@ function EndpointDetail({ endpoint, result, onOpenSource }: { endpoint: ApiEndpo
 
 function Metric({ label, value }: { label: string; value: string }): JSX.Element { return <div className="rounded-xl border bg-card p-4 shadow-sm"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-2 truncate text-lg font-semibold">{value}</div></div>; }
 function Info({ label, value }: { label: string; value: string }): JSX.Element { return <div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 font-medium">{value}</div></div>; }
-function CardList({ children, empty }: { children: React.ReactNode; empty: string }): JSX.Element { const items = React.Children.toArray(children); return <section className="space-y-2 rounded-xl border bg-card p-4">{items.length ? items : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={empty}/>}</section>; }
+function CardList({ children, empty }: { children: React.ReactNode; empty: string }): JSX.Element { const items = Children.toArray(children); return <section className="space-y-2 rounded-xl border bg-card p-4">{items.length ? items : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={empty}/>}</section>; }
 
 function calculateImpact(result: RepositoryAnalysis, nodeId?: string): { endpoints: ApiEndpoint[]; frontendCalls: number; tables: string[] } {
   if (!nodeId) return { endpoints: [], frontendCalls: 0, tables: [] };

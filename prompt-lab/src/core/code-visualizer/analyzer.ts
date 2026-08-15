@@ -1,4 +1,4 @@
-import type { AnalysisDiagnostic, AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
+import type { AnalysisEdge, AnalysisNode, ApiContract, ApiEndpoint, FrontendCall, HttpMethod, RepositoryAnalysis, RepositorySourceFile, SourceLocation } from './types';
 
 interface PythonFunction {
   id: string;
@@ -41,7 +41,7 @@ function parseContract(definition: string, routePath: string, decorator = ''): A
     const source = routePath.includes(`{${match[1]}}`) ? 'path' : marker === 'header' || marker === 'cookie' || marker === 'body' || marker === 'path' ? marker : 'query';
     parameters.push({ name: match[1], source, type: match[2]?.trim() ?? 'Any', required: defaultValue === undefined || /\.\.\./.test(defaultValue), defaultValue });
   }
-  const responseModel = /\bresponse_model\s*=\s*([\w.\[\], ]+)/.exec(decorator)?.[1]?.trim() ?? /\)\s*->\s*([^:]+)/.exec(definition)?.[1]?.trim();
+  const responseModel = /\bresponse_model\s*=\s*([^,)]+)/.exec(decorator)?.[1]?.trim() ?? /\)\s*->\s*([^:]+)/.exec(definition)?.[1]?.trim();
   const status = Number(/\bstatus_code\s*=\s*(\d+)/.exec(decorator)?.[1] ?? 200);
   const requestModel = parameters.find((parameter) => parameter.source === 'body' && !['str', 'int', 'float', 'bool', 'dict', 'list', 'Any'].includes(parameter.type))?.type;
   return { parameters, requestModel, responseModel, statusCodes: [status] };
