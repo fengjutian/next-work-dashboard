@@ -114,6 +114,7 @@ interface EvidenceRecord { id: string; title: string; url: string; source: strin
 interface ChapterQualityReport { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }
 interface ReviewSuggestion { id: string; section: string; position: string; issue: string; suggestion: string; decision: 'pending' | 'accepted' | 'rejected' }
 interface ReviewPatch { id: string; suggestionId: string; original: string; replacement: string; state: 'ready' | 'applied' | 'conflict' }
+interface GateFixTarget { path: string; blockers: string[] }
 interface DeploymentStatus { state: 'unconfigured' | 'configured' | 'publishing' | 'published' | 'failed'; url?: string; message?: string; updatedAt: number }
 
 type ChapterGenerationState = 'pending' | 'generating' | 'review' | 'complete' | 'error';
@@ -170,6 +171,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [deploymentChecking, setDeploymentChecking] = useState(false);
   const [pagesRunUrl, setPagesRunUrl] = useState('');
   const [, setPublishGateIssues] = useState<string[]>([]);
+  const [gateFixTargets, setGateFixTargets] = useState<GateFixTarget[]>([]);
   const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'quality' | 'publish'>('overview');
   const [auditLoading, setAuditLoading] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
@@ -1072,20 +1074,22 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (dirty) issues.push('当前文档有未保存修改');
     if (manifestSyncState === 'saving') issues.push('.chapter-project.json 正在同步，请稍后重试');
     if (manifestSyncState === 'error') issues.push('.chapter-project.json 同步失败');
-    const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path));
+    const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/(?:^|\/)(?:README|index|404)\.md$/i.test(path));
     const reports: Record<string, ChapterQualityReport> = { ...qualityReports };
     const nextStatuses: Record<string, ChapterGenerationStatus> = { ...chapterStatuses };
+    const fixTargets: GateFixTarget[] = [];
     for (const path of chapterFiles) {
       const read = await window.electronAPI.workspace.readTextFile(target.path, path);
       if (!read.success || !read.data) { issues.push(`${path} 无法读取`); nextStatuses[path] = { state: 'error', error: '发布检查时无法读取', updatedAt: Date.now() }; continue; }
       const report = inspectChapterQuality(path, read.data.content);
       reports[path] = report;
       report.blockers.forEach((item) => issues.push(`${path.split('/').pop()}：${item}`));
+      if (report.blockers.length) fixTargets.push({ path, blockers: report.blockers });
       nextStatuses[path] = report.blockers.length
         ? { state: 'review', error: report.blockers.join('；'), updatedAt: Date.now() }
         : { state: 'complete', updatedAt: Date.now() };
     }
-    setQualityReports(reports); setChapterStatuses(nextStatuses);
+    setQualityReports(reports); setChapterStatuses(nextStatuses); setGateFixTargets(fixTargets);
     const listing = await window.electronAPI.workspace.listFiles(target.path);
     if (listing.success) {
       const paths = new Set((listing.data ?? []).filter((entry) => entry.type === 'file').map((entry) => entry.path.replace(/\\/g, '/')));

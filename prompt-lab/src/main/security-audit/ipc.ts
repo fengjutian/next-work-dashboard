@@ -9,7 +9,10 @@
  * v1 范围：mock 数据 + settings 三件套（baseUrl/apiKey/model + sandboxMode 占位）。
  * 真实 deepsec CLI 调用在 Phase 2 接入。
  */
-import { ipcMain } from 'electron';
+import { dialog, ipcMain } from 'electron';
+import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
+import type { ScanRequest } from '../../core/security-audit';
+import { cancelScan, getSetting, listFindings, listScans, setSetting, startScan } from './service';
 
 let initialized = false;
 
@@ -17,23 +20,6 @@ let initialized = false;
  * SQLite-style setting store（plugin-local），复用 better-sqlite3 持久化。
  * v1 用一个极简的 in-memory + JSON 文件实现，Phase 3 切换到 Drizzle。
  */
-interface Settings {
-  [key: string]: string;
-}
-
-const SETTINGS_FILE = 'security-audit-settings.json';
-
-function loadSettings(): Settings {
-  // v1 stub：返回空对象，等 Phase 3 切到 Drizzle
-  return {};
-}
-
-function saveSettings(_settings: Settings): void {
-  // v1 stub
-}
-
-let settingsCache: Settings = loadSettings();
-
 export function setupSecurityAuditIPC(): void {
   if (initialized) return;
   initialized = true;
@@ -41,30 +27,38 @@ export function setupSecurityAuditIPC(): void {
   // ── Settings: AI 配置（baseUrl / apiKey / model）+ sandboxMode 占位 ──
 
   ipcMain.handle('security-audit:settings:get', (_e, key: string) => {
-    return settingsCache[key] ?? null;
+    return getSetting(key);
   });
 
   ipcMain.handle('security-audit:settings:set', (_e, key: string, value: string) => {
-    settingsCache = { ...settingsCache, [key]: value };
-    saveSettings(settingsCache);
+    setSetting(key, value);
     return { ok: true };
   });
 
   // ── Scan: v1 stub（返回 mock 数据，Phase 2 替换为 spawn deepsec） ──
 
-  ipcMain.handle('security-audit:scan:start', async (_e, input: { projectDir: string }) => {
-    // 简化版：直接返回成功。Phase 2 会在这里 spawn deepsec 子进程。
-    return { ok: true, jobId: `job-${Date.now()}`, projectDir: input.projectDir };
+  ipcMain.handle('security-audit:scan:start', async (event, input: ScanRequest) => {
+    let projectDir = input.projectDir?.trim();
+    if (!projectDir) {
+      const selected = await dialog.showOpenDialog({ properties: ['openDirectory'], title: '选择安全扫描项目' });
+      if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
+      projectDir = selected.filePaths[0];
+      authorizeWorkspace(projectDir);
+    }
+    const safeRoot = resolveWorkspacePath(projectDir);
+    const result = await startScan({ ...input, projectDir: safeRoot }, event.sender);
+    return { ok: true, ...result };
   });
 
-  ipcMain.handle('security-audit:scan:cancel', (_e, _jobId: string) => {
-    // v1 没有正在跑的 job，留 stub
-    return { ok: true };
+  ipcMain.handle('security-audit:scan:cancel', (_e, jobId: string) => {
+    return { ok: cancelScan(jobId) };
   });
 
   // ── Findings: v1 stub（Phase 3 接入 SQLite） ──
 
-  ipcMain.handle('security-audit:findings:list', (_e, _projectDir: string) => {
-    return [];
+  ipcMain.handle('security-audit:findings:list', (_e, projectDir: string) => {
+    return listFindings(resolveWorkspacePath(projectDir));
   });
+
+  ipcMain.handle('security-audit:scans:list', (_e, projectDir: string) => listScans(resolveWorkspacePath(projectDir)));
 }

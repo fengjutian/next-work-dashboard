@@ -548,7 +548,9 @@ const builtInPlugins: Plugin[] = [
     contributions: {
       commands: [{ id: 'website-registry.create', title: '添加网站收藏', category: '网站收藏' }],
     },
-    activate: (context) => context.commands.register('website-registry.create', () => window.dispatchEvent(new CustomEvent('website-registry:create'))),
+    activate: (context) => context.commands.register('website-registry.create', () => {
+      window.dispatchEvent(new CustomEvent('website-registry:create'));
+    }),
   },
   {
     id: 'security-audit',
