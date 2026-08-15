@@ -88,7 +88,7 @@ export interface TestReference {
 
 export interface PerformanceRisk {
   id: string;
-  rule: 'query-in-loop' | 'unbounded-query' | 'blocking-in-async' | 'deep-call-chain' | 'duplicate-table-read';
+  rule: 'query-in-loop' | 'external-call-in-loop' | 'unbounded-query' | 'unbounded-sql' | 'blocking-in-async' | 'sync-db-in-async' | 'deep-call-chain' | 'duplicate-table-read';
   severity: 'warning' | 'error';
   message: string;
   location: SourceLocation;

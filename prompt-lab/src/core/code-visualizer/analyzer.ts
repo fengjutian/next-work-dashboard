@@ -217,9 +217,15 @@ function findPerformanceRisks(functions: PythonFunction[]): PerformanceRisk[] {
   const risks: PerformanceRisk[] = [];
   for (const fn of functions) {
     const location = { file: fn.file, line: fn.line, endLine: fn.endLine, snippet: snippetAt(fn.body, 1) };
-    if (/\b(?:for|while)\b[\s\S]{0,800}?\.(?:query|execute|filter|get|all|first)\s*\(/.test(fn.body)) risks.push({ id: `perf:loop:${fn.id}`, rule: 'query-in-loop', severity: 'error', message: `${fn.name} 可能在循环中执行数据库查询`, location });
-    if (/\.(?:all|fetchall)\s*\(\)/.test(fn.body) && !/\.(?:limit|paginate)\s*\(/.test(fn.body)) risks.push({ id: `perf:all:${fn.id}`, rule: 'unbounded-query', severity: 'warning', message: `${fn.name} 存在未限制结果数量的查询`, location });
-    if (/^async\s+def/.test(fn.body.trim()) && /\b(?:time\.sleep|requests\.|subprocess\.(?:run|call)|open)\s*\(/.test(fn.body)) risks.push({ id: `perf:blocking:${fn.id}`, rule: 'blocking-in-async', severity: 'error', message: `${fn.name} 的异步函数中可能存在阻塞调用`, location });
+    const loopBody = /\b(?:for|while)\b[\s\S]{0,1600}/.exec(fn.body)?.[0] ?? '';
+    const databaseCall = /\.(?:query|execute|filter|get|all|first|find|find_one|find_all|fetch|fetchone|fetchall|scalar|scalars|count|exists|select|save|create|update|delete)\s*\(/;
+    if (loopBody && databaseCall.test(loopBody)) risks.push({ id: `perf:loop:${fn.id}`, rule: 'query-in-loop', severity: 'error', message: `${fn.name} 可能在循环中执行数据库操作，存在 N+1 风险`, location });
+    if (loopBody && /\b(?:requests\.(?:get|post|put|patch|delete)|httpx\.(?:get|post|put|patch|delete)|aiohttp\.|client\.(?:get|post|put|patch|delete))\s*\(/.test(loopBody)) risks.push({ id: `perf:http-loop:${fn.id}`, rule: 'external-call-in-loop', severity: 'warning', message: `${fn.name} 可能在循环中串行调用外部接口`, location });
+    if (/\.(?:all|fetchall|find_all)\s*\(\)/.test(fn.body) && !/\.(?:limit|paginate|offset)\s*\(/.test(fn.body)) risks.push({ id: `perf:all:${fn.id}`, rule: 'unbounded-query', severity: 'warning', message: `${fn.name} 存在未限制结果数量的 ORM 查询`, location });
+    if (/\bSELECT\b[\s\S]*?\bFROM\b/i.test(fn.body) && !/\bLIMIT\b/i.test(fn.body)) risks.push({ id: `perf:sql:${fn.id}`, rule: 'unbounded-sql', severity: 'warning', message: `${fn.name} 的原生 SELECT 未发现 LIMIT 限制`, location });
+    if (/^async\s+def/.test(fn.body.trim()) && /\b(?:time\.sleep|requests\.(?:get|post|put|patch|delete|request)|subprocess\.(?:run|call)|open)\s*\(/.test(fn.body)) risks.push({ id: `perf:blocking:${fn.id}`, rule: 'blocking-in-async', severity: 'error', message: `${fn.name} 的异步函数中可能存在阻塞调用`, location });
+    const hasSyncDatabaseCall = fn.body.split(/\r?\n/).some((line) => /(?:session\.|\.objects\.)\s*(?:query|execute|filter|get|all|first|count)\s*\(/.test(line) && !/\bawait\b/.test(line));
+    if (/^async\s+def/.test(fn.body.trim()) && hasSyncDatabaseCall) risks.push({ id: `perf:sync-db:${fn.id}`, rule: 'sync-db-in-async', severity: 'error', message: `${fn.name} 的异步函数中可能调用了同步数据库 API`, location });
   }
   if (functions.length > 7) risks.push({ id: `perf:depth:${functions[0]?.id}`, rule: 'deep-call-chain', severity: 'warning', message: `调用链深度达到 ${functions.length} 层`, location: { file: functions[0].file, line: functions[0].line } });
   const tableReads = new Map<string, number>();

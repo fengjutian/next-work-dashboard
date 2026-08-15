@@ -123,6 +123,16 @@ def users():
     expect(result.endpoints[0].performanceRisks.some((risk) => risk.rule === 'query-in-loop')).toBe(true);
   });
 
+  it('detects repository queries, external calls in loops and unbounded SQL', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'api.py', content: `@app.get('/reports')\nasync def reports():\n    for item in items:\n        await repo.find(item.id)\n        requests.get(item.url)\n    rows = session.execute("SELECT * FROM reports")\n    return rows` }]);
+    const rules = result.endpoints[0].performanceRisks.map((risk) => risk.rule);
+    expect(rules).toContain('query-in-loop');
+    expect(rules).toContain('external-call-in-loop');
+    expect(rules).toContain('unbounded-sql');
+    expect(rules).toContain('blocking-in-async');
+    expect(rules).toContain('sync-db-in-async');
+  });
+
   it('diffs endpoint contracts and database fields between snapshots', () => {
     const before = enrichRepositoryArchitecture(analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users():\n    return []` }]));
     const after = enrichRepositoryArchitecture(analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users(limit: int = 10):\n    return []\n@app.post('/users')\ndef create_user():\n    return {}` }]));
