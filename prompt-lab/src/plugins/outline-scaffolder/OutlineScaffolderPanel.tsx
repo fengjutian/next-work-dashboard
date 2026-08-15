@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { notification } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { BookOpen, Check, FileText, FolderOpen, Loader2, Save, Sparkles } from '@/components/icons';
+import { BookOpen, Check, FileText, FolderOpen, GitBranch, Loader2, Save, Sparkles } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
@@ -87,6 +87,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [gitOpen, setGitOpen] = useState(false);
+  const [gitChanges, setGitChanges] = useState<Array<{ path: string; status: string }>>([]);
+  const [gitMessage, setGitMessage] = useState('docs: update generated articles');
+  const [gitLoading, setGitLoading] = useState(false);
+  const [gitError, setGitError] = useState('');
+  const [gitRepository, setGitRepository] = useState<boolean | null>(null);
   const aiRequestRef = useRef(0);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
@@ -270,6 +276,62 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setAiOpen(false); setEditorMode('edit');
   };
 
+  const refreshGit = async () => {
+    if (!target) return;
+    setGitLoading(true); setGitError('');
+    try {
+      const result = await window.electronAPI.workspace.gitStatus(target.path);
+      if (!result.success) throw new Error(result.error);
+      setGitRepository(true);
+      const prefix = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
+      const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json']);
+      const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
+        .filter((item) => !item.path.startsWith('.history/') && !item.path.includes('/.history/'))
+        .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) : known.has(item.path));
+      setGitChanges(changes);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setGitChanges([]); setGitRepository(/not a git repository/i.test(message) ? false : null); setGitError(`当前输出目录不是可用的 Git 仓库：${message}`);
+    } finally { setGitLoading(false); }
+  };
+
+  const initializeGit = async () => {
+    if (!target) return;
+    setGitLoading(true); setGitError('');
+    try {
+      const result = await window.electronAPI.workspace.gitInit(target.path);
+      if (!result.success) throw new Error(result.error);
+      setGitRepository(true);
+      notice.success({ message: 'Git 仓库初始化成功', description: target.path, placement: 'bottomRight' });
+      await refreshGit();
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : String(error));
+    } finally { setGitLoading(false); }
+  };
+
+  const toggleGit = () => {
+    const next = !gitOpen;
+    setGitOpen(next); setAiOpen(false);
+    if (next) refreshGit();
+  };
+
+  const commitToGit = async () => {
+    if (!target || !gitChanges.length || !gitMessage.trim()) return;
+    if (dirty) { setGitError('当前文档尚未保存，请先保存后再提交。'); return; }
+    setGitLoading(true); setGitError('');
+    try {
+      const paths = gitChanges.map((change) => change.path);
+      const staged = await window.electronAPI.workspace.gitStage(target.path, paths);
+      if (!staged.success) throw new Error(staged.error);
+      const committed = await window.electronAPI.workspace.gitCommit(target.path, gitMessage.trim(), paths);
+      if (!committed.success) throw new Error(committed.error);
+      notice.success({ message: '文章已提交到 Git 仓库', description: committed.data?.split('\n')[0], placement: 'bottomRight' });
+      await refreshGit();
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : String(error));
+    } finally { setGitLoading(false); }
+  };
+
   const chooseFolder = async () => {
     const folder = await window.electronAPI.workspace.openFolder();
     if (folder) setTarget(folder);
@@ -380,13 +442,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </section>
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}生成 {documents.length || 0} 个章节文档</Button>
       </div>
-    </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
+    </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen || gitOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="truncate text-sm font-semibold">{activeProject?.name || projectTitle || '章节文档'}</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{activeProject && <div className="mb-1 text-xs text-emerald-600">● 已保存项目</div>}{target ? <><button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button>{!activeProject && managedFiles.length > 0 && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => rememberProject(target, managedFiles)}>保存为项目</Button>}</> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`}><FileText className="h-4 w-4 shrink-0" /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" />}</button>) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
-        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => setAiOpen((value) => !value)}><Sparkles className="mr-2 h-4 w-4" />AI 助写</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
+        <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={gitOpen ? 'default' : 'ghost'} disabled={!target} onClick={toggleGit}><GitBranch className="mr-2 h-4 w-4" />Git</Button><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setAiOpen((value) => !value); setGitOpen(false); }}><Sparkles className="mr-2 h-4 w-4" />AI 助写</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
         <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span>{documentContent.length} 字符</span></div>}
       </main>
@@ -401,6 +463,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown>{aiLoading && <span className="inline-block h-4 w-1 animate-pulse bg-primary" />}</article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">选择任务并填写要求，<br />AI 结果将在这里预览。</div>}</div>
         <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>追加到文档</Button><Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button></div>
+      </aside>}
+      {gitOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
+        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
+        <div className="space-y-3 border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>提交 {gitChanges.length} 个文件</Button></div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
+        <div className="min-h-0 flex-1 overflow-auto p-3">{gitChanges.length ? gitChanges.map((change) => <div key={change.path} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted"><span className="w-6 shrink-0 font-mono text-primary">{change.status.trim() || 'M'}</span><span className="truncate" title={change.path}>{change.path}</span></div>) : !gitLoading && !gitError ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">文章目录没有待提交的改动</div> : null}</div>
+        <div className="border-t border-border p-3 text-xs text-muted-foreground">远程推送可继续使用仓库现有的 Git 工作流；本功能目前负责安全生成本地提交。</div>
       </aside>}
     </div>}
   </div>;

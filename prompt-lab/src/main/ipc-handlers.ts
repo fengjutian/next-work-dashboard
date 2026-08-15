@@ -2038,12 +2038,13 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  ipcMain.handle('workspace:gitCommit', async (_event, rootPath: string, message: string) => {
+  ipcMain.handle('workspace:gitCommit', async (_event, rootPath: string, message: string, relativePaths?: string[]) => {
     try {
       const root = resolveWorkspacePath(rootPath);
       const normalizedMessage = message.trim();
       if (!normalizedMessage || normalizedMessage.length > 5000) return { success: false, error: 'INVALID_COMMIT_MESSAGE' };
-      const output = execFileSync('git', ['commit', '-m', normalizedMessage], {
+      const paths = relativePaths?.map((relativePath) => path.relative(root, resolveWorkspacePath(rootPath, relativePath)));
+      const output = execFileSync('git', ['commit', ...(paths?.length ? ['--only'] : []), '-m', normalizedMessage, ...(paths?.length ? ['--', ...paths] : [])], {
         cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 2 * 1024 * 1024,
       });
       return { success: true, data: output.trim() };
@@ -2419,6 +2420,18 @@ export function setupIPC(webviewPreloadPath: string) {
   });
   app.on('before-quit', () => {
     void shutdownMyCastDaemon();
+  });
+
+  ipcMain.handle('workspace:gitInit', async (_event, rootPath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const output = execFileSync('git', ['init'], {
+        cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 1024 * 1024,
+      });
+      return { success: true, data: output.trim() };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 
   setupPhoneIPC();

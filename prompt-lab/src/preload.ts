@@ -347,6 +347,7 @@ const electronAPI: ElectronAPI = {
     semanticSearch: (rootPath: string, symbol: string) => ipcRenderer.invoke('workspace:semanticSearch', rootPath, symbol),
     languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => ipcRenderer.invoke('workspace:languageSemanticSearch', rootPath, relativePath, line, column),
     gitStatus: (rootPath: string) => ipcRenderer.invoke('workspace:gitStatus', rootPath),
+    gitInit: (rootPath: string) => ipcRenderer.invoke('workspace:gitInit', rootPath),
     createAgentWorktree: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:createAgentWorktree', rootPath, sessionId),
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:getAgentWorktreeStatus', rootPath, sessionId),
     discardAgentWorktree: (rootPath: string, sessionId: string) => ipcRenderer.invoke('workspace:discardAgentWorktree', rootPath, sessionId),
@@ -371,7 +372,7 @@ const electronAPI: ElectronAPI = {
     gitShowHead: (rootPath: string, relativePath: string) => ipcRenderer.invoke('workspace:gitShowHead', rootPath, relativePath),
     gitStage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitStage', rootPath, relativePaths),
     gitUnstage: (rootPath: string, relativePaths: string[]) => ipcRenderer.invoke('workspace:gitUnstage', rootPath, relativePaths),
-    gitCommit: (rootPath: string, message: string) => ipcRenderer.invoke('workspace:gitCommit', rootPath, message),
+    gitCommit: (rootPath: string, message: string, relativePaths?: string[]) => ipcRenderer.invoke('workspace:gitCommit', rootPath, message, relativePaths),
     gitOperation: (rootPath: string, operation: import('./types/electron').WorkspaceGitOperation, payload?: Record<string, unknown>) => ipcRenderer.invoke('workspace:gitOperation', rootPath, operation, payload),
     cancelGitOperation: (rootPath: string, operationId: string) => ipcRenderer.invoke('workspace:cancelGitOperation', rootPath, operationId),
     onGitProgress: (callback: (event: import('./types/electron').WorkspaceGitProgress) => void) => {

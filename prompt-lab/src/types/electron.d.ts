@@ -305,6 +305,7 @@ export interface ElectronAPI {
     semanticSearch: (rootPath: string, symbol: string) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
+    gitInit: (rootPath: string) => Promise<WorkspaceResult<string>>;
     createAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo>>;
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo | null>>;
     discardAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<void>>;
@@ -325,7 +326,7 @@ export interface ElectronAPI {
     gitShowHead: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<string>>;
     gitStage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
     gitUnstage: (rootPath: string, relativePaths: string[]) => Promise<WorkspaceResult<void>>;
-    gitCommit: (rootPath: string, message: string) => Promise<WorkspaceResult<string>>;
+    gitCommit: (rootPath: string, message: string, relativePaths?: string[]) => Promise<WorkspaceResult<string>>;
     gitOperation: <T = unknown>(rootPath: string, operation: WorkspaceGitOperation, payload?: Record<string, unknown>) => Promise<WorkspaceResult<T>>;
     cancelGitOperation: (rootPath: string, operationId: string) => Promise<{ success: boolean }>;
     onGitProgress: (callback: (event: WorkspaceGitProgress) => void) => () => void;
