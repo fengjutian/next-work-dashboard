@@ -39,4 +39,29 @@ def login():
 ` }]);
     expect(result.endpoints[0]).toMatchObject({ framework: 'flask', method: 'POST', path: '/login' });
   });
+
+  it('resolves mounted router prefixes and imported calls', () => {
+    const result = analyzeRepositoryFiles('demo', [
+      { path: 'main.py', content: `from api.users import router as users_router\napp.include_router(users_router, prefix="/api/v1")` },
+      { path: 'api/users.py', content: `from fastapi import APIRouter\nfrom services.users import load_user\nrouter = APIRouter(prefix="/users")\n@router.get("/{user_id}")\ndef get_user(user_id):\n    return load_user(user_id)` },
+      { path: 'services/users.py', content: `def load_user(user_id):\n    return user_id` },
+      { path: 'web/api.ts', content: `const client = axios.create({ baseURL: '/api/v1' })\nclient.get(\`/users/\${id}\`)` },
+    ]);
+    expect(result.endpoints[0].path).toBe('/api/v1/users/{user_id}');
+    expect(result.endpoints[0].frontendCalls).toHaveLength(1);
+    const importedEdge = result.endpoints[0].edges.find((edge) => edge.target.includes('services/users.py'));
+    expect(importedEdge).toMatchObject({ confidence: 'exact', evidence: '由 import services.users.load_user 解析' });
+  });
+
+  it('follows FastAPI Depends dependencies', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `
+def current_user():
+    return 'user'
+
+@app.get('/me')
+def me(user = Depends(current_user)):
+    return user
+` }]);
+    expect(result.endpoints[0].nodes.some((node) => node.label === 'current_user')).toBe(true);
+  });
 });

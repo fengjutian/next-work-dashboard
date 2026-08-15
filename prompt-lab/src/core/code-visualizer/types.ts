@@ -20,6 +20,7 @@ export interface AnalysisEdge {
   target: string;
   kind: 'requests' | 'handles' | 'calls' | 'reads' | 'writes' | 'maps-to';
   confidence: 'exact' | 'inferred';
+  evidence?: string;
 }
 
 export interface FrontendCall {

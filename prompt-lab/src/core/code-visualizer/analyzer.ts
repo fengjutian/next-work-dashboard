@@ -8,11 +8,12 @@ interface PythonFunction {
   endLine: number;
   body: string;
   calls: string[];
+  imports: Map<string, string>;
   tables: Array<{ name: string; mode: 'reads' | 'writes' }>;
 }
 
 interface RawEndpoint {
-  framework: ApiEndpoint['framework']; method: HttpMethod; path: string; handler: string; fnId: string; location: SourceLocation;
+  framework: ApiEndpoint['framework']; method: HttpMethod; path: string; handler: string; fnId: string; routerName?: string; location: SourceLocation;
 }
 
 const METHODS = new Set<HttpMethod>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']);
@@ -32,13 +33,17 @@ function joinPath(prefix: string, route: string): string { return `/${[prefix, r
 export function extractFrontendCalls(file: RepositorySourceFile): FrontendCall[] {
   if (!/\.(vue|tsx?|jsx?)$/i.test(file.path)) return [];
   const calls: FrontendCall[] = [];
+  const clients = new Map<string, string>([['axios', '']]);
+  for (const client of file.content.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*axios\.create\s*\(\s*\{[\s\S]{0,500}?baseURL\s*:\s*["'`]([^"'`]+)["'`]/gim)) clients.set(client[1], client[2]);
   const patterns = [
-    /\baxios\s*\.\s*(get|post|put|patch|delete|options|head)\s*\(\s*(["'`])([^"'`]+)\2/gim,
+    /\b(\w+)\s*\.\s*(get|post|put|patch|delete|options|head)\s*\(\s*(["'`])([^"'`]+)\3/gim,
     /\bfetch\s*\(\s*(["'`])([^"'`]+)\1\s*(?:,\s*\{([\s\S]{0,300}?)\})?/gim,
     /\b(?:request|http|api)\s*\(\s*\{([\s\S]{0,500}?)\}\s*\)/gim,
   ];
   let match: RegExpExecArray | null;
-  while ((match = patterns[0].exec(file.content))) push(String(match[1]), match[3], match.index);
+  while ((match = patterns[0].exec(file.content))) {
+    if (clients.has(match[1]) || /^(request|http|api)$/i.test(match[1])) push(String(match[2]), joinPath(clients.get(match[1]) ?? '', match[4]), match.index);
+  }
   while ((match = patterns[1].exec(file.content))) {
     const method = /method\s*:\s*["'](\w+)/i.exec(match[3] ?? '')?.[1] ?? 'GET';
     push(method, match[2], match.index);
@@ -65,7 +70,15 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
   const endpoints: RawEndpoint[] = [];
   const modelTables = new Map<string, string>();
   const routerPrefixes = new Map<string, string>();
+  const imports = new Map<string, string>();
   for (let i = 0; i < lines.length; i += 1) {
+    const imported = /^\s*from\s+([\w.]+)\s+import\s+(.+)/.exec(lines[i]);
+    if (imported) for (const item of imported[2].split(',')) {
+      const symbol = /^(\w+)(?:\s+as\s+(\w+))?/.exec(item.trim());
+      if (symbol) imports.set(symbol[2] ?? symbol[1], `${imported[1]}.${symbol[1]}`);
+    }
+    const moduleImport = /^\s*import\s+([\w.]+)(?:\s+as\s+(\w+))?/.exec(lines[i]);
+    if (moduleImport) imports.set(moduleImport[2] ?? moduleImport[1].split('.')[0], moduleImport[1]);
     const prefix = /^\s*(\w+)\s*=\s*(?:APIRouter|Blueprint)\s*\([\s\S]*?(?:prefix|url_prefix)\s*=\s*["']([^"']*)/.exec(lines[i]);
     if (prefix) routerPrefixes.set(prefix[1], prefix[2]);
     const classMatch = /^class\s+(\w+)\s*\([^)]*(?:Model|Base)[^)]*\)\s*:/.exec(lines[i]);
@@ -88,7 +101,8 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
     let end = i + 1;
     while (end < lines.length && (lines[end].trim() === '' || (lines[end].match(/^\s*/)?.[0].length ?? 0) > indent)) end += 1;
     const body = lines.slice(i, end).join('\n');
-    const calls = [...body.matchAll(/\b(?:await\s+)?(?:\w+\.)*(\w+)\s*\(/g)].map((m) => m[1]).filter((name) => !['if', 'for', 'return', 'print', def[2]].includes(name));
+    const calls = [...body.matchAll(/\b(?:await\s+)?([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\(/g)].map((m) => m[1]).filter((name) => !['if', 'for', 'return', 'print', def[2]].includes(name));
+    for (const dependency of body.matchAll(/\bDepends\s*\(\s*([\w.]+)/g)) calls.push(dependency[1]);
     const tables: PythonFunction['tables'] = [];
     for (const [model, table] of modelTables) {
       if (new RegExp(`\\b${model}\\b`).test(body)) tables.push({ name: table, mode: /\.(add|delete|update|save|create)\s*\(|\.objects\.(create|update)/.test(body) ? 'writes' : 'reads' });
@@ -96,14 +110,14 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
     for (const sql of body.matchAll(/\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([\w."`]+)/gi)) {
       tables.push({ name: sql[2].replace(/["`]/g, ''), mode: /^SELECT$/i.test(sql[1]) ? 'reads' : 'writes' });
     }
-    const fn: PythonFunction = { id: `python:${file.path}:${i + 1}`, name: def[2], file: file.path, line: i + 1, endLine: end, body, calls: [...new Set(calls)], tables };
+    const fn: PythonFunction = { id: `python:${file.path}:${i + 1}`, name: def[2], file: file.path, line: i + 1, endLine: end, body, calls: [...new Set(calls)], imports, tables };
     functions.push(fn);
 
     const decorators: string[] = [];
     for (let j = i - 1; j >= 0 && (lines[j].trim().startsWith('@') || lines[j].trim() === ''); j -= 1) if (lines[j].trim()) decorators.unshift(lines[j].trim());
     for (const decorator of decorators) {
       const route = /^@(\w+)\.(get|post|put|patch|delete|options|head)\s*\(\s*["']([^"']+)/i.exec(decorator);
-      if (route) endpoints.push({ framework: route[1] === 'app' ? 'fastapi' : 'fastapi', method: route[2].toUpperCase() as HttpMethod, path: joinPath(routerPrefixes.get(route[1]) ?? '', route[3]), handler: def[2], fnId: fn.id, location: { file: file.path, line: i + 1, endLine: end, snippet: lines[i].trim() } });
+      if (route) endpoints.push({ framework: 'fastapi', method: route[2].toUpperCase() as HttpMethod, path: joinPath(routerPrefixes.get(route[1]) ?? '', route[3]), handler: def[2], fnId: fn.id, routerName: route[1], location: { file: file.path, line: i + 1, endLine: end, snippet: lines[i].trim() } });
       const flask = /^@(\w+)\.route\s*\(\s*["']([^"']+)["']/i.exec(decorator);
       if (flask) {
         const methodBlock = /methods\s*=\s*\[([^\]]+)\]/i.exec(decorator)?.[1];
@@ -122,15 +136,53 @@ function extractPython(file: RepositorySourceFile): { functions: PythonFunction[
   return { functions, endpoints, modelTables };
 }
 
+function findMountedRouterPrefixes(files: RepositorySourceFile[]): Map<string, string> {
+  const prefixes = new Map<string, string>();
+  for (const host of files) {
+    const imports = new Map<string, string>();
+    for (const match of host.content.matchAll(/^\s*from\s+([\w.]+)\s+import\s+(\w+)(?:\s+as\s+(\w+))?/gm)) imports.set(match[3] ?? match[2], match[1]);
+    for (const mount of host.content.matchAll(/\binclude_router\s*\(\s*(\w+)[\s\S]{0,300}?\)/g)) {
+      const moduleName = imports.get(mount[1]);
+      if (!moduleName) continue;
+      const modulePath = `${moduleName.replace(/\./g, '/')}.py`;
+      const target = files.find((file) => file.path.endsWith(modulePath));
+      if (!target) continue;
+      const prefix = /\bprefix\s*=\s*["']([^"']*)/.exec(mount[0])?.[1] ?? '';
+      prefixes.set(target.path, joinPath(prefixes.get(target.path) ?? '', prefix));
+    }
+  }
+  return prefixes;
+}
+
 export function analyzeRepositoryFiles(rootPath: string, files: RepositorySourceFile[]): RepositoryAnalysis {
   const pythonFiles = files.filter((file) => file.path.endsWith('.py'));
   const vueFiles = files.filter((file) => /\.(vue|tsx?|jsx?)$/i.test(file.path));
   const py = pythonFiles.map(extractPython);
   const functions = py.flatMap((item) => item.functions);
-  const rawEndpoints = py.flatMap((item) => item.endpoints);
+  const mountedPrefixes = findMountedRouterPrefixes(pythonFiles);
+  const rawEndpoints = py.flatMap((item) => item.endpoints).map((endpoint) => ({
+    ...endpoint,
+    path: joinPath(mountedPrefixes.get(endpoint.location.file) ?? '', endpoint.path),
+  }));
   const frontendCalls = vueFiles.flatMap(extractFrontendCalls);
   const byName = new Map<string, PythonFunction[]>();
   for (const fn of functions) byName.set(fn.name, [...(byName.get(fn.name) ?? []), fn]);
+
+  const resolveCall = (call: string, caller: PythonFunction): { fn?: PythonFunction; confidence: AnalysisEdge['confidence']; evidence: string } => {
+    const parts = call.split('.');
+    const name = parts.at(-1) ?? call;
+    const candidates = byName.get(name) ?? [];
+    const local = candidates.find((candidate) => candidate.file === caller.file);
+    if (local) return { fn: local, confidence: 'exact', evidence: `同文件符号 ${call}` };
+    const imported = caller.imports.get(parts[0]);
+    if (imported) {
+      const moduleName = imported.split('.').slice(0, -1).join('.');
+      const modulePath = `${moduleName.replace(/\./g, '/')}.py`;
+      const matched = candidates.find((candidate) => candidate.file.endsWith(modulePath));
+      if (matched) return { fn: matched, confidence: 'exact', evidence: `由 import ${imported} 解析` };
+    }
+    return { fn: candidates.length === 1 ? candidates[0] : undefined, confidence: 'inferred', evidence: candidates.length === 1 ? `仓库内唯一同名符号 ${name}` : `无法消歧 ${call}` };
+  };
 
   const endpoints = rawEndpoints.map((raw): ApiEndpoint => {
     const nodes: AnalysisNode[] = [{ id: `endpoint:${raw.method}:${normalizeApiPath(raw.path)}`, kind: 'endpoint', label: `${raw.method} ${raw.path}`, detail: raw.framework, location: raw.location }];
@@ -143,19 +195,22 @@ export function analyzeRepositoryFiles(rootPath: string, files: RepositorySource
     }
     const visited = new Set<string>();
     const tables = new Set<string>();
-    const walk = (fn: PythonFunction | undefined, parentId: string, depth: number): void => {
+    const walk = (fn: PythonFunction | undefined, parentId: string, depth: number, relation?: { confidence: AnalysisEdge['confidence']; evidence: string }): void => {
       if (!fn || visited.has(fn.id) || depth > 8) return;
       visited.add(fn.id);
       const kind: AnalysisNode['kind'] = depth === 0 ? 'controller' : /repo|dao|crud/i.test(fn.name + fn.file) ? 'repository' : 'service';
       nodes.push({ id: fn.id, kind, label: fn.name, detail: fn.file, location: { file: fn.file, line: fn.line, endLine: fn.endLine, snippet: snippetAt(fn.body, 1) } });
-      edges.push({ source: parentId, target: fn.id, kind: depth === 0 ? 'handles' : 'calls', confidence: depth === 0 ? 'exact' : 'inferred' });
+      edges.push({ source: parentId, target: fn.id, kind: depth === 0 ? 'handles' : 'calls', confidence: depth === 0 ? 'exact' : relation?.confidence ?? 'inferred', evidence: depth === 0 ? '路由装饰器绑定' : relation?.evidence });
       for (const table of fn.tables) {
         tables.add(table.name);
         const tableId = `table:${table.name}`;
         if (!nodes.some((node) => node.id === tableId)) nodes.push({ id: tableId, kind: 'database', label: table.name });
         edges.push({ source: fn.id, target: tableId, kind: table.mode, confidence: 'inferred' });
       }
-      for (const call of fn.calls) walk(byName.get(call)?.[0], fn.id, depth + 1);
+      for (const call of fn.calls) {
+        const resolved = resolveCall(call, fn);
+        walk(resolved.fn, fn.id, depth + 1, resolved);
+      }
     };
     walk(functions.find((fn) => fn.id === raw.fnId) ?? byName.get(raw.handler)?.[0], endpointId, 0);
     return { id: endpointId, framework: raw.framework, method: raw.method, path: raw.path, normalizedPath: normalizeApiPath(raw.path), handler: raw.handler, location: raw.location, frontendCalls: matchingFrontend, tables: [...tables], nodes, edges };
