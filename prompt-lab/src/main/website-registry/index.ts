@@ -1,0 +1,1 @@
+export { setupWebsiteRegistryIPC } from './ipc';
