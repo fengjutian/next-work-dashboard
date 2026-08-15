@@ -547,6 +547,23 @@ export interface ElectronAPI {
       suggest: (docSummary: { title: string; url: string; capturedAt: number }) => Promise<Array<{ workspaceId: string; score: number; reasons: string[] }>>;
     };
   };
+  websiteRegistry: {
+    record: {
+      list: (filters?: import('../core/website-registry/types').WebsiteRecordFilters) => Promise<import('../core/website-registry/types').WebsiteRecord[]>;
+      create: (input: import('../core/website-registry/types').WebsiteRecordInput) => Promise<import('../core/website-registry/types').WebsiteRecord>;
+      update: (id: string, patch: Partial<import('../core/website-registry/types').WebsiteRecordInput>) => Promise<import('../core/website-registry/types').WebsiteRecord>;
+      remove: (id: string) => Promise<void>;
+      open: (id: string) => Promise<import('../core/website-registry/types').WebsiteRecord>;
+    };
+    category: {
+      list: () => Promise<import('../core/website-registry/types').WebsiteCategory[]>;
+      create: (name: string, color?: string) => Promise<import('../core/website-registry/types').WebsiteCategory>;
+      update: (id: string, patch: Partial<Pick<import('../core/website-registry/types').WebsiteCategory, 'name' | 'color' | 'position'>>) => Promise<import('../core/website-registry/types').WebsiteCategory>;
+      remove: (id: string) => Promise<void>;
+    };
+    importData: () => Promise<{ imported: number; skipped: number; invalid: number }>;
+    exportData: () => Promise<boolean>;
+  };
   securityAudit: {
     settings: {
       get: (key: string) => Promise<string | null>;

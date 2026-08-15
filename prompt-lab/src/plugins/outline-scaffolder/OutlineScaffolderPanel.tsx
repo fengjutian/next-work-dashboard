@@ -1074,15 +1074,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (manifestSyncState === 'error') issues.push('.chapter-project.json 同步失败');
     const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path));
     const reports: Record<string, ChapterQualityReport> = { ...qualityReports };
+    const nextStatuses: Record<string, ChapterGenerationStatus> = { ...chapterStatuses };
     for (const path of chapterFiles) {
       const read = await window.electronAPI.workspace.readTextFile(target.path, path);
-      if (!read.success || !read.data) { issues.push(`${path} 无法读取`); continue; }
+      if (!read.success || !read.data) { issues.push(`${path} 无法读取`); nextStatuses[path] = { state: 'error', error: '发布检查时无法读取', updatedAt: Date.now() }; continue; }
       const report = inspectChapterQuality(path, read.data.content);
       reports[path] = report;
       report.blockers.forEach((item) => issues.push(`${path.split('/').pop()}：${item}`));
-      if ((chapterStatuses[path]?.state ?? 'pending') !== 'complete') issues.push(`${path.split('/').pop()}：尚未通过质量门禁`);
+      nextStatuses[path] = report.blockers.length
+        ? { state: 'review', error: report.blockers.join('；'), updatedAt: Date.now() }
+        : { state: 'complete', updatedAt: Date.now() };
     }
-    setQualityReports(reports);
+    setQualityReports(reports); setChapterStatuses(nextStatuses);
     const listing = await window.electronAPI.workspace.listFiles(target.path);
     if (listing.success) {
       const paths = new Set((listing.data ?? []).filter((entry) => entry.type === 'file').map((entry) => entry.path.replace(/\\/g, '/')));
@@ -1090,8 +1093,16 @@ export const OutlineScaffolderPanel: React.FC = () => {
       for (const required of [siteFolder ? `${siteFolder}/_config.yml` : '_config.yml', '.github/workflows/pages.yml', siteFolder ? `${siteFolder}/.chapter-project.json` : '.chapter-project.json']) if (!paths.has(required)) issues.push(`发布文件缺失：${required}`);
     }
     if (!gitRemoteUrl.trim()) issues.push('未配置远程 Git 仓库');
-    setPublishGateIssues([...new Set(issues)]);
-    return [...new Set(issues)];
+    const uniqueIssues = [...new Set(issues)];
+    if (!uniqueIssues.length) {
+      const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
+      const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
+      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const synced = existing.success && existing.data ? await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: existing.data.modifiedAt }) : { success: false, error: '项目清单不存在' };
+      if (!synced.success) uniqueIssues.push(`项目清单同步失败：${synced.error || '未知错误'}`); else setManifestSyncState('saved');
+    }
+    setPublishGateIssues(uniqueIssues);
+    return uniqueIssues;
   };
 
   const publishToRemote = async () => {

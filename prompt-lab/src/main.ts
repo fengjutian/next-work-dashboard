@@ -17,6 +17,7 @@ import { startRagIndexCoordinator, stopRagIndexCoordinator } from './main/rag-in
 import { setupVideoPlayerIPC, videoPlayerService } from './plugins/video-player/backend/video-service';
 import { setupWorkBrowserIPC } from './main/work-browser';
 import { setupSecurityAuditIPC } from './main/security-audit';
+import { setupWebsiteRegistryIPC } from './main/website-registry';
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -118,6 +119,7 @@ if (started) {
     setupVideoPlayerIPC();
     setupWorkBrowserIPC();
     setupSecurityAuditIPC();
+    setupWebsiteRegistryIPC();
     startRagIndexCoordinator();
     createTray();
     configureWindowsJumpList();

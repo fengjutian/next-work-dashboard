@@ -57,6 +57,7 @@ const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ def
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ default: m.ThinkingLabPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
+const websiteRegistry = preloadable(() => import('../website-registry').then((m) => ({ default: m.WebsiteRegistryPanel })));
 const securityAudit = preloadable(() => import('../security-audit').then((m) => ({ default: m.SecurityAuditPanel })));
 const videoGeneration = preloadable(() => import('../video-generation').then((m) => ({ default: m.VideoGenerationPanel })));
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
@@ -94,6 +95,7 @@ const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const ThinkingLabPanel = thinkingLab.component;
 const WorkBrowserPanel = workBrowser.component;
+const WebsiteRegistryPanel = websiteRegistry.component;
 const SecurityAuditPanel = securityAudit.component;
 const VideoGenerationPanel = videoGeneration.component;
 const EnglishLookupPanel = englishLookup.component;
@@ -533,6 +535,20 @@ const builtInPlugins: Plugin[] = [
         { key: 'workBrowser.ai.model', label: 'AI 模型', type: 'string', default: 'gpt-4o-mini' },
       ],
     },
+  },
+  {
+    id: 'website-registry',
+    name: '网站收藏',
+    icon: Globe,
+    component: WebsiteRegistryPanel,
+    preload: websiteRegistry.preload,
+    enabled: true,
+    order: 9.2,
+    keepAlive: true,
+    contributions: {
+      commands: [{ id: 'website-registry.create', title: '添加网站收藏', category: '网站收藏' }],
+    },
+    activate: (context) => context.commands.register('website-registry.create', () => window.dispatchEvent(new CustomEvent('website-registry:create'))),
   },
   {
     id: 'security-audit',

@@ -2,6 +2,7 @@
 import type { ElectronAPI, MemoryFile } from './types/electron';
 import { workBrowserBridge } from './preload/work-browser';
 import { securityAuditBridge } from './preload/security-audit';
+import { websiteRegistryBridge } from './preload/website-registry';
 
 // ── 暴露给渲染进程的安全 API ──
 const electronAPI: ElectronAPI = {
@@ -562,6 +563,8 @@ const electronAPI: ElectronAPI = {
 
   // Work Browser（work-browser 插件）
   workBrowser: workBrowserBridge,
+
+  websiteRegistry: websiteRegistryBridge,
 
   // Security Audit（security-audit 插件）
   securityAudit: securityAuditBridge,
