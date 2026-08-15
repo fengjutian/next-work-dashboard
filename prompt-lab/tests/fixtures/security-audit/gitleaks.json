@@ -1,0 +1,1 @@
+[{"Description":"Generic API Key","StartLine":7,"EndLine":7,"StartColumn":13,"EndColumn":40,"Line":"api_key = REDACTED","Match":"api_key=REDACTED","Secret":"REDACTED","File":"src/config.ts","SymlinkFile":"","Commit":"","Entropy":4.2,"Author":"","Email":"","Date":"","Message":"","Tags":["key"],"RuleID":"generic-api-key","Fingerprint":"src/config.ts:generic-api-key:7"}]

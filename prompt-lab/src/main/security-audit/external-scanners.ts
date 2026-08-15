@@ -100,7 +100,7 @@ export function parseOsvOutput(json: JsonObject, context: ScanContext): Security
   }
   return findings;
 }
-export const osvScanner = externalScanner('osv-scanner', 'OSV Dependency Scan', (context) => ['scan', 'source', '--format=json', '--verbosity=error', '--recursive', ...(context.networkPolicy === 'deny' ? ['--offline'] : []), '.'], parseOsvOutput);
+export const osvScanner = externalScanner('osv-scanner', 'OSV Dependency Scan', (context) => ['scan', 'source', '--format=json', '--verbosity=error', '--recursive', '.'], parseOsvOutput, (context) => context.networkPolicy === 'allow');
 
 export function parseTrivyOutput(json: JsonObject, context: ScanContext): SecurityFinding[] {
   const results = Array.isArray(json.Results) ? json.Results as JsonObject[] : [];
@@ -116,9 +116,17 @@ export function parseTrivyOutput(json: JsonObject, context: ScanContext): Securi
   }
   return findings;
 }
-export const trivyScanner = externalScanner('trivy', 'Trivy Vulnerability/IaC Scan', (context) => ['fs', '--format', 'json', '--scanners', 'vuln,misconfig,secret', ...(context.networkPolicy === 'deny' ? ['--skip-db-update', '--skip-check-update'] : []), '.'], parseTrivyOutput);
+export const trivyScanner = externalScanner('trivy', 'Trivy Vulnerability/IaC Scan', () => ['fs', '--format', 'json', '--scanners', 'vuln,misconfig,secret', '.'], parseTrivyOutput, (context) => context.networkPolicy === 'allow');
 
 export const externalScanners: SecurityScanner[] = [semgrepScanner, gitleaksScanner, osvScanner, trivyScanner];
-export async function listExternalScannerAvailability(force = false): Promise<Array<{ id: string; name: string; available: boolean; version?: string; error?: string; checkedAt: number }>> {
-  return Promise.all(externalScanners.map(async (scanner) => ({ id: scanner.id, name: scanner.name, ...await inspectScannerCommand(scanner.id as ExternalScannerCommand, force) })));
+export async function listExternalScannerAvailability(projectDir: string | undefined, networkPolicy: 'deny' | 'allow', force = false): Promise<Array<{ id: string; name: string; installed: boolean; ready: boolean; version?: string; reason?: string; checkedAt: number; requiresNetwork?: boolean }>> {
+  return Promise.all(externalScanners.map(async (scanner) => {
+    const installed = await inspectScannerCommand(scanner.id as ExternalScannerCommand, force);
+    let ready = installed.available;
+    let reason = installed.error;
+    const requiresNetwork = scanner.id === 'osv-scanner' || scanner.id === 'trivy';
+    if (ready && scanner.id === 'semgrep' && (!projectDir || (!fs.existsSync(path.join(projectDir, '.semgrep.yml')) && !fs.existsSync(path.join(projectDir, '.semgrep.yaml'))))) { ready = false; reason = '项目缺少 .semgrep.yml 或 .semgrep.yaml'; }
+    if (ready && requiresNetwork && networkPolicy !== 'allow') { ready = false; reason = '网络策略为拒绝；当前适配器未验证本地离线数据库'; }
+    return { id: scanner.id, name: scanner.name, installed: installed.available, ready, version: installed.version, reason, checkedAt: installed.checkedAt, requiresNetwork };
+  }));
 }

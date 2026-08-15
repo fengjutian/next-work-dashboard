@@ -11,7 +11,7 @@ import { Alert, Button, Card, Empty, Modal, Progress, Space, Spin, Tag, ToastHos
 import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanProgress } from './constants';
 
 type SeverityColor = 'red' | 'orange' | 'blue' | 'green';
-type ScannerInfo = { id: string; name: string; available: boolean; builtIn: boolean; version?: string; error?: string; checkedAt: number };
+type ScannerInfo = import('../../core/security-audit').ScannerStatus;
 const SCANNER_SELECTION_KEY = 'security-audit:selected-scanners:v1';
 
 function securityAuditErrorMessage(error: unknown): string {
@@ -138,19 +138,20 @@ export function SecurityAuditPanel(): JSX.Element {
   const [selectedScanners, setSelectedScanners] = useState<string[]>([]);
   const [scannerStateReady, setScannerStateReady] = useState(false);
   const [scannerDetectionRunning, setScannerDetectionRunning] = useState(false);
+  const [networkAllowed, setNetworkAllowed] = useState(false);
 
   const loadScanners = useCallback((force = false) => {
     setScannerDetectionRunning(true);
-    void window.electronAPI.securityAudit.scanners.list(force).then((items) => {
+    void window.electronAPI.securityAudit.scanners.list({ projectDir: scannedDir ?? undefined, networkPolicy: networkAllowed ? 'allow' : 'deny', force }).then((items) => {
       setScanners(items);
       let saved: string[] = [];
       try { saved = JSON.parse(localStorage.getItem(SCANNER_SELECTION_KEY) ?? '[]') as string[]; } catch { saved = []; }
-      const available = new Set(items.filter((item) => item.available).map((item) => item.id));
-      const defaults = items.filter((item) => item.available && (item.builtIn || saved.length === 0 || saved.includes(item.id))).map((item) => item.id);
+      const available = new Set(items.filter((item) => item.ready).map((item) => item.id));
+      const defaults = items.filter((item) => item.ready && (item.builtIn || saved.length === 0 || saved.includes(item.id))).map((item) => item.id);
       setSelectedScanners(defaults.filter((id) => available.has(id)));
       setScannerStateReady(true);
     }).catch((error: unknown) => message.warning(`扫描器检测失败：${securityAuditErrorMessage(error)}`)).finally(() => setScannerDetectionRunning(false));
-  }, []);
+  }, [networkAllowed, scannedDir]);
 
   useEffect(() => {
     loadScanners();
@@ -212,12 +213,12 @@ export function SecurityAuditPanel(): JSX.Element {
     if (!api) { void runMockScan(); return; }
     setFindings(null);
     setProgress({ phase: 'scanning', percent: 0, message: '请选择项目目录…' });
-    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef: 'HEAD', scanners: selectedScanners, aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
+    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef: 'HEAD', scanners: selectedScanners, networkPolicy: networkAllowed ? 'allow' : 'deny', aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
       if (!result.ok || !result.projectDir || !result.jobId) { setProgress({ phase: 'idle', percent: 0, message: '已取消' }); return; }
       setScannedDir(result.projectDir);
       setJobId(result.jobId);
     }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: securityAuditErrorMessage(error) }));
-  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, runMockScan, scanMode, scannedDir, selectedScanners]);
+  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, networkAllowed, runMockScan, scanMode, scannedDir, selectedScanners]);
 
   const selectProject = useCallback(() => {
     void window.electronAPI.securityAudit.project.select().then((result) => {
@@ -277,10 +278,11 @@ export function SecurityAuditPanel(): JSX.Element {
 
       {scanners.length > 0 && <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-muted/20 px-5 py-2 text-[11px]">
         <span className="shrink-0 text-muted-foreground">扫描引擎</span>
-        {scanners.map((scanner) => <label key={scanner.id} className={`flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${scanner.available ? 'border-border bg-card' : 'cursor-not-allowed border-border/50 text-muted-foreground opacity-60'}`} title={scanner.available ? `${scanner.name}${scanner.version ? ` · ${scanner.version}` : ''}` : `${scanner.name} 未安装或不可执行${scanner.error ? `：${scanner.error}` : ''}`}>
-          <input type="checkbox" checked={selectedScanners.includes(scanner.id)} disabled={!scanner.available || scanner.builtIn || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setSelectedScanners((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id))} />
-          {scanner.name}{scanner.builtIn ? '（内置）' : scanner.available ? '' : '（未安装）'}
+        {scanners.map((scanner) => <label key={scanner.id} className={`flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${scanner.ready ? 'border-border bg-card' : 'cursor-not-allowed border-border/50 text-muted-foreground opacity-60'}`} title={scanner.ready ? `${scanner.name}${scanner.version ? ` · ${scanner.version}` : ''}` : `${scanner.name}${scanner.installed ? ' 未就绪' : ' 未安装'}${scanner.reason ? `：${scanner.reason}` : ''}`}>
+          <input type="checkbox" checked={selectedScanners.includes(scanner.id)} disabled={!scanner.ready || scanner.builtIn || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setSelectedScanners((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id))} />
+          {scanner.name}{scanner.builtIn ? '（内置）' : scanner.ready ? '' : scanner.installed ? '（未就绪）' : '（未安装）'}
         </label>)}
+        <label className="flex shrink-0 items-center gap-1 rounded border border-orange-300 bg-orange-50 px-2 py-1 text-orange-800"><input type="checkbox" checked={networkAllowed} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setNetworkAllowed(event.target.checked)} />允许扫描器联网（OSV/Trivy）</label>
         <Button className="ml-auto shrink-0" loading={scannerDetectionRunning} onClick={() => loadScanners(true)}>重新检测</Button>
       </div>}
 

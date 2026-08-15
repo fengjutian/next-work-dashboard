@@ -1,0 +1,1 @@
+{"version":"1.120.0","results":[{"check_id":"javascript.lang.security.audit.eval-detected","path":"src/unsafe.ts","start":{"line":3,"col":1,"offset":20},"end":{"line":3,"col":12,"offset":31},"extra":{"message":"Detected eval usage","metadata":{"cwe":["CWE-95"]},"severity":"ERROR","fingerprint":"fixture","lines":"eval(input)"}}],"errors":[]}

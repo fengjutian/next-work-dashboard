@@ -66,7 +66,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
   const jobId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const controller = new AbortController();
   jobs.set(jobId, controller);
-  const record: ScanRecord = { id: jobId, projectDir: input.projectDir, mode: input.mode ?? 'full', baselineRef: input.baselineRef, startedAt: Date.now(), status: 'scanning', findings: [] };
+  const record: ScanRecord = { id: jobId, projectDir: input.projectDir, mode: input.mode ?? 'full', baselineRef: input.baselineRef, startedAt: Date.now(), status: 'scanning', findings: [], scannerRuns: [] };
   const data = load(); data.scans.unshift(record); data.scans = data.scans.slice(0, 100); save(data);
   const emit = (progress: Parameters<typeof progressFor>[1]): void => { if (!sender.isDestroyed()) sender.send('security-audit:event:progress', { ...progressFor(jobId, progress), projectDir: input.projectDir }); };
   void (async () => {
@@ -74,18 +74,20 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
       const files = await resolveScanFiles(input.projectDir, input.mode ?? 'full', input.baselineRef);
       emit({ phase: 'scanning', percent: 2, message: `已确定 ${files.length} 个扫描文件` });
       const selectedScanners = [...new Set([...builtinScanners.map((scanner) => scanner.id), ...(input.scanners ?? [])])];
-      let findings = await orchestrator.run({ projectDir: input.projectDir, files, signal: controller.signal, emit }, selectedScanners);
+      const scanResult = await orchestrator.runDetailed({ projectDir: input.projectDir, files, signal: controller.signal, networkPolicy: input.networkPolicy ?? 'deny', emit }, selectedScanners);
+      let findings = scanResult.findings;
       if (input.aiReview) { emit({ phase: 'triaging', percent: 85, message: '系统默认 AI 正在复核确定性扫描结果', findingsCount: findings.length }); findings = await reviewWithAI(findings, controller.signal, input.aiConfig); }
       const current = load();
       findings = mergeWithBaseline(findings, lastFindings(current, input.projectDir), Date.now(), input.mode === 'incremental' ? new Set(files) : undefined);
       const saved = current.scans.find((scan) => scan.id === jobId);
-      if (saved) Object.assign(saved, { findings, status: 'completed', completedAt: Date.now() });
+      if (saved) Object.assign(saved, { findings, scannerRuns: scanResult.scannerRuns, status: 'completed', completedAt: Date.now() });
       save(current);
       emit({ phase: 'completed', percent: 100, message: '扫描完成', findingsCount: findings.filter((item) => item.status !== 'fixed').length });
     } catch (error) {
       const cancelled = controller.signal.aborted;
       const current = load(); const saved = current.scans.find((scan) => scan.id === jobId);
-      if (saved) Object.assign(saved, { status: cancelled ? 'cancelled' : 'failed', completedAt: Date.now() });
+      const scannerRuns = error && typeof error === 'object' && 'scannerRuns' in error && Array.isArray(error.scannerRuns) ? error.scannerRuns : [];
+      if (saved) Object.assign(saved, { scannerRuns, status: cancelled ? 'cancelled' : 'failed', completedAt: Date.now() });
       save(current);
       emit({ phase: cancelled ? 'cancelled' : 'failed', percent: 100, message: cancelled ? '扫描已取消' : error instanceof Error ? error.message : '扫描失败' });
     } finally { jobs.delete(jobId); }
@@ -96,10 +98,10 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
 export function cancelScan(jobId: string): boolean { const job = jobs.get(jobId); if (!job) return false; job.abort(); return true; }
 export function listFindings(projectDir: string): SecurityFinding[] { return lastFindings(load(), projectDir); }
 export function listScans(projectDir: string): ScanRecord[] { return load().scans.filter((scan) => scan.projectDir === projectDir); }
-export async function listScanners(force = false): Promise<Array<{ id: string; name: string; available: boolean; builtIn: boolean; version?: string; error?: string; checkedAt: number }>> {
-  const external = await listExternalScannerAvailability(force);
+export async function listScanners(projectDir?: string, networkPolicy: 'deny' | 'allow' = 'deny', force = false): Promise<import('../../core/security-audit').ScannerStatus[]> {
+  const external = await listExternalScannerAvailability(projectDir, networkPolicy, force);
   return [
-    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, available: true, builtIn: true, version: '内置', checkedAt: Date.now() })),
+    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, installed: true, ready: true, builtIn: true, version: '内置', checkedAt: Date.now() })),
     ...external.map((scanner) => ({ ...scanner, builtIn: false })),
   ];
 }

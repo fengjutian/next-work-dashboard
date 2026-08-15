@@ -17,7 +17,7 @@ export const securityAuditBridge = {
     set: (key: string, value: string) => ipcRenderer.invoke('security-audit:settings:set', key, value),
   },
   scan: {
-    start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => ipcRenderer.invoke('security-audit:scan:start', input),
+    start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; networkPolicy?: 'deny' | 'allow'; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => ipcRenderer.invoke('security-audit:scan:start', input),
     cancel: (jobId: string) => ipcRenderer.invoke('security-audit:scan:cancel', jobId),
     onProgress: (callback: (progress: ScanProgress) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, progress: ScanProgress) => callback(progress);
@@ -29,6 +29,6 @@ export const securityAuditBridge = {
     list: (projectDir: string) => ipcRenderer.invoke('security-audit:findings:list', projectDir),
   },
   scans: { list: (projectDir: string) => ipcRenderer.invoke('security-audit:scans:list', projectDir) },
-  scanners: { list: (force?: boolean) => ipcRenderer.invoke('security-audit:scanners:list', force) },
+  scanners: { list: (input?: { projectDir?: string; networkPolicy?: 'deny' | 'allow'; force?: boolean }) => ipcRenderer.invoke('security-audit:scanners:list', input) },
   report: { exportSarif: (projectDir: string) => ipcRenderer.invoke('security-audit:report:export-sarif', projectDir) },
 };
