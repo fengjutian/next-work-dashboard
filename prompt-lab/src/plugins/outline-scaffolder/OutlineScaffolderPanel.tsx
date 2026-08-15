@@ -36,7 +36,7 @@ interface SavedProject {
   files: string[];
   updatedAt: number;
   git?: { remoteUrl: string; remoteName: string; branch: string };
-  pages?: { title: string; description: string; author: string; language: string; repositoryName: string; customDomain: string };
+  pages?: { title: string; description: string; author: string; language: string; repositoryName: string; customDomain: string; accentColor?: string };
 }
 
 function loadSavedProjects(): SavedProject[] {
@@ -101,11 +101,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [gitBranch, setGitBranch] = useState('main');
   const [pagesOpen, setPagesOpen] = useState(false);
   const [pagesTitle, setPagesTitle] = useState(projectTitle);
-  const [pagesDescription, setPagesDescription] = useState('我的文档在线阅读');
+  const [pagesDescription, setPagesDescription] = useState('秦末起义与汉王朝的建立');
   const [pagesAuthor, setPagesAuthor] = useState('作者');
   const [pagesLanguage, setPagesLanguage] = useState('zh-CN');
   const [pagesRepositoryName, setPagesRepositoryName] = useState('my-book');
   const [pagesCustomDomain, setPagesCustomDomain] = useState('');
+  const [pagesAccentColor, setPagesAccentColor] = useState('#6d285f');
   const aiRequestRef = useRef(0);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const documents = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
@@ -149,13 +150,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const timer = window.setTimeout(() => {
       setRecentProjects((current) => current.map((project) => project.id === activeProjectId ? {
         ...project,
-        git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
-        pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain },
+      git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
+        pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
         updatedAt: Date.now(),
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, gitBranch, gitRemoteName, gitRemoteUrl, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
+  }, [activeProjectId, gitBranch, gitRemoteName, gitRemoteUrl, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle]);
 
   const switchView = (next: 'generator' | 'documents') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -188,8 +189,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       template: overrides?.template ?? template,
       files: paths,
       updatedAt: Date.now(),
-      git: overrides?.git ?? { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
-      pages: overrides?.pages ?? { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain },
+      git: overrides?.git ?? { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
+      pages: overrides?.pages ?? { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
     };
     setRecentProjects((current) => [project, ...current.filter((item) => item.id !== project.id)].slice(0, 20));
   };
@@ -225,6 +226,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setGitRemoteUrl(project.git?.remoteUrl ?? ''); setGitRemoteName(project.git?.remoteName ?? 'origin'); setGitBranch(project.git?.branch ?? 'main');
       setPagesTitle(project.pages?.title ?? project.name); setPagesDescription(project.pages?.description ?? `${project.name}在线阅读`); setPagesAuthor(project.pages?.author ?? '作者');
       setPagesLanguage(project.pages?.language ?? 'zh-CN'); setPagesRepositoryName(project.pages?.repositoryName ?? 'my-book'); setPagesCustomDomain(project.pages?.customDomain ?? '');
+      setPagesAccentColor(project.pages?.accentColor ?? '#6d285f');
       setManagedFiles(project.files); setView('documents'); setActiveFile(''); setDocumentContent(''); setSavedContent('');
       await loadExistingDocuments(folder, project.subfolder, false, false);
       setRecentProjects((current) => current.map((item) => item.id === project.id ? { ...item, updatedAt: Date.now() } : item).sort((a, b) => b.updatedAt - a.updatedAt));
@@ -315,7 +317,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setGitRepository(true);
       setOutputIsGitRepository(true);
       const prefix = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
-      const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/index.md` : 'index.md', prefix ? `${prefix}/404.md` : '404.md', prefix ? `${prefix}/_config.yml` : '_config.yml', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json', '.github/workflows/pages.yml']);
+      const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/index.md` : 'index.md', prefix ? `${prefix}/404.md` : '404.md', prefix ? `${prefix}/_config.yml` : '_config.yml', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json', prefix ? `${prefix}/_layouts/default.html` : '_layouts/default.html', prefix ? `${prefix}/_layouts/article.html` : '_layouts/article.html', prefix ? `${prefix}/_layouts/home.html` : '_layouts/home.html', prefix ? `${prefix}/assets/css/reader.css` : 'assets/css/reader.css', '.github/workflows/pages.yml']);
       const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
         .filter((item) => !item.path.startsWith('.history/') && !item.path.includes('/.history/'))
         .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) || item.path === '.github/workflows/pages.yml' : known.has(item.path));
@@ -325,8 +327,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const persistDeploymentSettings = () => {
     if (!target || !managedFiles.length) return;
     rememberProject(target, managedFiles, {
-      git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
-      pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain },
+        git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
+      pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
     });
   };
 
@@ -392,6 +394,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const publishToRemote = async () => {
     if (!target || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()) return;
+    if (/^https?:\/\/[^/@]+@/i.test(gitRemoteUrl.trim())) { setGitError('远程地址中不要包含用户名、Token 或密码，请使用 Git Credential Manager。'); return; }
     if (dirty) { setGitError('当前文档尚未保存，请先保存后再发布。'); return; }
     setGitLoading(true); setGitError('');
     try {
@@ -452,27 +455,36 @@ export const OutlineScaffolderPanel: React.FC = () => {
     try {
       const siteFolder = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
       const inSite = (name: string) => siteFolder ? `${siteFolder}/${name}` : name;
-      for (const file of managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path))) {
+      const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path));
+      for (const [order, file] of chapterFiles.entries()) {
         const read = await window.electronAPI.workspace.readTextFile(target.path, file);
         if (!read.success || !read.data) continue;
-        if (/^---\s*\r?\n/.test(read.data.content)) continue;
         const title = file.split('/').pop()?.replace(/\.md$/i, '').replace(/^\d+-/, '') ?? '文章';
-        const content = `---\nlayout: default\ntitle: ${JSON.stringify(title)}\n---\n\n${read.data.content}`;
+        const body = read.data.content.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n+/, '').replace(/^#\s+.*\r?\n+/, '');
+        const content = `---\nlayout: article\ntitle: ${JSON.stringify(title)}\nchapter: true\norder: ${order + 1}\n---\n\n${body}`;
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, file, content, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: read.data.modifiedAt });
         if (!updated.success) throw new Error(updated.error);
       }
-      const chapterLinks = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path)).map((path) => {
-        const relative = siteFolder && path.startsWith(`${siteFolder}/`) ? path.slice(siteFolder.length + 1) : path;
-        const title = path.split('/').pop()?.replace(/\.md$/i, '').replace(/^\d+-/, '') ?? path;
-        return `- [${title}](${encodeURI(relative.replace(/\.md$/i, '.html'))})`;
-      }).join('\n');
       const baseUrl = pagesRepositoryName.trim() ? `/${pagesRepositoryName.trim().replace(/^\/+|\/+$/g, '')}` : '';
-      const config = `title: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\ndescription: ${JSON.stringify(pagesDescription.trim())}\nauthor: ${JSON.stringify(pagesAuthor.trim())}\nlang: ${JSON.stringify(pagesLanguage.trim() || 'zh-CN')}\ntheme: minima\nbaseurl: ${JSON.stringify(baseUrl)}\nurl: ${JSON.stringify(pagesCustomDomain.trim() ? `https://${pagesCustomDomain.trim().replace(/^https?:\/\//, '')}` : '')}\nplugins:\n  - jekyll-feed\n  - jekyll-seo-tag\nexclude:\n  - .history\n  - .chapter-project.json\n`;
-      const index = `---\nlayout: home\ntitle: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\n---\n\n${pagesDescription.trim()}\n\n## 章节目录\n\n${chapterLinks}\n`;
+      const config = `title: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\ndescription: ${JSON.stringify(pagesDescription.trim())}\nauthor: ${JSON.stringify(pagesAuthor.trim())}\nlang: ${JSON.stringify(pagesLanguage.trim() || 'zh-CN')}\nbaseurl: ${JSON.stringify(baseUrl)}\nurl: ${JSON.stringify(pagesCustomDomain.trim() ? `https://${pagesCustomDomain.trim().replace(/^https?:\/\//, '')}` : '')}\nplugins:\n  - jekyll-feed\n  - jekyll-seo-tag\nexclude:\n  - .history\n  - .chapter-project.json\n`;
+      const index = `---\nlayout: home\ntitle: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\n---\n\n${pagesDescription.trim() || `${projectTitle}在线阅读`}\n`;
       const notFound = `---\nlayout: default\ntitle: 页面未找到\npermalink: /404.html\n---\n\n# 页面未找到\n\n这页似乎比作者先下班了。请返回[首页]({{ site.baseurl }}/)。\n`;
+      const defaultLayout = `<!doctype html>\n<html lang="{{ site.lang | default: 'zh-CN' }}">\n<head>\n  <meta charset="utf-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1">\n  {% seo %}\n  {% feed_meta %}\n  <link rel="stylesheet" href="{{ '/assets/css/reader.css' | relative_url }}">\n</head>\n<body>\n  <header class="mobile-header"><a href="{{ '/' | relative_url }}">{{ site.title }}</a><button onclick="document.body.classList.toggle('nav-open')" aria-label="切换目录">目录</button></header>\n  <div class="book-shell">\n    <aside class="book-nav">\n      <a class="brand" href="{{ '/' | relative_url }}"><span class="brand-mark">阅</span><span><strong>{{ site.title }}</strong><small>{{ site.description }}</small></span></a>\n      <nav><div class="nav-label">章节目录</div><ol>{% assign chapters = site.pages | where: 'chapter', true | sort: 'order' %}{% for chapter in chapters %}<li><a href="{{ chapter.url | relative_url }}" {% if page.url == chapter.url %}class="active"{% endif %}><span>{{ chapter.order | prepend: '0' | slice: -2, 2 }}</span>{{ chapter.title }}</a></li>{% endfor %}</ol></nav>\n      <footer>{{ site.author }} · {{ 'now' | date: '%Y' }}</footer>\n    </aside>\n    <main class="book-main">{{ content }}</main>\n  </div>\n</body>\n</html>\n`;
+      const articleLayout = `---\nlayout: default\n---\n<article class="reading"><div class="eyebrow">第 {{ page.order }} 章</div><h1>{{ page.title }}</h1><div class="divider"></div>{{ content }}</article>\n`;
+      const homeLayout = `---\nlayout: default\n---\n<section class="hero"><span class="hero-kicker">在线阅读</span><h1>{{ site.title }}</h1><p>{{ content | strip_html }}</p><a class="start-reading" href="{{ site.pages | where: 'chapter', true | sort: 'order' | map: 'url' | first | relative_url }}">开始阅读 →</a></section><section class="chapter-section"><div class="section-heading"><span>CONTENTS</span><h2>章节目录</h2></div><div class="chapter-grid">{% assign chapters = site.pages | where: 'chapter', true | sort: 'order' %}{% for chapter in chapters %}<a class="chapter-card" href="{{ chapter.url | relative_url }}"><span>{{ chapter.order | prepend: '0' | slice: -2, 2 }}</span><h3>{{ chapter.title }}</h3><em>阅读本章 →</em></a>{% endfor %}</div></section>\n`;
+      const accent = /^#[0-9a-f]{6}$/i.test(pagesAccentColor) ? pagesAccentColor : '#6d285f';
+      const css = `:root{--accent:${accent};--accent-soft:color-mix(in srgb,var(--accent) 10%,white);--paper:#fbfaf8;--ink:#252220;--muted:#766f69;--line:#e7e1dc;--nav:300px}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;-webkit-font-smoothing:antialiased}.book-shell{min-height:100vh}.book-nav{position:fixed;inset:0 auto 0 0;width:var(--nav);display:flex;flex-direction:column;padding:32px 22px;background:#fff;border-right:1px solid var(--line);overflow:auto}.brand{display:flex;gap:13px;align-items:center;color:inherit;text-decoration:none}.brand-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:var(--accent);color:#fff;font-size:20px}.brand strong,.brand small{display:block}.brand strong{font-size:18px}.brand small{max-width:180px;margin-top:3px;color:var(--muted);font:12px/1.4 system-ui,sans-serif}.book-nav nav{margin-top:42px}.nav-label{margin:0 10px 12px;color:#aaa;font:600 11px system-ui,sans-serif;letter-spacing:.16em}.book-nav ol{margin:0;padding:0;list-style:none}.book-nav li a{display:flex;gap:12px;align-items:center;padding:9px 10px;border-radius:9px;color:#514b47;text-decoration:none;font:14px/1.45 system-ui,sans-serif}.book-nav li a span{color:#aaa;font-size:11px}.book-nav li a:hover,.book-nav li a.active{background:var(--accent-soft);color:var(--accent)}.book-nav footer{margin-top:auto;padding:28px 10px 0;color:#aaa;font:11px system-ui,sans-serif}.book-main{margin-left:var(--nav);min-height:100vh}.reading{max-width:820px;margin:0 auto;padding:80px 56px 120px}.reading .eyebrow,.hero-kicker{color:var(--accent);font:600 12px system-ui,sans-serif;letter-spacing:.18em}.reading h1{margin:12px 0 22px;font-size:42px;line-height:1.25}.divider{width:52px;height:3px;margin-bottom:46px;background:var(--accent)}.reading h2{margin:2.2em 0 .8em;font-size:26px}.reading h3{margin:1.8em 0 .7em;font-size:20px}.reading p,.reading li{font-size:18px;line-height:2;text-align:justify}.reading blockquote{margin:2em 0;padding:18px 24px;border-left:3px solid var(--accent);background:var(--accent-soft);color:#514b47}.reading img{max-width:100%;border-radius:12px}.reading code{padding:.15em .4em;border-radius:5px;background:#f0ece8;font-family:ui-monospace,monospace}.hero{padding:110px max(7vw,50px) 80px;background:radial-gradient(circle at 85% 10%,var(--accent-soft),transparent 34%),#fff;border-bottom:1px solid var(--line)}.hero h1{max-width:850px;margin:16px 0 20px;font-size:clamp(42px,6vw,76px);line-height:1.08}.hero p{max-width:680px;color:var(--muted);font-size:18px;line-height:1.8}.start-reading{display:inline-block;margin-top:24px;padding:13px 22px;border-radius:999px;background:var(--accent);color:#fff;text-decoration:none;font:600 14px system-ui,sans-serif}.chapter-section{padding:70px max(5vw,42px) 100px}.section-heading span{color:var(--accent);font:600 11px system-ui,sans-serif;letter-spacing:.2em}.section-heading h2{margin:8px 0 30px;font-size:32px}.chapter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.chapter-card{min-height:160px;padding:24px;border:1px solid var(--line);border-radius:16px;background:#fff;color:inherit;text-decoration:none;transition:.2s}.chapter-card:hover{transform:translateY(-3px);border-color:var(--accent);box-shadow:0 14px 35px rgba(45,33,27,.08)}.chapter-card>span{color:var(--accent);font:600 12px system-ui,sans-serif}.chapter-card h3{margin:18px 0 28px;font-size:19px}.chapter-card em{color:var(--muted);font:normal 12px system-ui,sans-serif}.mobile-header{display:none}@media(prefers-color-scheme:dark){:root{--paper:#191817;--ink:#eee9e4;--muted:#aaa29b;--line:#393532}.book-nav,.hero,.chapter-card{background:#211f1d}.reading code{background:#2d2926}}@media(max-width:840px){.mobile-header{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;padding:14px 18px;background:color-mix(in srgb,var(--paper) 92%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}.mobile-header a{color:inherit;text-decoration:none;font-weight:700}.mobile-header button{border:0;background:none;color:var(--accent)}.book-nav{z-index:30;transform:translateX(-102%);transition:.25s;box-shadow:12px 0 40px rgba(0,0,0,.12)}.nav-open .book-nav{transform:none}.book-main{margin-left:0}.reading{padding:54px 24px 90px}.reading h1{font-size:34px}.reading p,.reading li{font-size:17px;line-height:1.9}.hero{padding:70px 24px 60px}.chapter-section{padding:48px 20px 80px}}`;
+      for (const directory of [inSite('_layouts'), inSite('assets'), inSite('assets/css')]) {
+        const created = await window.electronAPI.workspace.createDirectory(target.path, directory);
+        if (!created.success && !/EEXIST|ALREADY_EXISTS/.test(String(created.error))) throw new Error(created.error);
+      }
       await upsertWorkspaceFile(inSite('_config.yml'), config);
       await upsertWorkspaceFile(inSite('index.md'), index);
       await upsertWorkspaceFile(inSite('404.md'), notFound);
+      await upsertWorkspaceFile(inSite('_layouts/default.html'), defaultLayout);
+      await upsertWorkspaceFile(inSite('_layouts/article.html'), articleLayout);
+      await upsertWorkspaceFile(inSite('_layouts/home.html'), homeLayout);
+      await upsertWorkspaceFile(inSite('assets/css/reader.css'), css);
       for (const directory of ['.github', '.github/workflows']) {
         const created = await window.electronAPI.workspace.createDirectory(target.path, directory);
         if (!created.success && !/EEXIST|ALREADY_EXISTS/.test(String(created.error))) throw new Error(created.error);
@@ -641,7 +653,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => applyAiResult('append')}>追加到文档</Button><Button disabled={!aiResult || aiLoading} onClick={() => applyAiResult('replace')}>替换文档</Button></div>
       </aside>}
       {gitOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
-        <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
+        <div className="border-b border-border p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><label className="flex items-center gap-2 text-xs text-muted-foreground">网站主题色<input type="color" value={pagesAccentColor} onChange={(event) => setPagesAccentColor(event.target.value)} className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" /></label></div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
         <div className="max-h-[58vh] space-y-3 overflow-auto border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>本地提交 {gitChanges.length}</Button></div><div className="border-t border-border pt-3"><div className="mb-2 text-xs font-medium">推送到新的远程仓库</div><input value={gitRemoteUrl} onChange={(event) => setGitRemoteUrl(event.target.value)} placeholder="https://github.com/user/repo.git 或 git@..." className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><div className="grid grid-cols-2 gap-2"><input value={gitRemoteName} onChange={(event) => setGitRemoteName(event.target.value)} placeholder="origin" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><input value={gitBranch} onChange={(event) => setGitBranch(event.target.value)} placeholder="main" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></div><Button className="mt-2 w-full" disabled={gitLoading || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()} onClick={publishToRemote}>提交并推送到远程仓库</Button><p className="mt-2 text-xs text-muted-foreground">HTTPS 凭据由 Git Credential Manager 管理；SSH 地址使用系统 SSH Key。</p></div><div className="border-t border-border pt-3"><button type="button" className="flex w-full items-center justify-between text-left text-xs font-medium" onClick={() => setPagesOpen((value) => !value)}><span>GitHub Pages 配置</span><span>{pagesOpen ? '收起' : '展开'}</span></button>{pagesOpen && <div className="mt-3 space-y-2"><input value={pagesTitle} onChange={(event) => setPagesTitle(event.target.value)} placeholder="站点标题" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><textarea value={pagesDescription} onChange={(event) => setPagesDescription(event.target.value)} placeholder="站点描述（用于首页与 SEO）" className="h-16 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /><div className="grid grid-cols-2 gap-2"><input value={pagesAuthor} onChange={(event) => setPagesAuthor(event.target.value)} placeholder="作者" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesLanguage} onChange={(event) => setPagesLanguage(event.target.value)} placeholder="zh-CN" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></div><input value={pagesRepositoryName} onChange={(event) => setPagesRepositoryName(event.target.value)} placeholder="仓库名（项目站点需要，例如 my-book）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesCustomDomain} onChange={(event) => setPagesCustomDomain(event.target.value)} placeholder="自定义域名（可选，例如 book.example.com）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><Button className="w-full" disabled={gitLoading || !managedFiles.length} onClick={configureGitHubPages}>生成 GitHub Pages 配置</Button><p className="text-xs text-muted-foreground">主题：Minima；包含 SEO、RSS、404、章节首页和自动部署 workflow。</p>{pagesCustomDomain.trim() && <p className="text-xs text-amber-700">自定义域名仍需在 GitHub 仓库 Settings → Pages 中配置并完成 DNS 验证。</p>}</div>}</div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
         <div className="min-h-0 flex-1 overflow-auto p-3">{gitChanges.length ? gitChanges.map((change) => <div key={change.path} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted"><span className="w-6 shrink-0 font-mono text-primary">{change.status.trim() || 'M'}</span><span className="truncate" title={change.path}>{change.path}</span></div>) : !gitLoading && !gitError ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">文章目录没有待提交的改动</div> : null}</div>
       </aside>}
