@@ -288,6 +288,18 @@ function ensureSchema(): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_hanyu_jinjie_executions_time ON hanyu_jinjie_executions(created_at DESC);
+    CREATE TABLE IF NOT EXISTS classical_readings (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT '',
+      original_text TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_classical_readings_time ON classical_readings(created_at DESC);
     CREATE TABLE IF NOT EXISTS document_knowledge_records (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL,
       sections TEXT NOT NULL DEFAULT '[]', plain_text TEXT NOT NULL DEFAULT '', chunks TEXT NOT NULL DEFAULT '[]',
@@ -1008,6 +1020,39 @@ export function dbDeleteHanyuJinjieExecution(id: string): void {
 
 export function dbUpdateHanyuJinjieExecution(id: string, patch: Partial<Pick<HanyuJinjieExecution, 'svgContent' | 'explanation'>>): void {
   getDb().update(schema.hanyuJinjieExecutions).set(patch).where(eq(schema.hanyuJinjieExecutions.id, id)).run();
+}
+
+// ═══════════════════════════════════════════
+// 古文阅读 — 用户原文 + LLM 精读卡片（Markdown）
+// ═══════════════════════════════════════════
+
+export interface ClassicalReading {
+  id: string;
+  title: string;
+  source: string;
+  originalText: string;
+  status: 'success' | 'error';
+  content: string;
+  error: string;
+  model: string;
+  createdAt: number;
+}
+
+export function dbSaveClassicalReading(reading: ClassicalReading): void {
+  getDb().insert(schema.classicalReadings).values(reading).run();
+}
+
+export function dbLoadClassicalReadings(limit = 30): ClassicalReading[] {
+  return getDb()
+    .select()
+    .from(schema.classicalReadings)
+    .orderBy(desc(schema.classicalReadings.createdAt))
+    .limit(Math.max(1, Math.min(200, limit)))
+    .all() as ClassicalReading[];
+}
+
+export function dbDeleteClassicalReading(id: string): void {
+  getDb().delete(schema.classicalReadings).where(eq(schema.classicalReadings.id, id)).run();
 }
 
 // ═══════════════════════════════════════════

@@ -579,10 +579,13 @@ export function setupIPC(webviewPreloadPath: string) {
 
   ipcMain.handle('video-generation:create', async (_event, payload: import('../plugins/video-generation/types').VideoGenerationRequest) => {
     try {
-      const normalized = (await import('../plugins/video-generation/core/api')).normalizeRequest(payload);
-      if (!normalized.ok) return { success: false, error: normalized.error };
+      const apiModule = await import('../plugins/video-generation/core/api');
+      const normalized = apiModule.normalizeRequest(payload);
+      if (normalized.ok !== true) {
+        return { success: false, error: normalized.error };
+      }
       const api = normalized.value;
-      const { buildCreateRequest, parseSubmitResponse } = await import('../plugins/video-generation/core/api');
+      const { buildCreateRequest, parseSubmitResponse } = apiModule;
       const { endpoint, init } = buildCreateRequest(api);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60_000);

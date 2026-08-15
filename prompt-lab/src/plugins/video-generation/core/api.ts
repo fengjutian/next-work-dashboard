@@ -173,12 +173,16 @@ export function parseSubmitResponse(payload: unknown): VideoGenerationSubmitResu
   const body = payload as { task_id?: string; base_resp?: { status_code?: number; status_msg?: string } };
   const statusCode = body.base_resp?.status_code;
   if (statusCode && statusCode !== 0) {
-    return { success: false, baseResp: body.base_resp, error: body.base_resp?.status_msg || `MiniMax 返回 status_code=${statusCode}` };
+    return {
+      success: false,
+      baseResp: { statusCode, statusMsg: body.base_resp?.status_msg },
+      error: body.base_resp?.status_msg || `MiniMax 返回 status_code=${statusCode}`,
+    };
   }
   if (!body.task_id) {
     return { success: false, error: '提交成功但未返回 task_id' };
   }
-  return { success: true, taskId: body.task_id, baseResp: body.base_resp };
+  return { success: true, taskId: body.task_id, baseResp: { statusCode: 0, statusMsg: body.base_resp?.status_msg } };
 }
 
 /** 轮询间隔（毫秒）。官方建议 10s，向上暴露常量供 main 进程使用 */

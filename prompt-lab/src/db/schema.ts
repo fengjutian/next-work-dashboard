@@ -118,6 +118,19 @@ export const hanyuJinjieExecutions = sqliteTable('hanyu_jinjie_executions', {
   createdAt: integer('created_at').notNull(),
 });
 
+// 古文阅读 — 用户粘贴的原文与 LLM 生成的精读卡片（Markdown）
+export const classicalReadings = sqliteTable('classical_readings', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  source: text('source').notNull().default(''),
+  originalText: text('original_text').notNull().default(''),
+  status: text('status').notNull(),
+  content: text('content').notNull().default(''),
+  error: text('error').notNull().default(''),
+  model: text('model').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+});
+
 export const documentKnowledgeRecords = sqliteTable('document_knowledge_records', {
   id: text('id').primaryKey(), name: text('name').notNull(), kind: text('kind').notNull(), size: integer('size').notNull(),
   sections: text('sections').notNull().default('[]'), plainText: text('plain_text').notNull().default(''), chunks: text('chunks').notNull().default('[]'),

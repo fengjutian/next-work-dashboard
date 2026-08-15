@@ -829,7 +829,7 @@ export interface ChapterProjectRecord {
   chapterBriefs?: Record<string, { goal: string; targetWords: number; keyQuestions: string; requiredSources: string; avoidTopics: string }>;
   chapterStatuses?: Record<string, { state: 'pending' | 'generating' | 'review' | 'complete' | 'error'; error?: string; updatedAt: number }>;
   knowledgeEntries?: Array<{ id: string; kind: 'person' | 'event' | 'place' | 'term' | 'date'; name: string; canonical: string; aliases: string; notes: string }>;
-  evidenceRecords?: Array<{ id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; createdAt: number }>;
+  evidenceRecords?: Array<{ id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; anchor?: { quote: string }; createdAt: number }>;
   qualityReports?: Record<string, { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }>;
   deploymentStatus?: { state: 'unconfigured' | 'configured' | 'publishing' | 'published' | 'failed'; url?: string; message?: string; updatedAt: number };
   splitMode: 'chapter' | 'section' | 'single';

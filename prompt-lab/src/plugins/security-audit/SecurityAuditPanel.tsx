@@ -5,7 +5,7 @@
  * Phase 2 会把 mock 数据换成真实 deepsec 进程输出流。
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { FolderOpen, Play, Shield, X } from '@/components/icons';
+import { FolderOpen, Play, ShieldAudit, X } from '@/components/icons';
 import { Alert, Button, Card, Empty, Modal, Progress, Space, Spin, Tag, ToastHost, message } from './ui';
 import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanPhase, type ScanProgress } from './constants';
 
@@ -194,7 +194,7 @@ export function SecurityAuditPanel(): JSX.Element {
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-5">
         <Space>
-          <Shield className="h-4 w-4" />
+          <ShieldAudit className="h-4 w-4" />
           <span className="text-sm font-semibold">Security Audit</span>
           {scannedDir && <Tag>{scannedDir}</Tag>}
         </Space>

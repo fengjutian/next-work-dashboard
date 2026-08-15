@@ -110,9 +110,10 @@ interface ChapterWritingBrief {
 }
 
 interface KnowledgeEntry { id: string; kind: 'person' | 'event' | 'place' | 'term' | 'date'; name: string; canonical: string; aliases: string; notes: string }
-interface EvidenceRecord { id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; createdAt: number }
+interface EvidenceRecord { id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; anchor?: { quote: string }; createdAt: number }
 interface ChapterQualityReport { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }
 interface ReviewSuggestion { id: string; section: string; position: string; issue: string; suggestion: string; decision: 'pending' | 'accepted' | 'rejected' }
+interface ReviewPatch { id: string; suggestionId: string; original: string; replacement: string; state: 'ready' | 'applied' | 'conflict' }
 interface DeploymentStatus { state: 'unconfigured' | 'configured' | 'publishing' | 'published' | 'failed'; url?: string; message?: string; updatedAt: number }
 
 type ChapterGenerationState = 'pending' | 'generating' | 'review' | 'complete' | 'error';
@@ -162,11 +163,15 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [evidenceRecords, setEvidenceRecords] = useState<EvidenceRecord[]>([]);
   const [qualityReports, setQualityReports] = useState<Record<string, ChapterQualityReport>>({});
   const [reviewSuggestions, setReviewSuggestions] = useState<ReviewSuggestion[]>([]);
+  const [reviewPatches, setReviewPatches] = useState<ReviewPatch[]>([]);
+  const [reviewPatchLoading, setReviewPatchLoading] = useState(false);
   const [deploymentStatus, setDeploymentStatus] = useState<DeploymentStatus>({ state: 'unconfigured', updatedAt: 0 });
   const [deploymentChecking, setDeploymentChecking] = useState(false);
   const [pagesRunUrl, setPagesRunUrl] = useState('');
   const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'quality' | 'publish'>('overview');
   const [auditLoading, setAuditLoading] = useState(false);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [manifestSyncState, setManifestSyncState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [consistencyIssues, setConsistencyIssues] = useState<string[]>([]);
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0, current: '' });
@@ -234,6 +239,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [pagesCustomDomain, setPagesCustomDomain] = useState('');
   const [pagesAccentColor, setPagesAccentColor] = useState('#6d285f');
   const aiRequestRef = useRef(0);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const baseDocuments = useMemo(() => createChapterDocuments(nodes, { folder: subfolder, splitMode, organizeByPart, projectTitle, template }), [nodes, organizeByPart, projectTitle, splitMode, subfolder, template]);
   const documents = useMemo(() => baseDocuments.map((document) => ({ ...document, content: attachChapterBrief(document.content, chapterBriefs[document.path]) })), [baseDocuments, chapterBriefs]);

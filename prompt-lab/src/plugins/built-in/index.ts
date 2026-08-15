@@ -57,11 +57,13 @@ const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ def
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ default: m.ThinkingLabPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
+const securityAudit = preloadable(() => import('../security-audit').then((m) => ({ default: m.SecurityAuditPanel })));
 const videoGeneration = preloadable(() => import('../video-generation').then((m) => ({ default: m.VideoGenerationPanel })));
 const englishLookup = preloadable(() => import('../english-lookup').then((m) => ({ default: m.EnglishLookupPanel })));
 const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default: m.CalcPathPanel })));
 const rssReader = preloadable(() => import('../rss-reader').then((m) => ({ default: m.RssReaderPanel })));
 const outlineScaffolder = preloadable(() => import('../outline-scaffolder').then((m) => ({ default: m.OutlineScaffolderPanel })));
+const classicalReading = preloadable(() => import('../classical-reading').then((m) => ({ default: m.ClassicalReadingPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -92,11 +94,13 @@ const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const ThinkingLabPanel = thinkingLab.component;
 const WorkBrowserPanel = workBrowser.component;
+const SecurityAuditPanel = securityAudit.component;
 const VideoGenerationPanel = videoGeneration.component;
 const EnglishLookupPanel = englishLookup.component;
 const CalcPathPanel = calcPath.component;
 const RssReaderPanel = rssReader.component;
 const OutlineScaffolderPanel = outlineScaffolder.component;
+const ClassicalReadingPanel = classicalReading.component;
 
 const builtInPlugins: Plugin[] = [
   {
@@ -427,6 +431,14 @@ const builtInPlugins: Plugin[] = [
     order: 20,
   },
   {
+    id: 'classical-reading',
+    name: '古文阅读',
+    icon: BookOpen,
+    component: ClassicalReadingPanel,
+    enabled: true,
+    order: 21,
+  },
+  {
     id: 'lingohut',
     name: 'LingoHut 语言学习',
     icon: Languages,
@@ -519,6 +531,36 @@ const builtInPlugins: Plugin[] = [
         { key: 'workBrowser.ai.baseUrl', label: 'AI 服务 baseUrl（OpenAI-compatible）', type: 'string', default: 'https://api.openai.com/v1' },
         { key: 'workBrowser.ai.apiKey', label: 'AI 服务 API Key', type: 'string' },
         { key: 'workBrowser.ai.model', label: 'AI 模型', type: 'string', default: 'gpt-4o-mini' },
+      ],
+    },
+  },
+  {
+    id: 'security-audit',
+    name: 'Security Audit',
+    icon: ShieldAudit,
+    component: SecurityAuditPanel,
+    enabled: false,
+    order: 10,
+    keepAlive: true,
+    preload: () => import('../security-audit'),
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('security-audit.run-scan', () => {
+        window.dispatchEvent(new CustomEvent('security-audit:command', { detail: { command: 'run-scan' } }));
+      }));
+      context.subscriptions.add(context.commands.register('security-audit.open-settings', () => {
+        window.dispatchEvent(new CustomEvent('security-audit:command', { detail: { command: 'open-settings' } }));
+      }));
+    },
+    contributions: {
+      commands: [
+        { id: 'security-audit.run-scan', title: 'Security Scan — 扫描当前项目', category: 'Security Audit' },
+        { id: 'security-audit.open-settings', title: 'Security Audit 设置', category: 'Security Audit' },
+      ],
+      settings: [
+        { key: 'securityAudit.ai.baseUrl', label: 'AI 服务 baseUrl（OpenAI-compatible）', type: 'string', default: 'https://api.openai.com/v1' },
+        { key: 'securityAudit.ai.apiKey', label: 'AI 服务 API Key', type: 'string' },
+        { key: 'securityAudit.ai.model', label: 'AI 模型', type: 'string', default: 'gpt-4o-mini' },
+        { key: 'securityAudit.sandboxMode', label: '执行模式（v1 仅占位，v2 实现）', type: 'string', default: 'local' },
       ],
     },
   },
