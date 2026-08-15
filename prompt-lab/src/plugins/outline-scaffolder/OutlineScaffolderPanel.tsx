@@ -346,6 +346,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const evidence = evidenceRecords.filter((item) => item.chapter === path);
     if (!/^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m.test(content)) warnings.push('没有文末参考资料区');
     if (!evidence.some((item) => item.status === 'verified')) warnings.push('没有已核实的证据记录');
+    else if (!evidence.some((item) => item.status === 'verified' && item.anchor?.quote && content.includes(item.anchor.quote))) warnings.push('已核实史料尚未绑定到正文观点');
     if ((content.match(/^##\s+/gm) ?? []).length === 0) warnings.push('缺少二级标题，长文可读性较弱');
     const score = Math.max(0, 100 - blockers.length * 25 - warnings.length * 8);
     return { score, blockers, warnings, wordCount: words, checkedAt: Date.now() };
@@ -615,9 +616,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const result = await window.electronAPI.workspace.listFiles(folder.path);
       if (!result.success) throw new Error(result.error);
       const requestedPrefix = projectFolder.trim() ? `${projectFolder.trim().replace(/\\/g, '/')}/` : '';
-      const manifestEntry = (result.data ?? []).find((entry) => entry.type === 'file' && entry.path.replace(/\\/g, '/').endsWith('/.chapter-project.json'));
-      const detectedFolder = manifestEntry?.path.replace(/\\/g, '/').replace(/\/.chapter-project\.json$/, '') ?? '';
-      const prefix = requestedPrefix && (result.data ?? []).some((entry) => entry.path.replace(/\\/g, '/').startsWith(requestedPrefix)) ? requestedPrefix : detectedFolder ? `${detectedFolder}/` : requestedPrefix;
+      const manifestEntry = (result.data ?? []).find((entry) => entry.type === 'file' && entry.path.replace(/\\/g, '/').endsWith('.chapter-project.json'));
+      const detectedFolder = manifestEntry?.path.replace(/\\/g, '/').replace(/(^|\/)\.chapter-project\.json$/, '').replace(/\/$/, '') ?? '';
+      const prefix = requestedPrefix && (result.data ?? []).some((entry) => entry.path.replace(/\\/g, '/').startsWith(requestedPrefix)) ? requestedPrefix : manifestEntry ? (detectedFolder ? `${detectedFolder}/` : '') : requestedPrefix;
       const allMarkdown = (result.data ?? []).filter((entry) => entry.type === 'file' && entry.path.toLowerCase().endsWith('.md'))
         .map((entry) => entry.path.replace(/\\/g, '/')).filter((path) => !path.startsWith('.history/') && !path.includes('/.history/'));
       const matched = allMarkdown.filter((path) => !prefix || path.startsWith(prefix));
@@ -1069,6 +1070,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!target) return ['未选择项目目录'];
     const issues: string[] = [];
     if (dirty) issues.push('当前文档有未保存修改');
+    if (manifestSyncState === 'saving') issues.push('.chapter-project.json 正在同步，请稍后重试');
     if (manifestSyncState === 'error') issues.push('.chapter-project.json 同步失败');
     const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path));
     const reports: Record<string, ChapterQualityReport> = { ...qualityReports };

@@ -121,6 +121,17 @@ export function buildQueryRequest(baseUrl: string, apiKey: string, taskId: strin
   };
 }
 
+/** 取消 / 删除上游任务。MiniMax 文档：取消排队中的任务，或删除成功和失败的任务记录。 */
+export function buildCancelRequest(baseUrl: string, apiKey: string, taskId: string): { endpoint: string; init: RequestInit } {
+  return {
+    endpoint: `${baseUrl.replace(/\/+$/, '')}/v2/video_generation/${encodeURIComponent(taskId)}`,
+    init: {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    },
+  };
+}
+
 /** 解析 MiniMax /v2/query 返回 — 文档结构：{ task: { status, content?: { url }, error? }, base_resp? } */
 export function parseTaskResponse(payload: unknown, taskId: string): VideoTaskInfo {
   if (!payload || typeof payload !== 'object') {

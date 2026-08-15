@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Download, FolderOpen, Loader2, Play, Plus, RefreshCw, Sparkles, Trash2 } from '@/components/icons';
+import { Copy, Download, FolderOpen, Loader2, Pause, Play, Plus, RefreshCw, Sparkles, Trash2, Upload, Video as VideoIcon, AudioLines, X } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { notification } from 'antd';
 import type {
@@ -24,8 +24,40 @@ import {
 const MINIMAX_KEY_STORAGE = 'nwd:video-generation:minimax-api-key';
 const MINIMAX_BASE_URL_STORAGE = 'nwd:video-generation:minimax-base-url';
 const POLL_STATE_STORAGE = 'nwd:video-generation:active-polls';
+const POLL_PAUSED_STORAGE = 'nwd:video-generation:polls-paused';
 const HISTORY_PAGE_SIZE = 12;
 const MAX_PROMPT_LENGTH = 7000;
+const POLL_STAGGER_MS = 1500; // 多个 active poll 错峰启动，避免一上线就把 MiniMax 打爆
+
+type ReferenceKind = 'image' | 'video' | 'audio';
+
+interface ReferenceItem {
+  /** 本地唯一 key（用于 React list） */
+  key: string;
+  /** 原始文件名 */
+  name: string;
+  /** 本地 mime type */
+  mimeType: string;
+  /** 本地图数据 ArrayBuffer，提交后释放 */
+  data: ArrayBuffer;
+  /** 上传后拿到的 HTTPS URL，未上传完成时为空 */
+  url: string;
+  /** 上传是否失败（用于 UI 提示） */
+  uploadError?: string;
+  /** 用户手动填的 HTTPS URL 模式（不走上传） */
+  manualUrl?: boolean;
+}
+
+const REFERENCE_ACCEPT: Record<ReferenceKind, string> = {
+  image: 'image/png,image/jpeg,image/webp,image/heic,image/heif',
+  video: 'video/mp4,video/quicktime',
+  audio: 'audio/wav,audio/mpeg,audio/x-wav',
+};
+const REFERENCE_SIZE_CAP: Record<ReferenceKind, number> = {
+  image: 30 * 1024 * 1024,
+  video: 50 * 1024 * 1024,
+  audio: 15 * 1024 * 1024,
+};
 
 const MODES: { id: VideoGenerationMode; label: string; description: string }[] = [
   { id: 'text-to-video', label: '文生视频', description: '只用文字描述生成视频。' },
@@ -92,6 +124,202 @@ function inferMode(record: StoredVideoRecord): VideoGenerationMode {
   return (record.mode as VideoGenerationMode) || 'text-to-video';
 }
 
+function inferReferenceKind(mimeType: string): ReferenceKind | null {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  return null;
+}
+
+function makeReferenceKey(): string {
+  return `ref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(blob);
+  });
+}
+
+interface ReferenceUploaderProps {
+  label: string;
+  kind: ReferenceKind;
+  item: ReferenceItem | null;
+  onChange: (item: ReferenceItem | null) => void;
+  onPick: (file: File) => void;
+  manualUrl: string;
+  onManualUrlChange: (value: string) => void;
+  manualPlaceholder: string;
+  hint?: string;
+}
+
+const ReferenceUploader: React.FC<ReferenceUploaderProps> = ({ label, kind, item, onChange, onPick, manualUrl, onManualUrlChange, manualPlaceholder, hint }) => {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>('');
+  useEffect(() => {
+    if (!item) { setPreviewUrl(''); return; }
+    if (item.url) { setPreviewUrl(''); return; } // 上传完后不显示本地图，避免大文件占用
+    if (item.data.byteLength > 0 && item.mimeType) {
+      blobToDataUrl(new Blob([item.data], { type: item.mimeType })).then(setPreviewUrl).catch(() => setPreviewUrl(''));
+    } else { setPreviewUrl(''); }
+    return () => { /* previewUrl 由 caller 决定是否 revoke（仅手动填 URL 时为空） */ };
+  }, [item]);
+  const handleFile = useCallback((file?: File) => { if (file) onPick(file); }, [onPick]);
+  const onDrop = useCallback((event: React.DragEvent) => { event.preventDefault(); handleFile(event.dataTransfer.files?.[0]); }, [handleFile]);
+
+  return (
+    <div className="mb-4 rounded-lg border bg-muted/20 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium">{label}</span>
+        {item && !item.manualUrl && (
+          <button type="button" onClick={() => onChange(null)} className="text-muted-foreground hover:text-red-600" title="移除">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {!item ? (
+        <div>
+          <input ref={inputRef} className="hidden" type="file" accept={REFERENCE_ACCEPT[kind]} onChange={(event) => handleFile(event.target.files?.[0])} />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={onDrop}
+            className="flex h-20 w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed text-xs text-muted-foreground hover:border-primary hover:text-primary"
+          >
+            <Upload className="h-4 w-4" />
+            <span>点击或拖入{label}</span>
+            <span className="text-[10px]">最大 {REFERENCE_SIZE_CAP[kind] / 1024 / 1024} MB，自动通过 litterbox 中转为 HTTPS</span>
+          </button>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-[10px] text-muted-foreground">或手动填 HTTPS URL</summary>
+            <input
+              className="mt-1 h-8 w-full rounded-md border bg-background px-2 text-xs"
+              value={manualUrl}
+              onChange={(event) => onManualUrlChange(event.target.value)}
+              placeholder={manualPlaceholder}
+            />
+          </details>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-md border bg-card p-2">
+          {previewUrl ? (
+            <img src={previewUrl} className="h-14 w-14 rounded object-cover" alt={item.name} />
+          ) : item.url ? (
+            kind === 'image' ? <img src={item.url} className="h-14 w-14 rounded object-cover" alt={item.name} referrerPolicy="no-referrer" />
+            : kind === 'video' ? <video src={item.url} className="h-14 w-14 rounded object-cover" muted preload="metadata" />
+            : <div className="flex h-14 w-14 items-center justify-center rounded bg-muted"><AudioLines className="h-5 w-5 text-muted-foreground" /></div>
+          ) : (
+            <div className="flex h-14 w-14 items-center justify-center rounded bg-muted"><Loader2 className="h-4 w-4 animate-spin" /></div>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium">{item.name || 'manual URL'}</p>
+            <p className="truncate text-[10px] text-muted-foreground">
+              {item.uploadError ? <span className="text-red-600">{item.uploadError}</span>
+                : item.url ? <span className="text-emerald-700">已上传 · {item.url.slice(0, 36)}…</span>
+                : item.manualUrl ? <span>手动 URL 模式</span> : <span>上传中…</span>}
+            </p>
+          </div>
+        </div>
+      )}
+      {hint && <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+};
+
+interface ReferenceListUploaderProps {
+  label: string;
+  kind: ReferenceKind;
+  items: ReferenceItem[];
+  onChange: (items: ReferenceItem[]) => void;
+  onAdd: (file: File) => void;
+  manualUrls: string;
+  onManualUrlsChange: (value: string) => void;
+  manualPlaceholder: string;
+  max: number;
+}
+
+const ReferenceListUploader: React.FC<ReferenceListUploaderProps> = ({ label, kind, items, onChange, onAdd, manualUrls, onManualUrlsChange, manualPlaceholder, max }) => {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const remove = (key: string) => onChange(items.filter((it) => it.key !== key));
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    items.forEach((item) => {
+      if (item.url || item.data.byteLength === 0) return;
+      const blob = new Blob([item.data], { type: item.mimeType || 'image/*' });
+      next[item.key] = URL.createObjectURL(blob);
+    });
+    setPreviews(next);
+    return () => { Object.values(next).forEach((u) => URL.revokeObjectURL(u)); };
+  }, [items]);
+  const onDrop = (event: React.DragEvent) => { event.preventDefault(); Array.from(event.dataTransfer.files).forEach((f) => onAdd(f)); };
+
+  return (
+    <div className="mb-4 rounded-lg border bg-muted/20 p-3">
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <span className="font-medium">{label}</span>
+        <span className="text-[10px] text-muted-foreground">{items.length}/{max}</span>
+      </div>
+      <input ref={inputRef} className="hidden" type="file" multiple accept={REFERENCE_ACCEPT[kind]} onChange={(event) => Array.from(event.target.files || []).forEach(onAdd)} />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={onDrop}
+        disabled={items.length >= max}
+        className="flex h-16 w-full items-center justify-center gap-1 rounded-md border border-dashed text-xs text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-50"
+      >
+        <Upload className="h-4 w-4" />
+        <span>点击或拖入{label}（一次可多选）</span>
+      </button>
+      {!!items.length && (
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          {items.map((item) => {
+            const preview = previews[item.key] || (item.url && kind === 'image' ? item.url : '');
+            return (
+              <div key={item.key} className="relative overflow-hidden rounded-md border bg-card">
+                {preview && kind === 'image' ? (
+                  <img src={preview} className="aspect-square w-full object-cover" alt={item.name} referrerPolicy="no-referrer" />
+                ) : item.url && kind === 'video' ? (
+                  <video src={item.url} className="aspect-square w-full object-cover" muted preload="metadata" />
+                ) : item.mimeType.startsWith('image/') ? (
+                  <div className="flex aspect-square w-full items-center justify-center bg-muted"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                ) : (
+                  <div className="flex aspect-square w-full flex-col items-center justify-center bg-muted text-muted-foreground">
+                    {kind === 'video' ? <VideoIcon className="h-5 w-5" /> : <AudioLines className="h-5 w-5" />}
+                    <span className="mt-1 truncate px-1 text-[9px]">{item.name}</span>
+                  </div>
+                )}
+                {item.uploadError ? (
+                  <div className="absolute inset-x-0 bottom-0 bg-rose-600/90 px-1 py-0.5 text-[9px] text-white" title={item.uploadError}>上传失败</div>
+                ) : !item.url && !item.uploadError ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/60"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                ) : null}
+                <button type="button" onClick={() => remove(item.key)} className="absolute right-1 top-1 rounded-full bg-background/90 p-0.5 shadow" title="移除">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[10px] text-muted-foreground">或手动填 HTTPS URL（每行一个）</summary>
+        <textarea
+          className="mt-1 min-h-12 w-full rounded-md border bg-background p-2 text-xs"
+          value={manualUrls}
+          onChange={(event) => onManualUrlsChange(event.target.value)}
+          placeholder={manualPlaceholder}
+        />
+      </details>
+    </div>
+  );
+};
+
 export const VideoGenerationPanel: React.FC = () => {
   const [notifApi, contextHolder] = notification.useNotification();
 
@@ -103,11 +331,19 @@ export const VideoGenerationPanel: React.FC = () => {
   const [duration, setDuration] = useState<number>(6);
   const [resolution, setResolution] = useState<VideoResolution>('768P');
   const [ratio, setRatio] = useState<VideoRatio>('16:9');
-  const [firstFrameUrl, setFirstFrameUrl] = useState<string>('');
-  const [lastFrameUrl, setLastFrameUrl] = useState<string>('');
-  const [referenceImageUrls, setReferenceImageUrls] = useState<string>('');
-  const [referenceVideoUrls, setReferenceVideoUrls] = useState<string>('');
-  const [referenceAudioUrls, setReferenceAudioUrls] = useState<string>('');
+  // 参考素材：本地图上传（litterbox 中转）或手动填 HTTPS URL。
+  // 用 ReferenceItem 列表，提交时只取已上传 / 手动 URL 成功的项。
+  const [firstFrame, setFirstFrame] = useState<ReferenceItem | null>(null);
+  const [lastFrame, setLastFrame] = useState<ReferenceItem | null>(null);
+  const [referenceImages, setReferenceImages] = useState<ReferenceItem[]>([]);
+  const [referenceVideos, setReferenceVideos] = useState<ReferenceItem[]>([]);
+  const [referenceAudios, setReferenceAudios] = useState<ReferenceItem[]>([]);
+  // 允许高级用户继续手填 URL：当某类素材列表为空时，仍可输入 https://... URL
+  const [firstFrameManualUrl, setFirstFrameManualUrl] = useState<string>('');
+  const [lastFrameManualUrl, setLastFrameManualUrl] = useState<string>('');
+  const [referenceImagesManual, setReferenceImagesManual] = useState<string>('');
+  const [referenceVideosManual, setReferenceVideosManual] = useState<string>('');
+  const [referenceAudiosManual, setReferenceAudiosManual] = useState<string>('');
 
   const [tasks, setTasks] = useState<StoredVideoRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -115,6 +351,7 @@ export const VideoGenerationPanel: React.FC = () => {
   const [activePolls, setActivePolls] = useState<ActivePoll[]>(() => loadActivePolls());
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [videoMeta, setVideoMeta] = useState<{ recordId: string; mimeType: string } | null>(null);
+  const [pollPaused, setPollPaused] = useState<boolean>(() => localStorage.getItem(POLL_PAUSED_STORAGE) === '1');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activePollsRef = useRef<ActivePoll[]>([]);
@@ -123,6 +360,7 @@ export const VideoGenerationPanel: React.FC = () => {
   useEffect(() => { localStorage.setItem(MINIMAX_KEY_STORAGE, apiKey); }, [apiKey]);
   useEffect(() => { localStorage.setItem(MINIMAX_BASE_URL_STORAGE, baseUrl); }, [baseUrl]);
   useEffect(() => { persistActivePolls(activePolls); }, [activePolls]);
+  useEffect(() => { localStorage.setItem(POLL_PAUSED_STORAGE, pollPaused ? '1' : '0'); }, [pollPaused]);
 
   const refreshLibrary = useCallback(() => {
     const next = listTasks(200);
@@ -193,15 +431,19 @@ export const VideoGenerationPanel: React.FC = () => {
     setActivePolls((current) => current.some((item) => item.recordId === poll.recordId) ? current : [...current, poll]);
   }, []);
 
-  // 轮询调度器：每 POLL_INTERVAL_MS 触发一次
+  // 轮询调度器：每 POLL_INTERVAL_MS 触发一次。
+  // 多个 active 任务错峰启动（POLL_STAGGER_MS），避免上线一瞬间都打 MiniMax。
+  // 暂停时整个调度停摆但 activePolls 状态保留，恢复后立即按各自的下次节奏继续。
   useEffect(() => {
-    if (!activePolls.length) return;
-    const timer = window.setTimeout(() => {
-      const current = activePollsRef.current;
-      current.forEach((poll) => { void pollOnce(poll); });
-    }, POLL_INTERVAL_MS);
-    return () => window.clearTimeout(timer);
-  }, [activePolls, pollOnce]);
+    if (!activePolls.length || pollPaused) return;
+    const timers: number[] = [];
+    activePolls.forEach((poll, index) => {
+      const delay = POLL_INTERVAL_MS + index * POLL_STAGGER_MS;
+      const t = window.setTimeout(() => { void pollOnce(poll); }, delay);
+      timers.push(t);
+    });
+    return () => { timers.forEach((t) => window.clearTimeout(t)); };
+  }, [activePolls, pollOnce, pollPaused]);
 
   // 选中的任务变化时，加载对应的视频 blob URL
   useEffect(() => {
@@ -240,6 +482,44 @@ export const VideoGenerationPanel: React.FC = () => {
 
   const splitUrls = (text: string): string[] => text.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
 
+  // 通用：把本地图文件加进对应 state，再异步上传到 litterbox 拿 HTTPS URL。
+  // 一个 setItems 回调负责把新项加到 list / 替换单值；上传完成后用 setItem 回填 url。
+  const uploadReferenceFile = useCallback(async (file: File, kind: ReferenceKind, setItem: (item: ReferenceItem) => void): Promise<void> => {
+    const inferred = inferReferenceKind(file.type);
+    if (inferred !== kind) {
+      showError(`${file.name} 不是${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}文件`);
+      return;
+    }
+    if (file.size > REFERENCE_SIZE_CAP[kind]) {
+      showError(`${file.name} 超过 ${(REFERENCE_SIZE_CAP[kind] / 1024 / 1024).toFixed(0)} MB 上限`);
+      return;
+    }
+    const buffer = await file.arrayBuffer();
+    const item: ReferenceItem = {
+      key: makeReferenceKey(),
+      name: file.name,
+      mimeType: file.type,
+      data: buffer,
+      url: '',
+    };
+    setItem(item);
+    const result = await window.electronAPI.videoGeneration.uploadReference({
+      name: file.name, mimeType: file.type, data: buffer, ttlHours: 1,
+    });
+    if (!result.success || !result.url) {
+      setItem({ ...item, uploadError: result.error || '上传失败' });
+      showError(`${file.name} 上传失败：${result.error || '未知错误'}`);
+      return;
+    }
+    setItem({ ...item, url: result.url });
+  }, [showError]);
+
+  // 高级用户手动填 HTTPS URL（不经过上传）
+  const setManualUrlItem = useCallback((kind: ReferenceKind, url: string, setItem: (item: ReferenceItem) => void) => {
+    if (!url.trim()) return;
+    setItem({ key: makeReferenceKey(), name: url.split('/').pop() || 'manual', mimeType: '', data: new ArrayBuffer(0), url: url.trim(), manualUrl: true });
+  }, []);
+
   const validateAndBuildPayload = useCallback((): VideoGenerationRequest | null => {
     if (!apiKey.trim()) { showError('请先填写 MiniMax API Key'); return null; }
     if (!prompt.trim()) { showError('请填写视频描述（prompt）'); return null; }
@@ -254,33 +534,51 @@ export const VideoGenerationPanel: React.FC = () => {
       ratio,
       mode,
     };
-    const firstFrame = firstFrameUrl.trim();
-    const lastFrame = lastFrameUrl.trim();
-    const refImages = splitUrls(referenceImageUrls);
-    const refVideos = splitUrls(referenceVideoUrls);
-    const refAudios = splitUrls(referenceAudioUrls);
+
+    // 解析各路素材：本地图列表 + 手动 URL
+    const allReferenceItems = (primary: ReferenceItem | null, manualText: string): { urls: string[]; pending: ReferenceItem[] } => {
+      const urls: string[] = [];
+      if (primary) {
+        if (primary.uploadError) { /* skip, user should see error inline */ }
+        else if (primary.url) urls.push(primary.url);
+      }
+      const manualUrls = splitUrls(manualText);
+      manualUrls.forEach((u) => { if (/^https?:\/\//i.test(u)) urls.push(u); });
+      const pending = primary && !primary.url && !primary.uploadError ? [primary] : [];
+      return { urls, pending };
+    };
 
     if (mode === 'image-to-video') {
-      if (!firstFrame) { showError('首帧图生视频模式需要 1 张首帧图 URL'); return null; }
-      if (!/^https?:\/\//i.test(firstFrame)) { showError('首帧图 URL 必须是 http(s) 链接'); return null; }
-      payload.firstFrameUrl = firstFrame;
+      const { urls, pending } = allReferenceItems(firstFrame, firstFrameManualUrl);
+      if (!urls.length) { showError('首帧图生视频模式需要 1 张首帧图（请上传本地图或填 HTTPS URL）'); return null; }
+      if (pending.length) { showError('首帧图正在上传，请稍候再提交'); return null; }
+      payload.firstFrameUrl = urls[0];
     } else if (mode === 'start-end-to-video') {
-      if (!firstFrame || !lastFrame) { showError('首尾帧模式需要首帧 + 尾帧两张图 URL'); return null; }
-      if (!/^https?:\/\//i.test(firstFrame) || !/^https?:\/\//i.test(lastFrame)) { showError('首/尾帧 URL 必须是 http(s) 链接'); return null; }
-      payload.firstFrameUrl = firstFrame;
-      payload.lastFrameUrl = lastFrame;
+      const f = allReferenceItems(firstFrame, firstFrameManualUrl);
+      const l = allReferenceItems(lastFrame, lastFrameManualUrl);
+      if (!f.urls.length || !l.urls.length) { showError('首尾帧模式需要首帧 + 尾帧两张图（请上传本地图或填 HTTPS URL）'); return null; }
+      if (f.pending.length || l.pending.length) { showError('首/尾帧图正在上传，请稍候再提交'); return null; }
+      payload.firstFrameUrl = f.urls[0];
+      payload.lastFrameUrl = l.urls[0];
     } else if (mode === 'reference-to-video') {
-      if (!refImages.length && !refVideos.length && !refAudios.length) {
-        showError('参考生视频模式至少需要 1 个参考图 / 参考视频 / 参考音频 URL'); return null;
+      const imgUrls = referenceImages.filter((r) => r.url).map((r) => r.url).concat(splitUrls(referenceImagesManual).filter((u) => /^https?:\/\//i.test(u)));
+      const vidUrls = referenceVideos.filter((r) => r.url).map((r) => r.url).concat(splitUrls(referenceVideosManual).filter((u) => /^https?:\/\//i.test(u)));
+      const audUrls = referenceAudios.filter((r) => r.url).map((r) => r.url).concat(splitUrls(referenceAudiosManual).filter((u) => /^https?:\/\//i.test(u)));
+      const anyPending = [...referenceImages, ...referenceVideos, ...referenceAudios].some((r) => !r.url && !r.uploadError);
+      if (!imgUrls.length && !vidUrls.length && !audUrls.length) {
+        showError('参考生视频模式至少需要 1 个参考图 / 参考视频 / 参考音频'); return null;
       }
-      const allUrls = [...refImages, ...refVideos, ...refAudios];
-      if (allUrls.some((url) => !/^https?:\/\//i.test(url))) { showError('参考素材 URL 必须是 http(s) 链接'); return null; }
-      payload.referenceImageUrls = refImages;
-      payload.referenceVideoUrls = refVideos;
-      payload.referenceAudioUrls = refAudios;
+      if (anyPending) { showError('部分参考素材正在上传，请稍候再提交'); return null; }
+      // MiniMax 上限：图片 ≤ 9、视频 ≤ 3、音频 ≤ 3
+      if (imgUrls.length > 9) { showError(`参考图片最多 9 张，当前 ${imgUrls.length}`); return null; }
+      if (vidUrls.length > 3) { showError(`参考视频最多 3 段，当前 ${vidUrls.length}`); return null; }
+      if (audUrls.length > 3) { showError(`参考音频最多 3 段，当前 ${audUrls.length}`); return null; }
+      payload.referenceImageUrls = imgUrls;
+      payload.referenceVideoUrls = vidUrls;
+      payload.referenceAudioUrls = audUrls;
     }
     return payload;
-  }, [apiKey, prompt, duration, resolution, ratio, mode, firstFrameUrl, lastFrameUrl, referenceImageUrls, referenceVideoUrls, referenceAudioUrls, baseUrl, model, showError]);
+  }, [apiKey, prompt, duration, resolution, ratio, mode, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, firstFrameManualUrl, lastFrameManualUrl, referenceImagesManual, referenceVideosManual, referenceAudiosManual, baseUrl, model, showError]);
 
   const handleSubmit = useCallback(async () => {
     const payload = validateAndBuildPayload();
@@ -329,6 +627,17 @@ export const VideoGenerationPanel: React.FC = () => {
   const handleDelete = useCallback(async (record: StoredVideoRecord) => {
     if (!window.confirm(`确定删除这条视频记录吗？${record.fileName ? '本地视频文件会一并删除。' : ''}`)) return;
     stopPolling(record.id);
+    // 还在上游队列 / 处理中的任务：先通知 MiniMax 取消，再删本地
+    if (record.status === 'queued' || record.status === 'preparing' || record.status === 'processing') {
+      try {
+        const cancel = await window.electronAPI.videoGeneration.cancel({ apiKey, baseUrl, taskId: record.taskId });
+        if (!cancel.success) {
+          showError(`MiniMax 取消任务失败：${cancel.error || '未知错误'}（仍会删除本地记录）`);
+        }
+      } catch (err) {
+        showError(`调用 MiniMax 取消接口失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     try {
       await deleteTask(record.id);
       refreshLibrary();
@@ -337,7 +646,7 @@ export const VideoGenerationPanel: React.FC = () => {
     } catch (err) {
       showError(err instanceof Error ? err.message : '删除失败');
     }
-  }, [refreshLibrary, selectedId, showError, showInfo, stopPolling]);
+  }, [apiKey, baseUrl, refreshLibrary, selectedId, showError, showInfo, stopPolling]);
 
   const handleRetry = useCallback(async (record: StoredVideoRecord) => {
     if (record.status === 'succeeded') return;
@@ -445,37 +754,78 @@ export const VideoGenerationPanel: React.FC = () => {
         <p className="mb-4 text-right text-[10px] text-muted-foreground">{prompt.length}/{MAX_PROMPT_LENGTH}</p>
 
         {mode === 'image-to-video' && (
-          <label className="mb-4 grid gap-1 text-xs">
-            <span>首帧图片 URL（https://）</span>
-            <input className="h-9 rounded-md border bg-background px-3" value={firstFrameUrl} onChange={(event) => setFirstFrameUrl(event.target.value)} placeholder="https://..." />
-          </label>
+          <ReferenceUploader
+            label="首帧图片"
+            kind="image"
+            item={firstFrame}
+            onChange={setFirstFrame}
+            onPick={(file) => void uploadReferenceFile(file, 'image', setFirstFrame)}
+            manualUrl={firstFrameManualUrl}
+            onManualUrlChange={(v) => { setFirstFrameManualUrl(v); if (v.trim() && /^https?:\/\//i.test(v.trim())) setManualUrlItem('image', v, setFirstFrame); }}
+            manualPlaceholder="https://example.com/first-frame.png"
+            hint="MiniMax 视频生成会以此画面作为起始帧；支持 PNG / JPEG / WebP / HEIC，最大 30 MB。"
+          />
         )}
         {mode === 'start-end-to-video' && (
           <>
-            <label className="mb-3 grid gap-1 text-xs">
-              <span>首帧图片 URL（https://）</span>
-              <input className="h-9 rounded-md border bg-background px-3" value={firstFrameUrl} onChange={(event) => setFirstFrameUrl(event.target.value)} placeholder="https://..." />
-            </label>
-            <label className="mb-4 grid gap-1 text-xs">
-              <span>尾帧图片 URL（https://）</span>
-              <input className="h-9 rounded-md border bg-background px-3" value={lastFrameUrl} onChange={(event) => setLastFrameUrl(event.target.value)} placeholder="https://..." />
-            </label>
+            <ReferenceUploader
+              label="首帧图片"
+              kind="image"
+              item={firstFrame}
+              onChange={setFirstFrame}
+              onPick={(file) => void uploadReferenceFile(file, 'image', setFirstFrame)}
+              manualUrl={firstFrameManualUrl}
+              onManualUrlChange={(v) => { setFirstFrameManualUrl(v); if (v.trim() && /^https?:\/\//i.test(v.trim())) setManualUrlItem('image', v, setFirstFrame); }}
+              manualPlaceholder="https://example.com/first-frame.png"
+            />
+            <ReferenceUploader
+              label="尾帧图片"
+              kind="image"
+              item={lastFrame}
+              onChange={setLastFrame}
+              onPick={(file) => void uploadReferenceFile(file, 'image', setLastFrame)}
+              manualUrl={lastFrameManualUrl}
+              onManualUrlChange={(v) => { setLastFrameManualUrl(v); if (v.trim() && /^https?:\/\//i.test(v.trim())) setManualUrlItem('image', v, setLastFrame); }}
+              manualPlaceholder="https://example.com/last-frame.png"
+              hint="视频会自然过渡到这一画面。"
+            />
           </>
         )}
         {mode === 'reference-to-video' && (
           <>
-            <label className="mb-3 grid gap-1 text-xs">
-              <span>参考图片 URL（每行一个）</span>
-              <textarea className="min-h-16 rounded-md border bg-background p-2" value={referenceImageUrls} onChange={(event) => setReferenceImageUrls(event.target.value)} placeholder={'https://img1.png\nhttps://img2.png'} />
-            </label>
-            <label className="mb-3 grid gap-1 text-xs">
-              <span>参考视频 URL（每行一个，最多 3 段）</span>
-              <textarea className="min-h-16 rounded-md border bg-background p-2" value={referenceVideoUrls} onChange={(event) => setReferenceVideoUrls(event.target.value)} placeholder={'https://ref1.mp4'} />
-            </label>
-            <label className="mb-4 grid gap-1 text-xs">
-              <span>参考音频 URL（每行一个）</span>
-              <textarea className="min-h-16 rounded-md border bg-background p-2" value={referenceAudioUrls} onChange={(event) => setReferenceAudioUrls(event.target.value)} placeholder={'https://audio1.wav'} />
-            </label>
+            <ReferenceListUploader
+              label="参考图片（角色 / 风格）"
+              kind="image"
+              items={referenceImages}
+              onChange={setReferenceImages}
+              onAdd={(file) => void uploadReferenceFile(file, 'image', (item) => setReferenceImages((cur) => [...cur, item]))}
+              manualUrls={referenceImagesManual}
+              onManualUrlsChange={setReferenceImagesManual}
+              manualPlaceholder={'https://img1.png\nhttps://img2.png'}
+              max={9}
+            />
+            <ReferenceListUploader
+              label="参考视频（动作 / 节奏）"
+              kind="video"
+              items={referenceVideos}
+              onChange={setReferenceVideos}
+              onAdd={(file) => void uploadReferenceFile(file, 'video', (item) => setReferenceVideos((cur) => [...cur, item]))}
+              manualUrls={referenceVideosManual}
+              onManualUrlsChange={setReferenceVideosManual}
+              manualPlaceholder="https://example.com/ref.mp4"
+              max={3}
+            />
+            <ReferenceListUploader
+              label="参考音频（声音 / 节奏）"
+              kind="audio"
+              items={referenceAudios}
+              onChange={setReferenceAudios}
+              onAdd={(file) => void uploadReferenceFile(file, 'audio', (item) => setReferenceAudios((cur) => [...cur, item]))}
+              manualUrls={referenceAudiosManual}
+              onManualUrlsChange={setReferenceAudiosManual}
+              manualPlaceholder="https://example.com/ref.wav"
+              max={3}
+            />
           </>
         )}
 
@@ -516,9 +866,16 @@ export const VideoGenerationPanel: React.FC = () => {
         </Button>
 
         {totalActive > 0 && (
-          <p className="mt-3 text-center text-[11px] text-muted-foreground">
-            当前有 {totalActive} 个任务正在轮询（每 {POLL_INTERVAL_MS / 1000} 秒一次）
-          </p>
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-[11px]">
+            <div className="text-muted-foreground">
+              {pollPaused
+                ? `已暂停 · ${totalActive} 个任务等待轮询`
+                : `轮询中 · ${totalActive} 个任务（每 ${POLL_INTERVAL_MS / 1000} 秒，错峰启动）`}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setPollPaused((current) => !current)} title={pollPaused ? '恢复轮询' : '暂停轮询'}>
+              {pollPaused ? <><Play className="mr-1 h-3 w-3" />恢复</> : <><Pause className="mr-1 h-3 w-3" />暂停</>}
+            </Button>
+          </div>
         )}
       </section>
 

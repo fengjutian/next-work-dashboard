@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCancelRequest,
   buildCreateRequest,
   buildQueryRequest,
   DEFAULT_BASE_URL,

@@ -643,15 +643,13 @@ export function setupIPC(webviewPreloadPath: string) {
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
       if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
       if (!taskId) return { success: false, error: 'taskId 不能为空' };
+      const { buildCancelRequest } = await import('../plugins/video-generation/core/api');
+      const { endpoint, init } = buildCancelRequest(baseUrl, apiKey, taskId);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);
       let response: Response;
       try {
-        response = await fetch(`${baseUrl}/v2/video_generation/${encodeURIComponent(taskId)}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal: controller.signal,
-        });
+        response = await fetch(endpoint, { ...init, signal: controller.signal });
       } finally { clearTimeout(timeout); }
       const text = await response.text();
       let data: { base_resp?: { status_code?: number; status_msg?: string } } | null = null;
@@ -659,9 +657,9 @@ export function setupIPC(webviewPreloadPath: string) {
       if (!response.ok) return { success: false, error: `取消任务失败（HTTP ${response.status}）：${text.slice(0, 300)}` };
       const statusCode = data?.base_resp?.status_code;
       if (statusCode && statusCode !== 0) {
-        return { success: false, baseResp: data?.base_resp, error: data?.base_resp?.status_msg || `MiniMax 返回 status_code=${statusCode}` };
+        return { success: false, baseResp: { statusCode, statusMsg: data?.base_resp?.status_msg }, error: data?.base_resp?.status_msg || `MiniMax 返回 status_code=${statusCode}` };
       }
-      return { success: true, baseResp: data?.base_resp };
+      return { success: true, baseResp: { statusCode: 0, statusMsg: data?.base_resp?.status_msg } };
     } catch (err) {
       const message = err instanceof Error && err.name === 'AbortError' ? '取消任务超时（30 秒）' : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
