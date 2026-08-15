@@ -1,9 +1,12 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, Spin, Tag, message } from 'antd';
 import MonacoEditor, { type OnMount } from '@monaco-editor/react';
-import { Code, Database, FolderOpen, Network, RefreshCw, Rows3, Search, XCircle } from '@/components/icons';
-import type { AnalysisNode, ApiEndpoint, RepositoryAnalysis } from '../../core/code-visualizer';
+import { Code, Database, FolderOpen, History, Network, RefreshCw, Rows3, Search, XCircle } from '@/components/icons';
+import type { AnalysisNode, ApiEndpoint, CodeVisualizerProjectHistory, RepositoryAnalysis } from '../../core/code-visualizer';
 import { RelationshipGraph } from './RelationshipGraph';
+import { configureMonaco } from '@/lib/monaco-setup';
+
+configureMonaco();
 
 const METHOD_COLOR: Record<string, string> = { GET: 'green', POST: 'blue', PUT: 'orange', PATCH: 'gold', DELETE: 'red' };
 const KIND_LABEL: Record<AnalysisNode['kind'], string> = { frontend: 'Vue', endpoint: '接口', controller: 'Controller', service: 'Service', repository: 'Repository', model: 'Model', database: '数据库' };
@@ -14,10 +17,16 @@ export function CodeVisualizerPanel(): JSX.Element {
   const [selected, setSelected] = useState<ApiEndpoint | null>(null);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<CodeVisualizerProjectHistory[]>([]);
   const [sourceTabs, setSourceTabs] = useState<SourceTab[]>([]);
   const [activeSourcePath, setActiveSourcePath] = useState<string | null>(null);
   const source = sourceTabs.find((tab) => tab.path === activeSourcePath) ?? null;
   const endpoints = useMemo(() => result?.endpoints.filter((item) => `${item.method} ${item.path} ${item.handler}`.toLowerCase().includes(query.toLowerCase())) ?? [], [query, result]);
+
+  const loadHistory = useCallback(() => {
+    void window.electronAPI.codeVisualizer.history.list().then(setHistory).catch(() => setHistory([]));
+  }, []);
+  useEffect(loadHistory, [loadHistory]);
 
   const chooseAndScan = async (): Promise<void> => {
     try {
@@ -28,7 +37,7 @@ export function CodeVisualizerPanel(): JSX.Element {
   };
   const scan = async (rootPath: string): Promise<void> => {
     setLoading(true); setSelected(null); setSourceTabs([]); setActiveSourcePath(null);
-    try { const next = await window.electronAPI.codeVisualizer.repository.scan(rootPath); setResult(next); if (next.endpoints[0]) setSelected(next.endpoints[0]); }
+    try { const next = await window.electronAPI.codeVisualizer.repository.scan(rootPath); setResult(next); if (next.endpoints[0]) setSelected(next.endpoints[0]); loadHistory(); }
     catch (error) { message.error(`扫描失败：${error instanceof Error ? error.message : String(error)}`); }
     finally { setLoading(false); }
   };
@@ -38,7 +47,7 @@ export function CodeVisualizerPanel(): JSX.Element {
     catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
   }, [result]);
 
-  if (!result && !loading) return <div className="flex h-full items-center justify-center bg-background text-foreground"><div className="max-w-lg text-center"><div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-3xl border bg-card text-primary shadow-sm"><Code className="h-10 w-10"/></div><h1 className="mb-2 text-2xl font-semibold">代码接口地图</h1><p className="mb-6 text-sm leading-6 text-muted-foreground">扫描本地 Python + Vue 仓库，汇总全部 HTTP 接口，并追踪前端请求、后端调用和数据库线索。</p><Button type="primary" size="large" icon={<FolderOpen className="h-4 w-4"/>} onClick={() => void chooseAndScan()}>选择本地仓库</Button></div></div>;
+  if (!result && !loading) return <div className="h-full overflow-auto bg-background px-6 py-12 text-foreground"><div className="mx-auto max-w-3xl text-center"><div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-3xl border bg-card text-primary shadow-sm"><Code className="h-10 w-10"/></div><h1 className="mb-2 text-2xl font-semibold">代码接口地图</h1><p className="mx-auto mb-6 max-w-lg text-sm leading-6 text-muted-foreground">扫描本地 Python + Vue 仓库，汇总全部 HTTP 接口，并追踪前端请求、后端调用和数据库线索。</p><Button type="primary" size="large" icon={<FolderOpen className="h-4 w-4"/>} onClick={() => void chooseAndScan()}>选择本地仓库</Button>{history.length > 0 && <section className="mt-12 text-left"><div className="mb-3 flex items-center gap-2"><History className="h-4 w-4 text-primary"/><h2 className="text-sm font-semibold">最近项目</h2><span className="text-xs text-muted-foreground">自动保存在本机</span></div><div className="grid gap-3 sm:grid-cols-2">{history.map((entry) => <div key={entry.rootPath} className={`group rounded-xl border bg-card p-4 shadow-sm transition ${entry.available ? 'hover:border-primary/40 hover:shadow-md' : 'opacity-60'}`}><div className="flex items-start gap-3"><button type="button" disabled={!entry.available} onClick={() => void window.electronAPI.codeVisualizer.history.open(entry.rootPath).then((opened) => scan(opened.rootPath)).catch((error: unknown) => message.error(error instanceof Error ? error.message : String(error)))} className="min-w-0 flex-1 text-left disabled:cursor-not-allowed"><div className="truncate text-sm font-semibold">{entry.name}</div><div className="mt-1 truncate text-xs text-muted-foreground" title={entry.rootPath}>{entry.rootPath}</div><div className="mt-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground"><span>{entry.endpointCount} 个接口</span><span>{entry.pythonFiles} Python</span><span>{entry.vueFiles} Vue/TS</span><span>{formatHistoryTime(entry.lastScannedAt)}</span></div>{!entry.available && <div className="mt-2 text-xs text-destructive">目录已移动或删除</div>}</button><button type="button" title="从历史中移除" onClick={() => void window.electronAPI.codeVisualizer.history.remove(entry.rootPath).then(loadHistory)} className="rounded-md p-1 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"><XCircle className="h-4 w-4"/></button></div></div>)}</div></section>}</div></div>;
   if (loading) return <div className="flex h-full items-center justify-center bg-background"><Spin size="large" tip="正在分析接口与调用关系…"/></div>;
 
   return <div className="flex h-full min-h-0 bg-background text-foreground">
@@ -70,7 +79,15 @@ function SourcePanel({ tabs, active, onActivate, onClose }: { tabs: SourceTab[];
     editor.setPosition({ lineNumber: active.line, column: 1 });
     editor.focus();
   };
-  return <aside className="flex w-[46%] min-w-[440px] flex-col border-l bg-card"><div className="flex h-10 shrink-0 overflow-x-auto border-b bg-background">{tabs.map((tab) => <button key={tab.path} type="button" onClick={() => onActivate(tab.path)} className={`group flex max-w-56 shrink-0 items-center gap-2 border-r px-3 text-xs ${tab.path === active.path ? 'border-t-2 border-t-primary bg-card text-foreground' : 'text-muted-foreground hover:bg-accent'}`}><span className="truncate">{tab.path.split('/').at(-1)}</span><span role="button" tabIndex={0} aria-label={`关闭 ${tab.path}`} onClick={(event) => { event.stopPropagation(); onClose(tab.path); }} onKeyDown={(event) => { if (event.key === 'Enter') onClose(tab.path); }} className="rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100"><XCircle className="h-3 w-3"/></span></button>)}</div><div className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{active.path} · 第 {active.line} 行</div><div className="min-h-0 flex-1"><MonacoEditor key={`${active.path}:${active.line}`} value={active.content} language={language} theme={dark ? 'vs-dark' : 'light'} onMount={handleMount} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, lineNumbersMinChars: 3, fontSize: 12, scrollBeyondLastLine: false, renderLineHighlight: 'all', wordWrap: 'off' }}/></div></aside>;
+  return <aside className="flex w-[46%] min-w-[440px] flex-col border-l bg-card"><div className="flex h-10 shrink-0 overflow-x-auto border-b bg-background">{tabs.map((tab) => <button key={tab.path} type="button" onClick={() => onActivate(tab.path)} className={`group flex max-w-56 shrink-0 items-center gap-2 border-r px-3 text-xs ${tab.path === active.path ? 'border-t-2 border-t-primary bg-card text-foreground' : 'text-muted-foreground hover:bg-accent'}`}><span className="truncate">{tab.path.split('/').at(-1)}</span><span role="button" tabIndex={0} aria-label={`关闭 ${tab.path}`} onClick={(event) => { event.stopPropagation(); onClose(tab.path); }} onKeyDown={(event) => { if (event.key === 'Enter') onClose(tab.path); }} className="rounded p-0.5 opacity-0 transition hover:bg-muted group-hover:opacity-100"><XCircle className="h-3 w-3"/></span></button>)}</div><div className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{active.path} · 第 {active.line} 行</div><div className="min-h-0 flex-1"><MonacoEditor key={`${active.path}:${active.line}`} value={active.content} language={language} theme={dark ? 'vs-dark' : 'light'} loading={<div className="grid h-full place-items-center text-xs text-muted-foreground">正在加载本地源码编辑器…</div>} onMount={handleMount} options={{ automaticLayout: true, readOnly: true, minimap: { enabled: false }, lineNumbersMinChars: 3, fontSize: 12, scrollBeyondLastLine: false, renderLineHighlight: 'all', wordWrap: 'off' }}/></div></aside>;
+}
+
+function formatHistoryTime(timestamp: number): string {
+  const elapsed = Date.now() - timestamp;
+  if (elapsed < 60_000) return '刚刚';
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} 小时前`;
+  return new Date(timestamp).toLocaleDateString('zh-CN');
 }
 
 function orderNodes(endpoint: ApiEndpoint): AnalysisNode[] {
