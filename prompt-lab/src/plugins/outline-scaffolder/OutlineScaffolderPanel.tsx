@@ -104,6 +104,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish'>('generate');
   const [aiInstruction, setAiInstruction] = useState('');
+  const [aiSources, setAiSources] = useState('');
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -315,16 +316,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
 2. 人物、时间、地点、制度、术语和数字应前后一致。不得编造史料、数据、引文、来源或人物心理；没有可靠依据时使用“可能”“大致”“现有材料不足以证明”等审慎表达，必要时加入“<!-- 待核实：具体问题 -->”。
 3. 区分事实、主流解释和作者判断，不把推测写成定论。存在争议时简洁交代争议边界，而不是假装只有一种答案。
 4. 抽象判断至少配一个具体事实、案例、对比或机制解释；案例不能只是换一种说法重复观点。
+5. 每一节尽量安排至少两个不同类型的“史料锚点”，可从时间节点、人物行动、制度条文、地理条件、器物考古、时人记载或现代研究观点中选择。史料必须被解释，不能只罗列名称。
+6. 用户提供的史料优先级最高。只有在用户资料中出现了原文和出处时才可以使用引号作精确引用；不得凭记忆伪造古籍原句、卷次、页码或学者观点。根据常识补充但无法核准出处的内容，只能概述，并标记“<!-- 待核实：需要核对的史料或出处 -->”。
 
 ## 内容与结构
-5. 开头直接进入本章的核心矛盾、关键场景或问题，不使用“在历史长河中”“众所周知”“随着时代发展”等万能套话。
-6. 每一节只解决一个清晰问题，段落之间用时间、因果、对比或递进关系推进。删除无信息量的承上启下和重复总结。
-7. 保持全书边界，不提前写完其他章节；需要铺垫时只提供理解本章所必需的背景。
+7. 开头直接进入本章的核心矛盾、关键场景或问题，不使用“在历史长河中”“众所周知”“随着时代发展”等万能套话。
+8. 每一节只解决一个清晰问题，段落之间用时间、因果、对比或递进关系推进。删除无信息量的承上启下和重复总结。
+9. 保持全书边界，不提前写完其他章节；需要铺垫时只提供理解本章所必需的背景。
 
 ## 文风
-8. 使用准确、具体、有画面感的现代中文。长短句交替，关键判断简洁有力；少用空泛形容词，多用动作、选择、条件和后果呈现内容。
-9. 风趣来自事实之间的反差、克制的比喻或机智转场，占比约 10%；不堆网络梗，不油滑，不拿灾难、战争或具体群体开玩笑。
-10. 避免 AI 腔：不用“值得注意的是”“不难发现”“综上所述”反复串联，不连续罗列“首先、其次、最后”，不在每节末尾机械升华。
+10. 使用准确、具体、有画面感的现代中文。长短句交替，关键判断简洁有力；少用空泛形容词，多用动作、选择、条件和后果呈现内容。
+11. 风趣来自事实之间的反差、克制的比喻或机智转场，占比约 10%；不堆网络梗，不油滑，不拿灾难、战争或具体群体开玩笑。
+12. 避免 AI 腔：不用“值得注意的是”“不难发现”“综上所述”反复串联，不连续罗列“首先、其次、最后”，不在每节末尾机械升华。
 
 ## 输出前自检（只在内部执行，不输出检查过程）
 - 删除任何没有新增信息的句子；
@@ -335,7 +338,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
 直接输出可写入文件的 Markdown，不使用代码围栏，不解释写作过程，不添加“以下是正文”等开场白。`;
     const context = managedFiles.slice(0, 100).map((path) => path.split('/').pop()?.replace(/\.md$/i, '')).filter(Boolean).join('、');
-    const user = `当前章节：${chapterName}\n全书章节：${context}\n任务：${modePrompt}${aiInstruction.trim() ? `\n用户补充要求：${aiInstruction.trim()}` : ''}\n\n现有文档：\n${documentContent}`;
+    const sourceContext = aiSources.trim() || '用户未提供专门史料。只能使用高度确定的通识性史实；不得生成精确引文、卷次或页码，存疑处必须标记待核实。';
+    const user = `当前章节：${chapterName}\n全书章节：${context}\n任务：${modePrompt}${aiInstruction.trim() ? `\n用户补充要求：${aiInstruction.trim()}` : ''}\n\n用户提供的史料与参考资料：\n${sourceContext}\n\n现有文档：\n${documentContent}`;
     try {
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
@@ -808,10 +812,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </main>
       {aiOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />AI 章节助写</div><p className="mt-1 text-xs text-muted-foreground">当前模型：{aiApi.model || '未配置'}</p></div>
-        <div className="space-y-3 border-b border-border p-4">
+        <div className="max-h-[52vh] space-y-3 overflow-auto border-b border-border p-4">
           <label className="block text-xs text-muted-foreground">写作任务<select value={aiMode} onChange={(event) => setAiMode(event.target.value as typeof aiMode)} disabled={aiLoading} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"><option value="generate">生成本章正文</option><option value="continue">续写本章</option><option value="polish">润色全文</option></select></label>
           <label className="block text-xs text-muted-foreground">补充要求与可靠资料<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder="例如：目标约 2500 字；核心史实、参考资料、必须解释的争议，以及希望采用的叙事视角" className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
-          <p className="text-xs text-muted-foreground">只给章节名时，AI 无法真正核验事实。加入可信资料、关键日期或来源线索，严谨度会明显提升。</p>
+          <label className="block text-xs text-muted-foreground">史料与参考资料<textarea value={aiSources} onChange={(event) => setAiSources(event.target.value)} disabled={aiLoading} placeholder="粘贴史书原文、考古材料、论文摘要、可靠网页摘录或自己整理的史实。建议同时注明书名、作者、篇章或链接。" className="mt-1 h-32 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
+          <p className="text-xs text-muted-foreground">精确引文只从这里取用；未提供出处的内容不会伪造卷次、页码或原话。</p>
           {!aiApi.apiKey?.trim() && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">尚未配置 API Key，请先前往应用设置配置 AI。</div>}
           {aiLoading ? <Button variant="outline" className="w-full" onClick={stopAi}>停止生成</Button> : <div className="grid grid-cols-2 gap-2"><Button variant="outline" disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(false)}><Sparkles className="mr-1 h-4 w-4" />生成预览</Button><Button disabled={!aiApi.apiKey?.trim()} onClick={() => runAi(true)}>生成并写入</Button></div>}
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
