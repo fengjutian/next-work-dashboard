@@ -5,13 +5,14 @@ import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { notification } from 'antd';
 import { deleteImage, listImages, saveImage } from './image-library';
+import { buildStylePrompt, getStyleRecipe, STYLE_FAMILIES, STYLE_RECIPES } from './style-recipes';
 
 type ReferenceImage = { file: File; dataUrl: string; base64: string };
 type GeneratedImage = { id: string; dataUrl: string; prompt: string; style: string; provider: string; model: string; aspectRatio: string; size: number; createdAt: number };
 type ImageProvider = 'openai-compatible' | 'minimax';
 const MINIMAX_KEY_STORAGE = 'nwd:style-image:minimax-api-key';
 
-const STYLES = [
+const CLASSIC_STYLES = [
   { id: 'custom', label: '自定义', prompt: '' },
   { id: 'zine', label: '纸艺拼贴', prompt: 'tactile editorial paper collage, torn fibrous edges, layered handmade paper, bold structural color, refined zine composition' },
   { id: 'watercolor', label: '清透水彩', prompt: 'delicate watercolor illustration, translucent pigments, soft paper texture, expressive brushwork' },
@@ -35,6 +36,8 @@ const STYLES = [
   { id: 'product', label: '商业产品', prompt: 'premium product photography, precise studio lighting, clean backdrop, realistic materials, advertising composition' },
 ];
 
+const STYLES = STYLE_RECIPES;
+
 async function createVisualPrompt(aiApi: { apiKey: string; baseUrl: string; model: string; provider?: string }, idea: string, stylePrompt: string): Promise<string> {
   const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl, chatProxy: aiApi.provider === 'qwen' ? window.electronAPI.llmChat : undefined });
   const messages: ChatMessage[] = [{ role: 'system', content: '你是专业视觉导演和文生图提示词设计师。将用户的简短想法扩写成一段具体、连贯、可直接用于图片生成的中文画面描述。必须保留用户主体与意图，并补充环境、构图、镜头、光线、色彩、材质和氛围。不要解释，不要标题，不要 Markdown，不要参数，不要杜撰文字或水印。控制在 180 至 350 个中文字符。' }, { role: 'user', content: `用户想法：${idea}\n选定风格参考：${stylePrompt || '自定义，不限定风格'}` }];
@@ -55,13 +58,25 @@ function readImage(file: File): Promise<ReferenceImage> {
   });
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const separator = dataUrl.indexOf(',');
+  if (separator < 0) throw new Error('图片数据格式无效');
+  const metadata = dataUrl.slice(0, separator);
+  const payload = dataUrl.slice(separator + 1);
+  const mimeType = metadata.match(/^data:([^;,]+)/)?.[1] || 'application/octet-stream';
+  const binary = metadata.includes(';base64') ? atob(payload) : decodeURIComponent(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
+
 export const StyleImagePanel: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
   const [notifApi, contextHolder] = notification.useNotification();
   const fileRef = useRef<HTMLInputElement>(null);
   const [reference, setReference] = useState<ReferenceImage | null>(null);
   const [prompt, setPrompt] = useState('');
-  const [style, setStyle] = useState('zine');
+  const [style, setStyle] = useState('refined-minimal');
   const [provider, setProvider] = useState<ImageProvider>('minimax');
   const [miniMaxApiKey, setMiniMaxApiKey] = useState(() => localStorage.getItem(MINIMAX_KEY_STORAGE) || '');
   const [miniMaxReferenceUrl, setMiniMaxReferenceUrl] = useState('');
@@ -92,7 +107,7 @@ export const StyleImagePanel: React.FC = () => {
   const changeProvider = (next: ImageProvider) => { setProvider(next); setModel(next === 'minimax' ? 'image-01' : 'gpt-image-1'); if (next === 'minimax') setReference(null); };
 
   const showError = useCallback((description: string) => {
-    notifApi.error({ message: '图片生成失败', description, placement: 'bottomRight', duration: 6 });
+    notifApi.error({ title: '图片生成失败', description, placement: 'bottomRight', duration: 6 });
   }, [notifApi]);
 
   const chooseFile = useCallback(async (file?: File) => {
@@ -110,7 +125,7 @@ export const StyleImagePanel: React.FC = () => {
       const next = await createVisualPrompt(aiApi, prompt.trim(), STYLES.find((item) => item.id === style)?.prompt || '');
       if (!next) throw new Error('AI 没有返回画面描述');
       setPrompt(next.slice(0, provider === 'minimax' ? 1500 : 4000));
-      notifApi.success({ message: '画面描述已生成', description: '可以继续修改，确认后再生成图片。', placement: 'bottomRight' });
+      notifApi.success({ title: '画面描述已生成', description: '可以继续修改，确认后再生成图片。', placement: 'bottomRight' });
     } catch (reason) { showError(reason instanceof Error ? reason.message : '生成画面描述失败'); }
     finally { setPromptLoading(false); }
   }, [aiApi, notifApi, prompt, provider, showError, style]);
@@ -119,8 +134,7 @@ export const StyleImagePanel: React.FC = () => {
     if (!prompt.trim()) { showError('请填写希望生成的画面描述'); return; }
     const apiKey = provider === 'minimax' ? miniMaxApiKey : aiApi.apiKey;
     if (!apiKey.trim() || (provider === 'openai-compatible' && !aiApi.baseUrl.trim())) { showError(provider === 'minimax' ? '请填写 MiniMax API Key' : '请先在设置中配置 AI API Key 和 Base URL'); return; }
-    const stylePrompt = STYLES.find((item) => item.id === style)?.prompt;
-    const finalPrompt = [prompt.trim(), stylePrompt].filter(Boolean).join('. ');
+    const finalPrompt = buildStylePrompt(prompt, style);
     setLoading(true);
     try {
       const response = await window.electronAPI.generateImage({
@@ -132,10 +146,12 @@ export const StyleImagePanel: React.FC = () => {
       });
       if (!response.success || !response.imageDataUrl) throw new Error(response.error || '模型没有返回图片');
       const imageDataUrl = response.imageDataUrl;
-      const imageBlob = await fetch(imageDataUrl).then((value) => value.blob());
+      const imageBlob = imageDataUrl.startsWith('data:')
+        ? dataUrlToBlob(imageDataUrl)
+        : await fetch(imageDataUrl).then((value) => value.blob());
       await saveImage({ id: crypto.randomUUID(), prompt: response.revisedPrompt || finalPrompt, style, provider, model, aspectRatio: provider === 'minimax' ? aspectRatio : size, mimeType: imageBlob.type || 'image/jpeg', size: imageBlob.size, createdAt: Date.now(), image: imageBlob });
       refreshLibrary();
-      notifApi.success({ message: '图片生成完成', description: '结果已保存到本地 SQLite 图片库。', placement: 'bottomRight' });
+      notifApi.success({ title: '图片生成完成', description: '结果已保存到本地 SQLite 图片库。', placement: 'bottomRight' });
     } catch (reason) {
       const rawMessage = reason instanceof Error ? reason.message : '图片生成失败';
       const needsRestart = /No handler registered for ['"]image:generate['"]/i.test(rawMessage);
@@ -154,18 +170,19 @@ export const StyleImagePanel: React.FC = () => {
     if (!window.confirm('确定删除这张本地图片吗？删除后无法恢复。')) return;
     await deleteImage(item.id);
     refreshLibrary();
-    notifApi.success({ message: '图片已删除', placement: 'bottomRight' });
+    notifApi.success({ title: '图片已删除', placement: 'bottomRight' });
   };
 
   const copyPrompt = async (item: GeneratedImage) => {
     await navigator.clipboard.writeText(item.prompt);
-    notifApi.success({ message: '提示词已复制', placement: 'bottomRight' });
+    notifApi.success({ title: '提示词已复制', placement: 'bottomRight' });
   };
 
   const reusePrompt = (item: GeneratedImage) => {
     setPrompt(item.prompt.slice(0, provider === 'minimax' ? 1500 : 4000));
     if (STYLES.some((candidate) => candidate.id === item.style)) setStyle(item.style);
-    notifApi.success({ message: '提示词已回填', description: '可在左侧修改后再次生成。', placement: 'bottomRight' });
+    else if (CLASSIC_STYLES.some((candidate) => candidate.id === item.style)) setStyle('refined-minimal');
+    notifApi.success({ title: '提示词已回填', description: '可在左侧修改后再次生成。', placement: 'bottomRight' });
   };
 
   return <div className="flex h-full min-h-0 bg-background text-foreground">
@@ -182,9 +199,11 @@ export const StyleImagePanel: React.FC = () => {
           : <button className="mb-4 flex h-36 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground hover:border-primary hover:text-primary" onClick={() => fileRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void chooseFile(event.dataTransfer.files[0]); }}><Upload className="h-6 w-6" /><span>点击或拖入图片</span><span className="text-[11px]">PNG / JPEG / WebP，最大 20 MB</span></button>}
       <div className="mb-2 flex items-center justify-between"><label className="text-sm font-medium">画面描述</label><Button type="button" size="sm" variant="outline" disabled={promptLoading || !prompt.trim()} onClick={() => void generatePrompt()}>{promptLoading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}{promptLoading ? 'AI 构思中' : 'AI 丰富描述'}</Button></div>
       <textarea className="mb-1 min-h-28 w-full resize-y rounded-md border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30" value={prompt} maxLength={provider === 'minimax' ? 1500 : 4000} onChange={(event) => setPrompt(event.target.value)} placeholder="例如：一只猫坐在雨夜咖啡馆的窗边，温暖灯光，安静的氛围……" /><p className="mb-4 text-right text-[10px] text-muted-foreground">{prompt.length}/{provider === 'minimax' ? 1500 : 4000}</p>
-      <div className="mb-2 flex items-center justify-between"><label className="text-sm font-medium">风格</label><span className="text-[10px] text-muted-foreground">{STYLES.length} 种</span></div>
-      <div className="grid grid-cols-3 gap-2">{(showAllStyles ? STYLES : STYLES.slice(0, 9)).map((item) => <button key={item.id} onClick={() => setStyle(item.id)} className={`rounded-md border px-2 py-2 text-xs ${style === item.id ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'}`}>{item.label}</button>)}</div>
-      <button type="button" className="mb-4 mt-2 w-full rounded py-1 text-xs text-primary hover:bg-primary/5" onClick={() => setShowAllStyles((current) => !current)}>{showAllStyles ? '收起风格' : `展开更多风格（${STYLES.length - 9}）`}</button>
+      <div className="mb-2 flex items-center justify-between"><label className="text-sm font-medium">风格配方</label><span className="text-[10px] text-muted-foreground">8 组 · {STYLES.length} 种</span></div>
+      <div className="mb-3 flex gap-1 overflow-x-auto pb-1">{STYLE_FAMILIES.map((family) => <button key={family.id} type="button" title={family.description} onClick={() => setStyle(STYLES.find((item) => item.family === family.id)?.id || style)} className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] ${getStyleRecipe(style)?.family === family.id ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}>{family.label}</button>)}</div>
+      <div className="grid grid-cols-2 gap-2">{(showAllStyles ? STYLES : STYLES.filter((item) => item.family === getStyleRecipe(style)?.family)).map((item) => <button key={item.id} onClick={() => setStyle(item.id)} className={`rounded-lg border p-2 text-left ${style === item.id ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'}`}><span className="flex items-center gap-1.5 text-xs font-medium"><span className="h-2.5 w-2.5 rounded-full border" style={{ backgroundColor: item.accent }} />{item.label}</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">{item.description}</span></button>)}</div>
+      {getStyleRecipe(style) && <div className="mt-2 rounded-lg bg-muted/40 p-2.5 text-[10px] leading-4 text-muted-foreground">生成时固定风格语言，并保留主体、动作、数量与关键物件；不自动混合其他风格。</div>}
+      <button type="button" className="mb-4 mt-2 w-full rounded py-1 text-xs text-primary hover:bg-primary/5" onClick={() => setShowAllStyles((current) => !current)}>{showAllStyles ? '只看当前风格组' : '浏览全部 25 种配方'}</button>
       {provider === 'minimax' ? <><div className="mb-4 grid grid-cols-2 gap-3"><label className="text-xs">模型<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={model} onChange={(event) => { const next = event.target.value; setModel(next); if (next === 'image-01-live' && aspectRatio === '21:9') setAspectRatio('1:1'); }}><option value="image-01">Image 01</option><option value="image-01-live">Image 01 Live</option></select></label><label className="text-xs">画幅<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>{['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', ...(model === 'image-01' ? ['21:9'] : [])].map((ratio) => <option key={ratio}>{ratio}</option>)}</select></label></div><label className="mb-4 flex items-center gap-2 text-xs"><input type="checkbox" checked={promptOptimizer} onChange={(event) => setPromptOptimizer(event.target.checked)} />让 MiniMax 自动优化提示词</label></> : <><div className="mb-4 grid grid-cols-2 gap-3"><label className="text-xs">尺寸<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={size} onChange={(event) => setSize(event.target.value)}><option>1024x1024</option><option>1536x1024</option><option>1024x1536</option></select></label><label className="text-xs">质量<select className="mt-1 h-9 w-full rounded-md border bg-background px-2" value={quality} onChange={(event) => setQuality(event.target.value)}><option value="low">快速</option><option value="medium">标准</option><option value="high">高清</option></select></label></div><label className="mb-1 block text-xs">图片模型</label><input className="mb-4 h-9 w-full rounded-md border bg-background px-3 text-sm" value={model} onChange={(event) => setModel(event.target.value)} placeholder="gpt-image-1" /></>}
       <Button className="w-full" disabled={loading || !prompt.trim()} onClick={() => void generate()}>{loading ? <><Loader2 className="mr-2 h-4 w-4" />正在生成（可能需要数分钟）</> : <><Sparkles className="mr-2 h-4 w-4" />生成图片</>}</Button>
     </section>

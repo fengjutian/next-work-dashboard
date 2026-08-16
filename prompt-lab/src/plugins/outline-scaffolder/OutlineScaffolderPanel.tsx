@@ -875,6 +875,47 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { setReviewPatchLoading(false); }
   };
 
+  const applyReviewReport = async () => {
+    if (!aiResult.trim() || reviewPatchLoading) return;
+    if (!normalizeApiKey(reviewApiKey) || !reviewBaseUrl.trim() || !reviewModel.trim()) {
+      notice.warning({ message: '请先完整配置审校模型', placement: 'bottomRight' });
+      return;
+    }
+    setReviewPatchLoading(true);
+    try {
+      const provider = createOpenAIProvider({
+        apiKey: normalizeApiKey(reviewApiKey),
+        baseUrl: reviewBaseUrl.trim(),
+        chatProxy: window.electronAPI.llmChat,
+      });
+      const messages: ChatMessage[] = [
+        {
+          role: 'system',
+          content: `你是谨慎的中文责任编辑。请依据校审报告直接修订正文，并只输出修订后的完整 Markdown 正文。
+
+要求：
+1. 落实报告中“必须修改”和能够安全落实的“建议修改”；可选扩写仅在报告给出充分依据、且不需要编造事实时处理。
+2. 对标记为“需人工核实”、证据不足或无法确认的内容，不得自行编造结论；保留原文，必要时用简洁的“<!-- 待核实：... -->”注释标记。
+3. 保留原有标题层级、脚注、链接、图片、引用和“史料与参考资料”章节，不得删减与报告无关的内容。
+4. 不输出修改说明、摘要、前言或代码围栏，只输出可直接保存的完整文章。`,
+        },
+        { role: 'user', content: `校审报告：\n\n${aiResult}\n\n待修改正文：\n\n${documentContent}` },
+      ];
+      let revised = '';
+      for await (const chunk of provider.chat(messages, { model: reviewModel.trim(), temperature: 0.15, maxTokens: 16_000, stream: false })) revised += chunk.delta || '';
+      revised = revised.trim().replace(/^```(?:markdown|md)?\s*\n/i, '').replace(/\n```\s*$/i, '').trim();
+      if (!revised) throw new Error('审校模型没有返回修改后的正文');
+      setDocumentContent(`${revised}\n`);
+      setReviewPatches([]);
+      setEditorMode('edit');
+      notice.success({ message: '已按照校审报告修改正文', description: '修改尚未保存，请检查正文后点击“保存”。', placement: 'bottomRight' });
+    } catch (error) {
+      notice.error({ message: '按照报告修改失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
+    } finally {
+      setReviewPatchLoading(false);
+    }
+  };
+
   const toggleReviewPatch = (patch: ReviewPatch) => {
     if (patch.state === 'conflict') return;
     if (patch.state === 'ready') {
@@ -1473,7 +1514,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{reviewSuggestions.length > 0 && <div className="mb-4 space-y-2"><div className="flex items-center justify-between text-xs font-semibold"><span>逐条处理审校意见</span><span className="text-muted-foreground">已采纳 {reviewSuggestions.filter((item) => item.decision === 'accepted').length}</span></div>{reviewSuggestions.map((item) => <div key={item.id} className={`rounded-md border p-2 text-xs ${item.decision === 'accepted' ? 'border-emerald-500/40 bg-emerald-500/10' : item.decision === 'rejected' ? 'border-border bg-muted/40 opacity-60' : 'border-border'}`}><div className="font-medium">{item.section} · {item.position}</div>{item.issue && <div className="mt-1 text-muted-foreground">{item.issue}</div>}{item.suggestion && <div className="mt-1">建议：{item.suggestion}</div>}<div className="mt-2 flex gap-2"><button type="button" className="text-emerald-700 hover:underline" onClick={() => setReviewSuggestions((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, decision: 'accepted' } : candidate))}>采纳</button><button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => setReviewSuggestions((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, decision: 'rejected' } : candidate))}>拒绝</button><button type="button" className="text-muted-foreground hover:underline" onClick={() => setReviewSuggestions((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, decision: 'pending' } : candidate))}>待定</button></div></div>)}</div>}{reviewPatches.length > 0 && <div className="mb-4 space-y-3 border-t border-border pt-4"><div className="text-xs font-semibold">段落级修改预览</div>{reviewPatches.map((patch) => <div key={patch.id} className="overflow-hidden rounded-md border border-border text-xs"><div className="bg-destructive/10 p-2"><div className="mb-1 font-semibold text-destructive">− 原段落</div><div className="whitespace-pre-wrap line-through decoration-destructive/50">{patch.original}</div></div><div className="border-t border-border bg-emerald-500/10 p-2"><div className="mb-1 font-semibold text-emerald-700">+ 修改后</div><div className="whitespace-pre-wrap">{patch.replacement}</div></div><div className="flex items-center justify-between border-t border-border p-2"><span className="text-muted-foreground">{patch.state === 'conflict' ? '原文已变化，无法安全应用' : patch.state === 'applied' ? '已应用，可撤销' : '等待应用'}</span><Button size="sm" variant={patch.state === 'applied' ? 'outline' : 'default'} disabled={patch.state === 'conflict'} onClick={() => toggleReviewPatch(patch)}>{patch.state === 'applied' ? '撤销' : '应用此段'}</Button></div></div>)}</div>}{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">AI 将列出明确错误、待核实内容、<br />扩写方向和修改优先级。</div>}</div>
-        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制报告</Button><Button disabled={!reviewSuggestions.some((item) => item.decision === 'accepted') || reviewPatchLoading} onClick={generateReviewPatches}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成段落 Diff</Button></div>
+        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制报告</Button><Button disabled={!reviewSuggestions.some((item) => item.decision === 'accepted') || reviewPatchLoading} onClick={generateReviewPatches}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成段落 Diff</Button><Button className="col-span-2" disabled={!aiResult || aiLoading || reviewPatchLoading} onClick={applyReviewReport}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}按照报告修改</Button></div>
       </aside>}
       {imageOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />MiniMax 章节插图</div><p className="mt-1 text-xs text-muted-foreground">先生成预览，确认后保存到 assets/images 并插入文章。</p></div>
