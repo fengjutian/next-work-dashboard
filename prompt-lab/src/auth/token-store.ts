@@ -22,7 +22,7 @@ import path from 'node:path';
 
 // ── 存储路径 ──
 
-const AUTH_FILE = path.join(app.getPath('userData'), '.auth-tokens.enc');
+const authFile = () => path.join(app.getPath('userData'), '.auth-tokens.enc');
 
 // ── 数据结构 ──
 
@@ -46,8 +46,8 @@ interface AuthStore {
 
 function readStore(): AuthStore {
   try {
-    if (!fs.existsSync(AUTH_FILE)) return { version: 1, tokens: [] };
-    const raw = fs.readFileSync(AUTH_FILE, 'utf-8');
+    if (!fs.existsSync(authFile())) return { version: 1, tokens: [] };
+    const raw = fs.readFileSync(authFile(), 'utf-8');
     const parsed = JSON.parse(raw);
     if (parsed.version === 1 && Array.isArray(parsed.tokens)) {
       return parsed;
@@ -59,11 +59,12 @@ function readStore(): AuthStore {
 }
 
 function writeStore(store: AuthStore): void {
-  const dir = path.dirname(AUTH_FILE);
+  const target = authFile();
+  const dir = path.dirname(target);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(AUTH_FILE, JSON.stringify(store), 'utf-8');
+  fs.writeFileSync(target, JSON.stringify(store), 'utf-8');
   // 限制文件权限（仅当前用户可读写）
-  try { fs.chmodSync(AUTH_FILE, 0o600); } catch { /* best-effort */ }
+  try { fs.chmodSync(target, 0o600); } catch { /* best-effort */ }
 }
 
 // ── 公开 API ──
@@ -162,8 +163,8 @@ export function listServices(): Array<{ service: string; savedAt: number; label?
  */
 export function clearAll(): boolean {
   try {
-    if (fs.existsSync(AUTH_FILE)) {
-      fs.unlinkSync(AUTH_FILE);
+    if (fs.existsSync(authFile())) {
+      fs.unlinkSync(authFile());
     }
     return true;
   } catch {

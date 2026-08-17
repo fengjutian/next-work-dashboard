@@ -19,6 +19,12 @@ import { setupWorkBrowserIPC } from './main/work-browser';
 import { setupSecurityAuditIPC } from './main/security-audit';
 import { setupWebsiteRegistryIPC } from './main/website-registry';
 import { setupCodeVisualizerIPC } from './main/code-visualizer';
+import { resolveUserDataPath } from './main/user-data-path';
+
+function configureUserDataPath(): void {
+  const isolatedPath = resolveUserDataPath(app.getPath('appData'), app.getName(), app.isPackaged);
+  app.setPath('userData', isolatedPath);
+}
 
 function configureSessionDataPath(): void {
   const preferredPath = path.join(app.getPath('userData'), 'chromium-session-v1');
@@ -66,6 +72,8 @@ function configureWindowsJumpList(): void {
     },
   ]);
 }
+
+configureUserDataPath();
 
 if (started) {
   app.quit();
