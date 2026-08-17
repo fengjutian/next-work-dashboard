@@ -95,7 +95,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
       ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),
       ...(fs.existsSync(ragWorkerResource) ? [ragWorkerResource] : []),
-      ...(fs.existsSync(videoPlayerResource) ? [videoPlayerResource] : []),
+      ...(process.env.NWD_BUNDLE_VIDEO_PLAYER === '1' && fs.existsSync(videoPlayerResource) ? [videoPlayerResource] : []),
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
       ...(fs.existsSync(netProbeResource) ? [netProbeResource] : []),
       ...(fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "video-player",
+  "name": "视频播放器",
+  "version": "1.0.0",
+  "pluginApiVersion": 1,
+  "engines": {
+    "app": ">=0.2.0 <0.4.0"
+  },
+  "resources": {
+    "mpv": {
+      "version": "0.40.0",
+      "executable": "resources/win32/mpv.exe"
+    }
+  },
+  "permissions": [
+    "filesystem:user-selected",
+    "network:media",
+    "process:mpv"
+  ]
+}

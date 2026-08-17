@@ -41,6 +41,13 @@ const electronAPI: ElectronAPI = {
     getCachedCatalog: () => ipcRenderer.invoke('plugins:marketplace:cached'),
     fetchCatalog: (url) => ipcRenderer.invoke('plugins:marketplace:fetch', url),
     install: (entry) => ipcRenderer.invoke('plugins:marketplace:install', entry),
+    installPackage: (request) => ipcRenderer.invoke('plugins:packages:install', request),
+    installCatalogVersion: (id, version, activate) => ipcRenderer.invoke('plugins:packages:install-catalog', id, version, activate),
+    listInstalled: () => ipcRenderer.invoke('plugins:packages:list'),
+    activateVersion: (id, version) => ipcRenderer.invoke('plugins:packages:activate', id, version),
+    rollback: (id) => ipcRenderer.invoke('plugins:packages:rollback', id),
+    uninstallVersion: (id, version) => ipcRenderer.invoke('plugins:packages:uninstall', id, version),
+    resolvePath: (id, relativePath) => ipcRenderer.invoke('plugins:packages:resolve', id, relativePath),
   },
   // 窗口控制
   minimize: () => ipcRenderer.invoke('window-minimize'),

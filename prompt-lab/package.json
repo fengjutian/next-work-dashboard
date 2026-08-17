@@ -14,6 +14,7 @@
     "build:mycast": "node scripts/build-mycast.mjs",
     "build:voice-engine": "node scripts/build-voice-engine.mjs",
     "fetch:mpv": "node scripts/fetch-mpv.mjs",
+    "plugin:pack": "node scripts/pack-plugin.mjs",
     "start": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && npm run build:mycast && npm run build:voice-engine && electron-forge start",
     "package": "npm run prepare:package-output && npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && npm run build:mycast && npm run build:voice-engine && node scripts/run-forge.mjs package",
     "make": "npm run prepare:package-output && npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && npm run build:mycast && npm run build:voice-engine && node scripts/run-forge.mjs make",

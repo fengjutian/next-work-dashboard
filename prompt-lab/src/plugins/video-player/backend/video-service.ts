@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MpvClient, type MpvEvent } from './mpv-client';
+import { resolveActivePluginPathSync } from '../../../main/plugin-marketplace';
 import type {
   MediaInfo,
   PlaylistItem,
@@ -153,6 +154,8 @@ export class VideoPlayerService {
         ? 'darwin'
         : 'linux';
     const candidates: string[] = [];
+    const installed = resolveActivePluginPathSync('video-player', path.join('resources', platformDir, executable));
+    if (installed) candidates.push(installed);
     if (app.isPackaged) {
       candidates.push(path.join(process.resourcesPath, 'video-player', platformDir, executable));
     } else {

@@ -115,7 +115,13 @@ export interface MarketplacePlugin {
   downloadUrl: string;
   sha256: string;
   size?: number;
+  versions?: import('../core/plugin-platform/types').MarketplacePluginVersion[];
 }
+
+export type PluginArtifact = import('../core/plugin-platform/types').PluginArtifact;
+export type PluginInstallRequest = import('../core/plugin-platform/types').PluginInstallRequest;
+export type InstalledPluginState = import('../core/plugin-platform/types').InstalledPluginState;
+export type InstalledPluginVersion = import('../core/plugin-platform/types').InstalledPluginVersion;
 
 export interface MarketplaceCatalog {
   schemaVersion: 1;
@@ -161,6 +167,13 @@ export interface ElectronAPI {
     getCachedCatalog: () => Promise<MarketplaceCatalog | null>;
     fetchCatalog: (url: string) => Promise<MarketplaceCatalog>;
     install: (entry: MarketplacePlugin) => Promise<{ path: string; sha256: string; bundle: string }>;
+    installPackage: (request: PluginInstallRequest) => Promise<InstalledPluginVersion>;
+    installCatalogVersion: (id: string, version: string, activate?: boolean) => Promise<InstalledPluginVersion>;
+    listInstalled: () => Promise<InstalledPluginState[]>;
+    activateVersion: (id: string, version: string) => Promise<InstalledPluginState>;
+    rollback: (id: string) => Promise<InstalledPluginState>;
+    uninstallVersion: (id: string, version: string) => Promise<InstalledPluginState>;
+    resolvePath: (id: string, relativePath?: string) => Promise<string | null>;
   };
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;
