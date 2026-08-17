@@ -22,6 +22,8 @@ const diskScannerResource = path.join(projectRoot, 'resources', 'disk-scanner');
 const ragWorkerResource = path.join(projectRoot, 'resources', 'rag-worker');
 const videoPlayerResource = path.join(projectRoot, 'resources', 'video-player');
 const mycastResource = path.join(projectRoot, 'resources', 'mycast');
+const netProbeResource = path.join(projectRoot, 'resources', 'net-probe');
+const voiceEngineResource = path.join(projectRoot, 'resources', 'voice-engine');
 
 function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
   const segments = name.split('/');
@@ -36,7 +38,7 @@ function resolveInstalledPackage(name: string, fromDirectory: string): string | 
   return null;
 }
 
-function copyProductionDependencyTree(name: string, buildPath: string, fromDirectory = projectRoot, copied = new Set<string>()): void {
+function copyProductionDependencyTree(name: string, buildPath: string, fromDirectory = projectRoot, copied = new Set<string>(), includeOptional = true): void {
   const source = resolveInstalledPackage(name, fromDirectory);
   if (!source || copied.has(source)) return;
   copied.add(source);
@@ -44,7 +46,17 @@ function copyProductionDependencyTree(name: string, buildPath: string, fromDirec
   const relativePath = path.relative(projectRoot, source);
   const destination = path.join(buildPath, relativePath);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.cpSync(source, destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    force: true,
+    // Dependencies are copied deliberately below. Copying a package's nested
+    // node_modules wholesale bypasses platform/optional filtering and was the
+    // reason Linux/macOS ONNX payloads entered the Windows application.
+    filter: (sourcePath) => {
+      const nestedPath = path.relative(source, sourcePath);
+      return nestedPath === '' || !nestedPath.split(path.sep).includes('node_modules');
+    },
+  });
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')) as {
     dependencies?: Record<string, string>;
@@ -52,9 +64,15 @@ function copyProductionDependencyTree(name: string, buildPath: string, fromDirec
   };
   const dependencies = new Set([
     ...Object.keys(packageJson.dependencies ?? {}),
-    ...Object.keys(packageJson.optionalDependencies ?? {}),
+    ...(includeOptional ? Object.keys(packageJson.optionalDependencies ?? {}) : []),
   ]);
-  dependencies.forEach((dependency) => copyProductionDependencyTree(dependency, buildPath, source, copied));
+  dependencies.forEach((dependency) => copyProductionDependencyTree(dependency, buildPath, source, copied, includeOptional));
+}
+
+function lancedbNativePackage(): string {
+  if (process.platform === 'win32') return `@lancedb/lancedb-win32-${process.arch}-msvc`;
+  if (process.platform === 'darwin') return `@lancedb/lancedb-darwin-${process.arch}`;
+  return `@lancedb/lancedb-linux-${process.arch}-gnu`;
 }
 
 const config: ForgeConfig = {
@@ -62,7 +80,12 @@ const config: ForgeConfig = {
     packageAfterCopy: async (_forgeConfig, buildPath) => {
       const copied = new Set<string>();
       copyProductionDependencyTree('node-pty', buildPath, projectRoot, copied);
-      copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied);
+      // The package declares every platform binary plus optional ML stacks.
+      // This app uses only the core database API, so package the host binary and
+      // peer Arrow runtime without copying ONNX, Sharp, macOS and Linux payloads.
+      copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied, false);
+      copyProductionDependencyTree(lancedbNativePackage(), buildPath, projectRoot, copied, false);
+      copyProductionDependencyTree('apache-arrow', buildPath, projectRoot, copied, false);
       copyProductionDependencyTree('better-sqlite3', buildPath, projectRoot, copied);
       copyProductionDependencyTree('ws', buildPath, projectRoot, copied);
     },
@@ -74,6 +97,8 @@ const config: ForgeConfig = {
       ...(fs.existsSync(ragWorkerResource) ? [ragWorkerResource] : []),
       ...(fs.existsSync(videoPlayerResource) ? [videoPlayerResource] : []),
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
+      ...(fs.existsSync(netProbeResource) ? [netProbeResource] : []),
+      ...(fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),
     ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**',

@@ -9,7 +9,7 @@ const manifest = path.join(root, 'native', 'net-probe', 'Cargo.toml');
 console.log('[build-net-probe] cargo build --release ...');
 const build = spawnSync('cargo', ['build', '--release', '--manifest-path', manifest], {
   stdio: 'inherit',
-  shell: process.platform === 'win32',
+  shell: false,
 });
 if (build.status !== 0) {
   process.exit(build.status ?? 1);

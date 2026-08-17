@@ -15,7 +15,7 @@ console.log('[build-voice-engine] cargo build --release ...');
 const build = spawnSync(
   'cargo',
   ['build', '--release', '--manifest-path', manifest],
-  { stdio: 'inherit', shell: process.platform === 'win32' },
+  { stdio: 'inherit', shell: false },
 );
 if (build.status !== 0) {
   process.exit(build.status ?? 1);
