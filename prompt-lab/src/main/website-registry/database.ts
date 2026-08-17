@@ -2,6 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as DatabaseNS from 'better-sqlite3';
+import { migrateLegacyWebsiteRegistry } from './legacy-migration';
 
 type DatabaseCtor = new (filename: string) => DatabaseNS.Database;
 const Database: DatabaseCtor = ((DatabaseNS as unknown as { default?: DatabaseCtor }).default || (DatabaseNS as unknown as DatabaseCtor));
@@ -32,5 +33,14 @@ export function getWebsiteRegistryDatabase(): DatabaseNS.Database {
     CREATE INDEX IF NOT EXISTS idx_website_records_opened ON website_records(last_opened_at DESC);
     INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ${Date.now()});
   `);
+  if (!app.isPackaged) {
+    const legacyDatabasePath = path.join(app.getPath('appData'), app.getName(), 'website-registry', 'website-registry.db');
+    try {
+      const imported = migrateLegacyWebsiteRegistry(database, legacyDatabasePath);
+      if (imported > 0) console.info(`[website-registry] Migrated ${imported} records from the legacy development profile.`);
+    } catch (error) {
+      console.warn('[website-registry] Legacy development profile migration failed; continuing with the current database.', error);
+    }
+  }
   return database;
 }
