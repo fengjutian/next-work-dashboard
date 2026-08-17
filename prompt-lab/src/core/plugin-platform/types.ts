@@ -58,6 +58,7 @@ export interface MarketplaceCatalog {
   schemaVersion: 1;
   plugins: MarketplacePlugin[];
   fetchedAt?: number;
+  signature?: { keyId: string; value: string };
 }
 
 export interface InstalledPluginState {
@@ -93,4 +94,12 @@ export interface PluginInstallProgress {
   totalBytes?: number;
   percent?: number;
   message?: string;
+}
+
+export interface PluginResourceRequirement {
+  pluginId: string;
+  required: boolean;
+  installed: boolean;
+  version?: string;
+  size?: number;
 }

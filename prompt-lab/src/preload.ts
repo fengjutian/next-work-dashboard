@@ -49,6 +49,8 @@ const electronAPI: ElectronAPI = {
     uninstallVersion: (id, version) => ipcRenderer.invoke('plugins:packages:uninstall', id, version),
     resolvePath: (id, relativePath) => ipcRenderer.invoke('plugins:packages:resolve', id, relativePath),
     cancelInstall: (id, version) => ipcRenderer.invoke('plugins:packages:cancel', id, version),
+    getResourceRequirement: (id) => ipcRenderer.invoke('plugins:packages:requirement', id),
+    ensureResource: (id) => ipcRenderer.invoke('plugins:packages:ensure', id),
     onInstallProgress: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: import('./core/plugin-platform/types').PluginInstallProgress) => callback(progress);
       ipcRenderer.on('plugins:packages:progress', handler);

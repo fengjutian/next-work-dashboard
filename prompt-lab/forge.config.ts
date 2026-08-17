@@ -92,6 +92,7 @@ const config: ForgeConfig = {
   },
   packagerConfig: {
     extraResource: [
+      ...(fs.existsSync(path.join(projectRoot, 'resources', 'plugin-marketplace-public.pem')) ? [path.join(projectRoot, 'resources', 'plugin-marketplace-public.pem')] : []),
       ...(process.env.NWD_BUNDLE_OFFICECLI === '1' && fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
       ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),
       ...(fs.existsSync(ragWorkerResource) ? [ragWorkerResource] : []),

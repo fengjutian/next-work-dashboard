@@ -123,6 +123,7 @@ export type PluginInstallRequest = import('../core/plugin-platform/types').Plugi
 export type InstalledPluginState = import('../core/plugin-platform/types').InstalledPluginState;
 export type InstalledPluginVersion = import('../core/plugin-platform/types').InstalledPluginVersion;
 export type PluginInstallProgress = import('../core/plugin-platform/types').PluginInstallProgress;
+export type PluginResourceRequirement = import('../core/plugin-platform/types').PluginResourceRequirement;
 
 export interface MarketplaceCatalog {
   schemaVersion: 1;
@@ -176,6 +177,8 @@ export interface ElectronAPI {
     uninstallVersion: (id: string, version: string) => Promise<InstalledPluginState>;
     resolvePath: (id: string, relativePath?: string) => Promise<string | null>;
     cancelInstall: (id: string, version: string) => Promise<boolean>;
+    getResourceRequirement: (id: string) => Promise<PluginResourceRequirement>;
+    ensureResource: (id: string) => Promise<InstalledPluginVersion | null>;
     onInstallProgress: (callback: (progress: PluginInstallProgress) => void) => () => void;
   };
   minimize: () => Promise<void>;

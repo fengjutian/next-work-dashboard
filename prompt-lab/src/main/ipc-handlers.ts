@@ -57,6 +57,8 @@ import {
   activatePluginVersion,
   cancelPluginInstall,
   fetchMarketplaceCatalog,
+  ensurePluginResource,
+  getPluginResourceRequirement,
   installMarketplacePlugin,
   installCatalogPlugin,
   installPluginPackage,
@@ -289,6 +291,8 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('plugins:packages:uninstall', (_event, id: string, version: string) => uninstallPluginVersion(id, version));
   ipcMain.handle('plugins:packages:resolve', (_event, id: string, relativePath?: string) => resolveActivePluginPath(id, relativePath));
   ipcMain.handle('plugins:packages:cancel', (_event, id: string, version: string) => cancelPluginInstall(id, version));
+  ipcMain.handle('plugins:packages:requirement', (_event, id: string) => getPluginResourceRequirement(id));
+  ipcMain.handle('plugins:packages:ensure', (event, id: string) => ensurePluginResource(id, (progress) => event.sender.send('plugins:packages:progress', progress)));
   const workspaceWatchers = new Map<number, fs.FSWatcher>();
   const dialogAuthorizedFiles = new Set<string>();
 

@@ -234,10 +234,24 @@ export const PluginManagerPanel: React.FC = () => {
                           const logs = pluginStorage.getLogs(id);
                           alert(logs.length ? logs.map((entry) => `[${entry.level}] ${entry.message}`).join('\n') : '暂无日志');
                         }}
-                        onToggle={(id) => {
+                        onToggle={async (id) => {
                           const p = pluginRegistry.get(id);
                           if (p) {
                             const nextEnabled = !p.enabled;
+                            if (nextEnabled) {
+                              try {
+                                const requirement = await window.electronAPI.plugins.getResourceRequirement(id);
+                                if (requirement.required && !requirement.installed) {
+                                  if (!requirement.version) throw new Error('在线目录中没有当前平台可用的资源版本');
+                                  const size = requirement.size ? `（${(requirement.size / 1024 / 1024).toFixed(1)} MB）` : '';
+                                  if (!window.confirm(`启用该插件需要下载资源 ${requirement.version}${size}，是否继续？`)) return;
+                                  await window.electronAPI.plugins.ensureResource(id);
+                                }
+                              } catch (error) {
+                                alert(`资源安装失败：${error instanceof Error ? error.message : String(error)}`);
+                                return;
+                              }
+                            }
                             pluginRegistry.setEnabled(id, nextEnabled);
                             if (isUserPlugin) {
                               const defs = loadUserPlugins().map((item) => item.id === id

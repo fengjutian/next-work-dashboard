@@ -517,6 +517,10 @@ export async function shutdownDaemon(): Promise<void> {
   resetAlertState();
 }
 
+export function isDaemonRunning(): boolean {
+  return Boolean(processHandle && state.ready);
+}
+
 export function setupNetProbeIPC(): void {
   ipcMain.handle('net-probe:start', async () => startDaemon());
   ipcMain.handle('net-probe:state', () => snapshotState());

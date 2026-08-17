@@ -10,7 +10,8 @@ import { destroyAll } from './plugins/terminal/backend/terminal-manager';
 import { mcpManager } from './main/mcp/mcp-manager';
 import { disposeOfficeService } from './plugins/office-studio/backend/office-service';
 import { disposeDiskSpaceService, setupDiskSpaceIPC } from './plugins/disk-space/backend/disk-service';
-import { setupNetProbeIPC, shutdownDaemon } from './plugins/network-observatory/backend/net-probe-service';
+import { isDaemonRunning as isNetProbeRunning, setupNetProbeIPC, shutdownDaemon, startDaemon as startNetProbeDaemon } from './plugins/network-observatory/backend/net-probe-service';
+import { getState as getVoiceState, shutdownDaemon as shutdownVoiceDaemon, startDaemon as startVoiceDaemon } from './plugins/voice-input/backend/voice-engine-service';
 import { setupRagWorkerIPC } from './main/rag-worker-ipc';
 import { ragWorkerClient } from './main/rag-worker-client';
 import { startRagIndexCoordinator, stopRagIndexCoordinator } from './main/rag-index-coordinator';
@@ -20,6 +21,7 @@ import { setupSecurityAuditIPC } from './main/security-audit';
 import { setupWebsiteRegistryIPC } from './main/website-registry';
 import { setupCodeVisualizerIPC } from './main/code-visualizer';
 import { resolveUserDataPath } from './main/user-data-path';
+import { registerPluginRuntimeHook } from './main/plugin-runtime-hooks';
 
 function configureUserDataPath(): void {
   const isolatedPath = resolveUserDataPath(app.getPath('appData'), app.getName(), app.isPackaged);
@@ -93,6 +95,16 @@ if (started) {
   // 应用生命周期
   app.whenReady().then(() => {
     const webviewPreloadPath = path.join(__dirname, 'webview-preload.js');
+    registerPluginRuntimeHook('network-observatory', {
+      isRunning: isNetProbeRunning,
+      stop: shutdownDaemon,
+      start: async () => { await startNetProbeDaemon(); },
+    });
+    registerPluginRuntimeHook('voice-input', {
+      isRunning: () => getVoiceState().ready,
+      stop: shutdownVoiceDaemon,
+      start: async () => { await startVoiceDaemon(); },
+    });
 
     let captureTarget: 'app' | 'screen' = 'screen';
     let captureSystemAudio = false;

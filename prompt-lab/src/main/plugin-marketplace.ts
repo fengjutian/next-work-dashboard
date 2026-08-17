@@ -5,6 +5,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
 import type { InstalledPluginState, InstalledPluginVersion, MarketplaceCatalog, MarketplacePlugin, PluginArtifact, PluginDataMigration, PluginInstallProgress, PluginInstallRequest, PluginPackageManifest } from '../core/plugin-platform/types';
+import { switchPluginRuntime } from './plugin-runtime-hooks';
 
 export type { MarketplaceCatalog, MarketplacePlugin } from '../core/plugin-platform/types';
 export const MAX_PLUGIN_PACKAGE_SIZE = 2 * 1024 * 1024;
@@ -22,6 +23,7 @@ const statePath = (id: string) => path.join(packageRoot(id), 'state.json');
 const versionPath = (id: string, version: string) => path.join(packageRoot(id), 'versions', version);
 const downloadPath = (id: string, version: string) => path.join(root(), 'downloads', `${id}-${version}.zip.part`);
 const activeDownloads = new Map<string, AbortController>();
+const RESOURCE_PLUGIN_IDS = new Set(['video-player', 'office-studio', 'voice-input', 'network-observatory']);
 
 async function atomicWrite(filePath: string, data: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -74,7 +76,21 @@ function parseCatalog(value: unknown): MarketplaceCatalog {
       validateArtifact({ url: item.downloadUrl, sha256: item.sha256, size: item.size });
     }
   }
+  verifyCatalogSignature(catalog);
   return catalog;
+}
+
+function verifyCatalogSignature(catalog: MarketplaceCatalog): void {
+  const configured = process.env.NWD_MARKETPLACE_PUBLIC_KEY_PATH;
+  const bundled = app.isPackaged
+    ? path.join(process.resourcesPath, 'plugin-marketplace-public.pem')
+    : path.join(app.getAppPath(), 'resources', 'plugin-marketplace-public.pem');
+  const keyPath = configured?.trim() || bundled;
+  if (!fsSync.existsSync(keyPath)) return;
+  if (!catalog.signature?.value) throw new Error('MARKETPLACE_SIGNATURE_REQUIRED');
+  const payload = Buffer.from(JSON.stringify({ schemaVersion: catalog.schemaVersion, plugins: catalog.plugins }));
+  const publicKey = fsSync.readFileSync(keyPath, 'utf8');
+  if (!crypto.verify(null, payload, publicKey, Buffer.from(catalog.signature.value, 'base64'))) throw new Error('MARKETPLACE_SIGNATURE_INVALID');
 }
 
 function parseManifest(value: unknown, expectedId: string, expectedVersion: string): PluginPackageManifest {
@@ -220,11 +236,15 @@ export async function installPluginPackage(request: PluginInstallRequest, report
     const state = await loadState(id);
     if (!state.installedVersions.includes(version)) state.installedVersions.push(version);
     if (request.activate !== false) {
-      state.previousVersion = state.activeVersion && state.activeVersion !== version ? state.activeVersion : state.previousVersion;
-      state.activeVersion = version;
-      state.enabled = true;
+      const original = { ...state, installedVersions: [...state.installedVersions] };
+      await switchPluginRuntime(id, async () => {
+        state.previousVersion = state.activeVersion && state.activeVersion !== version ? state.activeVersion : state.previousVersion;
+        state.activeVersion = version;
+        state.enabled = true;
+        await saveState(state);
+      }, () => saveState(original));
     }
-    await saveState(state);
+    else await saveState(state);
     const result = { manifest, path: destination, active: state.activeVersion === version };
     await fs.rm(downloadPath(id, version), { force: true });
     emit('completed', { percent: 100 });
@@ -363,6 +383,39 @@ export async function installCatalogPlugin(pluginId: string, version: string, ac
   return installPluginPackage({ pluginId, version, artifact, activate }, report);
 }
 
+export async function getPluginResourceRequirement(pluginId: string): Promise<import('../core/plugin-platform/types').PluginResourceRequirement> {
+  safeId(pluginId);
+  if (!RESOURCE_PLUGIN_IDS.has(pluginId)) return { pluginId, required: false, installed: true };
+  const state = await loadState(pluginId);
+  if ((state.enabled && state.activeVersion) || hasBundledPluginResource(pluginId)) return { pluginId, required: true, installed: true, version: state.activeVersion ?? 'bundled' };
+  const catalog = await loadCachedCatalog();
+  const plugin = catalog?.plugins.find((item) => item.id === pluginId);
+  const release = plugin?.versions
+    ?.filter((item) => (item.channel ?? 'stable') === 'stable')
+    .sort((left, right) => compareVersions(right.version, left.version))[0];
+  const artifact = release?.artifacts[`${process.platform}-${process.arch}`];
+  return { pluginId, required: true, installed: false, version: release?.version, size: artifact?.size };
+}
+
+function hasBundledPluginResource(pluginId: string): boolean {
+  const resourceRoot = app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources');
+  const executable = process.platform === 'win32' ? '.exe' : '';
+  const candidates: Record<string, string[]> = {
+    'video-player': [path.join(resourceRoot, 'video-player', process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux', `mpv${executable}`)],
+    'office-studio': [path.join(resourceRoot, 'officecli', `${process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'darwin' : 'linux'}-${process.arch === 'arm64' ? 'arm64' : 'x64'}`, `officecli${executable}`)],
+    'voice-input': [path.join(resourceRoot, 'voice-engine', `nwd-voice-engine${executable}`)],
+    'network-observatory': [path.join(resourceRoot, 'net-probe', `nwd-net-probe${executable}`)],
+  };
+  return (candidates[pluginId] ?? []).some((candidate) => fsSync.existsSync(candidate));
+}
+
+export async function ensurePluginResource(pluginId: string, report?: (progress: PluginInstallProgress) => void): Promise<InstalledPluginVersion | null> {
+  const requirement = await getPluginResourceRequirement(pluginId);
+  if (!requirement.required || requirement.installed) return null;
+  if (!requirement.version) throw new Error('PLUGIN_RESOURCE_RELEASE_NOT_FOUND');
+  return installCatalogPlugin(pluginId, requirement.version, true, report);
+}
+
 export async function listInstalledPlugins(): Promise<InstalledPluginState[]> {
   try {
     const entries = await fs.readdir(path.join(root(), 'packages'), { withFileTypes: true });
@@ -376,10 +429,14 @@ export async function activatePluginVersion(id: string, version: string): Promis
   await fs.access(manifestFile);
   await assertDataVersionCompatible(id, JSON.parse(await fs.readFile(manifestFile, 'utf8')) as PluginPackageManifest);
   const state = await loadState(id);
-  state.previousVersion = state.activeVersion && state.activeVersion !== version ? state.activeVersion : state.previousVersion;
-  state.activeVersion = version; state.enabled = true;
   if (!state.installedVersions.includes(version)) state.installedVersions.push(version);
-  await saveState(state); return state;
+  const original = { ...state, installedVersions: [...state.installedVersions] };
+  await switchPluginRuntime(id, async () => {
+    state.previousVersion = state.activeVersion && state.activeVersion !== version ? state.activeVersion : state.previousVersion;
+    state.activeVersion = version; state.enabled = true;
+    await saveState(state);
+  }, () => saveState(original));
+  return state;
 }
 
 export async function rollbackPlugin(id: string): Promise<InstalledPluginState> {
@@ -389,8 +446,12 @@ export async function rollbackPlugin(id: string): Promise<InstalledPluginState> 
   const manifestFile = path.join(versionPath(id, previous), 'plugin.json');
   await fs.access(manifestFile);
   await assertDataVersionCompatible(id, JSON.parse(await fs.readFile(manifestFile, 'utf8')) as PluginPackageManifest);
-  state.previousVersion = state.activeVersion; state.activeVersion = previous; state.enabled = true;
-  await saveState(state); return state;
+  const original = { ...state, installedVersions: [...state.installedVersions] };
+  await switchPluginRuntime(id, async () => {
+    state.previousVersion = state.activeVersion; state.activeVersion = previous; state.enabled = true;
+    await saveState(state);
+  }, () => saveState(original));
+  return state;
 }
 
 export async function uninstallPluginVersion(id: string, version: string): Promise<InstalledPluginState> {
