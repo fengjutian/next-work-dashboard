@@ -63,6 +63,7 @@ const config: ForgeConfig = {
       const copied = new Set<string>();
       copyProductionDependencyTree('node-pty', buildPath, projectRoot, copied);
       copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied);
+      copyProductionDependencyTree('better-sqlite3', buildPath, projectRoot, copied);
       copyProductionDependencyTree('ws', buildPath, projectRoot, copied);
     },
   },
@@ -75,7 +76,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
     ],
     asar: {
-      unpack: '**/node_modules/{node-pty,@lancedb}/**',
+      unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**',
     },
     download: {
       mirrorOptions: {
@@ -84,7 +85,7 @@ const config: ForgeConfig = {
     },
   },
   rebuildConfig: {
-    onlyModules: ['node-pty', '@lancedb/lancedb'],
+    onlyModules: ['node-pty', '@lancedb/lancedb', 'better-sqlite3'],
   },
   makers: [
     new MakerSquirrel({}),
