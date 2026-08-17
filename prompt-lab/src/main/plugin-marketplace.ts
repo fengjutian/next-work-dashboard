@@ -4,10 +4,11 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
-import type { InstalledPluginState, InstalledPluginVersion, MarketplaceCatalog, MarketplacePlugin, PluginArtifact, PluginInstallRequest, PluginPackageManifest } from '../core/plugin-platform/types';
+import type { InstalledPluginState, InstalledPluginVersion, MarketplaceCatalog, MarketplacePlugin, PluginArtifact, PluginDataMigration, PluginInstallProgress, PluginInstallRequest, PluginPackageManifest } from '../core/plugin-platform/types';
 
 export type { MarketplaceCatalog, MarketplacePlugin } from '../core/plugin-platform/types';
-export const MAX_PLUGIN_PACKAGE_SIZE = 512 * 1024 * 1024;
+export const MAX_PLUGIN_PACKAGE_SIZE = 2 * 1024 * 1024;
+export const MAX_VERSIONED_PLUGIN_PACKAGE_SIZE = 512 * 1024 * 1024;
 export const MAX_PLUGIN_EXTRACTED_SIZE = 1024 * 1024 * 1024;
 export const MAX_PLUGIN_FILE_COUNT = 10_000;
 const CATALOG_MAX_SIZE = 512 * 1024;
@@ -19,6 +20,8 @@ const catalogPath = () => path.join(root(), 'marketplace-catalog.json');
 const packageRoot = (id: string) => path.join(root(), 'packages', id);
 const statePath = (id: string) => path.join(packageRoot(id), 'state.json');
 const versionPath = (id: string, version: string) => path.join(packageRoot(id), 'versions', version);
+const downloadPath = (id: string, version: string) => path.join(root(), 'downloads', `${id}-${version}.zip.part`);
+const activeDownloads = new Map<string, AbortController>();
 
 async function atomicWrite(filePath: string, data: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -132,14 +135,15 @@ function verifySignature(bytes: Buffer, artifact: PluginArtifact): void {
   if (!crypto.verify(null, bytes, artifact.publicKey, Buffer.from(artifact.signature, 'base64'))) throw new Error('PLUGIN_SIGNATURE_INVALID');
 }
 
-async function extractPackage(bytes: Buffer, destination: string): Promise<void> {
+async function extractPackage(bytes: Buffer, destination: string, onProgress?: (completed: number, total: number) => void): Promise<void> {
   const archive = await JSZip.loadAsync(bytes, { checkCRC32: true, createFolders: false });
   const entries = Object.values(archive.files);
   if (entries.length > MAX_PLUGIN_FILE_COUNT) throw new Error('PLUGIN_ARCHIVE_TOO_MANY_FILES');
   let extractedSize = 0;
+  let completed = 0;
   for (const entry of entries) {
     const relative = validatePluginArchivePath(entry.name);
-    if (entry.dir) continue;
+    if (entry.dir) { completed += 1; onProgress?.(completed, entries.length); continue; }
     const unixMode = typeof entry.unixPermissions === 'number' ? entry.unixPermissions : 0;
     if ((unixMode & 0o170000) === 0o120000) throw new Error('PLUGIN_ARCHIVE_SYMLINK_NOT_ALLOWED');
     const data = await entry.async('nodebuffer');
@@ -152,6 +156,8 @@ async function extractPackage(bytes: Buffer, destination: string): Promise<void>
     await fs.mkdir(path.dirname(target), { recursive: true });
     const mode = unixMode & 0o777;
     await fs.writeFile(target, data, mode ? { mode } : undefined);
+    completed += 1;
+    onProgress?.(completed, entries.length);
   }
 }
 
@@ -176,24 +182,39 @@ export async function fetchMarketplaceCatalog(url: string): Promise<MarketplaceC
   return catalog;
 }
 
-export async function installPluginPackage(request: PluginInstallRequest): Promise<InstalledPluginVersion> {
+export async function installPluginPackage(request: PluginInstallRequest, report?: (progress: PluginInstallProgress) => void): Promise<InstalledPluginVersion> {
   const id = safeId(request.pluginId);
   const version = safeVersion(request.version);
   validateArtifact(request.artifact);
   try { await fs.access(destinationFor(id, version)); throw new Error('PLUGIN_VERSION_ALREADY_INSTALLED'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  const bytes = await fetchMarketplaceBytes(request.artifact.url, MAX_PLUGIN_PACKAGE_SIZE, 'PLUGIN');
-  if (request.artifact.size && bytes.length !== request.artifact.size) throw new Error('PLUGIN_PACKAGE_SIZE_INVALID');
-  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
-  if (digest.toLowerCase() !== request.artifact.sha256.toLowerCase()) throw new Error('PLUGIN_SHA256_MISMATCH');
-  verifySignature(bytes, request.artifact);
+  const emit = (phase: PluginInstallProgress['phase'], details: Partial<PluginInstallProgress> = {}) => report?.({ pluginId: id, version, phase, ...details });
+  let bytes: Buffer;
+  try {
+    emit('downloading', { receivedBytes: 0, totalBytes: request.artifact.size, percent: 0 });
+    bytes = await downloadPluginPackage(id, version, request.artifact, (receivedBytes, totalBytes) => {
+      emit('downloading', { receivedBytes, totalBytes, percent: totalBytes ? Math.min(100, Math.round(receivedBytes / totalBytes * 100)) : undefined });
+    });
+    emit('verifying');
+    if (request.artifact.size && bytes.length !== request.artifact.size) throw new Error('PLUGIN_PACKAGE_SIZE_INVALID');
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (digest.toLowerCase() !== request.artifact.sha256.toLowerCase()) throw new Error('PLUGIN_SHA256_MISMATCH');
+    verifySignature(bytes, request.artifact);
+  } catch (error) {
+    if ((error as Error).name !== 'AbortError') await fs.rm(downloadPath(id, version), { force: true });
+    emit('failed', { message: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 
   const staging = path.join(root(), 'staging', `${id}-${version}-${crypto.randomUUID()}`);
   const destination = destinationFor(id, version);
   await fs.mkdir(staging, { recursive: true });
   try {
-    await extractPackage(bytes, staging);
+    emit('extracting', { percent: 0 });
+    await extractPackage(bytes, staging, (completed, total) => emit('extracting', { percent: Math.round(completed / total * 100) }));
     const manifest = parseManifest(JSON.parse(await fs.readFile(path.join(staging, 'plugin.json'), 'utf8')), id, version);
+    await migratePluginData(manifest);
+    emit('installing');
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.rename(staging, destination);
     const state = await loadState(id);
@@ -204,18 +225,142 @@ export async function installPluginPackage(request: PluginInstallRequest): Promi
       state.enabled = true;
     }
     await saveState(state);
-    return { manifest, path: destination, active: state.activeVersion === version };
+    const result = { manifest, path: destination, active: state.activeVersion === version };
+    await fs.rm(downloadPath(id, version), { force: true });
+    emit('completed', { percent: 100 });
+    return result;
+  } catch (error) {
+    emit('failed', { message: error instanceof Error ? error.message : String(error) });
+    throw error;
   } finally { await fs.rm(staging, { recursive: true, force: true }); }
 }
 
-export async function installCatalogPlugin(pluginId: string, version: string, activate = true): Promise<InstalledPluginVersion> {
+export function cancelPluginInstall(id: string, version: string): boolean {
+  safeId(id); safeVersion(version);
+  const controller = activeDownloads.get(`${id}@${version}`);
+  if (!controller) return false;
+  controller.abort();
+  return true;
+}
+
+async function downloadPluginPackage(id: string, version: string, artifact: PluginArtifact, onProgress: (received: number, total?: number) => void): Promise<Buffer> {
+  const target = downloadPath(id, version);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  let existing = 0;
+  try { existing = (await fs.stat(target)).size; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  if (existing > MAX_VERSIONED_PLUGIN_PACKAGE_SIZE || (artifact.size && existing > artifact.size)) {
+    await fs.rm(target, { force: true }); existing = 0;
+  }
+  if (artifact.size && existing === artifact.size) {
+    onProgress(existing, artifact.size);
+    return fs.readFile(target);
+  }
+  if (existing) onProgress(existing, artifact.size);
+  const parsed = validatedDownloadUrl(artifact.url, 'PLUGIN');
+  const controller = new AbortController();
+  const key = `${id}@${version}`;
+  if (activeDownloads.has(key)) throw new Error('PLUGIN_DOWNLOAD_ALREADY_RUNNING');
+  activeDownloads.set(key, controller);
+  const timeout = setTimeout(() => controller.abort(), 10 * 60_000);
+  try {
+    const response = await fetch(parsed, {
+      signal: controller.signal,
+      redirect: 'error',
+      headers: existing ? { Range: `bytes=${existing}-` } : undefined,
+    });
+    if (!response.ok && response.status !== 206) throw new Error(`PLUGIN_HTTP_${response.status}`);
+    const resumed = existing > 0 && response.status === 206;
+    if (!resumed && existing) { await fs.truncate(target, 0); existing = 0; }
+    const remaining = Number(response.headers.get('content-length') || 0);
+    const totalSize = artifact.size ?? (remaining ? existing + remaining : undefined);
+    if (totalSize && totalSize > MAX_VERSIONED_PLUGIN_PACKAGE_SIZE) throw new Error('PLUGIN_PACKAGE_TOO_LARGE');
+    if (!response.body) throw new Error('PLUGIN_EMPTY_RESPONSE');
+    const handle = await fs.open(target, resumed ? 'a' : 'w');
+    let received = existing;
+    try {
+      const reader = response.body.getReader();
+      let done = false;
+      while (!done) {
+        const result = await reader.read();
+        done = result.done;
+        if (done) continue;
+        received += result.value.byteLength;
+        if (received > MAX_VERSIONED_PLUGIN_PACKAGE_SIZE) { await reader.cancel(); throw new Error('PLUGIN_PACKAGE_TOO_LARGE'); }
+        await handle.write(Buffer.from(result.value));
+        onProgress(received, totalSize);
+      }
+    } finally { await handle.close(); }
+    return fs.readFile(target);
+  } finally {
+    clearTimeout(timeout);
+    activeDownloads.delete(key);
+  }
+}
+
+async function migratePluginData(manifest: PluginPackageManifest): Promise<void> {
+  const migrations = [...(manifest.migrations ?? [])].sort((left, right) => left.from - right.from);
+  const dataRoot = path.join(root(), 'data', manifest.id);
+  const stateFile = path.join(dataRoot, '.data-version.json');
+  await fs.mkdir(dataRoot, { recursive: true });
+  let current = 0;
+  try { current = Number(JSON.parse(await fs.readFile(stateFile, 'utf8')).version || 0); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  const target = manifest.dataVersion ?? current;
+  if (target <= current) return;
+  const plan = planPluginMigrations(current, target, migrations);
+  const backup = path.join(root(), 'migration-backups', manifest.id, `${current}-${target}-${Date.now()}`);
+  await fs.cp(dataRoot, backup, { recursive: true, force: true });
+  try {
+    for (const migration of plan) {
+      for (const operation of migration.operations) {
+        if (operation.type === 'mkdir') await fs.mkdir(path.join(dataRoot, validatePluginArchivePath(operation.path)), { recursive: true });
+        else {
+          const from = path.join(dataRoot, validatePluginArchivePath(operation.from));
+          const to = path.join(dataRoot, validatePluginArchivePath(operation.to));
+          await fs.mkdir(path.dirname(to), { recursive: true });
+          if (operation.type === 'copy') await fs.cp(from, to, { recursive: true, force: true });
+          else await fs.rename(from, to);
+        }
+      }
+      current = migration.to;
+      await atomicWrite(stateFile, `${JSON.stringify({ version: current, updatedAt: Date.now() }, null, 2)}\n`);
+    }
+  } catch (error) {
+    await fs.rm(dataRoot, { recursive: true, force: true });
+    await fs.cp(backup, dataRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function planPluginMigrations(current: number, target: number, migrations: PluginDataMigration[]): PluginDataMigration[] {
+  const plan: PluginDataMigration[] = [];
+  let cursor = current;
+  while (cursor < target) {
+    const migration = migrations.find((item) => item.from === cursor);
+    if (!migration || migration.to <= cursor || migration.to > target) throw new Error('PLUGIN_DATA_MIGRATION_PATH_MISSING');
+    plan.push(migration);
+    cursor = migration.to;
+  }
+  return plan;
+}
+
+async function assertDataVersionCompatible(id: string, manifest: PluginPackageManifest): Promise<void> {
+  try {
+    const value = JSON.parse(await fs.readFile(path.join(root(), 'data', id, '.data-version.json'), 'utf8')) as { version?: number };
+    const current = Number(value.version || 0);
+    if ((manifest.dataVersion ?? 0) < current) throw new Error('PLUGIN_DATA_VERSION_PREVENTS_ROLLBACK');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
+export async function installCatalogPlugin(pluginId: string, version: string, activate = true, report?: (progress: PluginInstallProgress) => void): Promise<InstalledPluginVersion> {
   const catalog = await loadCachedCatalog();
   const plugin = catalog?.plugins.find((item) => item.id === pluginId);
   const release = plugin?.versions?.find((item) => item.version === version);
   if (!plugin || !release) throw new Error('PLUGIN_RELEASE_NOT_FOUND');
   const artifact = release.artifacts[`${process.platform}-${process.arch}`];
   if (!artifact) throw new Error('PLUGIN_PLATFORM_NOT_SUPPORTED');
-  return installPluginPackage({ pluginId, version, artifact, activate });
+  return installPluginPackage({ pluginId, version, artifact, activate }, report);
 }
 
 export async function listInstalledPlugins(): Promise<InstalledPluginState[]> {
@@ -227,7 +372,9 @@ export async function listInstalledPlugins(): Promise<InstalledPluginState[]> {
 
 export async function activatePluginVersion(id: string, version: string): Promise<InstalledPluginState> {
   safeId(id); safeVersion(version);
-  await fs.access(path.join(versionPath(id, version), 'plugin.json'));
+  const manifestFile = path.join(versionPath(id, version), 'plugin.json');
+  await fs.access(manifestFile);
+  await assertDataVersionCompatible(id, JSON.parse(await fs.readFile(manifestFile, 'utf8')) as PluginPackageManifest);
   const state = await loadState(id);
   state.previousVersion = state.activeVersion && state.activeVersion !== version ? state.activeVersion : state.previousVersion;
   state.activeVersion = version; state.enabled = true;
@@ -239,7 +386,9 @@ export async function rollbackPlugin(id: string): Promise<InstalledPluginState> 
   const state = await loadState(safeId(id));
   if (!state.previousVersion) throw new Error('PLUGIN_ROLLBACK_VERSION_MISSING');
   const previous = state.previousVersion;
-  await fs.access(path.join(versionPath(id, previous), 'plugin.json'));
+  const manifestFile = path.join(versionPath(id, previous), 'plugin.json');
+  await fs.access(manifestFile);
+  await assertDataVersionCompatible(id, JSON.parse(await fs.readFile(manifestFile, 'utf8')) as PluginPackageManifest);
   state.previousVersion = state.activeVersion; state.activeVersion = previous; state.enabled = true;
   await saveState(state); return state;
 }
@@ -275,13 +424,18 @@ export function resolveActivePluginPathSync(id: string, relativePath = ''): stri
 /** Compatibility wrapper for the legacy marketplace API. */
 export async function installMarketplacePlugin(entry: MarketplacePlugin): Promise<{ path: string; sha256: string; bundle: string }> {
   if (!entry.version || !entry.downloadUrl || !entry.sha256) throw new Error('PLUGIN_VERSION_REQUIRED');
-  const installed = await installPluginPackage({ pluginId: entry.id, version: entry.version, artifact: { url: entry.downloadUrl, sha256: entry.sha256, size: entry.size } });
-  return { path: installed.path, sha256: entry.sha256, bundle: JSON.stringify(installed.manifest) };
+  safeId(entry.id); safeVersion(entry.version);
+  const bytes = await fetchMarketplaceBytes(entry.downloadUrl, MAX_PLUGIN_PACKAGE_SIZE, 'PLUGIN');
+  if (entry.size && bytes.length !== entry.size) throw new Error('PLUGIN_PACKAGE_SIZE_INVALID');
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  if (digest.toLowerCase() !== entry.sha256.toLowerCase()) throw new Error('PLUGIN_SHA256_MISMATCH');
+  const installPath = path.join(root(), 'installed', entry.id, entry.version, `${entry.id}.nwd`);
+  await atomicWrite(installPath, bytes);
+  return { path: installPath, sha256: digest, bundle: bytes.toString('utf8') };
 }
 
-async function fetchMarketplaceBytes(url: string, maximum: number, prefix: string): Promise<Buffer> {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname))) throw new Error(`${prefix}_URL_MUST_USE_HTTPS`);
+async function fetchMarketplaceBytes(url: string, maximum: number, prefix: string, onProgress?: (received: number, total?: number) => void): Promise<Buffer> {
+  const parsed = validatedDownloadUrl(url, prefix);
   const response = await fetch(parsed, { signal: AbortSignal.timeout(120_000), redirect: 'error' });
   if (!response.ok) throw new Error(`${prefix}_HTTP_${response.status}`);
   const declared = Number(response.headers.get('content-length') || 0);
@@ -297,8 +451,15 @@ async function fetchMarketplaceBytes(url: string, maximum: number, prefix: strin
     total += value.byteLength;
     if (total > maximum) { await reader.cancel(); throw new Error(`${prefix}_PACKAGE_TOO_LARGE`); }
     chunks.push(Buffer.from(value));
+    onProgress?.(total, declared || undefined);
   }
   return Buffer.concat(chunks, total);
+}
+
+function validatedDownloadUrl(url: string, prefix: string): URL {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname))) throw new Error(`${prefix}_URL_MUST_USE_HTTPS`);
+  return parsed;
 }
 
 function destinationFor(id: string, version: string): string {

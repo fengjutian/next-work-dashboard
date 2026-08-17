@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "office-studio",
+  "name": "Office Studio",
+  "version": "1.0.0",
+  "pluginApiVersion": 1,
+  "engines": { "app": ">=0.2.0 <0.4.0" },
+  "resources": {
+    "officecli": { "version": "1.0.0", "executable": "resources/win-x64/officecli.exe" }
+  },
+  "permissions": ["filesystem:user-selected", "process:officecli"],
+  "packageResources": [{ "from": "resources/officecli/win-x64/officecli.exe", "to": "resources/win-x64/officecli.exe" }]
+}

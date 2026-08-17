@@ -12,6 +12,20 @@ export interface PluginPackageManifest {
   entrypoints?: { main?: string; renderer?: string; preload?: string };
   resources?: Record<string, { version: string; executable?: string }>;
   permissions?: string[];
+  dataVersion?: number;
+  migrations?: PluginDataMigration[];
+  packageResources?: Array<{ from: string; to?: string }>;
+}
+
+export type PluginDataMigrationOperation =
+  | { type: 'mkdir'; path: string }
+  | { type: 'copy'; from: string; to: string }
+  | { type: 'move'; from: string; to: string };
+
+export interface PluginDataMigration {
+  from: number;
+  to: number;
+  operations: PluginDataMigrationOperation[];
 }
 
 export interface PluginArtifact {
@@ -67,4 +81,16 @@ export interface PluginInstallRequest {
   version: string;
   artifact: PluginArtifact;
   activate?: boolean;
+}
+
+export type PluginInstallPhase = 'downloading' | 'verifying' | 'extracting' | 'installing' | 'completed' | 'failed';
+
+export interface PluginInstallProgress {
+  pluginId: string;
+  version: string;
+  phase: PluginInstallPhase;
+  receivedBytes?: number;
+  totalBytes?: number;
+  percent?: number;
+  message?: string;
 }

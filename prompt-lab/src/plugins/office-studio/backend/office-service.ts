@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { OfficeAddRequest, OfficeCliStatus, OfficeOperationResult, OfficeRenderResult, OfficeSetRequest } from '../types';
+import { resolveActivePluginPathSync } from '../../../main/plugin-marketplace';
 
 const execFileAsync = promisify(execFile);
 const SUPPORTED_EXTENSIONS = new Set(['.docx', '.xlsx', '.pptx']);
@@ -19,9 +20,10 @@ function bundledExecutableCandidates(): string[] {
   const executable = process.platform === 'win32' ? 'officecli.exe' : 'officecli';
   const resourceRoot = app.isPackaged ? process.resourcesPath : path.resolve(app.getAppPath(), 'resources');
   return [
+    resolveActivePluginPathSync('office-studio', path.join('resources', `${platform}-${arch}`, executable)),
     path.join(resourceRoot, 'officecli', `${platform}-${arch}`, executable),
     path.join(resourceRoot, 'officecli', executable),
-  ];
+  ].filter((candidate): candidate is string => Boolean(candidate));
 }
 
 export function resolveOfficeCliExecutable(): { executable: string; bundled: boolean } {

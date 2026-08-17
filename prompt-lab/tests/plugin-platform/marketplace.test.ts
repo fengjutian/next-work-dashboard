@@ -9,9 +9,25 @@ vi.mock('electron', () => ({
 
 let satisfiesVersion: typeof import('../../src/main/plugin-marketplace').satisfiesVersion;
 let validatePluginArchivePath: typeof import('../../src/main/plugin-marketplace').validatePluginArchivePath;
+let planPluginMigrations: typeof import('../../src/main/plugin-marketplace').planPluginMigrations;
 
 beforeAll(async () => {
-  ({ satisfiesVersion, validatePluginArchivePath } = await import('../../src/main/plugin-marketplace'));
+  ({ satisfiesVersion, validatePluginArchivePath, planPluginMigrations } = await import('../../src/main/plugin-marketplace'));
+});
+
+describe('plugin data migrations', () => {
+  const migrations = [
+    { from: 0, to: 1, operations: [] },
+    { from: 1, to: 2, operations: [] },
+  ];
+
+  it('builds a contiguous migration plan', () => {
+    expect(planPluginMigrations(0, 2, migrations)).toHaveLength(2);
+  });
+
+  it('rejects an incomplete migration chain', () => {
+    expect(() => planPluginMigrations(0, 2, migrations.slice(1))).toThrow('PLUGIN_DATA_MIGRATION_PATH_MISSING');
+  });
 });
 
 describe('plugin marketplace compatibility', () => {

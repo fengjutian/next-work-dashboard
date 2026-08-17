@@ -92,13 +92,13 @@ const config: ForgeConfig = {
   },
   packagerConfig: {
     extraResource: [
-      ...(fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
+      ...(process.env.NWD_BUNDLE_OFFICECLI === '1' && fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
       ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),
       ...(fs.existsSync(ragWorkerResource) ? [ragWorkerResource] : []),
       ...(process.env.NWD_BUNDLE_VIDEO_PLAYER === '1' && fs.existsSync(videoPlayerResource) ? [videoPlayerResource] : []),
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
-      ...(fs.existsSync(netProbeResource) ? [netProbeResource] : []),
-      ...(fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),
+      ...(process.env.NWD_BUNDLE_NET_PROBE === '1' && fs.existsSync(netProbeResource) ? [netProbeResource] : []),
+      ...(process.env.NWD_BUNDLE_VOICE_ENGINE === '1' && fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),
     ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**',

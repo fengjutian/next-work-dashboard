@@ -48,6 +48,12 @@ const electronAPI: ElectronAPI = {
     rollback: (id) => ipcRenderer.invoke('plugins:packages:rollback', id),
     uninstallVersion: (id, version) => ipcRenderer.invoke('plugins:packages:uninstall', id, version),
     resolvePath: (id, relativePath) => ipcRenderer.invoke('plugins:packages:resolve', id, relativePath),
+    cancelInstall: (id, version) => ipcRenderer.invoke('plugins:packages:cancel', id, version),
+    onInstallProgress: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: import('./core/plugin-platform/types').PluginInstallProgress) => callback(progress);
+      ipcRenderer.on('plugins:packages:progress', handler);
+      return () => ipcRenderer.removeListener('plugins:packages:progress', handler);
+    },
   },
   // 窗口控制
   minimize: () => ipcRenderer.invoke('window-minimize'),

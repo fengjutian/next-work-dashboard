@@ -10,6 +10,7 @@
 import { app, BrowserWindow, ipcMain, Notification } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
+import { resolveActivePluginPathSync } from '../../../main/plugin-marketplace';
 import fs from 'node:fs';
 import readline from 'node:readline';
 import os from 'node:os';
@@ -103,14 +104,16 @@ const broadcastSubscribers = new Set<(ev: NetProbeEvent) => void>();
 
 function probePath(): string {
   const executable = process.platform === 'win32' ? 'nwd-net-probe.exe' : 'nwd-net-probe';
+  const installed = resolveActivePluginPathSync('network-observatory', path.join('resources', executable));
   const candidates = app.isPackaged
-    ? [path.join(process.resourcesPath, 'net-probe', executable)]
+    ? [installed, path.join(process.resourcesPath, 'net-probe', executable)]
     : [
+        installed,
         path.join(app.getAppPath(), 'native', 'net-probe', 'target', 'release', executable),
         path.join(app.getAppPath(), 'resources', 'net-probe', executable),
         path.join(process.cwd(), 'resources', 'net-probe', executable),
       ];
-  const found = candidates.find((c) => fs.existsSync(c));
+  const found = candidates.find((c): c is string => Boolean(c) && fs.existsSync(c));
   if (!found) {
     throw new Error(
       `nwd-net-probe 未构建。运行: cd prompt-lab && npm run build:net-probe。搜索路径: ${candidates.join(', ')}`,

@@ -8,8 +8,8 @@ import { CreatePluginDialog } from './CreatePluginDialog';
 import { exportPlugin, importPlugin, rollbackPlugin } from './import-export';
 import { usePluginRegistryVersion } from '../usePluginRegistry';
 import { pluginStorage } from '../plugin-storage';
-import type { MarketplaceCatalog, MarketplacePlugin } from '@/types/electron';
-import { availableUpdates, getMarketplaceUrl, installOnlinePlugin, loadMarketplace, setMarketplaceUrl } from './marketplace';
+import type { InstalledPluginState, MarketplaceCatalog, MarketplacePlugin, PluginInstallProgress } from '@/types/electron';
+import { availableUpdates, getMarketplaceUrl, installOnlinePlugin, loadMarketplace, marketplacePluginVersion, setMarketplaceUrl } from './marketplace';
 
 type PluginCategoryId = 'ai' | 'knowledge' | 'office' | 'development' | 'productivity' | 'system' | 'custom';
 
@@ -290,12 +290,30 @@ const OnlinePluginList: React.FC<{
   onRefresh: () => Promise<void>;
 }> = ({ catalog, busy, onRefresh }) => {
   const [installing, setInstalling] = React.useState<string | null>(null);
-  const installed = new Map(loadUserPlugins().map((item) => [item.id, item.manifest?.version]));
+  const [installedPackages, setInstalledPackages] = React.useState<InstalledPluginState[]>([]);
+  const [selectedVersions, setSelectedVersions] = React.useState<Record<string, string>>({});
+  const [progress, setProgress] = React.useState<Record<string, PluginInstallProgress>>({});
+  const reloadInstalled = React.useCallback(async () => setInstalledPackages(await window.electronAPI.plugins.listInstalled()), []);
+  React.useEffect(() => {
+    void reloadInstalled().catch((error) => {
+      console.error('[PluginManager] Failed to load installed packages', error);
+    });
+    return window.electronAPI.plugins.onInstallProgress((next) => setProgress((current) => ({ ...current, [next.pluginId]: next })));
+  }, [reloadInstalled]);
+  const installed = new Map<string, string | undefined>(loadUserPlugins().map((item) => [item.id, item.manifest?.version]));
+  installedPackages.forEach((item) => installed.set(item.id, item.activeVersion ?? undefined));
   const install = async (entry: MarketplacePlugin) => {
     setInstalling(entry.id);
-    try { alert((await installOnlinePlugin(entry)).message); }
+    try {
+      alert((await installOnlinePlugin(entry, selectedVersions[entry.id] ?? marketplacePluginVersion(entry))).message);
+      await reloadInstalled();
+    }
     catch (error) { alert(`安装失败：${error instanceof Error ? error.message : String(error)}`); }
     finally { setInstalling(null); }
+  };
+  const runLifecycle = async (operation: () => Promise<unknown>) => {
+    try { await operation(); await reloadInstalled(); }
+    catch (error) { alert(error instanceof Error ? error.message : String(error)); }
   };
   return <div className="flex-1 overflow-y-auto p-4">
     <div className="mb-4 flex items-center justify-between">
@@ -303,13 +321,24 @@ const OnlinePluginList: React.FC<{
       <button className="rounded border px-3 py-1.5 text-xs" disabled={busy} onClick={() => void onRefresh()}>{busy ? '刷新中…' : '刷新目录'}</button>
     </div>
     {!catalog ? <p className="py-16 text-center text-sm text-muted-foreground">尚未配置或缓存 Marketplace catalog。</p> :
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">{catalog.plugins.map((entry) => <div key={entry.id} className="rounded-lg border bg-background p-4">
-        <h4 className="text-sm font-medium">{entry.name}</h4><p className="mt-1 text-xs text-muted-foreground">{entry.description || entry.id}</p>
-        <div className="mt-3 flex items-center justify-between"><span className="text-[11px] text-muted-foreground">v{entry.version}</span>
-          <button className="rounded bg-primary px-2.5 py-1 text-xs text-primary-foreground disabled:opacity-50" disabled={installing === entry.id || installed.get(entry.id) === entry.version} onClick={() => void install(entry)}>
-            {installed.get(entry.id) === entry.version ? '已安装' : installing === entry.id ? '安装中…' : installed.has(entry.id) ? '更新' : '安装'}
-          </button></div>
-      </div>)}</div>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{catalog.plugins.map((entry) => {
+        const packageState = installedPackages.find((item) => item.id === entry.id);
+        const selected = selectedVersions[entry.id] ?? marketplacePluginVersion(entry);
+        const currentProgress = progress[entry.id];
+        return <div key={entry.id} className="rounded-lg border bg-background p-4">
+          <h4 className="text-sm font-medium">{entry.name}</h4><p className="mt-1 min-h-8 text-xs text-muted-foreground">{entry.description || entry.id}</p>
+          <div className="mt-3 flex items-center gap-2">
+            {entry.versions?.length ? <select className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-xs" value={selected} onChange={(event) => setSelectedVersions((value) => ({ ...value, [entry.id]: event.target.value }))}>
+              {[...entry.versions].sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true })).map((release) => <option key={release.version} value={release.version}>{release.version} · {release.channel ?? 'stable'}</option>)}
+            </select> : <span className="flex-1 text-xs text-muted-foreground">v{entry.version}</span>}
+            <button className="rounded bg-primary px-2.5 py-1 text-xs text-primary-foreground disabled:opacity-50" disabled={installing === entry.id || packageState?.installedVersions.includes(selected)} onClick={() => void install(entry)}>
+              {installing === entry.id ? '安装中…' : packageState?.installedVersions.includes(selected) ? '已安装' : installed.has(entry.id) ? '安装版本' : '安装'}
+            </button>
+          </div>
+          {installing === entry.id && currentProgress && <div className="mt-3"><div className="mb-1 flex justify-between text-[10px] text-muted-foreground"><span>{currentProgress.phase}</span><span>{currentProgress.percent ?? 0}%</span></div><div className="h-1.5 overflow-hidden rounded bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${currentProgress.percent ?? 0}%` }} /></div>{currentProgress.phase === 'downloading' && <button className="mt-1 text-[10px] text-destructive" onClick={() => void window.electronAPI.plugins.cancelInstall(entry.id, selected)}>取消下载</button>}</div>}
+          {packageState && <div className="mt-3 border-t pt-3"><div className="text-[10px] text-muted-foreground">当前版本：{packageState.activeVersion ?? '未激活'}</div><div className="mt-2 flex flex-wrap gap-1">{packageState.installedVersions.map((version) => <span key={version} className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]">{version}{version !== packageState.activeVersion && <><button className="text-primary" onClick={() => void runLifecycle(() => window.electronAPI.plugins.activateVersion(entry.id, version))}>启用</button><button className="text-destructive" onClick={() => void runLifecycle(() => window.electronAPI.plugins.uninstallVersion(entry.id, version))}>删除</button></>}</span>)}</div>{packageState.previousVersion && <button className="mt-2 text-[10px] text-primary" onClick={() => void runLifecycle(() => window.electronAPI.plugins.rollback(entry.id))}>回滚到 {packageState.previousVersion}</button>}</div>}
+        </div>;
+      })}</div>}
   </div>;
 };
 

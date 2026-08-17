@@ -25,6 +25,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveActivePluginPathSync } from '../../../main/plugin-marketplace';
 import readline from 'node:readline';
 
 import type {
@@ -70,14 +71,16 @@ let restartAttempts = 0;
 
 function binaryPath(): string {
   const executable = process.platform === 'win32' ? 'nwd-voice-engine.exe' : 'nwd-voice-engine';
+  const installed = resolveActivePluginPathSync('voice-input', path.join('resources', executable));
   const candidates = app.isPackaged
-    ? [path.join(process.resourcesPath, 'voice-engine', executable)]
+    ? [installed, path.join(process.resourcesPath, 'voice-engine', executable)]
     : [
+        installed,
         path.join(app.getAppPath(), 'native', 'voice-engine', 'target', 'release', executable),
         path.join(process.resourcesPath, 'voice-engine', executable),
         path.join(process.cwd(), 'resources', 'voice-engine', executable),
       ];
-  const found = candidates.find((c) => fs.existsSync(c));
+  const found = candidates.find((c): c is string => Boolean(c) && fs.existsSync(c));
   if (!found) {
     throw new Error(
       `nwd-voice-engine 未构建。运行: cd prompt-lab && npm run build:voice-engine。搜索路径: ${candidates.join(', ')}`,

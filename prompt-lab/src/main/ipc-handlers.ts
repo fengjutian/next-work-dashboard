@@ -55,6 +55,7 @@ import { setupPhoneIPC, stopPhoneService } from '../plugins/phone/backend/phone-
 import { setupVoiceIPC, startDaemon as startVoiceDaemon, shutdownDaemon as shutdownVoiceDaemon } from '../plugins/voice-input/backend/voice-engine-service';
 import {
   activatePluginVersion,
+  cancelPluginInstall,
   fetchMarketplaceCatalog,
   installMarketplacePlugin,
   installCatalogPlugin,
@@ -280,13 +281,14 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('plugins:marketplace:cached', () => loadCachedCatalog());
   ipcMain.handle('plugins:marketplace:fetch', (_event, url: string) => fetchMarketplaceCatalog(url));
   ipcMain.handle('plugins:marketplace:install', (_event, entry) => installMarketplacePlugin(entry));
-  ipcMain.handle('plugins:packages:install', (_event, request) => installPluginPackage(request));
-  ipcMain.handle('plugins:packages:install-catalog', (_event, id: string, version: string, activate?: boolean) => installCatalogPlugin(id, version, activate));
+  ipcMain.handle('plugins:packages:install', (event, request) => installPluginPackage(request, (progress) => event.sender.send('plugins:packages:progress', progress)));
+  ipcMain.handle('plugins:packages:install-catalog', (event, id: string, version: string, activate?: boolean) => installCatalogPlugin(id, version, activate, (progress) => event.sender.send('plugins:packages:progress', progress)));
   ipcMain.handle('plugins:packages:list', () => listInstalledPlugins());
   ipcMain.handle('plugins:packages:activate', (_event, id: string, version: string) => activatePluginVersion(id, version));
   ipcMain.handle('plugins:packages:rollback', (_event, id: string) => rollbackPlugin(id));
   ipcMain.handle('plugins:packages:uninstall', (_event, id: string, version: string) => uninstallPluginVersion(id, version));
   ipcMain.handle('plugins:packages:resolve', (_event, id: string, relativePath?: string) => resolveActivePluginPath(id, relativePath));
+  ipcMain.handle('plugins:packages:cancel', (_event, id: string, version: string) => cancelPluginInstall(id, version));
   const workspaceWatchers = new Map<number, fs.FSWatcher>();
   const dialogAuthorizedFiles = new Set<string>();
 

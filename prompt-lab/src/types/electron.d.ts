@@ -122,6 +122,7 @@ export type PluginArtifact = import('../core/plugin-platform/types').PluginArtif
 export type PluginInstallRequest = import('../core/plugin-platform/types').PluginInstallRequest;
 export type InstalledPluginState = import('../core/plugin-platform/types').InstalledPluginState;
 export type InstalledPluginVersion = import('../core/plugin-platform/types').InstalledPluginVersion;
+export type PluginInstallProgress = import('../core/plugin-platform/types').PluginInstallProgress;
 
 export interface MarketplaceCatalog {
   schemaVersion: 1;
@@ -174,6 +175,8 @@ export interface ElectronAPI {
     rollback: (id: string) => Promise<InstalledPluginState>;
     uninstallVersion: (id: string, version: string) => Promise<InstalledPluginState>;
     resolvePath: (id: string, relativePath?: string) => Promise<string | null>;
+    cancelInstall: (id: string, version: string) => Promise<boolean>;
+    onInstallProgress: (callback: (progress: PluginInstallProgress) => void) => () => void;
   };
   minimize: () => Promise<void>;
   maximize: () => Promise<void>;

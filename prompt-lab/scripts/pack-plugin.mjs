@@ -20,7 +20,6 @@ if (manifest.id !== pluginId || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(mani
 const zip = new JSZip();
 zip.file('plugin.json', `${JSON.stringify(manifest, null, 2)}\n`, { date: archiveDate });
 
-const resourceRoot = path.join(projectRoot, 'resources', pluginId);
 async function addDirectory(directory, archivePrefix) {
   const entries = await fs.readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -32,8 +31,19 @@ async function addDirectory(directory, archivePrefix) {
   }
 }
 
-try { await addDirectory(resourceRoot, 'resources'); }
-catch (error) { if (error.code !== 'ENOENT') throw error; }
+const packageResources = manifest.packageResources?.length
+  ? manifest.packageResources
+  : [{ from: `resources/${pluginId}`, to: 'resources' }];
+for (const resource of packageResources) {
+  const source = path.resolve(projectRoot, resource.from);
+  if (source !== projectRoot && !source.startsWith(`${projectRoot}${path.sep}`)) throw new Error(`Resource escapes project: ${resource.from}`);
+  try {
+    const stat = await fs.stat(source);
+    if (stat.isDirectory()) await addDirectory(source, resource.to || 'resources');
+    else if (stat.isFile()) zip.file(resource.to || `resources/${path.basename(source)}`, await fs.readFile(source), { date: archiveDate });
+  }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
 
 const outputDirectory = path.join(projectRoot, '_artifacts', 'plugins', pluginId, manifest.version);
 await fs.mkdir(outputDirectory, { recursive: true });
