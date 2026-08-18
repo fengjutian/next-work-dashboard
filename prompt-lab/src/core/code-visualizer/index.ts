@@ -5,3 +5,4 @@ export * from './architecture';
 export * from './typescript-analyzer';
 export * from './governance';
 export * from './insights';
+export * from './advanced-analysis';

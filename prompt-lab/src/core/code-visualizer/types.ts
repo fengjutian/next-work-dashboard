@@ -172,6 +172,7 @@ export interface SqlQueryArtifact {
   location: SourceLocation;
   endpointIds: string[];
   risks: Array<'select-star' | 'missing-where' | 'unbounded-select' | 'dynamic-sql'>;
+  structure?: SqlStructure;
 }
 
 export interface DatabaseAnalysisReport {
@@ -179,6 +180,44 @@ export interface DatabaseAnalysisReport {
   tableToEndpoints: Record<string, string[]>;
   riskCount: number;
 }
+
+export interface SqlStructure {
+  operation: SqlQueryArtifact['operation'];
+  tables: string[];
+  joins: Array<{ table: string; condition?: string }>;
+  selectedColumns: string[];
+  hasWhere: boolean;
+  hasLimit: boolean;
+  parameters: string[];
+}
+
+export interface ExplainReport {
+  engine: 'postgresql' | 'mysql' | 'sqlite' | 'unknown';
+  summary: string;
+  findings: Array<{ severity: 'info' | 'warning' | 'error'; rule: 'sequential-scan' | 'high-cost' | 'large-row-estimate' | 'temporary-sort' | 'missing-index'; message: string }>;
+  raw: string;
+}
+
+export interface ArchitectureRuleConfig {
+  maxDepth: number;
+  maxFanOut: number;
+  sharedTableThreshold: number;
+  minimumCoverage: number;
+  forbidden: Array<{ from: AnalysisNode['kind']; to: AnalysisNode['kind'] }>;
+  ignoredRules: string[];
+}
+
+export interface SecurityFinding {
+  id: string;
+  rule: 'missing-auth' | 'sensitive-response' | 'sql-injection' | 'unsafe-upload' | 'cors-wildcard' | 'missing-rate-limit' | 'secret-in-url';
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+  endpointId?: string;
+  location?: SourceLocation;
+  evidence?: string;
+}
+
+export interface SecurityGovernanceReport { score: number; findings: SecurityFinding[] }
 
 export interface ApiDebugRequest {
   method: HttpMethod;
@@ -324,6 +363,9 @@ export interface RepositoryAnalysis {
   smartInsights?: SmartInsight[];
   architectureHealth?: ArchitectureHealthReport;
   databaseAnalysis?: DatabaseAnalysisReport;
+  explain?: ExplainReport;
+  architectureConfig?: ArchitectureRuleConfig;
+  security?: SecurityGovernanceReport;
   warnings: string[];
 }
 

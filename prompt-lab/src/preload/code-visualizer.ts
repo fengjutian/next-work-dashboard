@@ -27,6 +27,9 @@ export const codeVisualizerBridge = {
   apiDebug: {
     execute: (input: unknown) => ipcRenderer.invoke('code-visualizer:api-debug:execute', input),
   },
+  explain: {
+    import: (rootPath: string) => ipcRenderer.invoke('code-visualizer:explain:import', rootPath),
+  },
   history: {
     list: () => ipcRenderer.invoke('code-visualizer:history:list'),
     open: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:open', rootPath),

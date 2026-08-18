@@ -593,6 +593,9 @@ export interface ElectronAPI {
     apiDebug: {
       execute: (input: import('../core/code-visualizer').ApiDebugRequest) => Promise<import('../core/code-visualizer').ApiDebugResponse>;
     };
+    explain: {
+      import: (rootPath: string) => Promise<{ ok: boolean; cancelled?: boolean; report?: import('../core/code-visualizer').ExplainReport }>;
+    };
     history: {
       list: () => Promise<import('../core/code-visualizer').CodeVisualizerProjectHistory[]>;
       open: (rootPath: string) => Promise<{ ok: boolean; rootPath: string }>;

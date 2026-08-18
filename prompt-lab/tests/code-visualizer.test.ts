@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeTypeScriptFiles, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath, parseArchitectureConfig, parseExplain, parseSqlStructure } from '../src/core/code-visualizer';
 import { analyzePythonWithAst } from '../src/main/code-visualizer/python-ast';
 import { executeApiDebugRequest } from '../src/main/code-visualizer/api-debug';
 
@@ -65,6 +65,27 @@ describe('code visualizer', () => {
 
   it('rejects non-HTTP protocols in the API debugger', async () => {
     await expect(executeApiDebugRequest({ method: 'GET', url: 'file:///etc/passwd' })).rejects.toThrow('HTTP/HTTPS');
+  });
+
+  it('parses SQL structure with joins, columns and parameters', () => {
+    expect(parseSqlStructure('SELECT u.id, p.name FROM users u JOIN profiles p ON p.user_id = u.id WHERE u.id = :id LIMIT 1')).toMatchObject({ operation: 'SELECT', tables: ['users', 'profiles'], selectedColumns: ['u.id', 'p.name'], hasWhere: true, hasLimit: true, parameters: [':id'] });
+  });
+
+  it('recognizes PostgreSQL and SQLite EXPLAIN risks', () => {
+    expect(parseExplain('Seq Scan on users (cost=0.00..12000.00 rows=200000)')).toMatchObject({ engine: 'postgresql', findings: expect.arrayContaining([expect.objectContaining({ rule: 'sequential-scan' }), expect.objectContaining({ rule: 'high-cost' })]) });
+    expect(parseExplain('QUERY PLAN\nSCAN TABLE users\nUSE TEMP B-TREE')).toMatchObject({ engine: 'sqlite', findings: expect.arrayContaining([expect.objectContaining({ rule: 'temporary-sort' })]) });
+  });
+
+  it('loads architecture thresholds from code-map configuration', () => {
+    expect(parseArchitectureConfig({ architecture: { maxDepth: 4, maxFanOut: 3, ignore: ['shared-database'], forbidden: [{ from: 'controller', to: 'repository' }] }, coverage: { minimum: 90 } })).toMatchObject({ maxDepth: 4, maxFanOut: 3, minimumCoverage: .9, ignoredRules: ['shared-database'] });
+  });
+
+  it('finds missing auth, unsafe uploads and wildcard CORS', () => {
+    const files = [{ path: 'app.py', content: `app.add_middleware(CORSMiddleware, allow_origins=['*'])\n@app.post('/upload')\ndef upload(file):\n    return file` }];
+    const result = analyzeRepositoryFiles('demo', files);
+    result.databaseAnalysis = analyzeDatabaseQueries(result, files);
+    const security = analyzeSecurity(result, files);
+    expect(security.findings.map((item) => item.rule)).toEqual(expect.arrayContaining(['missing-auth', 'unsafe-upload', 'cors-wildcard']));
   });
   it('extracts axios and fetch calls with the TypeScript AST', () => {
     const analysis = analyzeTypeScriptFiles([

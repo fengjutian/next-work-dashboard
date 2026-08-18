@@ -2,7 +2,8 @@ import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeTypeScriptFiles, buildSmartInsights, diagnoseFrontendBackend, enrichRepositoryArchitecture, normalizeApiPath, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildSmartInsights, diagnoseFrontendBackend, enrichRepositoryArchitecture, normalizeApiPath, parseArchitectureConfig, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
+import { load as loadYaml } from 'js-yaml';
 import { analyzePythonWithAst } from './python-ast';
 
 const INCLUDED = new Set(['.py', '.vue', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts']);
@@ -47,8 +48,10 @@ export async function scanCodeRepository(rootPath: string): Promise<RepositoryAn
   for (const endpoint of result.endpoints) endpoint.frontendCalls = semantic.calls.filter((call) => call.method === endpoint.method && call.normalizedPath === endpoint.normalizedPath);
   result.diagnostics = [...diagnoseFrontendBackend(result, semantic.calls), ...semantic.diagnostics];
   enrichRepositoryArchitecture(result);
-  result.architectureHealth = analyzeArchitectureHealth(result);
+  result.architectureConfig = await readArchitectureConfig(rootPath);
+  result.architectureHealth = analyzeArchitectureHealth(result, result.architectureConfig);
   result.databaseAnalysis = analyzeDatabaseQueries(result, files);
+  result.security = analyzeSecurity(result, files);
   result.smartInsights = buildSmartInsights(result);
   result.scan = { mode: previous.size ? 'incremental' : 'full', changedFiles, reusedFiles, removedFiles, durationMs: Date.now() - startedAt, complete, skippedFiles, analyzerReports: [pythonAst.report, semantic.report] };
   result.warnings.push(...warnings);
@@ -82,6 +85,11 @@ export async function scanCodeRepository(rootPath: string): Promise<RepositoryAn
       } catch { warnings.push(`无法读取：${relative}`); skippedFiles += 1; }
     }
   }
+}
+
+async function readArchitectureConfig(rootPath: string): Promise<ReturnType<typeof parseArchitectureConfig>> {
+  try { return parseArchitectureConfig(loadYaml(await fs.readFile(path.join(rootPath, '.code-map.yml'), 'utf8'))); }
+  catch { return parseArchitectureConfig({}); }
 }
 
 async function readIgnoreRules(rootPath: string): Promise<string[]> {
