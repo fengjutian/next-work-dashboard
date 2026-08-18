@@ -162,7 +162,17 @@ function EditableOutlineTree({ nodes, onRename, onDelete, onMove }: { nodes: Out
 
 export const OutlineScaffolderPanel: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
-  const [notice, holder] = notification.useNotification();
+  const [antdNotice, holder] = notification.useNotification();
+  const notice = useMemo(() => {
+    type NoticeConfig = Omit<Parameters<typeof antdNotice.open>[0], 'title' | 'message'> & { message: React.ReactNode };
+    const modernize = ({ message, ...config }: NoticeConfig): Parameters<typeof antdNotice.open>[0] => ({ ...config, title: message });
+    return {
+      success: (config: NoticeConfig) => antdNotice.success(modernize(config)),
+      warning: (config: NoticeConfig) => antdNotice.warning(modernize(config)),
+      error: (config: NoticeConfig) => antdNotice.error(modernize(config)),
+      info: (config: NoticeConfig) => antdNotice.info(modernize(config)),
+    };
+  }, [antdNotice]);
   const [source, setSource] = useState('');
   const [bookRequirement, setBookRequirement] = useState('');
   const [outlineGenerating, setOutlineGenerating] = useState(false);
@@ -183,6 +193,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [pagesRunUrl, setPagesRunUrl] = useState('');
   const [, setPublishGateIssues] = useState<string[]>([]);
   const [gateFixTargets, setGateFixTargets] = useState<GateFixTarget[]>([]);
+  const gateFixTargetsRef = useRef<GateFixTarget[]>([]);
+  const gateRepairActiveRef = useRef(false);
   const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'quality' | 'publish'>('overview');
   const [auditLoading, setAuditLoading] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
@@ -434,12 +446,29 @@ export const OutlineScaffolderPanel: React.FC = () => {
   };
 
   const passQualityGate = (path: string) => {
+    setAiOpen(false); setReviewOpen(false); setImageOpen(false); setGitOpen(false);
+    if (path === activeFile && dirty) {
+      notice.warning({ key: 'chapter-quality-gate', message: '请先保存当前修改', description: '质量检查只针对已经保存的正文。', placement: 'bottomRight' });
+      return;
+    }
     const report = path === activeFile ? inspectChapterQuality(path, documentContent) : qualityReports[path];
     if (!report) { notice.warning({ message: '请先运行全书检查', placement: 'bottomRight' }); return; }
     setQualityReports((current) => ({ ...current, [path]: report }));
-    if (report.blockers.length) { notice.warning({ message: '章节尚未通过质量门禁', description: report.blockers.join('；'), placement: 'bottomRight' }); return; }
+    if (report.blockers.length) return;
     setChapterStatus(path, 'complete');
-    notice.success({ message: '章节已通过质量门禁', placement: 'bottomRight' });
+    notice.success({ key: 'chapter-quality-gate', message: '章节已通过质量检查', placement: 'bottomRight' });
+  };
+
+  const locateFirstQualityIssue = () => {
+    const match = documentContent.match(/<!--\s*(?:待核实[：:]|在这里添加内容)[\s\S]*?-->/);
+    const start = match?.index;
+    if (!match || start === undefined) return;
+    setEditorMode('edit');
+    window.requestAnimationFrame(() => {
+      editorRef.current?.focus();
+      editorRef.current?.setSelectionRange(start, start + match[0].length);
+      editorRef.current?.scrollIntoView({ block: 'center' });
+    });
   };
 
   const confirmCurrentDraft = () => {
@@ -725,9 +754,27 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const result = await window.electronAPI.workspace.writeTextFile(target.path, activeFile, documentContent, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: modifiedAt });
       if (!result.success || !result.data) throw new Error(result.error);
       setSavedContent(documentContent); setModifiedAt(result.data.modifiedAt);
+      setQualityReports((current) => {
+        if (!current[activeFile]) return current;
+        const next = { ...current };
+        delete next[activeFile];
+        return next;
+      });
       const currentState = chapterStatuses[activeFile]?.state ?? 'pending';
       const nextState = chapterStateAfterSave(currentState);
       if (nextState !== currentState) setChapterStatus(activeFile, nextState);
+      if (gateRepairActiveRef.current && currentState === 'quality') {
+        const report = inspectChapterQuality(activeFile, documentContent);
+        setQualityReports((current) => ({ ...current, [activeFile]: report }));
+        if (!report.blockers.length) {
+          setChapterStatus(activeFile, 'complete');
+          const remaining = gateFixTargetsRef.current.filter((item) => item.path !== activeFile);
+          gateFixTargetsRef.current = remaining; setGateFixTargets(remaining);
+          notice.success({ key: 'gate-fix-progress', message: '本章问题已修复', description: remaining.length ? `继续处理下一章；还剩 ${remaining.length} 章。` : '全部发布门禁问题已处理，请重新发布。', placement: 'bottomRight' });
+          if (remaining[0]) window.setTimeout(() => { void openAiGateFix(remaining[0]); }, 0);
+          else gateRepairActiveRef.current = false;
+        }
+      }
       notice.success({ message: '文档已保存', placement: 'bottomRight' });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1160,7 +1207,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         ? { state: 'quality', error: report.blockers.join('；'), updatedAt: Date.now() }
         : { state: 'complete', updatedAt: Date.now() };
     }
-    setQualityReports(reports); setChapterStatuses(nextStatuses); setGateFixTargets(fixTargets);
+    setQualityReports(reports); setChapterStatuses(nextStatuses); setGateFixTargets(fixTargets); gateFixTargetsRef.current = fixTargets;
     const listing = await window.electronAPI.workspace.listFiles(target.path);
     if (listing.success) {
       const paths = new Set((listing.data ?? []).filter((entry) => entry.type === 'file').map((entry) => entry.path.replace(/\\/g, '/')));
@@ -1182,7 +1229,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const openAiGateFix = async (targetIssue = gateFixTargets[0]) => {
     if (!targetIssue || !target) return;
-    if (!aiApi.apiKey?.trim()) { notice.warning({ message: '请先配置助写模型', placement: 'bottomRight' }); return; }
+    gateRepairActiveRef.current = true;
     await openDocument(targetIssue.path, target, true);
     const read = await window.electronAPI.workspace.readTextFile(target.path, targetIssue.path);
     if (!read.success || !read.data) { notice.error({ message: '无法读取待修复章节', description: read.error, placement: 'bottomRight' }); return; }
@@ -1201,6 +1248,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const chapterEvidence = evidenceRecords.filter((item) => item.chapter === targetIssue.path).map((item) => `- [${item.title}](${item.url})｜${item.status === 'verified' ? '已核实' : item.status === 'disputed' ? '存在争议' : '仅为检索线索'}｜${item.notes}`).join('\n');
     setAiSources(chapterEvidence || '本章没有已登记史料。不得生成精确引文、卷次、页码或未经证实的具体数据。');
     setView('documents'); setGitOpen(false); setReviewOpen(false); setImageOpen(false); setAiOpen(true); setEditorMode('edit');
+    if (!aiApi.apiKey?.trim()) {
+      setAiError('已定位发布门禁问题。配置助写模型后点击“生成预览”，或根据上方修复要求手动修改。');
+      return;
+    }
     const requestId = ++aiRequestRef.current;
     setAiLoading(true);
     try {
@@ -1225,7 +1276,16 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!target || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()) return;
     if (/^https?:\/\/[^/@]+@/i.test(gitRemoteUrl.trim())) { setGitError('远程地址中不要包含用户名、Token 或密码，请使用 Git Credential Manager。'); return; }
     const gateIssues = await runPublishGate();
-    if (gateIssues.length) { setGitError(`发布前检查未通过：${gateIssues.slice(0, 5).join('；')}${gateIssues.length > 5 ? `；另有 ${gateIssues.length - 5} 项` : ''}`); return; }
+    if (gateIssues.length) {
+      const firstFixable = gateFixTargetsRef.current[0];
+      if (firstFixable) {
+        setGitError('发布检查未通过，已转入逐章修复流程。');
+        await openAiGateFix(firstFixable);
+      } else {
+        setGitError(`发布前检查未通过：${gateIssues.slice(0, 5).join('；')}${gateIssues.length > 5 ? `；另有 ${gateIssues.length - 5} 项` : ''}`);
+      }
+      return;
+    }
     setGitLoading(true); setGitError(''); setDeploymentStatus({ state: 'publishing', message: '正在提交并推送', updatedAt: Date.now() });
     try {
       if (gitRepository !== true) {
@@ -1439,6 +1499,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   };
 
   const activeChapterState = activeFile ? chapterStatuses[activeFile]?.state ?? 'pending' : 'pending';
+  const activeQualityReport = activeFile ? qualityReports[activeFile] : undefined;
 
   return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
     {holder}
@@ -1508,7 +1569,20 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
         <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={gitOpen ? 'default' : 'ghost'} disabled={!target} onClick={() => { toggleGit(); setReviewOpen(false); setImageOpen(false); }}> <GitBranch className="mr-2 h-4 w-4" />Git</Button><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setAiOpen((value) => !value); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}><Sparkles className="mr-2 h-4 w-4" />助写</Button><Button size="sm" variant={reviewOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setReviewOpen((value) => !value); setAiOpen(false); setImageOpen(false); setGitOpen(false); setAiResult(''); setAiError(''); }}><Check className="mr-2 h-4 w-4" />审校</Button><Button size="sm" variant={imageOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setImageOpen((value) => !value); setAiOpen(false); setReviewOpen(false); setGitOpen(false); setImageError(''); }}><Sparkles className="mr-2 h-4 w-4" />插图</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
-        {activeFile && <div className="flex items-center gap-3 border-b border-border bg-primary/[0.04] px-4 py-2.5"><span className={`h-2.5 w-2.5 rounded-full ${CHAPTER_STATUS_META[activeChapterState].dot}`} /><div className="min-w-0 flex-1"><div className="text-xs font-semibold">{CHAPTER_STATUS_META[activeChapterState].label}</div><div className="truncate text-xs text-muted-foreground">{activeChapterState === 'pending' || activeChapterState === 'error' ? '使用助写生成正文，或直接编辑后保存。' : activeChapterState === 'draft' ? '阅读草稿并保存修改，确认后进入独立审校。' : activeChapterState === 'review' ? '运行审校，逐条决定哪些意见需要落实。' : activeChapterState === 'revising' ? '应用已采纳意见，确认修改后进入质量检查。' : activeChapterState === 'quality' ? '检查字数、待核实内容与必用史料，全部通过后完成。' : activeChapterState === 'complete' ? '本章已完成；继续编辑会保留完成状态。' : '正在生成正文。'}</div></div>{(activeChapterState === 'pending' || activeChapterState === 'error') && <Button size="sm" onClick={() => { setAiMode('generate'); setAiOpen(true); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}>生成本章</Button>}{activeChapterState === 'draft' && <Button size="sm" disabled={dirty} onClick={confirmCurrentDraft}>确认草稿并审校</Button>}{activeChapterState === 'review' && <Button size="sm" onClick={() => { setReviewOpen(true); setAiOpen(false); setImageOpen(false); setGitOpen(false); }}>开始审校</Button>}{activeChapterState === 'revising' && (dirty ? <Button size="sm" disabled={saving} onClick={saveDocument}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}保存修改</Button> : <Button size="sm" onClick={enterQualityCheck}>进入质量检查</Button>)}{activeChapterState === 'quality' && <Button size="sm" onClick={() => passQualityGate(activeFile)}>检查并完成</Button>}</div>}
+        {activeFile && <>
+          <div className="flex items-center gap-3 border-b border-border bg-primary/[0.04] px-4 py-2.5">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${CHAPTER_STATUS_META[activeChapterState].dot}`} />
+            <div className="min-w-0 flex-1"><div className="text-xs font-semibold">{CHAPTER_STATUS_META[activeChapterState].label}</div><div className="truncate text-xs text-muted-foreground">{activeChapterState === 'pending' || activeChapterState === 'error' ? '使用助写生成正文，或直接编辑后保存。' : activeChapterState === 'draft' ? '阅读草稿并保存修改，确认后进入独立审校。' : activeChapterState === 'review' ? '运行审校，逐条决定哪些意见需要落实。' : activeChapterState === 'revising' ? '应用已采纳意见，确认修改后进入质量检查。' : activeChapterState === 'quality' ? '运行检查后在这里处理具体问题；通过后自动完成。' : activeChapterState === 'complete' ? '本章已完成；继续编辑会保留完成状态。' : '正在生成正文。'}</div></div>
+            {(activeChapterState === 'pending' || activeChapterState === 'error') && <Button size="sm" onClick={() => { setAiMode('generate'); setAiOpen(true); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}>生成本章</Button>}
+            {activeChapterState === 'draft' && <Button size="sm" disabled={dirty} onClick={confirmCurrentDraft}>确认草稿并审校</Button>}
+            {activeChapterState === 'review' && <Button size="sm" onClick={() => { setReviewOpen(true); setAiOpen(false); setImageOpen(false); setGitOpen(false); }}>开始审校</Button>}
+            {activeChapterState === 'revising' && (dirty ? <Button size="sm" disabled={saving} onClick={saveDocument}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}保存修改</Button> : <Button size="sm" onClick={enterQualityCheck}>进入质量检查</Button>)}
+            {activeChapterState === 'quality' && <Button size="sm" disabled={dirty} onClick={() => passQualityGate(activeFile)}>{dirty ? '请先保存' : activeQualityReport?.blockers.length ? '重新检查' : '运行质量检查'}</Button>}
+          </div>
+          {activeChapterState === 'quality' && activeQualityReport && !dirty && <div className={`border-b px-4 py-3 ${activeQualityReport.blockers.length ? 'border-destructive/30 bg-destructive/[0.06]' : 'border-emerald-500/30 bg-emerald-500/[0.06]'}`}>
+            <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className={`text-xs font-semibold ${activeQualityReport.blockers.length ? 'text-destructive' : 'text-emerald-700'}`}>{activeQualityReport.blockers.length ? `需要处理 ${activeQualityReport.blockers.length} 项` : '质量检查已通过'}</div>{activeQualityReport.blockers.map((item) => <div key={item} className="mt-1 text-xs text-destructive">• {item}</div>)}{activeQualityReport.warnings.map((item) => <div key={item} className="mt-1 text-xs text-amber-700">提示：{item}</div>)}</div>{activeQualityReport.blockers.some((item) => item.includes('待核实') || item.includes('占位符')) && <Button size="sm" variant="outline" onClick={locateFirstQualityIssue}>定位正文标记</Button>}</div>
+          </div>}
+        </>}
         {editorMode === 'edit' && activeFile && evidenceRecords.length > 0 && <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2"><span className="shrink-0 text-xs text-muted-foreground">证据绑定</span><select value={selectedEvidenceId} onChange={(event) => setSelectedEvidenceId(event.target.value)} className="min-w-0 max-w-sm flex-1 rounded border border-input bg-background px-2 py-1 text-xs"><option value="">选择史料</option>{evidenceRecords.map((item) => <option key={item.id} value={item.id}>{item.status === 'verified' ? '✓ ' : ''}{item.title}</option>)}</select><Button size="sm" variant="outline" disabled={!selectedEvidenceId} onMouseDown={(event) => event.preventDefault()} onClick={bindEvidenceToSelection}>绑定到选中文字</Button><span className="truncate text-xs text-muted-foreground">先在正文中选择一个完整观点或句子</span></div>}
         <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea ref={editorRef} value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span title="字数已排除 YAML 头信息、Markdown 标记、链接地址和注释">文章 {articleWordCount.toLocaleString()} 字 · 原始 {documentContent.length.toLocaleString()} 字符</span></div>}
