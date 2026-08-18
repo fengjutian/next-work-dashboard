@@ -5,10 +5,11 @@ import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
 import { scanCodeRepository } from './scanner';
 import { listProjectHistory, recordProjectHistory, removeProjectHistory } from './history';
 import { listSnapshots, loadSnapshot, saveSnapshot } from './snapshots';
-import { calculateGitImpact, compareOpenApi, diffRepositorySnapshots, type RepositoryAnalysis } from '../../core/code-visualizer';
+import { calculateGitImpact, compareOpenApi, diffRepositorySnapshots, type ApiDebugRequest, type RepositoryAnalysis } from '../../core/code-visualizer';
 import { load as loadYaml } from 'js-yaml';
 import { parseRuntimeMetrics, readGitInfo, resolveSourceTarget } from './integrations';
 import { listGitChangedFiles, parseCoverageFile, runRelatedTests } from './quality';
+import { executeApiDebugRequest } from './api-debug';
 
 let initialized = false;
 
@@ -86,4 +87,5 @@ export function setupCodeVisualizerIPC(): void {
     if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
     return { ok: true, report: await parseCoverageFile(selected.filePaths[0]) };
   });
+  ipcMain.handle('code-visualizer:api-debug:execute', async (_event, input: ApiDebugRequest) => executeApiDebugRequest(input));
 }

@@ -24,6 +24,9 @@ export const codeVisualizerBridge = {
   coverage: {
     import: (rootPath: string) => ipcRenderer.invoke('code-visualizer:coverage:import', rootPath),
   },
+  apiDebug: {
+    execute: (input: unknown) => ipcRenderer.invoke('code-visualizer:api-debug:execute', input),
+  },
   history: {
     list: () => ipcRenderer.invoke('code-visualizer:history:list'),
     open: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:open', rootPath),

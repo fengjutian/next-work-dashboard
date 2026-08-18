@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeRepositoryFiles, analyzeTypeScriptFiles, buildQualityGate, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeTypeScriptFiles, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath } from '../src/core/code-visualizer';
 import { analyzePythonWithAst } from '../src/main/code-visualizer/python-ast';
+import { executeApiDebugRequest } from '../src/main/code-visualizer/api-debug';
 
 describe('code visualizer', () => {
   it('extracts Python routes and contracts with the native AST', async () => {
@@ -44,6 +45,26 @@ describe('code visualizer', () => {
     const gate = buildQualityGate(result, { source: 'lcov.info', files: [{ file: 'app.py', linesFound: 10, linesHit: 5, lineRate: .5 }], linesFound: 10, linesHit: 5, lineRate: .5 });
     expect(gate.passed).toBe(false);
     expect(gate.failures.map((item) => item.rule)).toEqual(expect.arrayContaining(['missing-test', 'low-coverage']));
+  });
+
+  it('scores architecture health and explains direct controller database access', () => {
+    const result = enrichRepositoryArchitecture(analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `class User(Base):\n    __tablename__ = 'users'\n@app.get('/users')\ndef users():\n    return session.query(User).all()` }]));
+    result.architectureHealth = analyzeArchitectureHealth(result);
+    expect(result.architectureHealth.findings).toContainEqual(expect.objectContaining({ rule: 'layer-violation' }));
+    result.smartInsights = buildSmartInsights(result);
+    expect(result.smartInsights[0]?.recommendation).toContain('Repository');
+  });
+
+  it('extracts SQL, risks and table-to-endpoint reverse indexes', () => {
+    const files = [{ path: 'reports.py', content: `@app.get('/reports')\ndef reports():\n    return db.execute("SELECT * FROM reports")` }];
+    const result = analyzeRepositoryFiles('demo', files);
+    const database = analyzeDatabaseQueries(result, files);
+    expect(database.queries[0]).toMatchObject({ operation: 'SELECT', tables: ['reports'], risks: ['select-star', 'unbounded-select'] });
+    expect(database.tableToEndpoints.reports).toContain(result.endpoints[0].id);
+  });
+
+  it('rejects non-HTTP protocols in the API debugger', async () => {
+    await expect(executeApiDebugRequest({ method: 'GET', url: 'file:///etc/passwd' })).rejects.toThrow('HTTP/HTTPS');
   });
   it('extracts axios and fetch calls with the TypeScript AST', () => {
     const analysis = analyzeTypeScriptFiles([

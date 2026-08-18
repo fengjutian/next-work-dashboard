@@ -139,6 +139,64 @@ export interface QualityGateReport {
   endpointCoverage: EndpointCoverage[];
 }
 
+export interface SmartInsight {
+  id: string;
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  summary: string;
+  recommendation: string;
+  endpointId?: string;
+  location?: SourceLocation;
+}
+
+export interface ArchitectureFinding {
+  id: string;
+  rule: 'cycle' | 'layer-violation' | 'high-fan-out' | 'deep-chain' | 'shared-database' | 'duplicate-route';
+  severity: 'warning' | 'error';
+  message: string;
+  nodes: string[];
+  location?: SourceLocation;
+}
+
+export interface ArchitectureHealthReport {
+  score: number;
+  findings: ArchitectureFinding[];
+  metrics: { nodes: number; edges: number; maxDepth: number; sharedTables: number };
+}
+
+export interface SqlQueryArtifact {
+  id: string;
+  operation: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'UNKNOWN';
+  sql: string;
+  tables: string[];
+  location: SourceLocation;
+  endpointIds: string[];
+  risks: Array<'select-star' | 'missing-where' | 'unbounded-select' | 'dynamic-sql'>;
+}
+
+export interface DatabaseAnalysisReport {
+  queries: SqlQueryArtifact[];
+  tableToEndpoints: Record<string, string[]>;
+  riskCount: number;
+}
+
+export interface ApiDebugRequest {
+  method: HttpMethod;
+  url: string;
+  headers?: Record<string, string>;
+  body?: string;
+  timeoutMs?: number;
+}
+
+export interface ApiDebugResponse {
+  status: number;
+  statusText: string;
+  durationMs: number;
+  headers: Record<string, string>;
+  body: string;
+  truncated: boolean;
+}
+
 export interface ApiParameter {
   name: string;
   source: 'path' | 'query' | 'header' | 'cookie' | 'body';
@@ -263,6 +321,9 @@ export interface RepositoryAnalysis {
   gitImpact?: GitImpactReport;
   coverage?: CoverageReport;
   qualityGate?: QualityGateReport;
+  smartInsights?: SmartInsight[];
+  architectureHealth?: ArchitectureHealthReport;
+  databaseAnalysis?: DatabaseAnalysisReport;
   warnings: string[];
 }
 

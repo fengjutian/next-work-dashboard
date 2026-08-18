@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { analyzeRepositoryFiles, analyzeTypeScriptFiles, diagnoseFrontendBackend, enrichRepositoryArchitecture, normalizeApiPath, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeTypeScriptFiles, buildSmartInsights, diagnoseFrontendBackend, enrichRepositoryArchitecture, normalizeApiPath, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
 import { analyzePythonWithAst } from './python-ast';
 
 const INCLUDED = new Set(['.py', '.vue', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts']);
@@ -47,6 +47,9 @@ export async function scanCodeRepository(rootPath: string): Promise<RepositoryAn
   for (const endpoint of result.endpoints) endpoint.frontendCalls = semantic.calls.filter((call) => call.method === endpoint.method && call.normalizedPath === endpoint.normalizedPath);
   result.diagnostics = [...diagnoseFrontendBackend(result, semantic.calls), ...semantic.diagnostics];
   enrichRepositoryArchitecture(result);
+  result.architectureHealth = analyzeArchitectureHealth(result);
+  result.databaseAnalysis = analyzeDatabaseQueries(result, files);
+  result.smartInsights = buildSmartInsights(result);
   result.scan = { mode: previous.size ? 'incremental' : 'full', changedFiles, reusedFiles, removedFiles, durationMs: Date.now() - startedAt, complete, skippedFiles, analyzerReports: [pythonAst.report, semantic.report] };
   result.warnings.push(...warnings);
   const target = cacheFile(rootPath);
