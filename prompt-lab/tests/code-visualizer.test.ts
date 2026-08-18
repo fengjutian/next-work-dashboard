@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath, parseArchitectureConfig, parseExplain, parseSqlStructure } from '../src/core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildFieldLineage, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath, parseArchitectureConfig, parseExplain, parseSqlStructure } from '../src/core/code-visualizer';
 import { analyzePythonWithAst } from '../src/main/code-visualizer/python-ast';
 import { executeApiDebugRequest } from '../src/main/code-visualizer/api-debug';
+import { validateReadonlySelect } from '../src/main/code-visualizer/live-database';
 
 describe('code visualizer', () => {
   it('extracts Python routes and contracts with the native AST', async () => {
@@ -86,6 +87,19 @@ describe('code visualizer', () => {
     result.databaseAnalysis = analyzeDatabaseQueries(result, files);
     const security = analyzeSecurity(result, files);
     expect(security.findings.map((item) => item.rule)).toEqual(expect.arrayContaining(['missing-auth', 'unsafe-upload', 'cors-wildcard']));
+  });
+
+  it('builds field lineage for aliases, joins, inserts and updates', () => {
+    const files = [{ path: 'repo.py', content: `@app.get('/users')\ndef users():\n    db.execute("SELECT u.id AS user_id, p.name FROM users u JOIN profiles p ON p.user_id = u.id WHERE u.id = :id LIMIT 1")\n    db.execute("UPDATE users SET name = :name WHERE id = :id")` }];
+    const result = analyzeRepositoryFiles('demo', files); result.databaseAnalysis = analyzeDatabaseQueries(result, files);
+    const lineage = buildFieldLineage(result);
+    expect(lineage.edges).toEqual(expect.arrayContaining([expect.objectContaining({ operation: 'read', source: { table: 'users', field: 'id' }, target: { kind: 'response', field: 'user_id' } }), expect.objectContaining({ operation: 'join', source: { table: 'profiles', field: 'user_id' } }), expect.objectContaining({ operation: 'write', target: { kind: 'table', table: 'users', field: 'name' } })]));
+  });
+
+  it('strictly rejects writes and multiple statements for live databases', () => {
+    expect(() => validateReadonlySelect('SELECT * FROM users')).not.toThrow();
+    expect(() => validateReadonlySelect('UPDATE users SET admin = 1')).toThrow('SELECT 或 WITH');
+    expect(() => validateReadonlySelect('SELECT 1; SELECT 2')).toThrow('一条语句');
   });
   it('extracts axios and fetch calls with the TypeScript AST', () => {
     const analysis = analyzeTypeScriptFiles([

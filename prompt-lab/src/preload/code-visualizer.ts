@@ -30,6 +30,11 @@ export const codeVisualizerBridge = {
   explain: {
     import: (rootPath: string) => ipcRenderer.invoke('code-visualizer:explain:import', rootPath),
   },
+  database: {
+    connectSqlite: () => ipcRenderer.invoke('code-visualizer:database:connect-sqlite'),
+    explain: (id: string, sql: string) => ipcRenderer.invoke('code-visualizer:database:explain', id, sql),
+    close: (id: string) => ipcRenderer.invoke('code-visualizer:database:close', id),
+  },
   history: {
     list: () => ipcRenderer.invoke('code-visualizer:history:list'),
     open: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:open', rootPath),

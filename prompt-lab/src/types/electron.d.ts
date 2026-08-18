@@ -596,6 +596,11 @@ export interface ElectronAPI {
     explain: {
       import: (rootPath: string) => Promise<{ ok: boolean; cancelled?: boolean; report?: import('../core/code-visualizer').ExplainReport }>;
     };
+    database: {
+      connectSqlite: () => Promise<{ ok: boolean; cancelled?: boolean; connection?: import('../core/code-visualizer').LiveDatabaseConnection }>;
+      explain: (id: string, sql: string) => Promise<import('../core/code-visualizer').ExplainReport>;
+      close: (id: string) => Promise<{ ok: boolean }>;
+    };
     history: {
       list: () => Promise<import('../core/code-visualizer').CodeVisualizerProjectHistory[]>;
       open: (rootPath: string) => Promise<{ ok: boolean; rootPath: string }>;

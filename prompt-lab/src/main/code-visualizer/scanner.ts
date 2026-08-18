@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildSmartInsights, diagnoseFrontendBackend, enrichRepositoryArchitecture, normalizeApiPath, parseArchitectureConfig, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildFieldLineage, buildSmartInsights, diagnoseFrontendBackend, enrichRepositoryArchitecture, normalizeApiPath, parseArchitectureConfig, type RepositoryAnalysis, type RepositorySourceFile } from '../../core/code-visualizer';
 import { load as loadYaml } from 'js-yaml';
 import { analyzePythonWithAst } from './python-ast';
 
@@ -51,6 +51,7 @@ export async function scanCodeRepository(rootPath: string): Promise<RepositoryAn
   result.architectureConfig = await readArchitectureConfig(rootPath);
   result.architectureHealth = analyzeArchitectureHealth(result, result.architectureConfig);
   result.databaseAnalysis = analyzeDatabaseQueries(result, files);
+  result.fieldLineage = buildFieldLineage(result);
   result.security = analyzeSecurity(result, files);
   result.smartInsights = buildSmartInsights(result);
   result.scan = { mode: previous.size ? 'incremental' : 'full', changedFiles, reusedFiles, removedFiles, durationMs: Date.now() - startedAt, complete, skippedFiles, analyzerReports: [pythonAst.report, semantic.report] };

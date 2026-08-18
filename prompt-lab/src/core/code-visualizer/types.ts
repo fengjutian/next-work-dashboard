@@ -189,6 +189,26 @@ export interface SqlStructure {
   hasWhere: boolean;
   hasLimit: boolean;
   parameters: string[];
+  aliases?: Record<string, string>;
+}
+
+export interface FieldLineageEdge {
+  id: string;
+  endpointIds: string[];
+  operation: 'read' | 'write' | 'filter' | 'join';
+  source: { table?: string; field: string };
+  target: { kind: 'response' | 'table' | 'parameter'; table?: string; field: string };
+  location: SourceLocation;
+  confidence: 'exact' | 'inferred';
+}
+
+export interface FieldLineageReport { edges: FieldLineageEdge[]; fields: number; tables: number }
+
+export interface LiveDatabaseConnection {
+  id: string;
+  engine: 'sqlite';
+  name: string;
+  tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>;
 }
 
 export interface ExplainReport {
@@ -366,6 +386,7 @@ export interface RepositoryAnalysis {
   explain?: ExplainReport;
   architectureConfig?: ArchitectureRuleConfig;
   security?: SecurityGovernanceReport;
+  fieldLineage?: FieldLineageReport;
   warnings: string[];
 }
 

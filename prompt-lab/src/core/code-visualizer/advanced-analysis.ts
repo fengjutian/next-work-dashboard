@@ -1,4 +1,4 @@
-import type { ArchitectureRuleConfig, ExplainReport, RepositoryAnalysis, RepositorySourceFile, SecurityGovernanceReport, SqlStructure } from './types';
+import type { ArchitectureRuleConfig, ExplainReport, FieldLineageReport, RepositoryAnalysis, RepositorySourceFile, SecurityGovernanceReport, SqlStructure } from './types';
 
 export const DEFAULT_ARCHITECTURE_CONFIG: ArchitectureRuleConfig = { maxDepth: 8, maxFanOut: 7, sharedTableThreshold: 5, minimumCoverage: .8, forbidden: [{ from: 'controller', to: 'database' }], ignoredRules: [] };
 
@@ -11,10 +11,34 @@ export function parseArchitectureConfig(input: unknown): ArchitectureRuleConfig 
 export function parseSqlStructure(sql: string): SqlStructure {
   const clean = sql.replace(/--.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\s+/g, ' ').trim();
   const operation = (/^(SELECT|INSERT|UPDATE|DELETE)/i.exec(clean)?.[1].toUpperCase() ?? 'UNKNOWN') as SqlStructure['operation'];
-  const tables = [...clean.matchAll(/\b(?:FROM|INTO|UPDATE)\s+([\w."`]+)/gi)].map((item) => unquote(item[1]));
+  const tableMatches = [...clean.matchAll(/\b(?:FROM|INTO|UPDATE)\s+([\w."`]+)(?:\s+(?:AS\s+)?(\w+))?/gi)];
+  const tables = tableMatches.map((item) => unquote(item[1]));
   const joins = [...clean.matchAll(/\bJOIN\s+([\w."`]+)(?:\s+(?:AS\s+)?\w+)?(?:\s+ON\s+(.+?))?(?=\s+(?:LEFT|RIGHT|INNER|OUTER|FULL|JOIN|WHERE|GROUP|ORDER|LIMIT|$))/gi)].map((item) => ({ table: unquote(item[1]), condition: item[2]?.trim() }));
   const select = /^SELECT\s+(.+?)\s+FROM\b/i.exec(clean)?.[1] ?? '';
-  return { operation, tables: [...new Set([...tables, ...joins.map((join) => join.table)])], joins, selectedColumns: splitColumns(select), hasWhere: /\bWHERE\b/i.test(clean), hasLimit: /\bLIMIT\b|\bFETCH\s+FIRST\b/i.test(clean), parameters: [...new Set([...clean.matchAll(/(?:\?|\$\d+|:\w+|%s)/g)].map((item) => item[0]))] };
+  const aliases: Record<string, string> = {}; for (const item of tableMatches) if (item[2] && !/^(?:WHERE|JOIN|LEFT|RIGHT|INNER|ORDER|GROUP|LIMIT|SET)$/i.test(item[2])) aliases[item[2]] = unquote(item[1]);
+  for (const join of [...clean.matchAll(/\bJOIN\s+([\w."`]+)(?:\s+(?:AS\s+)?(\w+))?/gi)]) if (join[2]) aliases[join[2]] = unquote(join[1]);
+  return { operation, tables: [...new Set([...tables, ...joins.map((join) => join.table)])], joins, selectedColumns: splitColumns(select), hasWhere: /\bWHERE\b/i.test(clean), hasLimit: /\bLIMIT\b|\bFETCH\s+FIRST\b/i.test(clean), parameters: [...new Set([...clean.matchAll(/(?:\?|\$\d+|:\w+|%s)/g)].map((item) => item[0]))], aliases };
+}
+
+export function buildFieldLineage(result: RepositoryAnalysis): FieldLineageReport {
+  const edges: FieldLineageReport['edges'] = [];
+  for (const query of result.databaseAnalysis?.queries ?? []) {
+    const structure = query.structure ?? parseSqlStructure(query.sql); const aliases = structure.aliases ?? {};
+    for (const rawColumn of structure.selectedColumns) {
+      if (rawColumn === '*') continue;
+      const aliasMatch = /^(?:(\w+)\.)?([\w*]+)(?:\s+(?:AS\s+)?(\w+))?$/i.exec(rawColumn.trim()); if (!aliasMatch) continue;
+      const table = aliasMatch[1] ? aliases[aliasMatch[1]] ?? aliasMatch[1] : structure.tables.length === 1 ? structure.tables[0] : undefined; const field = aliasMatch[2]; const output = aliasMatch[3] ?? field;
+      edges.push({ id: `lineage:read:${query.id}:${table}:${field}`, endpointIds: query.endpointIds, operation: 'read', source: { table, field }, target: { kind: 'response', field: output }, location: query.location, confidence: table ? 'exact' : 'inferred' });
+    }
+    for (const join of structure.joins) for (const condition of join.condition?.matchAll(/(?:(\w+)\.)?(\w+)\s*=\s*(?:(\w+)\.)?(\w+)/g) ?? []) {
+      const leftTable = condition[1] ? aliases[condition[1]] ?? condition[1] : undefined; const rightTable = condition[3] ? aliases[condition[3]] ?? condition[3] : undefined;
+      edges.push({ id: `lineage:join:${query.id}:${condition.index}`, endpointIds: query.endpointIds, operation: 'join', source: { table: leftTable, field: condition[2] }, target: { kind: 'table', table: rightTable, field: condition[4] }, location: query.location, confidence: leftTable && rightTable ? 'exact' : 'inferred' });
+    }
+    const insert = /^INSERT\s+INTO\s+[\w."`]+\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i.exec(query.sql);
+    if (insert) { const fields = splitColumns(insert[1]); const values = splitColumns(insert[2]); fields.forEach((field, index) => edges.push({ id: `lineage:write:${query.id}:${field}`, endpointIds: query.endpointIds, operation: 'write', source: { field: values[index] ?? '?' }, target: { kind: 'table', table: structure.tables[0], field: unquote(field.trim()) }, location: query.location, confidence: 'exact' })); }
+    const update = /\bSET\s+(.+?)(?:\s+WHERE\b|$)/i.exec(query.sql)?.[1]; if (update) for (const assignment of splitColumns(update)) { const match = /([\w."`]+)\s*=\s*(.+)/.exec(assignment); if (match) edges.push({ id: `lineage:update:${query.id}:${match[1]}`, endpointIds: query.endpointIds, operation: 'write', source: { field: match[2].trim() }, target: { kind: 'table', table: structure.tables[0], field: unquote(match[1]) }, location: query.location, confidence: 'exact' }); }
+  }
+  return { edges, fields: new Set(edges.flatMap((edge) => [`${edge.source.table ?? ''}.${edge.source.field}`, `${edge.target.table ?? ''}.${edge.target.field}`])).size, tables: new Set(edges.flatMap((edge) => [edge.source.table, edge.target.table]).filter(Boolean)).size };
 }
 
 export function parseExplain(input: string): ExplainReport {

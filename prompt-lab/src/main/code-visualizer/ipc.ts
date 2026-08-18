@@ -10,6 +10,7 @@ import { load as loadYaml } from 'js-yaml';
 import { parseRuntimeMetrics, readGitInfo, resolveSourceTarget } from './integrations';
 import { listGitChangedFiles, parseCoverageFile, runRelatedTests } from './quality';
 import { executeApiDebugRequest } from './api-debug';
+import { closeLiveDatabase, explainReadonlySqlite, openReadonlySqlite } from './live-database';
 
 let initialized = false;
 
@@ -94,4 +95,11 @@ export function setupCodeVisualizerIPC(): void {
     if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
     return { ok: true, report: parseExplain(await fs.readFile(selected.filePaths[0], 'utf8')) };
   });
+  ipcMain.handle('code-visualizer:database:connect-sqlite', async () => {
+    const selected = await dialog.showOpenDialog({ properties: ['openFile'], title: '选择只读 SQLite 数据库', filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] }] });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
+    return { ok: true, connection: openReadonlySqlite(selected.filePaths[0]) };
+  });
+  ipcMain.handle('code-visualizer:database:explain', (_event, id: string, sql: string) => explainReadonlySqlite(id, sql));
+  ipcMain.handle('code-visualizer:database:close', (_event, id: string) => { closeLiveDatabase(id); return { ok: true }; });
 }
