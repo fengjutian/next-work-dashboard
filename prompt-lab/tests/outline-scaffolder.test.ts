@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline } from '../src/plugins/outline-scaffolder/outline';
+import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
@@ -38,5 +38,10 @@ describe('outline scaffolder', () => {
     expect(chapterStateAfterSave('review')).toBe('review');
     expect(chapterStateAfterSave('revising')).toBe('quality');
     expect(chapterStateAfterSave('complete')).toBe('complete');
+  });
+
+  it('sorts and deduplicates discovered chapter files by numeric prefix', () => {
+    expect(sortChapterPaths(['docs/28-尾声.md', 'docs/02-开端.md', 'docs/12-转折.md', 'docs/02-开端.md']))
+      .toEqual(['docs/02-开端.md', 'docs/12-转折.md', 'docs/28-尾声.md']);
   });
 });

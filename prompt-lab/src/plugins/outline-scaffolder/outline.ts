@@ -20,6 +20,16 @@ export function chapterStateAfterSave(state: ChapterWorkflowState): ChapterWorkf
   return state;
 }
 
+export function sortChapterPaths(paths: string[]): string[] {
+  return [...new Set(paths)].sort((left, right) => {
+    const leftName = left.split('/').pop() ?? left;
+    const rightName = right.split('/').pop() ?? right;
+    const leftOrder = Number(leftName.match(/^(\d+)-/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+    const rightOrder = Number(rightName.match(/^(\d+)-/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+    return leftOrder - rightOrder || leftName.localeCompare(rightName, 'zh-CN', { numeric: true });
+  });
+}
+
 export interface ScaffoldOptions {
   folder?: string;
   splitMode?: SplitMode;

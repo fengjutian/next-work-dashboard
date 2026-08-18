@@ -6,7 +6,7 @@ import { BookOpen, Check, FileText, FolderOpen, GitBranch, Loader2, Save, Sparkl
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
-import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
+import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -191,7 +191,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [deploymentStatus, setDeploymentStatus] = useState<DeploymentStatus>({ state: 'unconfigured', updatedAt: 0 });
   const [deploymentChecking, setDeploymentChecking] = useState(false);
   const [pagesRunUrl, setPagesRunUrl] = useState('');
-  const [, setPublishGateIssues] = useState<string[]>([]);
+  const [publishGateIssues, setPublishGateIssues] = useState<string[]>([]);
+  const [publishCanOverride, setPublishCanOverride] = useState(false);
   const [gateFixTargets, setGateFixTargets] = useState<GateFixTarget[]>([]);
   const gateFixTargetsRef = useRef<GateFixTarget[]>([]);
   const gateRepairActiveRef = useRef(false);
@@ -1272,21 +1273,25 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { if (requestId === aiRequestRef.current) setAiLoading(false); }
   };
 
-  const publishToRemote = async () => {
+  const publishToRemote = async (allowQualityIssues = false) => {
     if (!target || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()) return;
     if (/^https?:\/\/[^/@]+@/i.test(gitRemoteUrl.trim())) { setGitError('远程地址中不要包含用户名、Token 或密码，请使用 Git Credential Manager。'); return; }
     const gateIssues = await runPublishGate();
     if (gateIssues.length) {
-      const firstFixable = gateFixTargetsRef.current[0];
-      if (firstFixable) {
-        setGitError('发布检查未通过，已转入逐章修复流程。');
-        await openAiGateFix(firstFixable);
-      } else {
-        setGitError(`发布前检查未通过：${gateIssues.slice(0, 5).join('；')}${gateIssues.length > 5 ? `；另有 ${gateIssues.length - 5} 项` : ''}`);
+      const qualityIssueSet = new Set(gateFixTargetsRef.current.flatMap((item) => item.blockers.map((blocker) => `${item.path.split('/').pop()}：${blocker}`)));
+      const hardIssues = gateIssues.filter((item) => !qualityIssueSet.has(item));
+      const canOverride = hardIssues.length === 0 && qualityIssueSet.size > 0;
+      setPublishCanOverride(canOverride);
+      if (hardIssues.length) {
+        setGitError(`暂时无法提交：${hardIssues.slice(0, 5).join('；')}${hardIssues.length > 5 ? `；另有 ${hardIssues.length - 5} 项` : ''}`);
+        return;
       }
-      return;
+      if (!allowQualityIssues) {
+        setGitError(`发现 ${gateFixTargetsRef.current.length} 章质量问题。可以先处理，也可以确认后忽略并提交。`);
+        return;
+      }
     }
-    setGitLoading(true); setGitError(''); setDeploymentStatus({ state: 'publishing', message: '正在提交并推送', updatedAt: Date.now() });
+    setPublishCanOverride(false); setGitLoading(true); setGitError(''); setDeploymentStatus({ state: 'publishing', message: allowQualityIssues ? '正在忽略质量提示并推送' : '正在提交并推送', updatedAt: Date.now() });
     try {
       if (gitRepository !== true) {
         const initialized = await window.electronAPI.workspace.gitInit(target.path);
@@ -1350,15 +1355,29 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const siteFolder = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
       const inSite = (name: string) => siteFolder ? `${siteFolder}/${name}` : name;
       const bookTitle = pagesTitle.trim() && pagesTitle.trim() !== '我的文档' ? pagesTitle.trim() : (pagesDescription.trim().replace(/在线阅读$/, '') || projectTitle);
-      const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path));
+      const listing = await window.electronAPI.workspace.listFiles(target.path);
+      if (!listing.success) throw new Error(listing.error || '无法扫描项目章节');
+      const folderPrefix = siteFolder ? `${siteFolder}/` : '';
+      const diskChapterFiles = (listing.data ?? [])
+        .filter((entry) => entry.type === 'file')
+        .map((entry) => entry.path.replace(/\\/g, '/'))
+        .filter((path) => !folderPrefix || path.startsWith(folderPrefix))
+        .filter((path) => !path.includes('/.history/') && !path.startsWith('.history/'))
+        .filter((path) => /(?:^|\/)\d+-[^/]+\.md$/i.test(path));
+      const chapterFiles = sortChapterPaths([
+        ...managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/(?:^|\/)(?:README|index|404)\.md$/i.test(path)),
+        ...diskChapterFiles,
+      ]);
+      if (!chapterFiles.length) throw new Error('没有找到可发布的章节文件');
+      setManagedFiles(chapterFiles);
       for (const [order, file] of chapterFiles.entries()) {
         const read = await window.electronAPI.workspace.readTextFile(target.path, file);
-        if (!read.success || !read.data) continue;
+        if (!read.success || !read.data) throw new Error(`章节读取失败：${file}：${read.error || '未知错误'}`);
         const title = file.split('/').pop()?.replace(/\.md$/i, '').replace(/^\d+-/, '') ?? '文章';
         const body = read.data.content.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n+/, '').replace(/^#\s+.*\r?\n+/, '');
         const content = `---\nlayout: article\ntitle: ${JSON.stringify(title)}\nchapter: true\norder: ${order + 1}\n---\n\n${body}`;
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, file, content, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: read.data.modifiedAt });
-        if (!updated.success) throw new Error(updated.error);
+        if (!updated.success) throw new Error(`章节配置写入失败：${file}：${updated.error || '未知错误'}`);
       }
       const baseUrl = pagesRepositoryName.trim() ? `/${pagesRepositoryName.trim().replace(/^\/+|\/+$/g, '')}` : '';
       const config = `title: ${JSON.stringify(pagesTitle.trim() || projectTitle)}\ndescription: ${JSON.stringify(pagesDescription.trim())}\nauthor: ${JSON.stringify(pagesAuthor.trim())}\nlang: ${JSON.stringify(pagesLanguage.trim() || 'zh-CN')}\nbaseurl: ${JSON.stringify(baseUrl)}\nurl: ${JSON.stringify(pagesCustomDomain.trim() ? `https://${pagesCustomDomain.trim().replace(/^https?:\/\//, '')}` : '')}\nplugins:\n  - jekyll-feed\n  - jekyll-seo-tag\nexclude:\n  - .history\n  - .chapter-project.json\n`;
@@ -1639,8 +1658,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       </aside>}
       {gitOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-semibold"><GitBranch className="h-4 w-4 text-primary" />保存到 Git 仓库</div><label className="flex items-center gap-2 text-xs text-muted-foreground">网站主题色<input type="color" value={pagesAccentColor} onChange={(event) => setPagesAccentColor(event.target.value)} className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" /></label></div><p className="mt-1 text-xs text-muted-foreground">只提交当前文章项目，不包含仓库中的其他改动。</p></div>
-        <div className="max-h-[58vh] space-y-3 overflow-auto border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>本地提交 {gitChanges.length}</Button></div><div className="border-t border-border pt-3"><div className="mb-2 text-xs font-medium">推送到新的远程仓库</div><input value={gitRemoteUrl} onChange={(event) => setGitRemoteUrl(event.target.value)} placeholder="https://github.com/user/repo.git 或 git@..." className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><div className="grid grid-cols-2 gap-2"><input value={gitRemoteName} onChange={(event) => setGitRemoteName(event.target.value)} placeholder="origin" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><input value={gitBranch} onChange={(event) => setGitBranch(event.target.value)} placeholder="main" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></div><Button className="mt-2 w-full" disabled={gitLoading || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()} onClick={publishToRemote}>提交并推送到远程仓库</Button><p className="mt-2 text-xs text-muted-foreground">HTTPS 凭据由 Git Credential Manager 管理；SSH 地址使用系统 SSH Key。</p></div><div className="border-t border-border pt-3"><button type="button" className="flex w-full items-center justify-between text-left text-xs font-medium" onClick={() => setPagesOpen((value) => !value)}><span>GitHub Pages 配置</span><span>{pagesOpen ? '收起' : '展开'}</span></button>{pagesOpen && <div className="mt-3 space-y-2"><input value={pagesTitle} onChange={(event) => setPagesTitle(event.target.value)} placeholder="站点标题" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><textarea value={pagesDescription} onChange={(event) => setPagesDescription(event.target.value)} placeholder="站点描述（用于首页与 SEO）" className="h-16 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /><div className="grid grid-cols-2 gap-2"><input value={pagesAuthor} onChange={(event) => setPagesAuthor(event.target.value)} placeholder="作者" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesLanguage} onChange={(event) => setPagesLanguage(event.target.value)} placeholder="zh-CN" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></div><input value={pagesRepositoryName} onChange={(event) => setPagesRepositoryName(event.target.value)} placeholder="仓库名（项目站点需要，例如 my-book）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesCustomDomain} onChange={(event) => setPagesCustomDomain(event.target.value)} placeholder="自定义域名（可选，例如 book.example.com）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><Button className="w-full" disabled={gitLoading || !managedFiles.length} onClick={configureGitHubPages}>生成 GitHub Pages 配置</Button><p className="text-xs text-muted-foreground">主题：Minima；包含 SEO、RSS、404、章节首页和自动部署 workflow。</p>{pagesCustomDomain.trim() && <p className="text-xs text-amber-700">自定义域名仍需在 GitHub 仓库 Settings → Pages 中配置并完成 DNS 验证。</p>}</div>}</div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
-        {gateFixTargets.length > 0 && <div className="border-b border-border p-3"><Button className="w-full" disabled={!aiApi.apiKey?.trim()} onClick={() => openAiGateFix()}><Sparkles className="mr-2 h-4 w-4" />AI 处理第一个门禁问题</Button><p className="mt-2 text-xs text-muted-foreground">共 {gateFixTargets.length} 章需要处理。每次修复并保存一章，然后重新执行发布检查。</p></div>}
+        <div className="max-h-[58vh] space-y-3 overflow-auto border-b border-border p-4"><label className="block text-xs text-muted-foreground">提交说明<input value={gitMessage} onChange={(event) => setGitMessage(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></label>{gitRepository === false && <Button className="w-full" disabled={gitLoading} onClick={initializeGit}><GitBranch className="mr-2 h-4 w-4" />初始化为 Git 仓库</Button>}<div className="flex gap-2"><Button variant="outline" className="flex-1" disabled={gitLoading} onClick={refreshGit}>{gitLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}刷新状态</Button><Button className="flex-1" disabled={gitLoading || gitRepository !== true || !gitChanges.length || !gitMessage.trim()} onClick={commitToGit}>本地提交 {gitChanges.length}</Button></div><div className="border-t border-border pt-3"><div className="mb-2 text-xs font-medium">推送到新的远程仓库</div><input value={gitRemoteUrl} onChange={(event) => setGitRemoteUrl(event.target.value)} placeholder="https://github.com/user/repo.git 或 git@..." className="mb-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><div className="grid grid-cols-2 gap-2"><input value={gitRemoteName} onChange={(event) => setGitRemoteName(event.target.value)} placeholder="origin" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /><input value={gitBranch} onChange={(event) => setGitBranch(event.target.value)} placeholder="main" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground" /></div><Button className="mt-2 w-full" disabled={gitLoading || !gitRemoteUrl.trim() || !gitRemoteName.trim() || !gitBranch.trim()} onClick={() => void publishToRemote()}>提交并推送到远程仓库</Button><p className="mt-2 text-xs text-muted-foreground">HTTPS 凭据由 Git Credential Manager 管理；SSH 地址使用系统 SSH Key。</p></div><div className="border-t border-border pt-3"><button type="button" className="flex w-full items-center justify-between text-left text-xs font-medium" onClick={() => setPagesOpen((value) => !value)}><span>GitHub Pages 配置</span><span>{pagesOpen ? '收起' : '展开'}</span></button>{pagesOpen && <div className="mt-3 space-y-2"><input value={pagesTitle} onChange={(event) => setPagesTitle(event.target.value)} placeholder="站点标题" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><textarea value={pagesDescription} onChange={(event) => setPagesDescription(event.target.value)} placeholder="站点描述（用于首页与 SEO）" className="h-16 w-full resize-none rounded-md border border-input bg-background p-2 text-sm" /><div className="grid grid-cols-2 gap-2"><input value={pagesAuthor} onChange={(event) => setPagesAuthor(event.target.value)} placeholder="作者" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesLanguage} onChange={(event) => setPagesLanguage(event.target.value)} placeholder="zh-CN" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></div><input value={pagesRepositoryName} onChange={(event) => setPagesRepositoryName(event.target.value)} placeholder="仓库名（项目站点需要，例如 my-book）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><input value={pagesCustomDomain} onChange={(event) => setPagesCustomDomain(event.target.value)} placeholder="自定义域名（可选，例如 book.example.com）" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /><Button className="w-full" disabled={gitLoading || !managedFiles.length} onClick={configureGitHubPages}>生成 GitHub Pages 配置</Button><p className="text-xs text-muted-foreground">主题：Minima；包含 SEO、RSS、404、章节首页和自动部署 workflow。</p>{pagesCustomDomain.trim() && <p className="text-xs text-amber-700">自定义域名仍需在 GitHub 仓库 Settings → Pages 中配置并完成 DNS 验证。</p>}</div>}</div>{gitError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{gitError}</div>}</div>
+        {gateFixTargets.length > 0 && <div className="space-y-2 border-b border-border p-3"><div className="text-xs font-medium">发现 {gateFixTargets.length} 章质量提示</div><div className="max-h-24 overflow-auto text-xs text-muted-foreground">{publishGateIssues.slice(0, 5).map((item) => <div key={item} className="truncate" title={item}>• {item}</div>)}</div><div className="grid grid-cols-2 gap-2"><Button disabled={gitLoading} onClick={() => void openAiGateFix()}><Sparkles className="mr-2 h-4 w-4" />处理问题</Button><Button variant="outline" disabled={gitLoading || !publishCanOverride} onClick={() => { if (window.confirm(`仍有 ${gateFixTargets.length} 章未通过质量检查。确认忽略这些提示并提交吗？`)) void publishToRemote(true); }}>忽略并提交</Button></div><p className="text-xs text-muted-foreground">质量提示可跳过；未保存、文件缺失或无法读取等错误仍会阻止提交。</p></div>}
         <div className="min-h-0 flex-1 overflow-auto p-3">{gitChanges.length ? gitChanges.map((change) => <div key={change.path} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 text-xs hover:bg-muted"><span className="w-6 shrink-0 font-mono text-primary">{change.status.trim() || 'M'}</span><span className="truncate" title={change.path}>{change.path}</span></div>) : !gitLoading && !gitError ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">文章目录没有待提交的改动</div> : null}</div>
       </aside>}
     </div>}
