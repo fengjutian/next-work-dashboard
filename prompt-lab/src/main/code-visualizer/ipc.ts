@@ -10,7 +10,7 @@ import { load as loadYaml } from 'js-yaml';
 import { parseRuntimeMetrics, readGitInfo, resolveSourceTarget } from './integrations';
 import { listGitChangedFiles, parseCoverageFile, runRelatedTests } from './quality';
 import { executeApiDebugRequest } from './api-debug';
-import { closeLiveDatabase, explainReadonlySqlite, openReadonlySqlite } from './live-database';
+import { closeLiveDatabase, explainReadonlyMySql, explainReadonlySqlite, openReadonlyMySql, openReadonlySqlite } from './live-database';
 
 let initialized = false;
 
@@ -100,6 +100,7 @@ export function setupCodeVisualizerIPC(): void {
     if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
     return { ok: true, connection: openReadonlySqlite(selected.filePaths[0]) };
   });
-  ipcMain.handle('code-visualizer:database:explain', (_event, id: string, sql: string) => explainReadonlySqlite(id, sql));
-  ipcMain.handle('code-visualizer:database:close', (_event, id: string) => { closeLiveDatabase(id); return { ok: true }; });
+  ipcMain.handle('code-visualizer:database:connect-mysql', async (_event, input: import('../../core/code-visualizer').LiveMySqlConfig) => ({ ok: true, connection: await openReadonlyMySql(input) }));
+  ipcMain.handle('code-visualizer:database:explain', (_event, id: string, engine: 'sqlite' | 'mysql', sql: string) => engine === 'mysql' ? explainReadonlyMySql(id, sql) : explainReadonlySqlite(id, sql));
+  ipcMain.handle('code-visualizer:database:close', async (_event, id: string) => { await closeLiveDatabase(id); return { ok: true }; });
 }

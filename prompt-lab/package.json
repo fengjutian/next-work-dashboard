@@ -132,6 +132,7 @@
     "mermaid": "^11.16.0",
     "meyda": "^5.6.3",
     "monaco-editor": "^0.52.2",
+    "mysql2": "^3.23.3",
     "node-pty": "1.1.0",
     "pdfjs-dist": "^6.2.108",
     "pptxgenjs": "^4.0.1",

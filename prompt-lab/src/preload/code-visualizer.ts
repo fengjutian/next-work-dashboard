@@ -32,7 +32,8 @@ export const codeVisualizerBridge = {
   },
   database: {
     connectSqlite: () => ipcRenderer.invoke('code-visualizer:database:connect-sqlite'),
-    explain: (id: string, sql: string) => ipcRenderer.invoke('code-visualizer:database:explain', id, sql),
+    connectMySql: (input: unknown) => ipcRenderer.invoke('code-visualizer:database:connect-mysql', input),
+    explain: (id: string, engine: 'sqlite' | 'mysql', sql: string) => ipcRenderer.invoke('code-visualizer:database:explain', id, engine, sql),
     close: (id: string) => ipcRenderer.invoke('code-visualizer:database:close', id),
   },
   history: {

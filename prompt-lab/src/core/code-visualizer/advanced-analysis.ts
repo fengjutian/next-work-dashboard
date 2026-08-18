@@ -45,9 +45,10 @@ export function parseExplain(input: string): ExplainReport {
   let engine: ExplainReport['engine'] = 'unknown'; const findings: ExplainReport['findings'] = [];
   if (/Seq Scan|Planning Time|Execution Time|"Plan"/i.test(input)) engine = 'postgresql'; else if (/select_type|possible_keys|Using filesort|"query_block"/i.test(input)) engine = 'mysql'; else if (/SCAN TABLE|SEARCH TABLE|QUERY PLAN/i.test(input)) engine = 'sqlite';
   if (/Seq Scan|SCAN TABLE/i.test(input)) findings.push({ rule: 'sequential-scan', severity: 'warning', message: '执行计划包含顺序/全表扫描' });
+  if (/"access_type"\s*:\s*"ALL"/i.test(input)) findings.push({ rule: 'sequential-scan', severity: 'warning', message: 'MySQL 执行计划使用 ALL 全表访问' });
   if (/Using filesort|TEMP B-TREE/i.test(input)) findings.push({ rule: 'temporary-sort', severity: 'warning', message: '执行计划使用额外排序或临时 B-Tree' });
   const costs = [...input.matchAll(/cost=\d+(?:\.\d+)?\.\.(\d+(?:\.\d+)?)/gi)].map((item) => Number(item[1])); if (costs.some((cost) => cost > 10000)) findings.push({ rule: 'high-cost', severity: 'warning', message: `计划成本较高：${Math.max(...costs)}` });
-  const rows = [...input.matchAll(/rows[=:]\s*(\d+)/gi)].map((item) => Number(item[1])); if (rows.some((count) => count > 100000)) findings.push({ rule: 'large-row-estimate', severity: 'warning', message: `预计扫描大量记录：${Math.max(...rows)}` });
+  const rows = [...input.matchAll(/(?:rows|rows_examined_per_scan)["']?\s*[:=]\s*(\d+)/gi)].map((item) => Number(item[1])); if (rows.some((count) => count > 100000)) findings.push({ rule: 'large-row-estimate', severity: 'warning', message: `预计扫描大量记录：${Math.max(...rows)}` });
   if (/possible_keys["']?\s*[:=]\s*(?:null|NULL)|key["']?\s*[:=]\s*(?:null|NULL)/i.test(input)) findings.push({ rule: 'missing-index', severity: 'warning', message: '执行计划没有可用索引' });
   return { engine, summary: findings.length ? `发现 ${findings.length} 个执行计划风险` : '执行计划中未识别到常见风险', findings, raw: input.slice(0, 200_000) };
 }

@@ -206,9 +206,18 @@ export interface FieldLineageReport { edges: FieldLineageEdge[]; fields: number;
 
 export interface LiveDatabaseConnection {
   id: string;
-  engine: 'sqlite';
+  engine: 'sqlite' | 'mysql';
   name: string;
   tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>;
+}
+
+export interface LiveMySqlConfig {
+  host: string;
+  port?: number;
+  user: string;
+  password: string;
+  database: string;
+  ssl?: boolean;
 }
 
 export interface ExplainReport {

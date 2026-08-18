@@ -598,7 +598,8 @@ export interface ElectronAPI {
     };
     database: {
       connectSqlite: () => Promise<{ ok: boolean; cancelled?: boolean; connection?: import('../core/code-visualizer').LiveDatabaseConnection }>;
-      explain: (id: string, sql: string) => Promise<import('../core/code-visualizer').ExplainReport>;
+      connectMySql: (input: import('../core/code-visualizer').LiveMySqlConfig) => Promise<{ ok: boolean; connection: import('../core/code-visualizer').LiveDatabaseConnection }>;
+      explain: (id: string, engine: 'sqlite' | 'mysql', sql: string) => Promise<import('../core/code-visualizer').ExplainReport>;
       close: (id: string) => Promise<{ ok: boolean }>;
     };
     history: {

@@ -75,6 +75,7 @@ describe('code visualizer', () => {
   it('recognizes PostgreSQL and SQLite EXPLAIN risks', () => {
     expect(parseExplain('Seq Scan on users (cost=0.00..12000.00 rows=200000)')).toMatchObject({ engine: 'postgresql', findings: expect.arrayContaining([expect.objectContaining({ rule: 'sequential-scan' }), expect.objectContaining({ rule: 'high-cost' })]) });
     expect(parseExplain('QUERY PLAN\nSCAN TABLE users\nUSE TEMP B-TREE')).toMatchObject({ engine: 'sqlite', findings: expect.arrayContaining([expect.objectContaining({ rule: 'temporary-sort' })]) });
+    expect(parseExplain('{"query_block":{"table":{"access_type":"ALL","possible_keys":null,"rows_examined_per_scan":200000}}}')).toMatchObject({ engine: 'mysql', findings: expect.arrayContaining([expect.objectContaining({ rule: 'sequential-scan' }), expect.objectContaining({ rule: 'missing-index' })]) });
   });
 
   it('loads architecture thresholds from code-map configuration', () => {

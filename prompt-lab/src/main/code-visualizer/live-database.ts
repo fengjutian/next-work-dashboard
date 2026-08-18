@@ -1,12 +1,14 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import * as DatabaseNS from 'better-sqlite3';
-import type { ExplainReport, LiveDatabaseConnection } from '../../core/code-visualizer';
+import { createConnection, type Connection } from 'mysql2/promise';
+import type { ExplainReport, LiveDatabaseConnection, LiveMySqlConfig } from '../../core/code-visualizer';
 import { parseExplain } from '../../core/code-visualizer';
 
 type DatabaseCtor = new (filename: string, options?: { readonly?: boolean; fileMustExist?: boolean; timeout?: number }) => DatabaseNS.Database;
 const Database: DatabaseCtor = ((DatabaseNS as unknown as { default?: DatabaseCtor }).default || (DatabaseNS as unknown as DatabaseCtor));
 const connections = new Map<string, { db: DatabaseNS.Database; path: string }>();
+const mysqlConnections = new Map<string, Connection>();
 
 export function openReadonlySqlite(filePath: string): LiveDatabaseConnection {
   const db = new Database(filePath, { readonly: true, fileMustExist: true, timeout: 3_000 });
@@ -25,7 +27,32 @@ export function explainReadonlySqlite(id: string, sql: string): ExplainReport {
   return parseExplain(text);
 }
 
-export function closeLiveDatabase(id: string): void { const connection = connections.get(id); if (connection) { connection.db.close(); connections.delete(id); } }
+export async function openReadonlyMySql(input: LiveMySqlConfig): Promise<LiveDatabaseConnection> {
+  const host = input.host.trim(); const user = input.user.trim(); const database = input.database.trim();
+  if (!host || !user || !database) throw new Error('MySQL host、user、database 必填');
+  if (!/^[\w.-]+$/.test(host) && host !== 'localhost') throw new Error('MySQL host 格式无效');
+  if (!/^[\w$-]+$/.test(database)) throw new Error('MySQL database 格式无效');
+  const connection = await createConnection({ host, port: Math.min(65535, Math.max(1, input.port ?? 3306)), user, password: input.password, database, ssl: input.ssl ? {} : undefined, connectTimeout: 5_000, enableKeepAlive: false, multipleStatements: false, namedPlaceholders: false });
+  try {
+    await connection.query('SET SESSION TRANSACTION READ ONLY');
+    await connection.query('SET SESSION max_execution_time = 5000');
+    const [columnRows] = await connection.execute('SELECT TABLE_NAME AS tableName, COLUMN_NAME AS columnName, COLUMN_TYPE AS columnType FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION', [database]);
+    const tableMap = new Map<string, Array<{ name: string; type: string }>>();
+    for (const row of columnRows as Array<{ tableName: string; columnName: string; columnType: string }>) tableMap.set(row.tableName, [...(tableMap.get(row.tableName) ?? []), { name: row.columnName, type: row.columnType }]);
+    const id = randomUUID(); mysqlConnections.set(id, connection);
+    return { id, engine: 'mysql', name: `${user}@${host}:${input.port ?? 3306}/${database}`, tables: [...tableMap].map(([name, columns]) => ({ name, columns })) };
+  } catch (error) { await connection.end(); throw error; }
+}
+
+export async function explainReadonlyMySql(id: string, sql: string): Promise<ExplainReport> {
+  const connection = mysqlConnections.get(id); if (!connection) throw new Error('MySQL 连接不存在或已关闭');
+  validateReadonlySelect(sql);
+  const [rows] = await connection.query(`EXPLAIN FORMAT=JSON ${sql.replace(/;+\s*$/, '')}`);
+  const first = (rows as Array<Record<string, unknown>>)[0]; const raw = typeof first?.EXPLAIN === 'string' ? first.EXPLAIN : JSON.stringify(rows, null, 2);
+  return parseExplain(raw);
+}
+
+export async function closeLiveDatabase(id: string): Promise<void> { const connection = connections.get(id); if (connection) { connection.db.close(); connections.delete(id); } const mysql = mysqlConnections.get(id); if (mysql) { mysqlConnections.delete(id); await mysql.end(); } }
 
 export function validateReadonlySelect(sql: string): void {
   const cleaned = sql.replace(/--[^\n\r]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/'(?:''|[^'])*'/g, "''").replace(/;+\s*$/, '').trim();
