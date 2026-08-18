@@ -14,16 +14,23 @@ export function parseSqlStructure(sql: string): SqlStructure {
   const tableMatches = [...clean.matchAll(/\b(?:FROM|INTO|UPDATE)\s+([\w."`]+)(?:\s+(?:AS\s+)?(\w+))?/gi)];
   const tables = tableMatches.map((item) => unquote(item[1]));
   const joins = [...clean.matchAll(/\bJOIN\s+([\w."`]+)(?:\s+(?:AS\s+)?\w+)?(?:\s+ON\s+(.+?))?(?=\s+(?:LEFT|RIGHT|INNER|OUTER|FULL|JOIN|WHERE|GROUP|ORDER|LIMIT|$))/gi)].map((item) => ({ table: unquote(item[1]), condition: item[2]?.trim() }));
-  const select = /^SELECT\s+(.+?)\s+FROM\b/i.exec(clean)?.[1] ?? '';
+  const select = /(?:^|\)\s*)SELECT\s+(.+?)\s+FROM\b/i.exec(clean)?.[1] ?? '';
   const aliases: Record<string, string> = {}; for (const item of tableMatches) if (item[2] && !/^(?:WHERE|JOIN|LEFT|RIGHT|INNER|ORDER|GROUP|LIMIT|SET)$/i.test(item[2])) aliases[item[2]] = unquote(item[1]);
   for (const join of [...clean.matchAll(/\bJOIN\s+([\w."`]+)(?:\s+(?:AS\s+)?(\w+))?/gi)]) if (join[2]) aliases[join[2]] = unquote(join[1]);
-  return { operation, tables: [...new Set([...tables, ...joins.map((join) => join.table)])], joins, selectedColumns: splitColumns(select), hasWhere: /\bWHERE\b/i.test(clean), hasLimit: /\bLIMIT\b|\bFETCH\s+FIRST\b/i.test(clean), parameters: [...new Set([...clean.matchAll(/(?:\?|\$\d+|:\w+|%s)/g)].map((item) => item[0]))], aliases };
+  const selectedColumns = splitColumns(select); const where = /\bWHERE\s+(.+?)(?=\s+(?:GROUP|ORDER|LIMIT|HAVING)\b|$)/i.exec(clean)?.[1] ?? '';
+  const filterColumns = [...where.matchAll(/(?:(\w+)\.)?(\w+)\s*(?:=|<>|!=|<|>|<=|>=|LIKE|IN\b|IS\b)/gi)].map((item) => `${item[1] ? `${item[1]}.` : ''}${item[2]}`);
+  const groupColumns = splitColumns(/\bGROUP\s+BY\s+(.+?)(?=\s+(?:HAVING|ORDER|LIMIT)\b|$)/i.exec(clean)?.[1] ?? '');
+  const orderColumns = splitColumns(/\bORDER\s+BY\s+(.+?)(?=\s+LIMIT\b|$)/i.exec(clean)?.[1] ?? '').map((item) => item.replace(/\s+(?:ASC|DESC)$/i, ''));
+  const aggregates = selectedColumns.flatMap((column) => { const match = /\b(COUNT|SUM|AVG|MIN|MAX)\s*\(([^)]+)\)(?:\s+(?:AS\s+)?(\w+))?/i.exec(column); return match ? [{ function: match[1].toUpperCase(), argument: match[2].trim(), output: match[3] }] : []; });
+  const ctes = [...clean.matchAll(/(?:\bWITH|,)\s*(\w+)\s+AS\s*\(/gi)].map((item) => item[1]);
+  return { operation, tables: [...new Set([...tables, ...joins.map((join) => join.table)])], joins, selectedColumns, hasWhere: Boolean(where), hasLimit: /\bLIMIT\b|\bFETCH\s+FIRST\b/i.test(clean), parameters: [...new Set([...clean.matchAll(/(?:\?|\$\d+|:\w+|%s)/g)].map((item) => item[0]))], aliases, filterColumns, groupColumns, orderColumns, aggregates, ctes };
 }
 
 export function buildFieldLineage(result: RepositoryAnalysis): FieldLineageReport {
   const edges: FieldLineageReport['edges'] = [];
   for (const query of result.databaseAnalysis?.queries ?? []) {
     const structure = query.structure ?? parseSqlStructure(query.sql); const aliases = structure.aliases ?? {};
+    const addReference = (raw: string, operation: 'filter' | 'group' | 'order'): void => { const resolved = resolveField(raw, aliases, structure.tables); edges.push({ id: `lineage:${operation}:${query.id}:${raw}`, endpointIds: query.endpointIds, operation, source: resolved, target: { kind: 'parameter', field: operation }, location: query.location, confidence: resolved.table ? 'exact' : 'inferred' }); };
     for (const rawColumn of structure.selectedColumns) {
       if (rawColumn === '*') continue;
       const aliasMatch = /^(?:(\w+)\.)?([\w*]+)(?:\s+(?:AS\s+)?(\w+))?$/i.exec(rawColumn.trim()); if (!aliasMatch) continue;
@@ -37,6 +44,10 @@ export function buildFieldLineage(result: RepositoryAnalysis): FieldLineageRepor
     const insert = /^INSERT\s+INTO\s+[\w."`]+\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i.exec(query.sql);
     if (insert) { const fields = splitColumns(insert[1]); const values = splitColumns(insert[2]); fields.forEach((field, index) => edges.push({ id: `lineage:write:${query.id}:${field}`, endpointIds: query.endpointIds, operation: 'write', source: { field: values[index] ?? '?' }, target: { kind: 'table', table: structure.tables[0], field: unquote(field.trim()) }, location: query.location, confidence: 'exact' })); }
     const update = /\bSET\s+(.+?)(?:\s+WHERE\b|$)/i.exec(query.sql)?.[1]; if (update) for (const assignment of splitColumns(update)) { const match = /([\w."`]+)\s*=\s*(.+)/.exec(assignment); if (match) edges.push({ id: `lineage:update:${query.id}:${match[1]}`, endpointIds: query.endpointIds, operation: 'write', source: { field: match[2].trim() }, target: { kind: 'table', table: structure.tables[0], field: unquote(match[1]) }, location: query.location, confidence: 'exact' }); }
+    for (const raw of structure.filterColumns ?? []) addReference(raw, 'filter');
+    for (const raw of structure.groupColumns ?? []) addReference(raw, 'group');
+    for (const raw of structure.orderColumns ?? []) addReference(raw, 'order');
+    for (const aggregate of structure.aggregates ?? []) { const resolved = resolveField(aggregate.argument, aliases, structure.tables); edges.push({ id: `lineage:aggregate:${query.id}:${aggregate.function}:${aggregate.argument}`, endpointIds: query.endpointIds, operation: 'aggregate', source: resolved, target: { kind: 'response', field: aggregate.output ?? `${aggregate.function.toLowerCase()}_${resolved.field}` }, location: query.location, confidence: resolved.table ? 'exact' : 'inferred' }); }
   }
   return { edges, fields: new Set(edges.flatMap((edge) => [`${edge.source.table ?? ''}.${edge.source.field}`, `${edge.target.table ?? ''}.${edge.target.field}`])).size, tables: new Set(edges.flatMap((edge) => [edge.source.table, edge.target.table]).filter(Boolean)).size };
 }
@@ -70,3 +81,4 @@ function record(value: unknown): Record<string, unknown> { return value && typeo
 function positive(value: unknown, fallback: number): number { const parsed = Number(value); return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback; }
 function unquote(value: string): string { return value.replace(/["`]/g, ''); }
 function splitColumns(value: string): string[] { const result: string[] = []; let depth = 0; let start = 0; for (let index = 0; index < value.length; index += 1) { if (value[index] === '(') depth += 1; else if (value[index] === ')') depth -= 1; else if (value[index] === ',' && depth === 0) { result.push(value.slice(start, index).trim()); start = index + 1; } } if (value.trim()) result.push(value.slice(start).trim()); return result; }
+function resolveField(raw: string, aliases: Record<string, string>, tables: string[]): { table?: string; field: string } { const value = raw.trim().replace(/\s+(?:ASC|DESC)$/i, ''); const match = /^(?:(\w+)\.)?([\w*]+)$/.exec(value); return match ? { table: match[1] ? aliases[match[1]] ?? match[1] : tables.length === 1 ? tables[0] : undefined, field: match[2] } : { field: value }; }

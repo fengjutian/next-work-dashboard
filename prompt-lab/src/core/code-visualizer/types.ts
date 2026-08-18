@@ -190,12 +190,17 @@ export interface SqlStructure {
   hasLimit: boolean;
   parameters: string[];
   aliases?: Record<string, string>;
+  filterColumns?: string[];
+  groupColumns?: string[];
+  orderColumns?: string[];
+  aggregates?: Array<{ function: string; argument: string; output?: string }>;
+  ctes?: string[];
 }
 
 export interface FieldLineageEdge {
   id: string;
   endpointIds: string[];
-  operation: 'read' | 'write' | 'filter' | 'join';
+  operation: 'read' | 'write' | 'filter' | 'join' | 'group' | 'order' | 'aggregate';
   source: { table?: string; field: string };
   target: { kind: 'response' | 'table' | 'parameter'; table?: string; field: string };
   location: SourceLocation;
@@ -208,7 +213,8 @@ export interface LiveDatabaseConnection {
   id: string;
   engine: 'sqlite' | 'mysql';
   name: string;
-  tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>;
+  tables: Array<{ name: string; columns: Array<{ name: string; type: string; nullable?: boolean; defaultValue?: unknown }> ; indexes?: Array<{ name: string; unique: boolean; columns: string[] }> }>;
+  security?: { ssl: boolean; readOnlyGrants: boolean; account: string; warnings: string[] };
 }
 
 export interface LiveMySqlConfig {
@@ -218,6 +224,37 @@ export interface LiveMySqlConfig {
   password: string;
   database: string;
   ssl?: boolean;
+  rejectUnauthorized?: boolean;
+}
+
+export interface SchemaComparisonReport {
+  missingTables: string[];
+  extraTables: string[];
+  missingColumns: string[];
+  extraColumns: string[];
+  typeMismatches: Array<{ field: string; ormType: string; databaseType: string }>;
+  nullableMismatches: Array<{ field: string; ormNullable: boolean; databaseNullable: boolean }>;
+}
+
+export interface IndexGovernanceFinding {
+  rule: 'missing-filter-index' | 'missing-join-index' | 'redundant-index' | 'left-prefix-mismatch';
+  severity: 'info' | 'warning';
+  table: string;
+  columns: string[];
+  message: string;
+  suggestedSql?: string;
+}
+
+export interface IndexGovernanceReport { findings: IndexGovernanceFinding[]; indexes: number; suggestions: number }
+
+export interface QueryPerformanceEntry {
+  id: string;
+  fingerprint: string;
+  engine: 'postgresql' | 'mysql' | 'sqlite' | 'unknown';
+  recordedAt: number;
+  summary: string;
+  findingRules: string[];
+  sqlPreview: string;
 }
 
 export interface ExplainReport {
@@ -396,6 +433,8 @@ export interface RepositoryAnalysis {
   architectureConfig?: ArchitectureRuleConfig;
   security?: SecurityGovernanceReport;
   fieldLineage?: FieldLineageReport;
+  schemaComparison?: SchemaComparisonReport;
+  indexGovernance?: IndexGovernanceReport;
   warnings: string[];
 }
 

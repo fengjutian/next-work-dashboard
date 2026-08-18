@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildFieldLineage, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath, parseArchitectureConfig, parseExplain, parseSqlStructure } from '../src/core/code-visualizer';
+import { analyzeArchitectureHealth, analyzeDatabaseQueries, analyzeIndexes, analyzeRepositoryFiles, analyzeSecurity, analyzeTypeScriptFiles, buildFieldLineage, buildQualityGate, buildSmartInsights, calculateGitImpact, compareOrmWithLiveSchema, compareOpenApi, compareOpenApiDocuments, createPerformanceEntry, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath, parseArchitectureConfig, parseExplain, parseSqlStructure, sqlFingerprint } from '../src/core/code-visualizer';
 import { analyzePythonWithAst } from '../src/main/code-visualizer/python-ast';
 import { executeApiDebugRequest } from '../src/main/code-visualizer/api-debug';
 import { validateReadonlySelect } from '../src/main/code-visualizer/live-database';
@@ -254,5 +254,41 @@ def users():
     const diff = diffRepositorySnapshots(before, after);
     expect(diff.addedEndpoints).toContain('POST /users');
     expect(diff.changedContracts).toContain('GET /users');
+  });
+
+  it('compares ORM models with a live schema', () => {
+    const report = compareOrmWithLiveSchema([
+      { name: 'users', file: 'models.ts', fields: [{ name: 'id', type: 'int', nullable: false }, { name: 'email', type: 'string', nullable: false }] },
+    ], { id: 'db', engine: 'mysql', name: 'demo', tables: [
+      { name: 'users', columns: [{ name: 'id', type: 'boolean', nullable: false }, { name: 'legacy', type: 'varchar(20)', nullable: true }] },
+      { name: 'audit', columns: [] },
+    ] });
+    expect(report.missingColumns).toContain('users.email');
+    expect(report.extraColumns).toContain('users.legacy');
+    expect(report.extraTables).toContain('audit');
+    expect(report.typeMismatches).toHaveLength(1);
+  });
+
+  it('links SQL predicates to index governance suggestions', () => {
+    const files = [{ path: 'repo.ts', content: "db.query('SELECT * FROM users u WHERE u.email = ?')" }];
+    const result = analyzeRepositoryFiles('demo', files);
+    result.databaseAnalysis = analyzeDatabaseQueries(result, files);
+    const report = analyzeIndexes(result, { id: 'db', engine: 'mysql', name: 'demo', tables: [{ name: 'users', columns: [{ name: 'email', type: 'varchar' }], indexes: [] }] });
+    expect(report.findings).toContainEqual(expect.objectContaining({ rule: 'missing-filter-index', table: 'users', columns: ['email'] }));
+    expect(report.findings[0]?.suggestedSql).toContain('CREATE INDEX');
+  });
+
+  it('captures deeper SQL lineage and stable performance fingerprints', () => {
+    const sql = "WITH active AS (SELECT team_id, amount FROM users WHERE status = 'active') SELECT team_id, SUM(amount) AS total FROM active GROUP BY team_id ORDER BY total DESC";
+    const structure = parseSqlStructure(sql);
+    expect(structure.ctes).toContain('active');
+    expect(structure.filterColumns).toContain('status');
+    expect(structure.groupColumns).toContain('team_id');
+    expect(structure.orderColumns).toContain('total');
+    expect(structure.aggregates).toContainEqual(expect.objectContaining({ function: 'SUM', argument: 'amount', output: 'total' }));
+    expect(sqlFingerprint("select * from users where id = 42 and email = 'a@b.test'")).toBe('SELECT * FROM USERS WHERE ID = ? AND EMAIL = ?');
+    const entry = createPerformanceEntry('select * from users where id = 42', { engine: 'mysql', summary: 'ok', findings: [{ rule: 'full-table-scan' }] });
+    expect(entry).toMatchObject({ engine: 'mysql', findingRules: ['full-table-scan'] });
+    expect(entry.sqlPreview).not.toContain('42');
   });
 });
