@@ -230,6 +230,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiMode, setAiMode] = useState<'generate' | 'continue' | 'polish' | 'revise'>('generate');
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiSources, setAiSources] = useState('');
+  const [researchPlans, setResearchPlans] = useState<Record<string, string>>({});
+  const [researchPlanLoading, setResearchPlanLoading] = useState(false);
   const [sourceResearchLoading, setSourceResearchLoading] = useState(false);
   const [sourceResearchError, setSourceResearchError] = useState('');
   const [sourceResearchQueries, setSourceResearchQueries] = useState<string[]>([]);
@@ -373,6 +375,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!/^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m.test(content)) warnings.push('没有文末参考资料区');
     if (!evidence.some((item) => item.status === 'verified')) warnings.push('没有已核实的证据记录');
     else if (!evidence.some((item) => item.status === 'verified' && item.anchor?.quote && content.includes(item.anchor.quote))) warnings.push('已核实史料尚未绑定到正文观点');
+    const unsupportedStrongClaims = content.match(/(?:彻底|唯一|必然|完全|从根本上|极度|绝对|致命)(?:[^。！？\n]{0,28})(?:。|！|？)/g) ?? [];
+    if (unsupportedStrongClaims.length >= 2) warnings.push(`存在 ${unsupportedStrongClaims.length} 处高强度结论，请核对证据并改写绝对化表述`);
+    const genericHistoricalPhrases = content.match(/(?:宏伟蓝图之下|历史长河中|时代洪流|思想的火种|致命暗伤|深深裂痕|历史舞台)/g) ?? [];
+    if (genericHistoricalPhrases.length) warnings.push('存在模板化历史叙述，建议改为具体制度、材料、行动或争议分析');
+    const highRiskClaims = [
+      ...(content.match(/(?:公元前|公元|前)\s*\d+年|\d+(?:\.\d+)?(?:万|亿|余)?(?:人|户|郡|县|年|里|件|次)/g) ?? []),
+      ...(content.match(/[“"][^”"\n]{4,80}[”"]/g) ?? []),
+      ...(content.match(/(?:百姓|民众|士人|知识分子|六国人|天下人)[^。！？\n]{0,32}(?:认为|反对|支持|不满|恐惧|认同|离心)/g) ?? []),
+      ...(content.match(/[^。！？\n]{4,40}(?:因此|由此|从而|导致|造成|成为了?)[^。！？\n]{4,40}/g) ?? []),
+    ];
+    if (highRiskClaims.length && !evidence.some((item) => item.status === 'verified')) warnings.push(`主张审计发现 ${highRiskClaims.length} 处日期、数字、引语、群体心理或强因果表述，但本章没有已核实证据`);
     if ((content.match(/^##\s+/gm) ?? []).length === 0) warnings.push('缺少二级标题，长文可读性较弱');
     const score = Math.max(0, 100 - blockers.length * 25 - warnings.length * 8);
     return { score, blockers, warnings, wordCount: words, checkedAt: Date.now() };
@@ -540,9 +553,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
           const previous = await window.electronAPI.workspace.readTextFile(target.path, previousPath);
           if (previous.success && previous.data) previousEnding = previous.data.content.slice(-1200);
         }
+        const chapterEvidence = evidenceRecords.filter((item) => item.chapter === path);
+        const evidenceContext = chapterEvidence.map((item) => `- ${item.status === 'verified' ? '已核实' : item.status === 'disputed' ? '有争议' : '检索线索'}｜${item.title}｜${item.source}｜${item.url}\n  ${item.notes}${item.anchor?.quote ? `\n  已绑定正文：${item.anchor.quote}` : ''}`).join('\n') || '无已登记材料。此时只能写范围较窄的分析性草稿；涉及具体数字、引文、争议事件或强因果判断时必须标记待核实。';
         const messages: ChatMessage[] = [
-          { role: 'system', content: `你是“${projectTitle}”的资深中文作者。根据章节骨架和 chapter-writing-brief 完成本章正文。要求：观点必须有事实、材料或机制支撑；区分事实与推测；不得编造史料、引文、卷次、页码或数据；无法核实处添加“<!-- 待核实：原因 -->”。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释。不要复述上一章，不要提前展开下一章。语言严谨、具体、有叙事张力，直接输出完整 Markdown。` },
-          { role: 'user', content: `全书需求：${bookRequirement || '未单独填写'}\n全书知识库（标准写法优先）：\n${knowledgeEntries.map((item) => `- ${item.kind}｜${item.name}｜标准：${item.canonical || item.name}｜别名：${item.aliases}｜${item.notes}`).join('\n') || '暂无'}\n当前章节：${chapterName}\n上一章结尾（仅用于衔接，不得复述）：${previousEnding || '无'}\n下一章：${nextPath?.split('/').pop()?.replace(/\.md$/i, '') || '无'}\n\n章节骨架：\n${skeleton}` },
+          { role: 'system', content: `你是“${projectTitle}”的历史类图书作者兼事实编辑。根据章节骨架和 chapter-writing-brief 完成本章，但不能把通识概述扩写成看似深刻的散文。
+
+每一节必须回答一个明确问题，并包含：至少两个可辨认的事实或材料锚点、制度或行动如何运作的中间机制，以及该材料能够支持到什么程度。对同一问题存在不同解释时，交代争议边界。区分同时代材料、后世记载与现代研究，不能把后世概括直接当作当时事实。
+
+禁止用“彻底、唯一、必然、完全、从根本上、极度、绝对、致命”等词代替论证；确有必要使用时，必须紧邻给出能够支持该强度的材料。禁止“宏伟蓝图之下、时代洪流、思想火种、致命暗伤、深深裂痕”等模板化升华。避免把复杂群体写成单一心理，不得笼统声称“百姓都……”“知识分子普遍……”。
+
+不得编造史料、引文、卷次、页码、数字、学者观点或人物心理。只把标为“已核实”的材料当作证据；检索线索只能提出核查方向。没有足够材料时，宁可缩小结论并插入“<!-- 待核实：所需材料 -->”，也不要补写成确定事实。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释；不要复述上一章或提前写完下一章。直接输出完整 Markdown。` },
+          { role: 'user', content: `全书需求：${bookRequirement || '未单独填写'}\n全书知识库（标准写法优先）：\n${knowledgeEntries.map((item) => `- ${item.kind}｜${item.name}｜标准：${item.canonical || item.name}｜别名：${item.aliases}｜${item.notes}`).join('\n') || '暂无'}\n当前章节：${chapterName}\n上一章结尾（仅用于衔接，不得复述）：${previousEnding || '无'}\n下一章：${nextPath?.split('/').pop()?.replace(/\.md$/i, '') || '无'}\n\n本章证据台账：\n${evidenceContext}\n\n章节骨架：\n${skeleton}` },
         ];
         let result = '';
         for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.55, maxTokens: 8_192, stream: true })) {
@@ -783,9 +804,42 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { setSaving(false); }
   };
 
+  const generateResearchPlan = async () => {
+    if (!activeFile || researchPlanLoading) return;
+    if (!aiApi.apiKey?.trim()) { setAiError('请先在应用设置中配置 AI API Key。'); return; }
+    setResearchPlanLoading(true); setAiError('');
+    try {
+      const chapterName = activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile;
+      const brief = { ...EMPTY_CHAPTER_BRIEF, ...chapterBriefs[activeFile] };
+      const ledger = evidenceRecords.filter((item) => item.chapter === activeFile).map((item) => `- ${item.status === 'verified' ? '已核实' : item.status === 'disputed' ? '有争议' : '检索线索'}｜${item.title}｜${item.source}｜${item.notes}`).join('\n') || '暂无证据记录';
+      const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
+      const messages: ChatMessage[] = [
+        { role: 'system', content: `你是历史研究编辑。正文写作前先制作研究提纲与证据映射，不撰写正文，不补造资料。严格输出以下 Markdown 结构：
+## 核心问题
+列出本章需要回答的 2—4 个问题。
+## 叙事入口
+选择一个可由现有材料支持的事件、制度运作或人物选择；禁止虚构场景、对话和心理。
+## 分节论证
+逐节列出“拟回答问题｜可用证据｜证据类型与形成时间｜分析机制｜结论边界”。没有证据时明确写“材料缺口”。
+## 争议与风险
+列出数字、引语、群体判断、强因果、后世记载及现代概念等需要核查的内容。
+## 补充材料清单
+按优先级列出还需要寻找的原始材料或研究问题。检索线索不得标成已证实。` },
+        { role: 'user', content: `书名：${projectTitle}\n章节：${chapterName}\n全书要求：${bookRequirement || '未填写'}\n写作目标：${brief.goal || '未填写'}\n核心问题：${brief.keyQuestions || '未填写'}\n必用史料：${brief.requiredSources || '未填写'}\n避免重复：${brief.avoidTopics || '未填写'}\n\n证据台账：\n${ledger}\n\n用户补充资料：\n${aiSources.trim() || '无'}\n\n现有章节骨架：\n${documentContent}` },
+      ];
+      let result = '';
+      for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.2, maxTokens: 4_000, stream: true })) result += chunk.delta || '';
+      if (!result.trim()) throw new Error('模型没有返回研究提纲');
+      setResearchPlans((current) => ({ ...current, [activeFile]: result.trim() }));
+      notice.success({ message: '研究提纲已生成', description: '请检查证据映射和材料缺口，再生成正文。', placement: 'bottomRight' });
+    } catch (error) { setAiError(error instanceof Error ? error.message : String(error)); }
+    finally { setResearchPlanLoading(false); }
+  };
+
   const runAi = async (writeToEditor = false) => {
     if (!activeFile || aiLoading) return;
     if (!aiApi.apiKey?.trim()) { setAiError('请先在应用设置中配置 AI API Key。'); return; }
+    if (aiMode === 'generate' && !researchPlans[activeFile]?.trim()) { setAiError('请先生成并确认“研究提纲与证据映射”，再生成本章正文。'); return; }
     if (aiMode === 'revise' && !aiInstruction.trim()) { setAiError('请先填写具体修改要求，例如要修改的段落、事实、结构或语气。'); return; }
     const requestId = ++aiRequestRef.current;
     setAiLoading(true); setAiResult(''); setAiError('');
@@ -804,6 +858,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
 2. 人物、时间、地点、制度、术语和数字应前后一致。不得编造史料、数据、引文、来源或人物心理；没有可靠依据时使用“可能”“大致”“现有材料不足以证明”等审慎表达，必要时加入“<!-- 待核实：具体问题 -->”。
 3. 区分事实、主流解释和作者判断，不把推测写成定论。存在争议时简洁交代争议边界，而不是假装只有一种答案。
 4. 抽象判断至少配一个具体事实、案例、对比或机制解释；案例不能只是换一种说法重复观点。
+4.1 不用“彻底、唯一、必然、完全、从根本上、极度、绝对、致命”等词代替论证；确需使用时，紧邻说明证据及适用范围。不要把“六国百姓”“知识分子”等复杂群体写成具有单一态度。
+4.2 禁止“宏伟蓝图之下、时代洪流、思想的火种、致命暗伤、深深裂痕”等模板化升华。段落结尾应落在可观察的制度后果、行动选择、材料限制或待解释问题上。
 5. 每一节尽量安排至少两个不同类型的“史料锚点”，可从时间节点、人物行动、制度条文、地理条件、器物考古、时人记载或现代研究观点中选择。史料必须被解释，不能只罗列名称。
 6. 用户提供的史料优先级最高。只有在用户资料中出现了原文和出处时才可以使用引号作精确引用；不得凭记忆伪造古籍原句、卷次、页码或学者观点。根据常识补充但无法核准出处的内容，只能概述，并标记“<!-- 待核实：需要核对的史料或出处 -->”。
 7. 使用用户提供的史料时，在相关句末使用 Markdown 脚注标记（如 [^s1]）；文章最下方必须添加“## 史料与参考资料”，列出对应脚注、材料名称、作者或篇章及链接。AI 搜索摘要只能标为“检索线索，引用前需核对原文”，不得当作正式引文。
@@ -830,7 +886,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const context = managedFiles.slice(0, 100).map((path) => path.split('/').pop()?.replace(/\.md$/i, '')).filter(Boolean).join('、');
     const sourceContext = aiSources.trim() || '用户未提供专门史料。只能使用高度确定的通识性史实；不得生成精确引文、卷次或页码，存疑处必须标记待核实。';
     const knowledgeContext = knowledgeEntries.map((item) => `- ${item.kind}｜${item.name}｜标准写法：${item.canonical || item.name}｜别名：${item.aliases}｜${item.notes}`).join('\n') || '暂无项目级知识条目';
-    const user = `当前章节：${chapterName}\n全书章节：${context}\n全书知识库：\n${knowledgeContext}\n任务：${modePrompt}${aiInstruction.trim() ? `\n用户补充要求：${aiInstruction.trim()}` : ''}\n\n用户提供的史料与参考资料：\n${sourceContext}\n\n现有文档：\n${documentContent}`;
+    const researchPlan = researchPlans[activeFile]?.trim() || '尚未制作研究提纲。写作时必须自行收缩无证据结论，并标记材料缺口。';
+    const user = `当前章节：${chapterName}\n全书章节：${context}\n全书知识库：\n${knowledgeContext}\n任务：${modePrompt}${aiInstruction.trim() ? `\n用户补充要求：${aiInstruction.trim()}` : ''}\n\n已确认的研究提纲与证据映射：\n${researchPlan}\n\n用户提供的史料与参考资料：\n${sourceContext}\n\n现有文档：\n${documentContent}`;
     try {
       const provider = createOpenAIProvider({ apiKey: aiApi.apiKey, baseUrl: aiApi.baseUrl });
       const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
@@ -1622,6 +1679,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           <label className="block text-xs text-muted-foreground">{aiMode === 'revise' ? '具体修改要求' : '补充要求与可靠资料'}<textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} disabled={aiLoading} placeholder={aiMode === 'revise' ? '例如：删除第三节重复内容；核正某个日期；扩写制度背景 300 字；其余段落保持不变' : '例如：目标约 2500 字；核心史实、参考资料、必须解释的争议，以及希望采用的叙事视角'} className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
           <label className="block text-xs text-muted-foreground">史料与参考资料<textarea value={aiSources} onChange={(event) => setAiSources(event.target.value)} disabled={aiLoading} placeholder="粘贴史书原文、考古材料、论文摘要、可靠网页摘录或自己整理的史实。建议同时注明书名、作者、篇章或链接。" className="mt-1 h-32 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground" /></label>
           <p className="text-xs text-muted-foreground">精确引文只从这里取用；未提供出处的内容不会伪造卷次、页码或原话。</p>
+          {aiMode === 'generate' && <div className="space-y-2 rounded-md border border-border p-2"><div className="flex items-center justify-between"><span className="text-xs font-medium">第一阶段：研究提纲与证据映射</span><span className="text-[10px] text-muted-foreground">{researchPlans[activeFile]?.trim() ? '已生成，可编辑' : '尚未生成'}</span></div><Button type="button" variant="outline" size="sm" className="w-full" disabled={researchPlanLoading || aiLoading || !aiApi.apiKey?.trim()} onClick={generateResearchPlan}>{researchPlanLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成研究提纲</Button>{researchPlans[activeFile] !== undefined && <textarea value={researchPlans[activeFile]} onChange={(event) => setResearchPlans((current) => ({ ...current, [activeFile]: event.target.value }))} disabled={researchPlanLoading || aiLoading} className="h-52 w-full resize-y rounded-md border border-input bg-background p-2 text-xs leading-5 text-foreground" aria-label="研究提纲与证据映射" />}<p className="text-xs text-muted-foreground">确认核心问题、材料性质、争议和结论边界后，再生成正文。</p></div>}
           <Button type="button" variant="outline" className="w-full" disabled={sourceResearchLoading || !activeFile} onClick={researchHistoricalSources}>{sourceResearchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 搜集史料</Button>
           {sourceResearchQueries.length > 0 && <div className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground"><div className="mb-1 font-medium text-foreground">检索计划</div>{sourceResearchQueries.map((query) => <div key={query} className="truncate" title={query}>• {query}</div>)}</div>}
           {sourceResearchError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{sourceResearchError}</div>}
