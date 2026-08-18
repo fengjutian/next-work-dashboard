@@ -29,6 +29,37 @@ export interface FrontendCall {
   path: string;
   normalizedPath: string;
   location: SourceLocation;
+  confidence?: 'exact' | 'inferred';
+  evidence?: string;
+}
+
+export interface AnalyzerReport {
+  id: string;
+  language: 'python' | 'typescript' | 'javascript' | 'vue';
+  engine: 'ast' | 'semantic' | 'regex-fallback';
+  files: number;
+  artifacts: number;
+  failures: Array<{ file: string; message: string }>;
+}
+
+export interface GitRepositoryInfo {
+  available: boolean;
+  branch?: string;
+  commit?: string;
+  dirty?: boolean;
+  changedFiles: string[];
+}
+
+export interface RuntimeEndpointMetric {
+  method: HttpMethod;
+  path: string;
+  normalizedPath: string;
+  requests: number;
+  errors: number;
+  errorRate: number;
+  p50Ms?: number;
+  p95Ms?: number;
+  p99Ms?: number;
 }
 
 export interface ApiParameter {
@@ -84,6 +115,8 @@ export interface TestReference {
   line: number;
   kind: 'backend' | 'frontend' | 'e2e';
   evidence: string;
+  testName?: string;
+  confidence?: 'direct' | 'text-match';
 }
 
 export interface PerformanceRisk {
@@ -143,7 +176,12 @@ export interface RepositoryAnalysis {
     removedFiles: number;
     durationMs: number;
     snapshotId?: string;
+    complete?: boolean;
+    skippedFiles?: number;
+    analyzerReports?: AnalyzerReport[];
   };
+  git?: GitRepositoryInfo;
+  runtimeMetrics?: RuntimeEndpointMetric[];
   warnings: string[];
 }
 

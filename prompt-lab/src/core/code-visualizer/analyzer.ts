@@ -208,7 +208,12 @@ function findTests(files: RepositorySourceFile[], endpoint: RawEndpoint): TestRe
     if (!/(^|\/)(tests?|__tests__|e2e)(\/|$)|\.(test|spec)\.[jt]sx?$/i.test(file.path)) continue;
     const index = file.content.search(new RegExp(`${escapeRegExp(endpoint.handler)}|${escapeRegExp(endpoint.path)}`));
     if (index < 0) continue;
-    references.push({ file: file.path, line: lineOf(file.content, index), kind: /e2e|playwright|cypress/i.test(file.path + file.content.slice(0, 300)) ? 'e2e' : file.path.endsWith('.py') ? 'backend' : 'frontend', evidence: snippetAt(file.content, lineOf(file.content, index)) });
+    const line = lineOf(file.content, index);
+    const prefix = file.content.slice(0, index);
+    const declarations = [...prefix.matchAll(/(?:^|\n)\s*(?:def\s+(test_\w+)|(?:it|test)\s*\(\s*["'`]([^"'`]+))/g)];
+    const testName = declarations.at(-1)?.[1] ?? declarations.at(-1)?.[2];
+    const directPath = file.content.slice(Math.max(0, index - 200), index + endpoint.path.length + 200).includes(endpoint.path);
+    references.push({ file: file.path, line, kind: /e2e|playwright|cypress/i.test(file.path + file.content.slice(0, 300)) ? 'e2e' : file.path.endsWith('.py') ? 'backend' : 'frontend', evidence: snippetAt(file.content, line), testName, confidence: directPath ? 'direct' : 'text-match' });
   }
   return references;
 }

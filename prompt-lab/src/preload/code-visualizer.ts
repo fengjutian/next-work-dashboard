@@ -7,6 +7,10 @@ export const codeVisualizerBridge = {
   },
   source: {
     read: (rootPath: string, relativePath: string) => ipcRenderer.invoke('code-visualizer:source:read', rootPath, relativePath),
+    openExternal: (rootPath: string, relativePath: string, line?: number) => ipcRenderer.invoke('code-visualizer:source:open-external', rootPath, relativePath, line),
+  },
+  runtime: {
+    import: (rootPath: string) => ipcRenderer.invoke('code-visualizer:runtime:import', rootPath),
   },
   history: {
     list: () => ipcRenderer.invoke('code-visualizer:history:list'),

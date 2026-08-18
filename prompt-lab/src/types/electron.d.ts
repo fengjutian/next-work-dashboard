@@ -573,6 +573,10 @@ export interface ElectronAPI {
     };
     source: {
       read: (rootPath: string, relativePath: string) => Promise<{ path: string; content: string }>;
+      openExternal: (rootPath: string, relativePath: string, line?: number) => Promise<{ ok: boolean }>;
+    };
+    runtime: {
+      import: (rootPath: string) => Promise<{ ok: boolean; cancelled?: boolean; metrics: import('../core/code-visualizer').RuntimeEndpointMetric[] }>;
     };
     history: {
       list: () => Promise<import('../core/code-visualizer').CodeVisualizerProjectHistory[]>;

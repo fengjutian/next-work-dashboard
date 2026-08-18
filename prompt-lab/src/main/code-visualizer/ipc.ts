@@ -1,4 +1,4 @@
-import { dialog, ipcMain } from 'electron';
+import { dialog, ipcMain, shell } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
@@ -6,6 +6,7 @@ import { scanCodeRepository } from './scanner';
 import { listProjectHistory, recordProjectHistory, removeProjectHistory } from './history';
 import { listSnapshots, loadSnapshot, saveSnapshot } from './snapshots';
 import { diffRepositorySnapshots } from '../../core/code-visualizer';
+import { parseRuntimeMetrics, readGitInfo, resolveSourceTarget } from './integrations';
 
 let initialized = false;
 
@@ -21,6 +22,7 @@ export function setupCodeVisualizerIPC(): void {
   ipcMain.handle('code-visualizer:repository:scan', async (_event, rootPath: string) => {
     const safeRoot = resolveWorkspacePath(rootPath);
     const result = await scanCodeRepository(safeRoot);
+    result.git = await readGitInfo(safeRoot);
     const snapshot = await saveSnapshot(result);
     if (result.scan) result.scan.snapshotId = snapshot.id;
     await recordProjectHistory(result);
@@ -49,5 +51,18 @@ export function setupCodeVisualizerIPC(): void {
     const relative = path.relative(safeRoot, target);
     if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('源码路径超出已授权仓库');
     return { content: await fs.readFile(target, 'utf8'), path: relative.replace(/\\/g, '/') };
+  });
+  ipcMain.handle('code-visualizer:source:open-external', async (_event, rootPath: string, relativePath: string, line = 1) => {
+    const safeRoot = resolveWorkspacePath(rootPath);
+    const target = resolveSourceTarget(safeRoot, relativePath);
+    const url = `vscode://file/${target.replace(/\\/g, '/')}:${Math.max(1, Number(line) || 1)}`;
+    await shell.openExternal(url);
+    return { ok: true };
+  });
+  ipcMain.handle('code-visualizer:runtime:import', async (_event, rootPath: string) => {
+    resolveWorkspacePath(rootPath);
+    const selected = await dialog.showOpenDialog({ properties: ['openFile'], title: '导入运行时日志', filters: [{ name: '日志', extensions: ['log', 'jsonl', 'ndjson', 'txt'] }] });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true, metrics: [] };
+    return { ok: true, metrics: await parseRuntimeMetrics(selected.filePaths[0]) };
   });
 }

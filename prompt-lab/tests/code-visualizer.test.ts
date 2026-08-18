@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeRepositoryFiles, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzeRepositoryFiles, analyzeTypeScriptFiles, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, normalizeApiPath } from '../src/core/code-visualizer';
 
 describe('code visualizer', () => {
+  it('extracts axios and fetch calls with the TypeScript AST', () => {
+    const analysis = analyzeTypeScriptFiles([
+      { path: 'src/api.ts', content: `const client = axios.create({ baseURL: '/api/v2' });\nclient.get(\`/users/\${id}\`);\nfetch('/health', { method: 'HEAD' });` },
+      { path: 'src/View.vue', content: `<template><div /></template><script setup lang="ts">axios.post('/jobs')</script>` },
+    ]);
+    expect(analysis.calls.map((call) => [call.method, call.normalizedPath])).toEqual(expect.arrayContaining([
+      ['GET', '/api/v2/users/:param'], ['HEAD', '/health'], ['POST', '/jobs'],
+    ]));
+    expect(analysis.report).toMatchObject({ engine: 'ast', files: 2 });
+  });
+
+  it('reports frontend URLs that cannot be statically resolved', () => {
+    const analysis = analyzeTypeScriptFiles([{ path: 'src/api.ts', content: `axios.get(buildUrl(resource))` }]);
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({ kind: 'dynamic-url', severity: 'warning' }));
+  });
   it('normalizes frontend and backend route parameters', () => {
     expect(normalizeApiPath('/api/users/${id}?detail=1')).toBe('/api/users/:param');
     expect(normalizeApiPath('/api/users/{user_id}/')).toBe('/api/users/:param');
