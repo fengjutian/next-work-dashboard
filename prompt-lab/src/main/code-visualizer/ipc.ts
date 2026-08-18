@@ -5,8 +5,10 @@ import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
 import { scanCodeRepository } from './scanner';
 import { listProjectHistory, recordProjectHistory, removeProjectHistory } from './history';
 import { listSnapshots, loadSnapshot, saveSnapshot } from './snapshots';
-import { diffRepositorySnapshots } from '../../core/code-visualizer';
+import { calculateGitImpact, compareOpenApi, diffRepositorySnapshots, type RepositoryAnalysis } from '../../core/code-visualizer';
+import { load as loadYaml } from 'js-yaml';
 import { parseRuntimeMetrics, readGitInfo, resolveSourceTarget } from './integrations';
+import { listGitChangedFiles, parseCoverageFile, runRelatedTests } from './quality';
 
 let initialized = false;
 
@@ -64,5 +66,24 @@ export function setupCodeVisualizerIPC(): void {
     const selected = await dialog.showOpenDialog({ properties: ['openFile'], title: '导入运行时日志', filters: [{ name: '日志', extensions: ['log', 'jsonl', 'ndjson', 'txt'] }] });
     if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true, metrics: [] };
     return { ok: true, metrics: await parseRuntimeMetrics(selected.filePaths[0]) };
+  });
+  ipcMain.handle('code-visualizer:openapi:import', async (_event, rootPath: string, analysis: RepositoryAnalysis) => {
+    resolveWorkspacePath(rootPath);
+    const selected = await dialog.showOpenDialog({ properties: ['openFile'], title: '导入 OpenAPI 契约', filters: [{ name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] }] });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
+    const content = await fs.readFile(selected.filePaths[0], 'utf8');
+    return { ok: true, report: compareOpenApi(analysis, loadYaml(content)) };
+  });
+  ipcMain.handle('code-visualizer:git:impact', async (_event, rootPath: string, base: string, analysis: RepositoryAnalysis) => {
+    const safeRoot = resolveWorkspacePath(rootPath);
+    const changedFiles = await listGitChangedFiles(safeRoot, base);
+    return calculateGitImpact(analysis, changedFiles, base);
+  });
+  ipcMain.handle('code-visualizer:test:run', async (_event, rootPath: string, files: string[]) => runRelatedTests(resolveWorkspacePath(rootPath), files));
+  ipcMain.handle('code-visualizer:coverage:import', async (_event, rootPath: string) => {
+    resolveWorkspacePath(rootPath);
+    const selected = await dialog.showOpenDialog({ properties: ['openFile'], title: '导入覆盖率', filters: [{ name: 'Coverage', extensions: ['info', 'lcov', 'json'] }] });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, cancelled: true };
+    return { ok: true, report: await parseCoverageFile(selected.filePaths[0]) };
   });
 }

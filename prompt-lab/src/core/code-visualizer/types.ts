@@ -62,6 +62,83 @@ export interface RuntimeEndpointMetric {
   p99Ms?: number;
 }
 
+export interface OpenApiOperation {
+  method: HttpMethod;
+  path: string;
+  normalizedPath: string;
+  operationId?: string;
+  parameters: ApiParameter[];
+  requestModel?: string;
+  responseModel?: string;
+  statusCodes: number[];
+  requestFields: OpenApiSchemaField[];
+  responseFields: OpenApiSchemaField[];
+}
+
+export interface OpenApiSchemaField {
+  path: string;
+  type: string;
+  required: boolean;
+  nullable: boolean;
+  enumValues?: string[];
+}
+
+export interface OpenApiGovernanceReport {
+  title?: string;
+  version?: string;
+  operations: OpenApiOperation[];
+  undocumentedCode: string[];
+  missingImplementation: string[];
+  contractMismatches: Array<{ endpoint: string; changes: string[]; breaking: boolean }>;
+}
+
+export interface GitImpactReport {
+  base: string;
+  head: string;
+  changedFiles: string[];
+  endpoints: string[];
+  tests: string[];
+  tables: string[];
+}
+
+export interface TestRunResult {
+  framework: 'vitest' | 'pytest';
+  command: string;
+  ok: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  output: string;
+}
+
+export interface CoverageFile {
+  file: string;
+  linesFound: number;
+  linesHit: number;
+  lineRate: number;
+}
+
+export interface CoverageReport {
+  source: string;
+  files: CoverageFile[];
+  linesFound: number;
+  linesHit: number;
+  lineRate: number;
+}
+
+export interface EndpointCoverage {
+  endpoint: string;
+  files: string[];
+  lineRate: number;
+  covered: boolean;
+}
+
+export interface QualityGateReport {
+  passed: boolean;
+  score: number;
+  failures: Array<{ rule: 'breaking-contract' | 'missing-test' | 'low-coverage' | 'missing-implementation'; message: string; endpoint?: string }>;
+  endpointCoverage: EndpointCoverage[];
+}
+
 export interface ApiParameter {
   name: string;
   source: 'path' | 'query' | 'header' | 'cookie' | 'body';
@@ -182,6 +259,10 @@ export interface RepositoryAnalysis {
   };
   git?: GitRepositoryInfo;
   runtimeMetrics?: RuntimeEndpointMetric[];
+  openApi?: OpenApiGovernanceReport;
+  gitImpact?: GitImpactReport;
+  coverage?: CoverageReport;
+  qualityGate?: QualityGateReport;
   warnings: string[];
 }
 

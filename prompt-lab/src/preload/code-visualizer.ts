@@ -12,6 +12,18 @@ export const codeVisualizerBridge = {
   runtime: {
     import: (rootPath: string) => ipcRenderer.invoke('code-visualizer:runtime:import', rootPath),
   },
+  openApi: {
+    import: (rootPath: string, analysis: unknown) => ipcRenderer.invoke('code-visualizer:openapi:import', rootPath, analysis),
+  },
+  git: {
+    impact: (rootPath: string, base: string, analysis: unknown) => ipcRenderer.invoke('code-visualizer:git:impact', rootPath, base, analysis),
+  },
+  test: {
+    run: (rootPath: string, files: string[]) => ipcRenderer.invoke('code-visualizer:test:run', rootPath, files),
+  },
+  coverage: {
+    import: (rootPath: string) => ipcRenderer.invoke('code-visualizer:coverage:import', rootPath),
+  },
   history: {
     list: () => ipcRenderer.invoke('code-visualizer:history:list'),
     open: (rootPath: string) => ipcRenderer.invoke('code-visualizer:history:open', rootPath),

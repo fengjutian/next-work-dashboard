@@ -1,7 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeRepositoryFiles, analyzeTypeScriptFiles, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzeRepositoryFiles, analyzeTypeScriptFiles, buildQualityGate, calculateGitImpact, compareOpenApi, compareOpenApiDocuments, diagnoseFrontendBackend, diffRepositorySnapshots, enrichRepositoryArchitecture, extractFrontendCalls, gitImpactMarkdown, normalizeApiPath } from '../src/core/code-visualizer';
+import { analyzePythonWithAst } from '../src/main/code-visualizer/python-ast';
 
 describe('code visualizer', () => {
+  it('extracts Python routes and contracts with the native AST', async () => {
+    const result = await analyzePythonWithAst([{ path: 'api.py', content: `PREFIX = '/api'\nrouter = APIRouter(prefix=PREFIX)\n@router.post('/users', response_model=UserOut, status_code=201)\nasync def create_user(payload: UserIn = Body(...)):\n    return payload` }]);
+    expect(result.report.engine).toBe('semantic');
+    expect(result.endpoints[0]).toMatchObject({ method: 'POST', path: '/api/users', handler: 'create_user', contract: { responseModel: 'UserOut', statusCodes: [201] } });
+  });
+
+  it('resolves include_router prefixes across Python modules with AST imports', async () => {
+    const result = await analyzePythonWithAst([
+      { path: 'main.py', content: `from api.users import router as users_router\napp.include_router(users_router, prefix='/v1')` },
+      { path: 'api/users.py', content: `router = APIRouter(prefix='/users')\n@router.get('/{user_id}')\ndef get_user(user_id: int):\n    return user_id` },
+    ]);
+    expect(result.endpoints[0]?.path).toBe('/v1/users/{user_id}');
+  });
+
+  it('compares OpenAPI operations and required parameters', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users(limit: int):\n    return []` }]);
+    const report = compareOpenApi(result, { openapi: '3.0.0', info: { title: 'Demo', version: '1' }, paths: { '/users': { get: { parameters: [{ in: 'query', name: 'page', required: true, schema: { type: 'integer' } }], responses: { 200: { description: 'ok' } } } }, '/missing': { post: { responses: { 204: { description: 'ok' } } } } } });
+    expect(report.missingImplementation).toContain('POST /missing');
+    expect(report.contractMismatches[0]?.changes).toContain('规范必填参数未在代码契约中体现：query:page');
+  });
+
+  it('calculates Git impact through endpoint nodes and tests', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users():\n    return []` }, { path: 'tests/test_users.py', content: `def test_users():\n    client.get('/users')` }]);
+    const impact = calculateGitImpact(result, ['app.py'], 'main');
+    expect(impact.endpoints).toContain('GET /users');
+    expect(impact.tests).toContain('tests/test_users.py');
+    expect(gitImpactMarkdown(impact)).toContain('## 接口变更影响');
+  });
+
+  it('detects field-level OpenAPI breaking changes', () => {
+    const operation = (schema: unknown) => ({ openapi: '3.0.0', paths: { '/users': { post: { requestBody: { content: { 'application/json': { schema } } }, responses: { 200: { content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' } } } } } } } } } } });
+    const before = operation({ type: 'object', properties: { name: { type: 'string' } } });
+    const after = operation({ type: 'object', required: ['email'], properties: { name: { type: 'string' }, email: { type: 'string' } } });
+    expect(compareOpenApiDocuments(before, after)[0]).toMatchObject({ endpoint: 'POST /users', breaking: true, changes: ['新增必填请求字段：email'] });
+  });
+
+  it('maps coverage onto endpoints and builds a quality gate', () => {
+    const result = analyzeRepositoryFiles('demo', [{ path: 'app.py', content: `@app.get('/users')\ndef users():\n    return []` }]);
+    const gate = buildQualityGate(result, { source: 'lcov.info', files: [{ file: 'app.py', linesFound: 10, linesHit: 5, lineRate: .5 }], linesFound: 10, linesHit: 5, lineRate: .5 });
+    expect(gate.passed).toBe(false);
+    expect(gate.failures.map((item) => item.rule)).toEqual(expect.arrayContaining(['missing-test', 'low-coverage']));
+  });
   it('extracts axios and fetch calls with the TypeScript AST', () => {
     const analysis = analyzeTypeScriptFiles([
       { path: 'src/api.ts', content: `const client = axios.create({ baseURL: '/api/v2' });\nclient.get(\`/users/\${id}\`);\nfetch('/health', { method: 'HEAD' });` },

@@ -578,6 +578,18 @@ export interface ElectronAPI {
     runtime: {
       import: (rootPath: string) => Promise<{ ok: boolean; cancelled?: boolean; metrics: import('../core/code-visualizer').RuntimeEndpointMetric[] }>;
     };
+    openApi: {
+      import: (rootPath: string, analysis: import('../core/code-visualizer').RepositoryAnalysis) => Promise<{ ok: boolean; cancelled?: boolean; report?: import('../core/code-visualizer').OpenApiGovernanceReport }>;
+    };
+    git: {
+      impact: (rootPath: string, base: string, analysis: import('../core/code-visualizer').RepositoryAnalysis) => Promise<import('../core/code-visualizer').GitImpactReport>;
+    };
+    test: {
+      run: (rootPath: string, files: string[]) => Promise<import('../core/code-visualizer').TestRunResult>;
+    };
+    coverage: {
+      import: (rootPath: string) => Promise<{ ok: boolean; cancelled?: boolean; report?: import('../core/code-visualizer').CoverageReport }>;
+    };
     history: {
       list: () => Promise<import('../core/code-visualizer').CodeVisualizerProjectHistory[]>;
       open: (rootPath: string) => Promise<{ ok: boolean; rootPath: string }>;
