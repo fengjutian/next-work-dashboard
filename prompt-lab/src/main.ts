@@ -134,13 +134,13 @@ if (started) {
     // plugin can invoke its preload bridge before the matching main-process handler exists.
     setupIPC(webviewPreloadPath);
     setupSecurityAuditIPC();
+    setupCodeVisualizerIPC();
     openMainWindow();
     setupDiskSpaceIPC();
     setupNetProbeIPC();
     setupRagWorkerIPC();
     setupVideoPlayerIPC();
     setupWorkBrowserIPC();
-    setupCodeVisualizerIPC();
     setupWebsiteRegistryIPC();
     startRagIndexCoordinator();
     createTray();

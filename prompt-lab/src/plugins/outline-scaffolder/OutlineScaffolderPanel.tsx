@@ -1105,14 +1105,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } catch (error) { setImageError(error instanceof Error ? error.message : String(error)); }
   };
 
-  const getProjectGitChanges = async () => {
+  const getProjectGitChanges = async (projectFiles = managedFiles) => {
     if (!target) return [];
       const result = await window.electronAPI.workspace.gitStatus(target.path);
       if (!result.success) throw new Error(result.error);
       setGitRepository(true);
       setOutputIsGitRepository(true);
       const prefix = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
-      const known = new Set([...managedFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/index.md` : 'index.md', prefix ? `${prefix}/404.md` : '404.md', prefix ? `${prefix}/_config.yml` : '_config.yml', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json', prefix ? `${prefix}/_data/chapters.yml` : '_data/chapters.yml', prefix ? `${prefix}/_layouts/default.html` : '_layouts/default.html', prefix ? `${prefix}/_layouts/article.html` : '_layouts/article.html', prefix ? `${prefix}/_layouts/home.html` : '_layouts/home.html', prefix ? `${prefix}/assets/css/reader.css` : 'assets/css/reader.css', '.github/workflows/pages.yml']);
+      const known = new Set([...projectFiles, prefix ? `${prefix}/README.md` : 'README.md', prefix ? `${prefix}/index.md` : 'index.md', prefix ? `${prefix}/404.md` : '404.md', prefix ? `${prefix}/_config.yml` : '_config.yml', prefix ? `${prefix}/.chapter-project.json` : '.chapter-project.json', prefix ? `${prefix}/_data/chapters.yml` : '_data/chapters.yml', prefix ? `${prefix}/_layouts/default.html` : '_layouts/default.html', prefix ? `${prefix}/_layouts/article.html` : '_layouts/article.html', prefix ? `${prefix}/_layouts/home.html` : '_layouts/home.html', prefix ? `${prefix}/assets/css/reader.css` : 'assets/css/reader.css', '.github/workflows/pages.yml']);
       const changes = (result.data ?? []).map((item) => ({ ...item, path: item.path.replace(/\\/g, '/') }))
         .filter((item) => !item.path.startsWith('.history/') && !item.path.includes('/.history/'))
         .filter((item) => prefix ? item.path.startsWith(`${prefix}/`) || item.path === '.github/workflows/pages.yml' : known.has(item.path) || item.path.startsWith('assets/images/'));
@@ -1291,6 +1291,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
         return;
       }
     }
+    const publishFiles = await configureGitHubPages(true);
+    if (!publishFiles) return;
     setPublishCanOverride(false); setGitLoading(true); setGitError(''); setDeploymentStatus({ state: 'publishing', message: allowQualityIssues ? '正在忽略质量提示并推送' : '正在提交并推送', updatedAt: Date.now() });
     try {
       if (gitRepository !== true) {
@@ -1298,7 +1300,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (!initialized.success) throw new Error(initialized.error);
         setGitRepository(true); setOutputIsGitRepository(true);
       }
-      const changes = await getProjectGitChanges();
+      const changes = await getProjectGitChanges(publishFiles);
       if (changes.length) {
         const paths = changes.map((change) => change.path);
         const staged = await window.electronAPI.workspace.gitStage(target.path, paths);
@@ -1347,9 +1349,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!created.success) throw new Error(created.error);
   };
 
-  const configureGitHubPages = async () => {
-    if (!target || !managedFiles.length) return;
-    if (dirty) { setGitError('当前文档尚未保存，请先保存后再生成 Pages 配置。'); return; }
+  const configureGitHubPages = async (silent: boolean | React.MouseEvent = false): Promise<string[] | null> => {
+    const quiet = silent === true;
+    if (!target || !managedFiles.length) return null;
+    if (dirty) { setGitError('当前文档尚未保存，请先保存后再生成 Pages 配置。'); return null; }
     setGitLoading(true); setGitError('');
     try {
       const siteFolder = activeProject?.subfolder || (subfolder.trim() && managedFiles[0]?.includes('/') ? managedFiles[0].split('/')[0] : '');
@@ -1420,12 +1423,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const workflow = `name: Deploy GitHub Pages\n\non:\n  push:\n    branches: [${gitBranch.trim() || 'main'}]\n  workflow_dispatch:\n\npermissions:\n  contents: read\n  pages: write\n  id-token: write\n\nconcurrency:\n  group: pages\n  cancel-in-progress: false\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Checkout\n        uses: actions/checkout@v6\n      - name: Setup Pages\n        uses: actions/configure-pages@v5\n      - name: Build with Jekyll\n        uses: actions/jekyll-build-pages@v1\n        with:\n          source: ${JSON.stringify(source)}\n          destination: ./_site\n      - name: Upload artifact\n        uses: actions/upload-pages-artifact@v4\n\n  deploy:\n    environment:\n      name: github-pages\n      url: \${{ steps.deployment.outputs.page_url }}\n    runs-on: ubuntu-latest\n    needs: build\n    steps:\n      - name: Deploy\n        id: deployment\n        uses: actions/deploy-pages@v4\n`;
       await upsertWorkspaceFile('.github/workflows/pages.yml', workflow);
       if (activeFile) await openDocument(activeFile, target, false);
-      notice.success({ message: 'GitHub Pages 配置已生成', description: '提交并推送后，请在仓库 Settings → Pages 中选择 GitHub Actions。', placement: 'bottomRight' });
+      if (!quiet) notice.success({ message: 'GitHub Pages 配置已生成', description: `已收录 ${chapterFiles.length} 章。提交并推送后，请在仓库 Settings → Pages 中选择 GitHub Actions。`, placement: 'bottomRight' });
       setDeploymentStatus({ state: 'configured', message: 'Pages 配置已生成，等待提交和部署', updatedAt: Date.now() });
       persistDeploymentSettings();
-      setGitChanges(await getProjectGitChanges());
+      setGitChanges(await getProjectGitChanges(chapterFiles));
+      return chapterFiles;
     } catch (error) {
       setGitError(error instanceof Error ? error.message : String(error));
+      return null;
     } finally { setGitLoading(false); }
   };
 
