@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createChapterDocuments, createReadme, parseOutline } from '../src/plugins/outline-scaffolder/outline';
+import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline } from '../src/plugins/outline-scaffolder/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
@@ -29,5 +29,14 @@ describe('outline scaffolder', () => {
     const single = createChapterDocuments(nodes, { folder: '书', splitMode: 'single', projectTitle: '指南' });
     expect(single).toHaveLength(1);
     expect(single[0].path).toBe('书/指南.md');
+  });
+
+  it('advances saved chapters through explicit review stages', () => {
+    expect(chapterStateAfterSave('pending')).toBe('draft');
+    expect(chapterStateAfterSave('error')).toBe('draft');
+    expect(chapterStateAfterSave('draft')).toBe('draft');
+    expect(chapterStateAfterSave('review')).toBe('review');
+    expect(chapterStateAfterSave('revising')).toBe('quality');
+    expect(chapterStateAfterSave('complete')).toBe('complete');
   });
 });

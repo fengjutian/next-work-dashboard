@@ -6,7 +6,7 @@ import { BookOpen, Check, FileText, FolderOpen, GitBranch, Loader2, Save, Sparkl
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
-import { createChapterDocuments, createReadme, parseOutline, type OutlineNode, type SplitMode } from './outline';
+import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -44,7 +44,7 @@ const appendSourceReferences = (markdown: string, sources: string) => {
   const items = [...references].map(([url, title], index) => `${index + 1}. [${title}](${url})${sources.includes('搜索摘要（仅作线索') ? '（检索线索，引用前需核对原文）' : ''}`).join('\n');
   return `${markdown.trimEnd()}\n\n## 史料与参考资料\n\n${items}`;
 };
-const normalizeForComparison = (value: string) => value.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/[\s*_~`>，。！？；：、“”‘’（）()\[\]]+/g, '').toLowerCase();
+const normalizeForComparison = (value: string) => value.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/[\s*_~`>，。！？；：、“”‘’（）()]+/g, '').replaceAll('[', '').replaceAll(']', '').toLowerCase();
 const removeRepeatedContinuation = (existing: string, generated: string) => {
   const existingNormalized = normalizeForComparison(existing);
   const blocks = generated.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, '').trim().split(/\n\s*\n/);
@@ -117,8 +117,19 @@ interface ReviewPatch { id: string; suggestionId: string; original: string; repl
 interface GateFixTarget { path: string; blockers: string[] }
 interface DeploymentStatus { state: 'unconfigured' | 'configured' | 'publishing' | 'published' | 'failed'; url?: string; message?: string; updatedAt: number }
 
-type ChapterGenerationState = 'pending' | 'generating' | 'review' | 'complete' | 'error';
+type ChapterGenerationState = ChapterWorkflowState;
 interface ChapterGenerationStatus { state: ChapterGenerationState; error?: string; updatedAt: number }
+
+const CHAPTER_STATUS_META: Record<ChapterGenerationState, { label: string; dot: string }> = {
+  pending: { label: '待写作', dot: 'bg-slate-400' },
+  generating: { label: '生成中', dot: 'bg-primary animate-pulse' },
+  draft: { label: '草稿待确认', dot: 'bg-sky-500' },
+  review: { label: '待审校', dot: 'bg-amber-500' },
+  revising: { label: '修改待确认', dot: 'bg-orange-500' },
+  quality: { label: '待质量检查', dot: 'bg-violet-500' },
+  complete: { label: '已完成', dot: 'bg-emerald-500' },
+  error: { label: '生成失败', dot: 'bg-destructive' },
+};
 
 const EMPTY_CHAPTER_BRIEF: ChapterWritingBrief = { goal: '', targetWords: 2500, keyQuestions: '', requiredSources: '', avoidTopics: '' };
 const attachChapterBrief = (content: string, brief?: ChapterWritingBrief) => {
@@ -138,7 +149,7 @@ function loadSavedProjects(): SavedProject[] {
   } catch { return []; }
 }
 
-const serializeOutline = (nodes: OutlineNode[]) => nodes.map((node) => `${'#'.repeat(Math.min(6, Math.max(1, node.level)))} ${node.title}${node.children.length ? `\n${serializeOutline(node.children)}` : ''}`).join('\n');
+const serializeOutline = (nodes: OutlineNode[]): string => nodes.map((node) => `${'#'.repeat(Math.min(6, Math.max(1, node.level)))} ${node.title}${node.children.length ? `\n${serializeOutline(node.children)}` : ''}`).join('\n');
 
 function EditableOutlineTree({ nodes, onRename, onDelete, onMove }: { nodes: OutlineNode[]; onRename: (id: string, title: string) => void; onDelete: (id: string) => void; onMove: (id: string, direction: -1 | 1) => void }) {
   const [editingId, setEditingId] = useState('');
@@ -431,6 +442,20 @@ export const OutlineScaffolderPanel: React.FC = () => {
     notice.success({ message: '章节已通过质量门禁', placement: 'bottomRight' });
   };
 
+  const confirmCurrentDraft = () => {
+    if (!activeFile) return;
+    if (dirty) { notice.warning({ message: '请先保存当前草稿', placement: 'bottomRight' }); return; }
+    setChapterStatus(activeFile, 'review');
+    setAiOpen(false); setReviewOpen(true); setImageOpen(false); setGitOpen(false);
+    setAiResult(''); setAiError(''); setReviewSuggestions([]); setReviewPatches([]);
+  };
+
+  const enterQualityCheck = () => {
+    if (!activeFile) return;
+    if (dirty) { notice.warning({ message: '请先保存审校后的修改', placement: 'bottomRight' }); return; }
+    setChapterStatus(activeFile, 'quality');
+  };
+
   const bindEvidenceToSelection = () => {
     if (!activeFile || !selectedEvidenceId || !editorRef.current) return;
     const editor = editorRef.current;
@@ -476,7 +501,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         const skeleton = read.data.content;
         const prose = skeleton.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, '').replace(/<!--[\s\S]*?-->/g, '').replace(/^#+\s+.*$/gm, '').trim();
         if (countArticleWords(prose) > 150 && !skeleton.includes('<!-- 在这里添加内容 -->')) {
-          setChapterStatus(path, 'review'); completed += 1; continue;
+          setChapterStatus(path, 'draft'); completed += 1; continue;
         }
         const previousPath = managedFiles[managedFiles.indexOf(path) - 1];
         const nextPath = managedFiles[managedFiles.indexOf(path) + 1];
@@ -498,13 +523,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
         if (!result.trim()) throw new Error('模型未返回正文');
         const written = await window.electronAPI.workspace.writeTextFile(target.path, path, `${result.trimEnd()}\n`, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: read.data.modifiedAt });
         if (!written.success || !written.data) throw new Error(written.error || '写入章节失败');
-        setChapterStatus(path, 'review'); completed += 1;
+        setChapterStatus(path, 'draft'); completed += 1;
         if (activeFile === path) { setDocumentContent(`${result.trimEnd()}\n`); setSavedContent(`${result.trimEnd()}\n`); setModifiedAt(written.data.modifiedAt); }
       } catch (error) { setChapterStatus(path, 'error', error instanceof Error ? error.message : String(error)); }
       setBatchProgress({ completed, total: candidates.length, current: chapterName });
     }
     setBatchGenerating(false); setBatchProgress((current) => ({ ...current, completed, current: '' }));
-    notice.info({ message: batchStopRef.current ? '批量生成已停止' : '批量生成结束', description: `已处理 ${completed}/${candidates.length} 章；生成结果进入“待审校”状态。`, placement: 'bottomRight' });
+    notice.info({ message: batchStopRef.current ? '批量生成已停止' : '批量生成结束', description: `已处理 ${completed}/${candidates.length} 章；生成结果进入“草稿待确认”状态。`, placement: 'bottomRight' });
   };
 
   useEffect(() => {
@@ -700,7 +725,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const result = await window.electronAPI.workspace.writeTextFile(target.path, activeFile, documentContent, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: modifiedAt });
       if (!result.success || !result.data) throw new Error(result.error);
       setSavedContent(documentContent); setModifiedAt(result.data.modifiedAt);
-      if ((chapterStatuses[activeFile]?.state ?? 'pending') === 'pending') setChapterStatus(activeFile, 'review');
+      const currentState = chapterStatuses[activeFile]?.state ?? 'pending';
+      const nextState = chapterStateAfterSave(currentState);
+      if (nextState !== currentState) setChapterStatus(activeFile, nextState);
       notice.success({ message: '文档已保存', placement: 'bottomRight' });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -791,7 +818,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!normalizeApiKey(reviewApiKey) || !reviewBaseUrl.trim() || !reviewModel.trim()) { setAiError('请完整填写审校模型地址、API Key 和模型名。'); return; }
     if (!isValidApiKey(reviewApiKey)) { setAiError('API Key 含有中文、空格或其他无效字符。请清空后从 MiniMax 控制台重新复制完整 Key。'); return; }
     const requestId = ++aiRequestRef.current;
-    setAiLoading(true); setAiResult(''); setAiError('');
+    setAiLoading(true); setAiResult(''); setAiError(''); setReviewSuggestions([]); setReviewPatches([]);
     const messages: ChatMessage[] = [
       { role: 'system', content: `你是独立于作者的资深中文责任编辑、事实核查员和内容策划。你的任务是审阅文章并提交“审校报告”，不要重写全文。\n\n请严格使用以下 Markdown 结构：\n# 审校结论\n用 2—4 句话概括完成度、主要优点和最需要处理的问题。\n\n## 一、明确错误与修改建议\n按严重程度排序。每项必须包含：\n- **位置**：引用能唯一定位问题的原文短句，不超过 30 字；\n- **类型**：事实、时间线、人物关系、逻辑、术语、语病、错别字或标点；\n- **问题**：说明为什么有错或存在风险；\n- **建议**：给出具体修改方向；能确定时提供一句建议改法，不能确定时明确标记“需人工核实”。\n若没有明确错误，写“未发现明确错误”，不得为了凑数虚构问题。\n\n## 二、可能存疑、需要核实\n列出原文中的数字、日期、引语、因果判断和历史细节等高风险表述。区分“疑似错误”和“原文缺少依据”，不要把不确定内容武断判错。\n\n## 三、值得扩写的地方\n每项必须包含：\n- **位置**：对应标题或原文短句；\n- **为什么值得扩写**：它对读者理解有什么帮助；\n- **扩写方向**：建议补充的背景、案例、数据、对比、人物动机或因果链；\n- **建议篇幅**：例如 100—200 字。\n扩写必须服务于本章主题，不抢写其他章节，不重复已有内容。\n\n## 四、结构与表达建议\n指出段落顺序、衔接、重复、节奏、标题层级及风趣程度的问题。\n\n## 五、处理优先级\n分为“必须修改”“建议修改”“可选扩写”三个清单。\n\n审校原则：准确优先；证据不足就明确说不足；不编造事实、来源或引文；意见必须具体、可执行；只输出审校报告，不输出修改后的全文。` },
       { role: 'user', content: `书名：${projectTitle}\n章节：${activeFile.split('/').pop()?.replace(/\.md$/i, '') ?? activeFile}\n用户关注点：${reviewInstruction.trim()}\n\n请审阅以下文章：\n\n${documentContent}` },
@@ -805,6 +832,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       }
       if (!result.trim()) throw new Error('审校模型没有返回内容，请检查模型配置。');
       setReviewSuggestions(parseReviewSuggestions(result));
+      setChapterStatus(activeFile, 'revising');
     } catch (error) {
       if (requestId === aiRequestRef.current) {
         const message = error instanceof Error ? error.message : String(error);
@@ -876,11 +904,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
   };
 
   const applyReviewReport = async () => {
-    if (!aiResult.trim() || reviewPatchLoading) return;
+    const accepted = reviewSuggestions.filter((item) => item.decision === 'accepted');
+    if (!aiResult.trim() || !accepted.length || reviewPatchLoading) return;
     if (!normalizeApiKey(reviewApiKey) || !reviewBaseUrl.trim() || !reviewModel.trim()) {
       notice.warning({ message: '请先完整配置审校模型', placement: 'bottomRight' });
       return;
     }
+    if (!window.confirm(`将按已采纳的 ${accepted.length} 条意见修改完整正文。此操作改动范围较大，修改后仍需人工确认，是否继续？`)) return;
     setReviewPatchLoading(true);
     try {
       const provider = createOpenAIProvider({
@@ -899,7 +929,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 3. 保留原有标题层级、脚注、链接、图片、引用和“史料与参考资料”章节，不得删减与报告无关的内容。
 4. 不输出修改说明、摘要、前言或代码围栏，只输出可直接保存的完整文章。`,
         },
-        { role: 'user', content: `校审报告：\n\n${aiResult}\n\n待修改正文：\n\n${documentContent}` },
+        { role: 'user', content: `仅执行以下已采纳意见，忽略审校报告中的其他意见：\n\n${accepted.map((item) => `位置：${item.position}\n问题：${item.issue}\n建议：${item.suggestion}`).join('\n\n')}\n\n待修改正文：\n\n${documentContent}` },
       ];
       let revised = '';
       for await (const chunk of provider.chat(messages, { model: reviewModel.trim(), temperature: 0.15, maxTokens: 16_000, stream: false })) revised += chunk.delta || '';
@@ -1020,7 +1050,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       let common = 0;
       while (common < from.length && common < to.length && from[common] === to[common]) common += 1;
       const relativePath = `${'../'.repeat(from.length - common)}${to.slice(common).join('/')}`;
-      const alt = imagePrompt.trim().replace(/[\[\]]/g, '').slice(0, 80) || '章节插图';
+      const alt = imagePrompt.trim().replaceAll('[', '').replaceAll(']', '').slice(0, 80) || '章节插图';
       setDocumentContent((current) => `${current.trimEnd()}\n\n![${alt}](${relativePath})\n`);
       setImageOpen(false); setEditorMode('edit');
       notice.success({ message: '插图已保存并插入', description: imagePath, placement: 'bottomRight' });
@@ -1127,7 +1157,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       report.blockers.forEach((item) => issues.push(`${path.split('/').pop()}：${item}`));
       if (report.blockers.length) fixTargets.push({ path, blockers: report.blockers });
       nextStatuses[path] = report.blockers.length
-        ? { state: 'review', error: report.blockers.join('；'), updatedAt: Date.now() }
+        ? { state: 'quality', error: report.blockers.join('；'), updatedAt: Date.now() }
         : { state: 'complete', updatedAt: Date.now() };
     }
     setQualityReports(reports); setChapterStatuses(nextStatuses); setGateFixTargets(fixTargets);
@@ -1408,6 +1438,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { setCreating(false); }
   };
 
+  const activeChapterState = activeFile ? chapterStatuses[activeFile]?.state ?? 'pending' : 'pending';
+
   return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
     {holder}
     <header className="flex items-center justify-between border-b border-border px-6 py-4">
@@ -1456,11 +1488,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">{[
             ['章节总数', managedFiles.filter((path) => !/README\.md$/i.test(path)).length, 'text-foreground'],
             ['已完成', Object.values(chapterStatuses).filter((item) => item.state === 'complete').length, 'text-emerald-600'],
+            ['待确认', Object.values(chapterStatuses).filter((item) => item.state === 'draft').length, 'text-sky-600'],
             ['待审校', Object.values(chapterStatuses).filter((item) => item.state === 'review').length, 'text-amber-600'],
             ['质量阻断', Object.values(qualityReports).filter((item) => item.blockers.length > 0).length, 'text-destructive'],
             ['已核实史料', evidenceRecords.filter((item) => item.status === 'verified').length, 'text-primary'],
           ].map(([label, value, color]) => <div key={String(label)} className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="text-xs text-muted-foreground">{label}</div><div className={`mt-2 text-3xl font-semibold ${color}`}>{value}</div></div>)}</div>
-          <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3"><div><h2 className="font-semibold">章节生产计划</h2><p className="text-xs text-muted-foreground">状态、字数、史料和质量结果集中查看</p></div><span className="text-sm text-muted-foreground">总计 {Object.values(qualityReports).reduce((sum, item) => sum + item.wordCount, 0).toLocaleString()} 字</span></div><div className="overflow-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-4 py-2">章节</th><th className="px-4 py-2">状态</th><th className="px-4 py-2">字数</th><th className="px-4 py-2">史料</th><th className="px-4 py-2">质量</th><th className="px-4 py-2">操作</th></tr></thead><tbody>{managedFiles.filter((path) => !/README\.md$/i.test(path)).map((path) => { const report = qualityReports[path]; const status = chapterStatuses[path]?.state ?? 'pending'; return <tr key={path} className="border-t border-border"><td className="max-w-[420px] truncate px-4 py-3 font-medium" title={path}>{path.split('/').pop()}</td><td className="px-4 py-3">{({ pending: '待生成', generating: '生成中', review: '待审校', complete: '已完成', error: '失败' } as const)[status]}</td><td className="px-4 py-3">{report?.wordCount ?? '—'}</td><td className="px-4 py-3">{evidenceRecords.filter((item) => item.chapter === path).length}</td><td className="px-4 py-3"><span className={report ? report.blockers.length ? 'text-destructive' : 'text-emerald-600' : 'text-muted-foreground'}>{report ? `${report.score} 分${report.blockers.length ? ` · ${report.blockers.length} 阻断` : ''}` : '未检查'}</span></td><td className="px-4 py-3"><button type="button" className="text-primary hover:underline" onClick={() => { switchView('documents'); void openDocument(path); }}>打开</button></td></tr>; })}</tbody></table></div></section>
+          <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3"><div><h2 className="font-semibold">章节生产计划</h2><p className="text-xs text-muted-foreground">状态、字数、史料和质量结果集中查看</p></div><span className="text-sm text-muted-foreground">总计 {Object.values(qualityReports).reduce((sum, item) => sum + item.wordCount, 0).toLocaleString()} 字</span></div><div className="overflow-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-4 py-2">章节</th><th className="px-4 py-2">状态</th><th className="px-4 py-2">字数</th><th className="px-4 py-2">史料</th><th className="px-4 py-2">质量</th><th className="px-4 py-2">操作</th></tr></thead><tbody>{managedFiles.filter((path) => !/README\.md$/i.test(path)).map((path) => { const report = qualityReports[path]; const status = chapterStatuses[path]?.state ?? 'pending'; return <tr key={path} className="border-t border-border"><td className="max-w-[420px] truncate px-4 py-3 font-medium" title={path}>{path.split('/').pop()}</td><td className="px-4 py-3">{CHAPTER_STATUS_META[status].label}</td><td className="px-4 py-3">{report?.wordCount ?? '—'}</td><td className="px-4 py-3">{evidenceRecords.filter((item) => item.chapter === path).length}</td><td className="px-4 py-3"><span className={report ? report.blockers.length ? 'text-destructive' : 'text-emerald-600' : 'text-muted-foreground'}>{report ? `${report.score} 分${report.blockers.length ? ` · ${report.blockers.length} 阻断` : ''}` : '未检查'}</span></td><td className="px-4 py-3"><button type="button" className="text-primary hover:underline" onClick={() => { switchView('documents'); void openDocument(path); }}>打开</button></td></tr>; })}</tbody></table></div></section>
         </div>}
         {managementTab === 'knowledge' && <div className="mx-auto max-w-5xl space-y-4"><div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold">全书知识库</h2><p className="text-sm text-muted-foreground">统一人物、事件、地点、时间和术语的标准写法。</p></div><div className="flex gap-2"><Button variant="outline" disabled={knowledgeLoading || !target} onClick={extractBookKnowledge}>{knowledgeLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 从全书抽取</Button><Button onClick={() => setKnowledgeEntries((current) => [...current, { id: `${Date.now()}`, kind: 'person', name: '', canonical: '', aliases: '', notes: '' }])}>新增条目</Button></div></div>{knowledgeEntries.length ? knowledgeEntries.map((item) => <div key={item.id} className="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-sm lg:grid-cols-[120px_1fr_1fr_1.3fr_auto]"><select value={item.kind} onChange={(event) => setKnowledgeEntries((current) => current.map((entry) => entry.id === item.id ? { ...entry, kind: event.target.value as KnowledgeEntry['kind'] } : entry))} className="rounded-md border border-input bg-background px-2 py-2 text-sm"><option value="person">人物</option><option value="event">事件</option><option value="place">地点</option><option value="term">术语</option><option value="date">时间</option></select>{([['name', '条目名称'], ['canonical', '标准写法'], ['aliases', '别名，用顿号分隔']] as const).map(([field, placeholder]) => <input key={field} value={item[field]} placeholder={placeholder} onChange={(event) => setKnowledgeEntries((current) => current.map((entry) => entry.id === item.id ? { ...entry, [field]: event.target.value } : entry))} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />)}<Button size="sm" variant="ghost" onClick={() => setKnowledgeEntries((current) => current.filter((entry) => entry.id !== item.id))}>删除</Button><textarea value={item.notes} placeholder="事实说明、时间范围、人物关系或使用规则" onChange={(event) => setKnowledgeEntries((current) => current.map((entry) => entry.id === item.id ? { ...entry, notes: event.target.value } : entry))} className="h-16 resize-none rounded-md border border-input bg-background p-2 text-sm lg:col-span-5" /></div>) : <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">暂无知识条目。可让 AI 从全书提取，再逐条确认。</div>}</div>}
         {managementTab === 'evidence' && <div className="mx-auto max-w-6xl space-y-4"><div><h2 className="text-lg font-semibold">史料证据台账</h2><p className="text-sm text-muted-foreground">AI 搜集的来源自动进入“线索”，核对原文后再标记为已核实。</p></div><div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><table className="w-full text-left text-sm"><thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-4 py-2">来源</th><th className="px-4 py-2">关联章节</th><th className="px-4 py-2">状态</th><th className="px-4 py-2">备注</th><th className="px-4 py-2"></th></tr></thead><tbody>{evidenceRecords.map((item) => <tr key={item.id} className="border-t border-border"><td className="max-w-[360px] px-4 py-3"><button type="button" className="block max-w-full truncate text-primary hover:underline" title={item.title} onClick={() => window.electronAPI.shell.openExternal(item.url)}>{item.title}</button><span className="text-xs text-muted-foreground">{item.source}</span></td><td className="max-w-[240px] truncate px-4 py-3" title={item.chapter}>{item.chapter.split('/').pop() || '未关联'}</td><td className="px-4 py-3"><select value={item.status} onChange={(event) => setEvidenceRecords((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: event.target.value as EvidenceRecord['status'] } : entry))} className="rounded border border-input bg-background px-2 py-1"><option value="clue">检索线索</option><option value="verified">已核实</option><option value="disputed">存在争议</option></select></td><td className="px-4 py-3"><input value={item.notes} onChange={(event) => setEvidenceRecords((current) => current.map((entry) => entry.id === item.id ? { ...entry, notes: event.target.value } : entry))} className="w-full rounded border border-input bg-background px-2 py-1" /></td><td className="px-4 py-3"><button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => setEvidenceRecords((current) => current.filter((entry) => entry.id !== item.id))}>删除</button></td></tr>)}</tbody></table>{!evidenceRecords.length && <div className="p-12 text-center text-muted-foreground">尚无证据记录。请在章节“助写 → AI 搜集史料”中选择来源。</div>}</div></div>}
@@ -1470,11 +1503,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
     </div> : <div className={`grid min-h-0 flex-1 overflow-hidden ${aiOpen || reviewOpen || imageOpen || gitOpen ? 'grid-cols-[280px_minmax(0,1fr)_360px]' : 'grid-cols-[280px_minmax(0,1fr)]'}`}>
       <aside className="flex min-h-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><h2 className="truncate text-sm font-semibold">{activeProject?.name || projectTitle || '章节文档'}</h2><span className="text-xs text-muted-foreground">{managedFiles.length}</span></div>{activeProject && <div className="mb-1 text-xs text-emerald-600">● 已保存项目</div>}{target ? <><button type="button" className="w-full truncate text-left text-xs text-muted-foreground hover:text-foreground" title={target.path} onClick={() => loadExistingDocuments()}>{target.path}</button>{!activeProject && managedFiles.length > 0 && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => rememberProject(target, managedFiles)}>保存为项目</Button>}</> : <Button size="sm" variant="outline" className="w-full" onClick={chooseFolder}>选择目录</Button>}</div>
-        {managedFiles.length > 0 && <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between text-xs"><span className="font-medium">批量生成队列</span><span className="text-muted-foreground">待生成 {managedFiles.filter((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending')).length}</span></div>{batchGenerating ? <><div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${batchProgress.total ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}%` }} /></div><div className="mb-2 truncate text-xs text-muted-foreground">{batchProgress.completed}/{batchProgress.total} · {batchProgress.current || '正在结束'}</div><Button size="sm" variant="outline" className="w-full" onClick={() => { batchStopRef.current = true; }}>完成当前请求后停止</Button></> : <Button size="sm" className="w-full" disabled={!aiApi.apiKey?.trim() || !managedFiles.some((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending'))} onClick={runBatchGeneration}><Sparkles className="mr-2 h-4 w-4" />生成待处理章节</Button>}{activeFile && chapterStatuses[activeFile]?.state === 'review' && <Button size="sm" variant="outline" className="mt-2 w-full" onClick={() => passQualityGate(activeFile)}>检查并完成当前章</Button>}</div>}
-        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => { const status = chapterStatuses[path] ?? { state: 'pending' as const, updatedAt: 0 }; const statusMeta = { pending: ['待生成', 'bg-slate-400'], generating: ['生成中', 'bg-primary animate-pulse'], review: ['待审校', 'bg-amber-500'], complete: ['已完成', 'bg-emerald-500'], error: ['生成失败', 'bg-destructive'] }[status.state]; return <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`} title={status.error || statusMeta[0]}><FileText className="h-4 w-4 shrink-0" /><span className={`h-2 w-2 shrink-0 rounded-full ${statusMeta[1]}`} aria-label={statusMeta[0]} /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" title="有未保存修改" />}</button>; }) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
+        {managedFiles.length > 0 && <div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between text-xs"><span className="font-medium">批量生成队列</span><span className="text-muted-foreground">待写作 {managedFiles.filter((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending')).length}</span></div>{batchGenerating ? <><div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${batchProgress.total ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}%` }} /></div><div className="mb-2 truncate text-xs text-muted-foreground">{batchProgress.completed}/{batchProgress.total} · {batchProgress.current || '正在结束'}</div><Button size="sm" variant="outline" className="w-full" onClick={() => { batchStopRef.current = true; }}>完成当前请求后停止</Button></> : <Button size="sm" className="w-full" disabled={!aiApi.apiKey?.trim() || !managedFiles.some((path) => ['pending', 'error'].includes(chapterStatuses[path]?.state ?? 'pending'))} onClick={runBatchGeneration}><Sparkles className="mr-2 h-4 w-4" />生成待写作章节</Button>}</div>}
+        <div className="min-h-0 flex-1 overflow-auto p-2">{managedFiles.length ? managedFiles.map((path) => { const status = chapterStatuses[path] ?? { state: 'pending' as const, updatedAt: 0 }; const statusMeta = CHAPTER_STATUS_META[status.state]; return <button type="button" key={path} onClick={() => openDocument(path)} className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? 'bg-primary/10 text-primary' : 'hover:bg-muted'}`} title={status.error || statusMeta.label}><FileText className="h-4 w-4 shrink-0" /><span className={`h-2 w-2 shrink-0 rounded-full ${statusMeta.dot}`} aria-label={statusMeta.label} /><span className="truncate" title={path}>{path.split('/').pop()}</span>{activeFile === path && dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-500" title="有未保存修改" />}</button>; }) : recentProjects.length ? <div><div className="px-2 py-2 text-xs font-medium text-muted-foreground">历史项目</div>{recentProjects.map((project) => <button type="button" key={project.id} className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted" onClick={() => openSavedProject(project)}><span className="block truncate text-sm font-medium">{project.name}</span><span className="block truncate text-xs text-muted-foreground">{project.files.length} 个文档 · {new Date(project.updatedAt).toLocaleDateString()}</span></button>)}</div> : <div className="p-3 text-sm text-muted-foreground">生成文档或选择目录后，点击“加载已有文档”。</div>}</div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-col">
         <div className="flex h-12 items-center justify-between border-b border-border px-4"><div className="min-w-0"><span className="block truncate text-sm font-medium">{activeFile || '未选择文档'}</span></div><div className="flex items-center gap-2"><Button size="sm" variant={gitOpen ? 'default' : 'ghost'} disabled={!target} onClick={() => { toggleGit(); setReviewOpen(false); setImageOpen(false); }}> <GitBranch className="mr-2 h-4 w-4" />Git</Button><Button size="sm" variant={aiOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setAiOpen((value) => !value); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}><Sparkles className="mr-2 h-4 w-4" />助写</Button><Button size="sm" variant={reviewOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setReviewOpen((value) => !value); setAiOpen(false); setImageOpen(false); setGitOpen(false); setAiResult(''); setAiError(''); }}><Check className="mr-2 h-4 w-4" />审校</Button><Button size="sm" variant={imageOpen ? 'default' : 'ghost'} disabled={!activeFile} onClick={() => { setImageOpen((value) => !value); setAiOpen(false); setReviewOpen(false); setGitOpen(false); setImageError(''); }}><Sparkles className="mr-2 h-4 w-4" />插图</Button><Button size="sm" variant={editorMode === 'edit' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('edit')}>编辑</Button><Button size="sm" variant={editorMode === 'preview' ? 'secondary' : 'ghost'} onClick={() => setEditorMode('preview')}>预览</Button><Button size="sm" disabled={!dirty || saving || !activeFile} onClick={saveDocument}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存</Button></div></div>
+        {activeFile && <div className="flex items-center gap-3 border-b border-border bg-primary/[0.04] px-4 py-2.5"><span className={`h-2.5 w-2.5 rounded-full ${CHAPTER_STATUS_META[activeChapterState].dot}`} /><div className="min-w-0 flex-1"><div className="text-xs font-semibold">{CHAPTER_STATUS_META[activeChapterState].label}</div><div className="truncate text-xs text-muted-foreground">{activeChapterState === 'pending' || activeChapterState === 'error' ? '使用助写生成正文，或直接编辑后保存。' : activeChapterState === 'draft' ? '阅读草稿并保存修改，确认后进入独立审校。' : activeChapterState === 'review' ? '运行审校，逐条决定哪些意见需要落实。' : activeChapterState === 'revising' ? '应用已采纳意见，确认修改后进入质量检查。' : activeChapterState === 'quality' ? '检查字数、待核实内容与必用史料，全部通过后完成。' : activeChapterState === 'complete' ? '本章已完成；继续编辑会保留完成状态。' : '正在生成正文。'}</div></div>{(activeChapterState === 'pending' || activeChapterState === 'error') && <Button size="sm" onClick={() => { setAiMode('generate'); setAiOpen(true); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}>生成本章</Button>}{activeChapterState === 'draft' && <Button size="sm" disabled={dirty} onClick={confirmCurrentDraft}>确认草稿并审校</Button>}{activeChapterState === 'review' && <Button size="sm" onClick={() => { setReviewOpen(true); setAiOpen(false); setImageOpen(false); setGitOpen(false); }}>开始审校</Button>}{activeChapterState === 'revising' && (dirty ? <Button size="sm" disabled={saving} onClick={saveDocument}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}保存修改</Button> : <Button size="sm" onClick={enterQualityCheck}>进入质量检查</Button>)}{activeChapterState === 'quality' && <Button size="sm" onClick={() => passQualityGate(activeFile)}>检查并完成</Button>}</div>}
         {editorMode === 'edit' && activeFile && evidenceRecords.length > 0 && <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2"><span className="shrink-0 text-xs text-muted-foreground">证据绑定</span><select value={selectedEvidenceId} onChange={(event) => setSelectedEvidenceId(event.target.value)} className="min-w-0 max-w-sm flex-1 rounded border border-input bg-background px-2 py-1 text-xs"><option value="">选择史料</option>{evidenceRecords.map((item) => <option key={item.id} value={item.id}>{item.status === 'verified' ? '✓ ' : ''}{item.title}</option>)}</select><Button size="sm" variant="outline" disabled={!selectedEvidenceId} onMouseDown={(event) => event.preventDefault()} onClick={bindEvidenceToSelection}>绑定到选中文字</Button><span className="truncate text-xs text-muted-foreground">先在正文中选择一个完整观点或句子</span></div>}
         <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea ref={editorRef} value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span title="字数已排除 YAML 头信息、Markdown 标记、链接地址和注释">文章 {articleWordCount.toLocaleString()} 字 · 原始 {documentContent.length.toLocaleString()} 字符</span></div>}
@@ -1514,7 +1548,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           {aiError && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">{aiError}</div>}
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{reviewSuggestions.length > 0 && <div className="mb-4 space-y-2"><div className="flex items-center justify-between text-xs font-semibold"><span>逐条处理审校意见</span><span className="text-muted-foreground">已采纳 {reviewSuggestions.filter((item) => item.decision === 'accepted').length}</span></div>{reviewSuggestions.map((item) => <div key={item.id} className={`rounded-md border p-2 text-xs ${item.decision === 'accepted' ? 'border-emerald-500/40 bg-emerald-500/10' : item.decision === 'rejected' ? 'border-border bg-muted/40 opacity-60' : 'border-border'}`}><div className="font-medium">{item.section} · {item.position}</div>{item.issue && <div className="mt-1 text-muted-foreground">{item.issue}</div>}{item.suggestion && <div className="mt-1">建议：{item.suggestion}</div>}<div className="mt-2 flex gap-2"><button type="button" className="text-emerald-700 hover:underline" onClick={() => setReviewSuggestions((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, decision: 'accepted' } : candidate))}>采纳</button><button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => setReviewSuggestions((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, decision: 'rejected' } : candidate))}>拒绝</button><button type="button" className="text-muted-foreground hover:underline" onClick={() => setReviewSuggestions((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, decision: 'pending' } : candidate))}>待定</button></div></div>)}</div>}{reviewPatches.length > 0 && <div className="mb-4 space-y-3 border-t border-border pt-4"><div className="text-xs font-semibold">段落级修改预览</div>{reviewPatches.map((patch) => <div key={patch.id} className="overflow-hidden rounded-md border border-border text-xs"><div className="bg-destructive/10 p-2"><div className="mb-1 font-semibold text-destructive">− 原段落</div><div className="whitespace-pre-wrap line-through decoration-destructive/50">{patch.original}</div></div><div className="border-t border-border bg-emerald-500/10 p-2"><div className="mb-1 font-semibold text-emerald-700">+ 修改后</div><div className="whitespace-pre-wrap">{patch.replacement}</div></div><div className="flex items-center justify-between border-t border-border p-2"><span className="text-muted-foreground">{patch.state === 'conflict' ? '原文已变化，无法安全应用' : patch.state === 'applied' ? '已应用，可撤销' : '等待应用'}</span><Button size="sm" variant={patch.state === 'applied' ? 'outline' : 'default'} disabled={patch.state === 'conflict'} onClick={() => toggleReviewPatch(patch)}>{patch.state === 'applied' ? '撤销' : '应用此段'}</Button></div></div>)}</div>}{aiResult ? <article className="prose prose-sm max-w-none dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown></article> : <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">AI 将列出明确错误、待核实内容、<br />扩写方向和修改优先级。</div>}</div>
-        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制报告</Button><Button disabled={!reviewSuggestions.some((item) => item.decision === 'accepted') || reviewPatchLoading} onClick={generateReviewPatches}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成段落 Diff</Button><Button className="col-span-2" disabled={!aiResult || aiLoading || reviewPatchLoading} onClick={applyReviewReport}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}按照报告修改</Button></div>
+        <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Button variant="outline" disabled={!aiResult || aiLoading} onClick={() => { window.electronAPI.copyText(aiResult); notice.success({ message: '审校报告已复制', placement: 'bottomRight' }); }}>复制报告</Button><Button disabled={!reviewSuggestions.some((item) => item.decision === 'accepted') || reviewPatchLoading} onClick={generateReviewPatches}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}生成段落 Diff</Button><Button variant="outline" className="col-span-2" disabled={!aiResult || !reviewSuggestions.some((item) => item.decision === 'accepted') || aiLoading || reviewPatchLoading} onClick={applyReviewReport}>{reviewPatchLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}高级：按已采纳意见修改全文</Button><p className="col-span-2 text-xs text-muted-foreground">推荐逐段应用 Diff；全文修改范围更大，执行前会再次确认。</p></div>
       </aside>}
       {imageOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">
         <div className="border-b border-border p-4"><div className="flex items-center gap-2 font-semibold"><Sparkles className="h-4 w-4 text-primary" />MiniMax 章节插图</div><p className="mt-1 text-xs text-muted-foreground">先生成预览，确认后保存到 assets/images 并插入文章。</p></div>

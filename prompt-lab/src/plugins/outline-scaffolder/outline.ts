@@ -12,6 +12,13 @@ export interface ChapterDocument {
 }
 
 export type SplitMode = 'chapter' | 'section' | 'single';
+export type ChapterWorkflowState = 'pending' | 'generating' | 'draft' | 'review' | 'revising' | 'quality' | 'complete' | 'error';
+
+export function chapterStateAfterSave(state: ChapterWorkflowState): ChapterWorkflowState {
+  if (state === 'pending' || state === 'error') return 'draft';
+  if (state === 'revising') return 'quality';
+  return state;
+}
 
 export interface ScaffoldOptions {
   folder?: string;
@@ -42,7 +49,7 @@ export function parseOutline(source: string): OutlineNode[] {
     const line = rawLine.trim();
     if (!line) continue;
     const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    const bullet = line.match(/^(?:[-*+]\s+|\d+[.)、]\s*)(.+)$/);
+    const bullet = line.match(/^(?:[-*+]\s+|\d+(?:[)、]|\.(?!\d))\s*)(.+)$/);
     const title = (heading?.[2] ?? bullet?.[1] ?? line).trim();
     if (!title) continue;
     const indentation = rawLine.match(/^\s*/)?.[0].replace(/\t/g, '  ').length ?? 0;
