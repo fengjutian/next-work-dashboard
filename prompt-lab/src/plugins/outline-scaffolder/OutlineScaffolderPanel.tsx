@@ -82,6 +82,7 @@ interface SavedProject {
   evidenceRecords?: EvidenceRecord[];
   qualityReports?: Record<string, ChapterQualityReport>;
   editorialAudits?: Record<string, Partial<Record<EditorialStageId, EditorialAudit>>>;
+  finalReadConfirmed?: boolean;
   deploymentStatus?: DeploymentStatus;
   splitMode: SplitMode;
   organizeByPart: boolean;
@@ -726,6 +727,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         evidenceRecords,
         qualityReports,
         editorialAudits,
+        finalReadConfirmed,
         deploymentStatus,
         git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
         pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
@@ -733,14 +735,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, editorialAudits, evidenceRecords, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports]);
+  }, [activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, editorialAudits, evidenceRecords, finalReadConfirmed, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports]);
 
   useEffect(() => {
     if (!activeProjectId || !target || !managedFiles.length) return;
     const timer = window.setTimeout(async () => {
       setManifestSyncState('saving');
       const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
-      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       try {
         const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
         const result = existing.success && existing.data
@@ -750,7 +752,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } catch { setManifestSyncState('error'); }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [activeProject, activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, editorialAudits, evidenceRecords, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, managedFiles, organizeByPart, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports, source, splitMode, target, template]);
+  }, [activeProject, activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, editorialAudits, evidenceRecords, finalReadConfirmed, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, managedFiles, organizeByPart, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports, source, splitMode, target, template]);
 
   const switchView = (next: 'generator' | 'documents' | 'management') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -785,6 +787,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       evidenceRecords: overrides?.evidenceRecords ?? evidenceRecords,
       qualityReports: overrides?.qualityReports ?? qualityReports,
       editorialAudits: overrides?.editorialAudits ?? editorialAudits,
+      finalReadConfirmed: overrides?.finalReadConfirmed ?? finalReadConfirmed,
       deploymentStatus: overrides?.deploymentStatus ?? deploymentStatus,
       splitMode: overrides?.splitMode ?? splitMode,
       organizeByPart: overrides?.organizeByPart ?? organizeByPart,
@@ -817,7 +820,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         try {
           diskProject = JSON.parse(diskManifest.data.content) as Partial<SavedProject>;
           setProjectTitle(diskProject.name || folder.name); setSource(diskProject.source || ''); setBookRequirement(diskProject.requirement || '');
-          setChapterBriefs(diskProject.chapterBriefs ?? {}); setChapterStatuses(diskProject.chapterStatuses ?? {}); setKnowledgeEntries(diskProject.knowledgeEntries ?? []); setEvidenceRecords(diskProject.evidenceRecords ?? []); setQualityReports(diskProject.qualityReports ?? {}); setEditorialAudits(diskProject.editorialAudits ?? {}); setDeploymentStatus(diskProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
+          setChapterBriefs(diskProject.chapterBriefs ?? {}); setChapterStatuses(diskProject.chapterStatuses ?? {}); setKnowledgeEntries(diskProject.knowledgeEntries ?? []); setEvidenceRecords(diskProject.evidenceRecords ?? []); setQualityReports(diskProject.qualityReports ?? {}); setEditorialAudits(diskProject.editorialAudits ?? {}); setFinalReadConfirmed(diskProject.finalReadConfirmed ?? false); setDeploymentStatus(diskProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
           if (diskProject.git) { setGitRemoteUrl(diskProject.git.remoteUrl || ''); setGitRemoteName(diskProject.git.remoteName || 'origin'); setGitBranch(diskProject.git.branch || 'main'); }
         } catch { notice.warning({ message: '.chapter-project.json 无法解析', placement: 'bottomRight' }); }
       }
@@ -855,6 +858,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setEvidenceRecords(openedProject.evidenceRecords ?? []);
       setQualityReports(openedProject.qualityReports ?? {});
       setEditorialAudits(openedProject.editorialAudits ?? {});
+      setFinalReadConfirmed(openedProject.finalReadConfirmed ?? false);
       setDeploymentStatus(openedProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
       setSplitMode(openedProject.splitMode); setOrganizeByPart(openedProject.organizeByPart); setTemplate(openedProject.template);
       setGitRemoteUrl(openedProject.git?.remoteUrl ?? ''); setGitRemoteName(openedProject.git?.remoteName ?? 'origin'); setGitBranch(openedProject.git?.branch ?? 'main');
@@ -1393,7 +1397,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!uniqueIssues.length) {
       const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
       const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
-      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, editorialAudits, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, editorialAudits, finalReadConfirmed, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       const synced = existing.success && existing.data ? await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: existing.data.modifiedAt }) : { success: false, error: '项目清单不存在' };
       if (!synced.success) uniqueIssues.push(`项目清单同步失败：${synced.error || '未知错误'}`); else setManifestSyncState('saved');
     }
@@ -1684,7 +1688,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
       const initialStatuses: Record<string, ChapterGenerationStatus> = Object.fromEntries(paths.map((path) => [path, chapterStatuses[path] ?? { state: 'pending', updatedAt: Date.now() }]));
       setChapterStatuses(initialStatuses);
-      const manifest = JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, deploymentStatus, splitMode, organizeByPart, template, files: paths, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2) + '\n';
+      const manifest = JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, deploymentStatus, splitMode, organizeByPart, template, files: paths, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2) + '\n';
       const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
       if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
