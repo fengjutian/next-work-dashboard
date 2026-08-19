@@ -115,7 +115,8 @@ interface KnowledgeEntry { id: string; kind: 'person' | 'event' | 'place' | 'ter
 interface EvidenceRecord { id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; anchor?: { quote: string }; createdAt: number }
 interface ChapterQualityReport { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }
 type EditorialStageId = 'completeness' | 'structure' | 'facts' | 'professional' | 'language' | 'citations' | 'consistency' | 'format';
-interface EditorialAudit { status: 'pending' | 'issues' | 'passed' | 'stale'; blockers: string[]; warnings: string[]; checkedAt: number; confirmedAt?: number; contentSignature?: string }
+interface EditorialIssue { id: string; stage: EditorialStageId; severity: 'blocker' | 'warning'; type: string; message: string; originalText?: string; suggestion?: string; start?: number; end?: number; status: 'open' | 'accepted' | 'rejected' }
+interface EditorialAudit { status: 'pending' | 'issues' | 'passed' | 'stale'; blockers: string[]; warnings: string[]; issues?: EditorialIssue[]; checkedAt: number; confirmedAt?: number; contentSignature?: string }
 interface ReviewSuggestion { id: string; section: string; position: string; issue: string; suggestion: string; decision: 'pending' | 'accepted' | 'rejected' }
 interface ReviewPatch { id: string; suggestionId: string; original: string; replacement: string; state: 'ready' | 'applied' | 'conflict' }
 interface GateFixTarget { path: string; blockers: string[] }
@@ -147,6 +148,27 @@ const EDITORIAL_STAGES: Array<{ id: EditorialStageId; label: string; scope: 'cha
   { id: 'format', label: '出版格式校验', scope: 'book' },
 ];
 const editorialSignature = (content: string) => `${content.length}:${content.slice(0, 160)}:${content.slice(-160)}`;
+const buildEditorialIssues = (stage: EditorialStageId, content: string, blockers: string[], warnings: string[]): EditorialIssue[] => {
+  const issues: EditorialIssue[] = [];
+  const add = (severity: EditorialIssue['severity'], type: string, message: string, match?: { 0: string; index?: number }, suggestion?: string) => issues.push({ id: `${stage}-${issues.length}-${match?.index ?? 'general'}`, stage, severity, type, message, originalText: match?.[0], suggestion, start: match?.index, end: match?.index === undefined ? undefined : match.index + match[0].length, status: 'open' });
+  const targetedMessages = new Set<string>();
+  if (stage === 'facts') {
+    for (const match of content.matchAll(/(?:公元前|公元|前)\s*\d+年|\d+(?:\.\d+)?(?:万|亿|余)?(?:人|户|郡|县|年|里|件|次)|[“"][^”"\n]{4,80}[”"]|(?:百姓|民众|士人|知识分子|六国人|天下人)[^。！？\n]{0,32}(?:认为|反对|支持|不满|恐惧|认同|离心)/g)) add('warning', '高风险事实主张', '请核对该日期、数字、引语或群体判断，并绑定能够支持它的证据。', match);
+  }
+  if (stage === 'language' || stage === 'facts') {
+    const replacements: Record<string, string> = { '值得注意的是': '', '不难发现': '', '综上所述': '', '历史长河中': '在这一历史过程中', '时代洪流': '当时的制度与政治环境', '宏伟蓝图之下': '在制度实施过程中', '思想的火种': '未被消除的异议', '致命暗伤': '持续存在的治理风险', '深深裂痕': '尚未解决的地区差异' };
+    for (const match of content.matchAll(/值得注意的是|不难发现|综上所述|历史长河中|时代洪流|宏伟蓝图之下|思想的火种|致命暗伤|深深裂痕/g)) add('warning', '模板化表达', '用具体制度、行动、材料限制或可观察后果替代套话。', match, replacements[match[0]]);
+  }
+  if (stage === 'structure') {
+    let offset = 0;
+    for (const paragraph of content.split(/\n\s*\n/)) {
+      const start = content.indexOf(paragraph, offset); offset = start + paragraph.length;
+      if (!/^#/.test(paragraph.trim()) && countArticleWords(paragraph) > 420) add('warning', '段落过长', '拆分为观点、证据和分析三个层次。', { 0: paragraph.slice(0, 160), index: start });
+    }
+  }
+  [...blockers.map((message) => ['blocker', message] as const), ...warnings.map((message) => ['warning', message] as const)].forEach(([severity, message]) => { if (!targetedMessages.has(message) && !issues.some((issue) => issue.message === message)) add(severity, stage === 'citations' ? '引用来源' : '阶段检查', message); });
+  return issues;
+};
 const attachChapterBrief = (content: string, brief?: ChapterWritingBrief) => {
   if (!brief || (!brief.goal.trim() && !brief.keyQuestions.trim() && !brief.requiredSources.trim() && !brief.avoidTopics.trim())) return content;
   const clean = (value: string) => value.trim().replace(/-->/g, '→');
@@ -432,11 +454,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const blockers: string[] = [];
       const warnings: string[] = [];
       let signature = '';
+      let auditContent = '';
       const key = meta.scope === 'book' ? '__book__' : path;
       if (meta.scope === 'chapter') {
         const read = await window.electronAPI.workspace.readTextFile(target.path, path);
         if (!read.success || !read.data) throw new Error(read.error || '章节读取失败');
         const content = read.data.content;
+        auditContent = content;
         signature = editorialSignature(content);
         const brief = { ...EMPTY_CHAPTER_BRIEF, ...chapterBriefs[path] };
         const evidence = evidenceRecords.filter((item) => item.chapter === path);
@@ -484,7 +508,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
           if (!/^---\s*$/m.test(read.data.content) || !/^#\s+/m.test(read.data.content)) warnings.push(`${chapter} 的头信息或标题需要检查`);
         }
       }
-      setEditorialAudit(key, stage, { status: blockers.length || warnings.length ? 'issues' : 'passed', blockers: [...new Set(blockers)], warnings: [...new Set(warnings)], checkedAt: Date.now(), confirmedAt: blockers.length || warnings.length ? undefined : Date.now(), contentSignature: signature || undefined });
+      const uniqueBlockers = [...new Set(blockers)];
+      const uniqueWarnings = [...new Set(warnings)];
+      setEditorialAudit(key, stage, { status: uniqueBlockers.length || uniqueWarnings.length ? 'issues' : 'passed', blockers: uniqueBlockers, warnings: uniqueWarnings, issues: buildEditorialIssues(stage, auditContent, uniqueBlockers, uniqueWarnings), checkedAt: Date.now(), confirmedAt: uniqueBlockers.length || uniqueWarnings.length ? undefined : Date.now(), contentSignature: signature || undefined });
       notice.success({ message: `${meta.label}完成`, description: blockers.length ? `${blockers.length} 项阻断` : warnings.length ? `${warnings.length} 项需要人工确认` : '已自动通过', placement: 'bottomRight' });
     } catch (error) { notice.error({ message: `${meta.label}失败`, description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); }
     finally { setEditorialRunning(null); }
