@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessNarrative, assessPacing, atomizeClaims, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms } from '../src/plugins/outline-scaffolder/editorial-analysis';
+import { EDITORIAL_PRESETS, assessNarrative, assessPacing, atomizeClaims, buildAIConstraintBlock, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, createBackupManifest, evaluateExportGate, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, renderPrintHtml, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms } from '../src/plugins/outline-scaffolder/editorial-analysis';
 
 describe('editorial analysis', () => {
   it('normalizes BCE dates and detects conflicting event dates', () => {
@@ -149,5 +149,21 @@ describe('editorial analysis', () => {
     expect(buildMergeSuggestions([{ leftChapter: 'a.md', rightChapter: 'b.md', leftText: '甲', rightText: '乙', similarity: 0.95 }])[0].recommendation).toContain('回指');
     const index = buildBookIndex([{ chapter: 'a.md', content: '秦始皇统一。秦始皇巡行。' }], [{ name: '嬴政', canonical: '秦始皇', kind: 'person', aliases: '始皇帝' }]);
     expect(index[0]).toMatchObject({ term: '秦始皇', mentions: 2 });
+  });
+
+  it('builds AI constraints and enforces template export gates', () => {
+    const block = buildAIConstraintBlock({ lock: { dates: ['前221年'], numbers: ['36郡'], names: ['秦始皇'], quotes: ['统一文字'] }, canonicalTerms: [{ name: '嬴政', canonical: '秦始皇' }], controversies: [], forbidden: ['虚构心理'] });
+    expect(block).toContain('不得新增、删除或改写');
+    const gate = evaluateExportGate({ readiness: { score: 100, blockers: [], warnings: [], metrics: {} }, approvals: [], preset: EDITORIAL_PRESETS['academic-history'], evidenceCoverage: 100, narrativeScore: 80 });
+    expect(gate.allowed).toBe(false);
+    expect(gate.blockers.length).toBe(5);
+  });
+
+  it('creates verifiable backup manifests and printable HTML', () => {
+    const manifest = createBackupManifest([{ path: 'a.md', content: '正文' }]);
+    expect(manifest[0].checksum).toMatch(/^[0-9a-f]{8}$/);
+    const html = renderPrintHtml('书名', [{ title: '第一章', content: '## 第一节\n\n正文' }], ['参考资料'], { author: '作者', version: 'v1' });
+    expect(html).toContain('@page');
+    expect(html).toContain('第一章');
   });
 });

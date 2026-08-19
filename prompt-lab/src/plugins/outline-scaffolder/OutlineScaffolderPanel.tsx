@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
-import { assessNarrative, assessPacing, atomizeClaims, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms, type AnalysisIssue, type CitationStyle, type ContentClassification, type EditorialRole, type EvidenceGap, type FactLock, type IndexEntry, type NarrativeAssessment, type NumericClaim, type PacingAssessment, type PersonPresence, type PersonRelation, type PlaceMapping, type ProfessionalRulePackId, type QualitySnapshot, type SemanticDuplicate, type SourceLevel, type SupportStrength, type TimelineEvent, type VersionComparison } from './editorial-analysis';
+import { EDITORIAL_PRESETS, assessNarrative, assessPacing, atomizeClaims, buildAIConstraintBlock, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, createBackupManifest, evaluateExportGate, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, renderPrintHtml, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms, type AnalysisIssue, type CitationStyle, type ContentClassification, type EditorialPresetId, type EditorialRole, type EvidenceGap, type FactLock, type IndexEntry, type NarrativeAssessment, type NumericClaim, type PacingAssessment, type PersonPresence, type PersonRelation, type PlaceMapping, type ProfessionalRulePackId, type QualitySnapshot, type SemanticDuplicate, type SourceLevel, type SupportStrength, type TimelineEvent, type VersionComparison } from './editorial-analysis';
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -111,6 +111,9 @@ interface SavedProject {
   qualityBaselineId?: string;
   bookIndex?: IndexEntry[];
   releaseRecords?: ReleaseRecord[];
+  editorialPresetId?: EditorialPresetId;
+  commentThreads?: CommentThread[];
+  aiExecutionLogs?: AiExecutionLog[];
   deploymentStatus?: DeploymentStatus;
   splitMode: SplitMode;
   organizeByPart: boolean;
@@ -155,6 +158,8 @@ interface HistoricalTermRule { id: string; term: string; fromYear?: number; toYe
 interface CharacterArc { id: string; person: string; chapter: string; goal: string; choice: string; cost: string; change: string; evidenceIds: string[] }
 interface EditorialTask { id: string; title: string; chapter: string; assignee: string; priority: 'low' | 'medium' | 'high' | 'blocker'; status: 'todo' | 'doing' | 'review' | 'resolved'; opinions: Array<{ reviewer: string; position: string }>; resolution: string; updatedAt: number }
 interface ReleaseRecord { id: string; label: 'draft' | 'review' | 'proof' | 'final'; version: string; notes: string; snapshotPath?: string; createdAt: number }
+interface CommentThread { id: string; chapter: string; quote: string; status: 'open' | 'resolved'; comments: Array<{ id: string; author: string; text: string; createdAt: number }>; createdAt: number }
+interface AiExecutionLog { id: string; operation: string; model: string; chapter: string; startedAt: number; durationMs: number; inputChars: number; outputChars: number; success: boolean }
 interface ReviewSuggestion { id: string; section: string; position: string; issue: string; suggestion: string; decision: 'pending' | 'accepted' | 'rejected' }
 interface ReviewPatch { id: string; suggestionId: string; original: string; replacement: string; state: 'ready' | 'applied' | 'conflict' }
 interface GateFixTarget { path: string; blockers: string[] }
@@ -311,6 +316,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [bookIndex, setBookIndex] = useState<IndexEntry[]>([]);
   const [releaseRecords, setReleaseRecords] = useState<ReleaseRecord[]>([]);
   const [transitionDraft, setTransitionDraft] = useState('');
+  const [editorialPresetId, setEditorialPresetId] = useState<EditorialPresetId>('popular-history');
+  const [commentThreads, setCommentThreads] = useState<CommentThread[]>([]);
+  const [aiExecutionLogs, setAiExecutionLogs] = useState<AiExecutionLog[]>([]);
   const [versionFiles, setVersionFiles] = useState<string[]>([]);
   const [leftVersion, setLeftVersion] = useState('');
   const [rightVersion, setRightVersion] = useState('');
@@ -626,7 +634,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!target || !path || (editorialAiLoading && !editorialBatchRunning)) return false;
     if (!aiApi.apiKey?.trim()) { if (!silent) notice.warning({ message: '请先配置助写模型', placement: 'bottomRight' }); return false; }
     if (path === activeFile && dirty) { if (!silent) notice.warning({ message: '请先保存当前修改', placement: 'bottomRight' }); return false; }
-    setEditorialAiLoading(true);
+    setEditorialAiLoading(true); const executionStartedAt = Date.now();
     try {
       const read = await window.electronAPI.workspace.readTextFile(target.path, path);
       if (!read.success || !read.data) throw new Error(read.error || '章节读取失败');
@@ -640,7 +648,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 {"severity":"blocker|warning","type":"简短问题类型","message":"具体、可执行的说明","originalText":"逐字复制正文中的最小连续原文；若属于全局缺失则为空字符串","suggestion":"可安全替换的完整文本；不能确定时为空字符串"}
 
 规则：originalText 必须逐字存在于正文，不得改写后冒充原文；每项只处理一个问题；没有问题输出 []；最多 40 项。事实与引用检查不得依靠模型记忆宣称已核实，只能根据用户给出的证据判断“有支持、证据不足或需要核对”。建议不得编造史实、来源、引文、数字或人物心理。` },
-        { role: 'user', content: `书名：${projectTitle}\n章节：${path.split('/').pop()}\n写作目标：${brief.goal || '未填写'}\n核心问题：${brief.keyQuestions || '未填写'}\n必用材料：${brief.requiredSources || '未填写'}\n避免重复：${brief.avoidTopics || '未填写'}\n\n证据台账：\n${evidence}\n\n正文：\n${read.data.content}` },
+        { role: 'user', content: `书名：${projectTitle}\n章节：${path.split('/').pop()}\n写作目标：${brief.goal || '未填写'}\n核心问题：${brief.keyQuestions || '未填写'}\n必用材料：${brief.requiredSources || '未填写'}\n避免重复：${brief.avoidTopics || '未填写'}\n\n${aiConstraintBlock}\n\n证据台账：\n${evidence}\n\n正文：\n${read.data.content}` },
       ];
       let raw = '';
       for await (const chunk of provider.chat(messages, { model: aiApi.model, temperature: 0.1, maxTokens: 6_000, stream: false })) raw += chunk.delta || '';
@@ -666,6 +674,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const warnings = [...new Set([...(existing?.warnings ?? []), ...open.filter((issue) => issue.severity === 'warning').map((issue) => issue.message)])];
       setEditorialAudit(path, stage, { status: blockers.length || warnings.length ? 'issues' : 'passed', blockers, warnings, issues: merged, checkedAt: Date.now(), confirmedAt: blockers.length || warnings.length ? undefined : Date.now(), contentSignature: editorialSignature(read.data.content) });
       if (stage === 'facts') syncClaimsFromIssues(path, merged);
+      setAiExecutionLogs((current) => [{ id: `ai-log-${Date.now()}`, operation: `editorial:${stage}`, model: aiApi.model, chapter: path, startedAt: executionStartedAt, durationMs: Date.now() - executionStartedAt, inputChars: read.data.content.length, outputChars: raw.length, success: true }, ...current].slice(0, 500));
       if (!silent) notice.success({ message: 'AI 深度审校完成', description: `新增 ${aiIssues.length} 项候选问题，请逐条核对。`, placement: 'bottomRight' });
       return true;
     } catch (error) { if (!silent) notice.error({ message: 'AI 深度审校失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); return false; }
@@ -1136,6 +1145,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const assertionSuggestions = useMemo(() => calibrateAssertionStrength(documentContent, evidenceGaps.filter((item) => item.chapter === activeFile).map((item) => item.claim)), [activeFile, documentContent, evidenceGaps]);
   const evidenceRewriteSuggestions = useMemo(() => suggestEvidenceBasedRewrites(documentContent), [documentContent]);
   const mergeSuggestions = useMemo(() => buildMergeSuggestions(semanticDuplicates), [semanticDuplicates]);
+  const activePreset = EDITORIAL_PRESETS[editorialPresetId];
+  const aiConstraintBlock = useMemo(() => buildAIConstraintBlock({ lock: factLocks[activeFile] ?? { dates: [], numbers: [], names: [], quotes: [] }, canonicalTerms: knowledgeEntries.map((item) => ({ name: item.name, canonical: item.canonical || item.name })), controversies, forbidden: [chapterBriefs[activeFile]?.avoidTopics || '', ...activePreset.guidance].filter(Boolean) }), [activeFile, activePreset.guidance, chapterBriefs, controversies, factLocks, knowledgeEntries]);
+  const exportGate = useMemo(() => evaluateExportGate({ readiness: publicationReadiness, approvals: roleApprovals, preset: activePreset, evidenceCoverage: publicationReadiness.metrics.evidenceGaps === 0 ? 100 : claims.length ? Math.round(((claims.length - evidenceGaps.length) / claims.length) * 100) : 0, narrativeScore: publicationReadiness.metrics.averageNarrativeScore ?? 0 }), [activePreset, claims.length, evidenceGaps.length, publicationReadiness, roleApprovals]);
   const activeProject = recentProjects.find((project) => project.rootPath === target?.path && (!project.subfolder || managedFiles.some((path) => path.startsWith(`${project.subfolder}/`)))) ?? null;
   const activeProjectId = activeProject?.id;
 

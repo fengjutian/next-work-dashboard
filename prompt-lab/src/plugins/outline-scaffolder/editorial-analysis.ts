@@ -37,6 +37,44 @@ export interface QualityRegression { metric: keyof Pick<QualitySnapshot, 'readin
 export interface RewriteSuggestion { id: string; original: string; replacement: string; reason: string; start: number; end: number }
 export interface MergeSuggestion { sourceChapter: string; targetChapter: string; similarity: number; sourceText: string; targetText: string; recommendation: string }
 export interface IndexEntry { term: string; kind: string; chapters: string[]; mentions: number }
+export type EditorialPresetId = 'academic-history' | 'popular-history' | 'biography' | 'local-gazetteer';
+export interface EditorialPreset { id: EditorialPresetId; label: string; requiredRulePacks: ProfessionalRulePackId[]; minimumCoverage: number; minimumNarrative: number; requiredRoles: EditorialRole[]; guidance: string[] }
+export interface ExportGate { allowed: boolean; blockers: string[] }
+export interface BackupEntry { path: string; size: number; checksum: string }
+
+export const EDITORIAL_PRESETS: Record<EditorialPresetId, EditorialPreset> = {
+  'academic-history': { id: 'academic-history', label: '学术史著', requiredRulePacks: ['history', 'general'], minimumCoverage: 90, minimumNarrative: 45, requiredRoles: ['author', 'editor', 'fact-checker', 'subject-reviewer', 'final-reviewer'], guidance: ['区分史料记载、现代解释与作者推断', '重要结论至少两条独立来源', '完整记录版本、页码和争议边界'] },
+  'popular-history': { id: 'popular-history', label: '通俗历史', requiredRulePacks: ['history', 'general'], minimumCoverage: 80, minimumNarrative: 70, requiredRoles: ['author', 'editor', 'fact-checker', 'final-reviewer'], guidance: ['以人物行动和问题推进叙事', '场景细节必须来自场景证据卡', '避免用文学化细节填补材料空白'] },
+  biography: { id: 'biography', label: '人物传记', requiredRulePacks: ['history', 'general'], minimumCoverage: 85, minimumNarrative: 75, requiredRoles: ['author', 'editor', 'fact-checker', 'subject-reviewer', 'final-reviewer'], guidance: ['持续追踪人物目标、选择、代价和转变', '心理描写必须标明材料或推测性质', '核对人物行踪和关系年代'] },
+  'local-gazetteer': { id: 'local-gazetteer', label: '地方志', requiredRulePacks: ['history', 'general'], minimumCoverage: 90, minimumNarrative: 40, requiredRoles: ['author', 'editor', 'fact-checker', 'subject-reviewer'], guidance: ['统一古今地名和行政区划沿革', '数字表格必须说明统计口径', '人物、事件和机构生成书后索引'] },
+};
+
+export function buildAIConstraintBlock(input: { lock: FactLock; canonicalTerms: Array<{ name: string; canonical: string }>; controversies: Array<{ topic: string; adoptedPosition: string }>; forbidden: string[] }): string {
+  const lines = ['## 不可违反的事实约束', `日期：${input.lock.dates.join('、') || '无'}`, `数字：${input.lock.numbers.join('、') || '无'}`, `人名：${input.lock.names.join('、') || '无'}`, `原文引语：${input.lock.quotes.map((item) => `“${item}”`).join('、') || '无'}`, '不得新增、删除或改写上述事实；如确需修改，必须停止生成并说明冲突。'];
+  if (input.canonicalTerms.length) lines.push(`规范写法：${input.canonicalTerms.map((item) => `${item.name}→${item.canonical}`).join('；')}`);
+  if (input.controversies.length) lines.push(`争议边界：${input.controversies.map((item) => `${item.topic}（本书暂取：${item.adoptedPosition || '不裁断'}）`).join('；')}`);
+  if (input.forbidden.length) lines.push(`禁写事项：${input.forbidden.join('；')}`);
+  return lines.join('\n');
+}
+
+export function evaluateExportGate(input: { readiness: PublicationReadiness; approvals: Array<{ role: EditorialRole; status: string; reviewer: string }>; preset: EditorialPreset; evidenceCoverage: number; narrativeScore: number }): ExportGate {
+  const blockers = [...input.readiness.blockers];
+  input.preset.requiredRoles.forEach((role) => { if (!input.approvals.some((item) => item.role === role && item.status === 'approved' && item.reviewer.trim())) blockers.push(`缺少${role}角色的实名签核`); });
+  if (input.evidenceCoverage < input.preset.minimumCoverage) blockers.push(`证据覆盖率 ${input.evidenceCoverage}% 低于模板要求 ${input.preset.minimumCoverage}%`);
+  if (input.narrativeScore < input.preset.minimumNarrative) blockers.push(`故事性均分 ${input.narrativeScore} 低于模板要求 ${input.preset.minimumNarrative}`);
+  return { allowed: blockers.length === 0, blockers: [...new Set(blockers)] };
+}
+
+export function createBackupManifest(files: Array<{ path: string; content: string }>): BackupEntry[] {
+  const hash = (value: string) => { let result = 2166136261; for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); } return (result >>> 0).toString(16).padStart(8, '0'); };
+  return files.map((file) => ({ path: file.path, size: file.content.length, checksum: hash(file.content) }));
+}
+
+export function renderPrintHtml(title: string, chapters: Array<{ title: string; content: string }>, references: string[], metadata: { author: string; version: string }): string {
+  const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const markdown = (value: string) => escape(value).replace(/^###\s+(.+)$/gm, '<h3>$1</h3>').replace(/^##\s+(.+)$/gm, '<h2>$1</h2>').replace(/^#\s+(.+)$/gm, '<h1>$1</h1>').split(/\n\s*\n/).map((block) => /^<h[1-3]>/.test(block) ? block : `<p>${block.replace(/\n/g, '<br>')}</p>`).join('\n');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escape(title)}</title><style>@page{size:A4;margin:25mm 22mm 25mm 25mm}body{font-family:"Noto Serif SC","Source Han Serif SC",serif;color:#211d1b;line-height:1.9;max-width:170mm;margin:auto}h1{font-size:28pt;page-break-before:always}h1:first-child{page-break-before:auto}h2{font-size:18pt;margin-top:2em}h3{font-size:14pt}p{text-align:justify;text-indent:2em;orphans:2;widows:2}.cover{height:85vh;display:flex;flex-direction:column;justify-content:center;text-align:center}.cover h1{page-break-before:auto}.meta{color:#666}.references p{text-indent:0;font-size:10.5pt}@media print{a{color:inherit}}</style></head><body><section class="cover"><h1>${escape(title)}</h1><div class="meta">${escape(metadata.author)} · ${escape(metadata.version)}</div></section>${chapters.map((chapter) => `<article><h1>${escape(chapter.title)}</h1>${markdown(chapter.content)}</article>`).join('')}<section class="references"><h1>参考文献</h1>${references.map((item) => `<p>${escape(item)}</p>`).join('')}</section></body></html>`;
+}
 
 export function generateChapterTransition(previousTitle: string, previousContent: string, nextTitle: string, nextContent: string): string {
   const clean = (value: string) => value.replace(/^#{1,6}\s+.*$/gm, '').replace(/<!--[^]*?-->/g, '').split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
