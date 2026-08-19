@@ -30,6 +30,93 @@ export interface PlaceMapping { id: string; historicalName: string; modernName: 
 export interface NumericClaim { id: string; chapter: string; topic: string; value: number; unit: string; expression: string; evidenceIds: string[] }
 export interface PacingAssessment { chapter: string; score: number; expositionRatio: number; paragraphLengths: number[]; openingQuestion: string; resolved: boolean; issues: string[] }
 export interface QualitySnapshot { id: string; createdAt: number; readiness: number; evidenceCoverage: number; blockers: number; narrativeScore: number }
+export interface GraphNode { id: string; label: string; kind: string; x: number; y: number }
+export interface GraphEdge { id: string; from: string; to: string; label: string; kind: string }
+export interface ChapterHeat { chapter: string; score: number; level: 'good' | 'watch' | 'risk' | 'blocked'; blockers: number; gaps: number; narrative: number; duplicates: number }
+export interface QualityRegression { metric: keyof Pick<QualitySnapshot, 'readiness' | 'evidenceCoverage' | 'blockers' | 'narrativeScore'>; before: number; after: number; delta: number; regressed: boolean }
+export interface RewriteSuggestion { id: string; original: string; replacement: string; reason: string; start: number; end: number }
+export interface MergeSuggestion { sourceChapter: string; targetChapter: string; similarity: number; sourceText: string; targetText: string; recommendation: string }
+export interface IndexEntry { term: string; kind: string; chapters: string[]; mentions: number }
+
+export function generateChapterTransition(previousTitle: string, previousContent: string, nextTitle: string, nextContent: string): string {
+  const clean = (value: string) => value.replace(/^#{1,6}\s+.*$/gm, '').replace(/<!--[^]*?-->/g, '').split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
+  const previousPoint = clean(previousContent).slice(-1)[0]?.replace(/\s+/g, ' ').slice(0, 120) ?? '';
+  const nextPoint = clean(nextContent)[0]?.replace(/\s+/g, ' ').slice(0, 120) ?? '';
+  return `在“${previousTitle}”中，${previousPoint.replace(/[。！？]+$/, '')}。这一变化并未结束相关问题，而是把讨论推向“${nextTitle}”：${nextPoint.replace(/[。！？]+$/, '')}。`;
+}
+
+export function calibrateAssertionStrength(content: string, weakClaims: string[] = []): RewriteSuggestion[] {
+  const replacements: Record<string, string> = { 彻底: '在相当程度上', 唯一: '主要', 必然: '可能', 完全: '较大程度上', 从根本上: '在制度层面', 首次: '较早', 所有人: '许多人', 无一例外: '大多' };
+  const suggestions: RewriteSuggestion[] = [];
+  for (const match of content.matchAll(/彻底|唯一|必然|完全|从根本上|首次|所有人|无一例外/g)) {
+    const sentence = sentenceAt(content, match.index ?? 0);
+    if (weakClaims.length && !weakClaims.some((claim) => sentence.includes(claim) || claim.includes(sentence.slice(0, 24)))) continue;
+    suggestions.push({ id: `strength:${match.index}`, original: match[0], replacement: replacements[match[0]], reason: '证据不足以支持绝对化论断，建议降低结论强度或补充直接证据', start: match.index ?? 0, end: (match.index ?? 0) + match[0].length });
+  }
+  return suggestions;
+}
+
+export function suggestEvidenceBasedRewrites(content: string): RewriteSuggestion[] {
+  const suggestions: RewriteSuggestion[] = [];
+  for (const match of content.matchAll(/[^。！？\n]{0,80}(?:意义重大|影响深远|奠定了基础|引发强烈不满|造成深远影响|留下致命暗伤|形成深深裂痕)[^。！？\n]{0,80}[。！？]?/g)) {
+    suggestions.push({ id: `evidence-rewrite:${match.index}`, original: match[0], replacement: '请改写为：具体人物或机构采取了什么行动；发生于何时何地；哪条材料能够证明；产生了什么可观察后果。', reason: '该段主要给出评价，没有提供可核验的信息链', start: match.index ?? 0, end: (match.index ?? 0) + match[0].length });
+  }
+  return suggestions;
+}
+
+export function renderControversySection(card: { topic: string; positions: Array<{ label: string; argument: string }>; adoptedPosition: string; rationale: string }): string {
+  const positions = card.positions.filter((item) => item.argument.trim()).map((item) => `- **${item.label}**：${item.argument.trim()}`).join('\n');
+  return `### ${card.topic}\n\n${positions || '- 尚未录入有效观点'}\n\n**本书判断**：${card.adoptedPosition || '暂不裁断'}。${card.rationale ? `\n\n**判断依据与保留意见**：${card.rationale}` : ''}`;
+}
+
+export function buildMergeSuggestions(duplicates: SemanticDuplicate[]): MergeSuggestion[] {
+  return duplicates.map((item) => ({ sourceChapter: item.rightChapter, targetChapter: item.leftChapter, similarity: item.similarity, sourceText: item.rightText, targetText: item.leftText, recommendation: item.similarity >= 0.9 ? '保留信息和证据更完整的一处，另一处改为简短回指' : '拆分共同背景与章节独有分析，避免两章重复展开' }));
+}
+
+export function buildBookIndex(documents: Array<{ chapter: string; content: string }>, terms: Array<{ name: string; canonical: string; kind: string; aliases?: string }>): IndexEntry[] {
+  return terms.map((term) => {
+    const variants = [term.canonical, term.name, ...(term.aliases?.split(/[、，,;；\n]+/) ?? [])].map((item) => item.trim()).filter(Boolean);
+    const chapterCounts = documents.map((document) => ({ chapter: document.chapter, count: variants.reduce((sum, variant) => sum + (document.content.split(variant).length - 1), 0) })).filter((item) => item.count > 0);
+    return { term: term.canonical || term.name, kind: term.kind, chapters: chapterCounts.map((item) => item.chapter), mentions: chapterCounts.reduce((sum, item) => sum + item.count, 0) };
+  }).filter((item) => item.mentions > 0).sort((a, b) => b.mentions - a.mentions || a.term.localeCompare(b.term, 'zh-CN'));
+}
+
+export function layoutRelationshipGraph(relations: PersonRelation[], width = 720, height = 420): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const names = [...new Set(relations.flatMap((item) => [item.from, item.to]).filter(Boolean))];
+  const radius = Math.max(80, Math.min(width, height) / 2 - 50);
+  const nodes = names.map((label, index) => ({ id: label, label, kind: 'person', x: width / 2 + Math.cos((index / Math.max(1, names.length)) * Math.PI * 2 - Math.PI / 2) * radius, y: height / 2 + Math.sin((index / Math.max(1, names.length)) * Math.PI * 2 - Math.PI / 2) * radius }));
+  const edges = relations.filter((item) => item.from && item.to).map((item) => ({ id: item.id, from: item.from, to: item.to, label: item.kind, kind: item.kind }));
+  return { nodes, edges };
+}
+
+export function buildChapterHeatmap(chapters: string[], input: { issues: AnalysisIssue[]; gaps: EvidenceGap[]; narratives: Record<string, NarrativeAssessment>; duplicates: SemanticDuplicate[] }): ChapterHeat[] {
+  return chapters.map((chapter) => {
+    const blockers = input.issues.filter((item) => item.severity === 'blocker' && item.chapters.includes(chapter)).length;
+    const gaps = input.gaps.filter((item) => item.chapter === chapter).length;
+    const duplicates = input.duplicates.filter((item) => item.leftChapter === chapter || item.rightChapter === chapter).length;
+    const narrative = input.narratives[chapter]?.score ?? 0;
+    const score = Math.max(0, Math.min(100, narrative - blockers * 20 - gaps * 3 - duplicates * 5));
+    return { chapter, score, level: blockers ? 'blocked' : score < 45 ? 'risk' : score < 70 ? 'watch' : 'good', blockers, gaps, narrative, duplicates };
+  });
+}
+
+export function findAffectedChapters(changedChapter: string, claims: Array<{ chapter: string; evidenceIds: string[] }>, evidence: Array<{ id: string; chapter: string }>, duplicates: SemanticDuplicate[], relations: PersonRelation[], chapterTexts: Record<string, string> = {}): string[] {
+  const affected = new Set([changedChapter]);
+  const changedEvidence = new Set(evidence.filter((item) => item.chapter === changedChapter).map((item) => item.id));
+  claims.filter((claim) => claim.evidenceIds.some((id) => changedEvidence.has(id))).forEach((claim) => affected.add(claim.chapter));
+  duplicates.forEach((item) => { if (item.leftChapter === changedChapter) affected.add(item.rightChapter); if (item.rightChapter === changedChapter) affected.add(item.leftChapter); });
+  const changedText = chapterTexts[changedChapter] ?? '';
+  const relatedPeople = new Set(relations.flatMap((item) => changedText.includes(item.from) || changedText.includes(item.to) ? [item.from, item.to] : []));
+  Object.entries(chapterTexts).forEach(([chapter, text]) => { if ([...relatedPeople].some((person) => text.includes(person))) affected.add(chapter); });
+  return [...affected];
+}
+
+export function compareQualitySnapshots(before: QualitySnapshot, after: QualitySnapshot): QualityRegression[] {
+  return (['readiness', 'evidenceCoverage', 'blockers', 'narrativeScore'] as const).map((metric) => {
+    const delta = after[metric] - before[metric];
+    return { metric, before: before[metric], after: after[metric], delta, regressed: metric === 'blockers' ? delta > 0 : delta < 0 };
+  });
+}
 
 export function findPresenceConflicts(presences: PersonPresence[]): AnalysisIssue[] {
   const groups = new Map<string, PersonPresence[]>();

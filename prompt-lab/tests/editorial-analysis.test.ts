@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessNarrative, assessPacing, atomizeClaims, buildEvidenceReverseIndex, buildFootnotes, buildPublicationReadiness, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, extractFactLock, extractTimelineEvents, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, locateQuoteContext, runProfessionalRules, validateHistoricalTerms } from '../src/plugins/outline-scaffolder/editorial-analysis';
+import { assessNarrative, assessPacing, atomizeClaims, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms } from '../src/plugins/outline-scaffolder/editorial-analysis';
 
 describe('editorial analysis', () => {
   it('normalizes BCE dates and detects conflicting event dates', () => {
@@ -120,5 +120,34 @@ describe('editorial analysis', () => {
     const result = assessPacing('a.md', '## 开端\n\n秦为何突然改变政策？\n\n秦王下令召见群臣，双方发生争论。\n\n最终，这次政策改变回应了秦为何改变政策的问题。');
     expect(result.openingQuestion).toContain('为何');
     expect(result.resolved).toBe(true);
+  });
+
+  it('lays out relationship graphs and chapter heat scores', () => {
+    const graph = layoutRelationshipGraph([{ id: 'r', from: '甲', to: '乙', kind: 'conflict', evidenceIds: [], notes: '' }]);
+    expect(graph.nodes).toHaveLength(2);
+    expect(graph.edges[0].label).toBe('conflict');
+    const heat = buildChapterHeatmap(['a.md'], { issues: [{ id: 'i', kind: 'timeline', severity: 'blocker', chapters: ['a.md'], message: 'x', excerpts: [] }], gaps: [], narratives: { 'a.md': { score: 80, sceneSignals: 1, actionSignals: 1, conflictSignals: 1, transitionSignals: 1, abstractSignals: 0, issues: [] } }, duplicates: [] });
+    expect(heat[0].level).toBe('blocked');
+  });
+
+  it('finds affected chapters and quality regressions', () => {
+    const affected = findAffectedChapters('a.md', [{ chapter: 'b.md', evidenceIds: ['e1'] }], [{ id: 'e1', chapter: 'a.md' }], [], [], {});
+    expect(affected).toEqual(['a.md', 'b.md']);
+    const regression = compareQualitySnapshots({ id: 'a', createdAt: 1, readiness: 80, evidenceCoverage: 70, blockers: 1, narrativeScore: 75 }, { id: 'b', createdAt: 2, readiness: 70, evidenceCoverage: 75, blockers: 2, narrativeScore: 75 });
+    expect(regression.filter((item) => item.regressed).map((item) => item.metric)).toEqual(['readiness', 'blockers']);
+  });
+
+  it('generates transitions and calibrated rewrite suggestions', () => {
+    const transition = generateChapterTransition('旧章', '# 旧章\n\n旧制度遇到阻力。', '新章', '# 新章\n\n改革者开始调整政策。');
+    expect(transition).toContain('旧制度遇到阻力');
+    expect(calibrateAssertionStrength('这一制度彻底消除了矛盾。')[0].replacement).toBe('在相当程度上');
+    expect(suggestEvidenceBasedRewrites('这场改革意义重大，影响深远。')).toHaveLength(1);
+  });
+
+  it('renders controversies, merge plans and book index entries', () => {
+    expect(renderControversySection({ topic: '争议', positions: [{ label: '甲说', argument: '依据甲材料' }], adoptedPosition: '甲说', rationale: '材料较早' })).toContain('本书判断');
+    expect(buildMergeSuggestions([{ leftChapter: 'a.md', rightChapter: 'b.md', leftText: '甲', rightText: '乙', similarity: 0.95 }])[0].recommendation).toContain('回指');
+    const index = buildBookIndex([{ chapter: 'a.md', content: '秦始皇统一。秦始皇巡行。' }], [{ name: '嬴政', canonical: '秦始皇', kind: 'person', aliases: '始皇帝' }]);
+    expect(index[0]).toMatchObject({ term: '秦始皇', mentions: 2 });
   });
 });
