@@ -81,12 +81,12 @@ npx vitest run tests/work-browser/  # 32 / 32 必须全过
 
 | 限制 | 原因 | 何时解决 |
 |---|---|---|
-| Save Page 不能保存鉴权页 | main 端 fetch 无登录态 | 未知（看用户） |
+| Save Page 对部分强 CSP / 特殊协议页面有限制 | 当前优先捕获 webview DOM，失败时回退 main fetch | 按站点兼容 |
 | AI 摘要 / Agent 需手动配 baseUrl/apiKey | 独立 core，未集成 ai 模块；用户在 Settings 填 `workBrowser.ai.{baseUrl,apiKey,model}` | 已落，UI 入口 OK（Phase 3.5） |
 | Note 富文本 / Wiki-link | 未接入 markdown-editor | Phase 4 |
-| PDF / Docling 解析 | 未集成 document-knowledge | Phase 4 |
+| PDF / Docling 解析 | PDF/Office 已集成；扫描 PDF 需用户配置 Docling 服务 | 已落地 |
 | Web Diff 增强 / Web Replay | 在路线图 | Phase 4 |
-| Sync / NAS / WebDAV / S3 | 在路线图 | Phase 4 |
+| Sync / NAS / WebDAV / S3 | WebDAV、S3 Compatible、Syncthing 目录已落地；NAS 可通过后两者接入 | 已落地 |
 
 ## 已知全局遗留（不是 bug，按项目节奏处理）
 
