@@ -50,6 +50,14 @@ export const workBrowserBridge = {
     providers: () => ipcRenderer.invoke('work-browser:search:providers'),
     run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) =>
       ipcRenderer.invoke('work-browser:search:run', input),
+    start: (requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) =>
+      ipcRenderer.invoke('work-browser:search:start', requestId, input),
+    cancel: (requestId: string) => ipcRenderer.invoke('work-browser:search:cancel', requestId),
+    onProgress: (callback: (progress: { requestId: string; results: unknown[]; providers: unknown[]; took: number }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, progress: { requestId: string; results: unknown[]; providers: unknown[]; took: number }) => callback(progress);
+      ipcRenderer.on('work-browser:search:progress', listener);
+      return () => ipcRenderer.removeListener('work-browser:search:progress', listener);
+    },
     suggest: (text: string) => ipcRenderer.invoke('work-browser:search:suggest', text),
     history: (limit?: number) => ipcRenderer.invoke('work-browser:search:history', limit),
   },

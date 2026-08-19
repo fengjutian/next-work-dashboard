@@ -25,6 +25,8 @@ export interface AggregateOptions {
   localDb?: Database.Database;
   /** 本地检索 scope */
   localScope?: { kind: 'workspace' | 'library' | 'off'; workspaceId?: string };
+  signal?: AbortSignal;
+  onProgress?: (progress: { results: SearchResult[]; providers: SearchProviderStatus[]; took: number }) => void;
 }
 
 export async function aggregateSearch(
@@ -48,17 +50,22 @@ export async function aggregateSearch(
         const t0 = Date.now();
         const controller = new AbortController();
         const providerTimer = setTimeout(() => controller.abort(), timeoutMs);
+        const abortProvider = () => controller.abort();
+        options.signal?.addEventListener('abort', abortProvider, { once: true });
         try {
-          const results = await withTimeout(p.search(query, controller.signal), timeoutMs, p.id);
+          const results = await withTimeout(p.search(query, controller.signal), timeoutMs, p.id, options.signal);
           for (const r of results) {
             all.push(normalizeResult(r, p.id));
           }
           statuses.push({ providerId: p.id, ok: true, count: results.length, error: null, took: Date.now() - t0 });
+          options.onProgress?.({ results: rankResults(dedupeResults(all)).slice(0, query.perPage), providers: [...statuses], took: Date.now() - started });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           statuses.push({ providerId: p.id, ok: false, count: 0, error: msg, took: Date.now() - t0 });
+          options.onProgress?.({ results: rankResults(dedupeResults(all)).slice(0, query.perPage), providers: [...statuses], took: Date.now() - started });
         } finally {
           clearTimeout(providerTimer);
+          options.signal?.removeEventListener('abort', abortProvider);
         }
       }
     })());
@@ -114,13 +121,17 @@ export async function aggregateSearch(
   };
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, providerId: string): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, providerId: string, signal?: AbortSignal): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(`PROVIDER_TIMEOUT:${providerId}`)), timeoutMs);
   });
   try {
-    return await Promise.race([promise, timeout]);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      if (signal?.aborted) reject(new Error('SEARCH_CANCELLED'));
+      else signal?.addEventListener('abort', () => reject(new Error('SEARCH_CANCELLED')), { once: true });
+    });
+    return await Promise.race([promise, timeout, aborted]);
   } finally {
     if (timer) clearTimeout(timer);
   }

@@ -46,6 +46,7 @@ export function setupWorkBrowserIPC(): void {
   const resolveAIConfig = () => resolveWorkBrowserAIConfig((key) => workspaces.getSetting(key));
   const search = new SearchRouter(workspaces, db, resolveAIConfig);
   const graph = new GraphStore(db);
+  const searchRequests = new Map<string, AbortController>();
 
   // ── Workspace ──
 
@@ -364,6 +365,23 @@ export function setupWorkBrowserIPC(): void {
   ipcMain.handle('work-browser:search:providers', () => search.listProviders());
   ipcMain.handle('work-browser:search:run', async (_e, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => {
     return await search.runSearch(input);
+  });
+  ipcMain.handle('work-browser:search:start', async (event, requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => {
+    searchRequests.get(requestId)?.abort();
+    const controller = new AbortController();
+    searchRequests.set(requestId, controller);
+    try {
+      return await search.runSearch(input, {
+        signal: controller.signal,
+        onProgress: (progress) => event.sender.send('work-browser:search:progress', { requestId, ...progress }),
+      });
+    } finally {
+      if (searchRequests.get(requestId) === controller) searchRequests.delete(requestId);
+    }
+  });
+  ipcMain.handle('work-browser:search:cancel', (_event, requestId: string) => {
+    searchRequests.get(requestId)?.abort();
+    searchRequests.delete(requestId);
   });
   ipcMain.handle('work-browser:search:suggest', async (_e, text: string) => await search.getSuggestions(text));
   ipcMain.handle('work-browser:search:history', (_e, limit?: number) => workspaces.listSearchHistory(limit));

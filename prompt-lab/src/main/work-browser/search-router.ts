@@ -27,7 +27,10 @@ export class SearchRouter {
     return this.providers.map((p) => ({ id: p.id, name: p.name, capabilities: p.capabilities }));
   }
 
-  async runSearch(input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }): Promise<AggregatedSearchResponse> {
+  async runSearch(input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }, options: {
+    signal?: AbortSignal;
+    onProgress?: (progress: { results: AggregatedSearchResponse['results']; providers: AggregatedSearchResponse['providers']; took: number }) => void;
+  } = {}): Promise<AggregatedSearchResponse> {
     const query: SearchQuery = {
       text: input.text,
       locale: input.locale || 'zh-CN',
@@ -51,6 +54,8 @@ export class SearchRouter {
       concurrency: 4,
       localDb: useLocal ? this.db : undefined,
       localScope,
+      signal: options.signal,
+      onProgress: options.onProgress,
       onSummarize: async (results) => {
         if (!config.apiKey && !config.local) return null;
         return await summarizeResults(results, query, config);

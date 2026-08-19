@@ -525,6 +525,9 @@ export interface ElectronAPI {
     search: {
       providers: () => Promise<Array<{ id: string; name: string; capabilities: any }>>;
       run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => Promise<{ results: any[]; providers: any[]; aiSummary: string | null; took: number }>;
+      start: (requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => Promise<{ results: any[]; providers: any[]; aiSummary: string | null; took: number }>;
+      cancel: (requestId: string) => Promise<void>;
+      onProgress: (callback: (progress: { requestId: string; results: any[]; providers: any[]; took: number }) => void) => () => void;
       suggest: (text: string) => Promise<string[]>;
       history: (limit?: number) => Promise<unknown[]>;
     };
