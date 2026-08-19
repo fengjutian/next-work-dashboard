@@ -9,3 +9,4 @@ export { SearchRouter } from './search-router';
 export { savePageAsMarkdown } from './save';
 export { getCleanerPayload } from './cleaner';
 export { enqueueIndexDocument, drainIndexQueue, indexDocument } from './embedding';
+export { SyncthingFolderAdapter } from './syncthing-sync';
