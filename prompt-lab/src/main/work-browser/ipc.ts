@@ -28,6 +28,7 @@ import { summarizeResults } from '../../core/work-browser/ai/summarizer';
 import { resolveWorkBrowserAIConfig, setRuntimeAIConfig } from './ai-config';
 import { buildMcpAgentTools, recordMcpAgentDenial } from './mcp-tools';
 import { GraphStore } from '../../core/work-browser/graph/edges';
+import { ResearchEvidenceStore, type EvidenceStatus } from './research-evidence-store';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
@@ -47,6 +48,7 @@ export function setupWorkBrowserIPC(): void {
   const resolveAIConfig = () => resolveWorkBrowserAIConfig((key) => workspaces.getSetting(key));
   const search = new SearchRouter(workspaces, db, resolveAIConfig);
   const graph = new GraphStore(db);
+  const evidenceStore = new ResearchEvidenceStore(db);
   const searchRequests = new Map<string, AbortController>();
 
   // ── Workspace ──
@@ -265,14 +267,17 @@ export function setupWorkBrowserIPC(): void {
         },
       },
     );
+    const evidence = evidenceStore.record(result.task.id, input.workspaceId, result.citations);
     return {
       taskId: result.task.id,
       report: result.report,
-      citations: result.citations,
+      citations: evidence,
       reportPath: result.reportPath,
       took: result.took,
     };
   });
+  ipcMain.handle('work-browser:research:evidence-list', (_event, researchId: string) => evidenceStore.list(researchId));
+  ipcMain.handle('work-browser:research:evidence-status', (_event, id: string, status: EvidenceStatus) => evidenceStore.setStatus(id, status));
 
   // Task 自动编排：跑一个 task 的所有 step，用 auto-handler 链
   ipcMain.handle('work-browser:task:run-auto', async (_e, taskId: TaskId) => {

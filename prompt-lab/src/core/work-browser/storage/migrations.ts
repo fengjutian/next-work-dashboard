@@ -118,6 +118,29 @@ const ALL_MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    description: 'Research evidence ledger',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS research_evidence (
+          id TEXT PRIMARY KEY,
+          research_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL,
+          excerpt TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'clue',
+          occurrence_count INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(research_id, url)
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_evidence_workspace ON research_evidence(workspace_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_research_evidence_research ON research_evidence(research_id, status);
+      `);
+    },
+  },
 ];
 
 export interface MigrationResult {
