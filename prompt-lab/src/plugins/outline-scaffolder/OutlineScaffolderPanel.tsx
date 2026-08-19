@@ -81,6 +81,7 @@ interface SavedProject {
   knowledgeEntries?: KnowledgeEntry[];
   evidenceRecords?: EvidenceRecord[];
   qualityReports?: Record<string, ChapterQualityReport>;
+  editorialAudits?: Record<string, Partial<Record<EditorialStageId, EditorialAudit>>>;
   deploymentStatus?: DeploymentStatus;
   splitMode: SplitMode;
   organizeByPart: boolean;
@@ -112,6 +113,8 @@ interface ChapterWritingBrief {
 interface KnowledgeEntry { id: string; kind: 'person' | 'event' | 'place' | 'term' | 'date'; name: string; canonical: string; aliases: string; notes: string }
 interface EvidenceRecord { id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; anchor?: { quote: string }; createdAt: number }
 interface ChapterQualityReport { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }
+type EditorialStageId = 'completeness' | 'structure' | 'facts' | 'professional' | 'language' | 'citations' | 'consistency' | 'format';
+interface EditorialAudit { status: 'pending' | 'issues' | 'passed' | 'stale'; blockers: string[]; warnings: string[]; checkedAt: number; confirmedAt?: number; contentSignature?: string }
 interface ReviewSuggestion { id: string; section: string; position: string; issue: string; suggestion: string; decision: 'pending' | 'accepted' | 'rejected' }
 interface ReviewPatch { id: string; suggestionId: string; original: string; replacement: string; state: 'ready' | 'applied' | 'conflict' }
 interface GateFixTarget { path: string; blockers: string[] }
@@ -132,6 +135,17 @@ const CHAPTER_STATUS_META: Record<ChapterGenerationState, { label: string; dot: 
 };
 
 const EMPTY_CHAPTER_BRIEF: ChapterWritingBrief = { goal: '', targetWords: 2500, keyQuestions: '', requiredSources: '', avoidTopics: '' };
+const EDITORIAL_STAGES: Array<{ id: EditorialStageId; label: string; scope: 'chapter' | 'book' }> = [
+  { id: 'completeness', label: '内容完整性校验', scope: 'chapter' },
+  { id: 'structure', label: '结构逻辑校验', scope: 'chapter' },
+  { id: 'facts', label: '事实准确性校验', scope: 'chapter' },
+  { id: 'professional', label: '专业/技术校验', scope: 'chapter' },
+  { id: 'language', label: '语言文字校验', scope: 'chapter' },
+  { id: 'citations', label: '引用来源校验', scope: 'chapter' },
+  { id: 'consistency', label: '全书一致性校验', scope: 'book' },
+  { id: 'format', label: '出版格式校验', scope: 'book' },
+];
+const editorialSignature = (content: string) => `${content.length}:${content.slice(0, 160)}:${content.slice(-160)}`;
 const attachChapterBrief = (content: string, brief?: ChapterWritingBrief) => {
   if (!brief || (!brief.goal.trim() && !brief.keyQuestions.trim() && !brief.requiredSources.trim() && !brief.avoidTopics.trim())) return content;
   const clean = (value: string) => value.trim().replace(/-->/g, '→');
@@ -185,6 +199,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [evidenceRecords, setEvidenceRecords] = useState<EvidenceRecord[]>([]);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState('');
   const [qualityReports, setQualityReports] = useState<Record<string, ChapterQualityReport>>({});
+  const [editorialAudits, setEditorialAudits] = useState<Record<string, Partial<Record<EditorialStageId, EditorialAudit>>>>({});
+  const [editorialRunning, setEditorialRunning] = useState<EditorialStageId | null>(null);
+  const [finalReadConfirmed, setFinalReadConfirmed] = useState(false);
   const [reviewSuggestions, setReviewSuggestions] = useState<ReviewSuggestion[]>([]);
   const [reviewPatches, setReviewPatches] = useState<ReviewPatch[]>([]);
   const [reviewPatchLoading, setReviewPatchLoading] = useState(false);
@@ -196,7 +213,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [gateFixTargets, setGateFixTargets] = useState<GateFixTarget[]>([]);
   const gateFixTargetsRef = useRef<GateFixTarget[]>([]);
   const gateRepairActiveRef = useRef(false);
-  const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'quality' | 'publish'>('overview');
+  const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'editorial' | 'quality' | 'publish'>('overview');
   const [auditLoading, setAuditLoading] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [manifestSyncState, setManifestSyncState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -391,8 +408,97 @@ export const OutlineScaffolderPanel: React.FC = () => {
     return { score, blockers, warnings, wordCount: words, checkedAt: Date.now() };
   };
 
+  const setEditorialAudit = (key: string, stage: EditorialStageId, audit: EditorialAudit) => setEditorialAudits((current) => ({ ...current, [key]: { ...current[key], [stage]: audit } }));
+  const chapterStagesPassed = (path: string) => EDITORIAL_STAGES.filter((stage) => stage.scope === 'chapter').every((stage) => editorialAudits[path]?.[stage.id]?.status === 'passed');
+  const runEditorialStage = async (stage: EditorialStageId, path = activeFile) => {
+    if (!target || editorialRunning) return;
+    const meta = EDITORIAL_STAGES.find((item) => item.id === stage);
+    if (!meta) return;
+    if (meta.scope === 'chapter') {
+      if (!path) { notice.warning({ message: '请先选择章节', placement: 'bottomRight' }); return; }
+      if (path === activeFile && dirty) { notice.warning({ message: '请先保存当前修改', placement: 'bottomRight' }); return; }
+      const stageIndex = EDITORIAL_STAGES.findIndex((item) => item.id === stage);
+      const previous = EDITORIAL_STAGES.slice(0, stageIndex).filter((item) => item.scope === 'chapter');
+      if (previous.some((item) => editorialAudits[path]?.[item.id]?.status !== 'passed')) { notice.warning({ message: '请按顺序完成前一项校验', placement: 'bottomRight' }); return; }
+    } else {
+      const chapterFiles = managedFiles.filter((item) => item.toLowerCase().endsWith('.md') && !/README\.md$/i.test(item));
+      if (chapterFiles.some((item) => !chapterStagesPassed(item))) { notice.warning({ message: '请先完成所有章节的前六项校验', placement: 'bottomRight' }); return; }
+      if (stage === 'format' && editorialAudits.__book__?.consistency?.status !== 'passed') { notice.warning({ message: '请先确认通过全书一致性校验', placement: 'bottomRight' }); return; }
+    }
+    setEditorialRunning(stage);
+    try {
+      const blockers: string[] = [];
+      const warnings: string[] = [];
+      let signature = '';
+      const key = meta.scope === 'book' ? '__book__' : path;
+      if (meta.scope === 'chapter') {
+        const read = await window.electronAPI.workspace.readTextFile(target.path, path);
+        if (!read.success || !read.data) throw new Error(read.error || '章节读取失败');
+        const content = read.data.content;
+        signature = editorialSignature(content);
+        const brief = { ...EMPTY_CHAPTER_BRIEF, ...chapterBriefs[path] };
+        const evidence = evidenceRecords.filter((item) => item.chapter === path);
+        const quality = inspectChapterQuality(path, content);
+        if (stage === 'completeness') {
+          blockers.push(...quality.blockers.filter((item) => /占位符|字|必用史料/.test(item)));
+          if ((content.match(/^##\s+/gm) ?? []).length === 0) blockers.push('没有可识别的小节结构');
+          if (brief.keyQuestions.trim() && !content.includes(brief.keyQuestions.trim().slice(0, 12))) warnings.push('核心问题尚未在正文中形成可直接定位的回应，请人工核对');
+        } else if (stage === 'structure') {
+          const paragraphs = content.replace(/^---[\s\S]*?---/, '').split(/\n\s*\n/).filter((item) => !/^#/.test(item.trim()));
+          if (paragraphs.some((item) => countArticleWords(item) > 420)) warnings.push('存在超过 420 字的长段落，建议拆分观点、证据与分析');
+          if ((content.match(/(?:因此|由此|从而|然而|但是)/g) ?? []).length < 2) warnings.push('逻辑连接较少，请人工检查时间、因果、对比或递进关系');
+        } else if (stage === 'facts') {
+          blockers.push(...quality.blockers.filter((item) => item.includes('待核实')));
+          warnings.push(...quality.warnings.filter((item) => /主张审计|高强度/.test(item)));
+          if (!evidence.some((item) => item.status === 'verified')) warnings.push('没有已核实证据，事实结论只能人工确认后通过');
+        } else if (stage === 'professional') {
+          const modernTerms = content.match(/(?:知识分子|民族认同|文化专制|封建社会|中央集权)/g) ?? [];
+          if (modernTerms.length) warnings.push(`发现 ${modernTerms.length} 处现代分析概念，请检查是否说明其分析性质及历史语境`);
+          if (!knowledgeEntries.length) warnings.push('全书知识库为空，官职、地名、术语和年代缺少统一标准');
+        } else if (stage === 'language') {
+          warnings.push(...quality.warnings.filter((item) => /模板化|高强度/.test(item)));
+          const aiPhrases = content.match(/(?:值得注意的是|不难发现|综上所述|历史长河中|时代洪流)/g) ?? [];
+          if (aiPhrases.length) warnings.push(`发现 ${aiPhrases.length} 处套话或 AI 腔表达`);
+        } else if (stage === 'citations') {
+          if (!/^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m.test(content)) blockers.push('缺少文末参考资料区');
+          if (!evidence.some((item) => item.status === 'verified')) blockers.push('没有已核实的证据记录');
+          if (evidence.some((item) => item.status === 'verified') && !evidence.some((item) => item.status === 'verified' && item.anchor?.quote && content.includes(item.anchor.quote))) warnings.push('已核实证据尚未绑定到正文观点');
+        }
+      } else if (stage === 'consistency') {
+        const issues = await runBookAudit();
+        warnings.push(...issues.slice(0, 100));
+      } else {
+        const listing = await window.electronAPI.workspace.listFiles(target.path);
+        if (!listing.success) throw new Error(listing.error || '无法扫描出版文件');
+        const paths = new Set((listing.data ?? []).map((item) => item.path.replace(/\\/g, '/')));
+        const siteFolder = activeProject?.subfolder || '';
+        const required = ['_config.yml', '_data/chapters.yml', 'index.md', '404.md', '_layouts/default.html', '_layouts/article.html', '_layouts/home.html', 'assets/css/reader.css'].map((item) => siteFolder ? `${siteFolder}/${item}` : item);
+        required.push('.github/workflows/pages.yml');
+        required.filter((item) => !paths.has(item)).forEach((item) => blockers.push(`出版文件缺失：${item}`));
+        for (const chapter of managedFiles.filter((item) => item.toLowerCase().endsWith('.md') && !/README\.md$/i.test(item))) {
+          const read = await window.electronAPI.workspace.readTextFile(target.path, chapter);
+          if (!read.success || !read.data) { blockers.push(`无法读取：${chapter}`); continue; }
+          if (/<!--\s*(?:待核实[：:]|在这里添加内容)/.test(read.data.content)) blockers.push(`${chapter} 仍有待处理标记`);
+          if (!/^---\s*$/m.test(read.data.content) || !/^#\s+/m.test(read.data.content)) warnings.push(`${chapter} 的头信息或标题需要检查`);
+        }
+      }
+      setEditorialAudit(key, stage, { status: blockers.length || warnings.length ? 'issues' : 'passed', blockers: [...new Set(blockers)], warnings: [...new Set(warnings)], checkedAt: Date.now(), confirmedAt: blockers.length || warnings.length ? undefined : Date.now(), contentSignature: signature || undefined });
+      notice.success({ message: `${meta.label}完成`, description: blockers.length ? `${blockers.length} 项阻断` : warnings.length ? `${warnings.length} 项需要人工确认` : '已自动通过', placement: 'bottomRight' });
+    } catch (error) { notice.error({ message: `${meta.label}失败`, description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); }
+    finally { setEditorialRunning(null); }
+  };
+
+  const confirmEditorialStage = (stage: EditorialStageId, path = activeFile) => {
+    const meta = EDITORIAL_STAGES.find((item) => item.id === stage);
+    if (!meta) return;
+    const key = meta.scope === 'book' ? '__book__' : path;
+    const audit = editorialAudits[key]?.[stage];
+    if (!audit || audit.blockers.length) return;
+    setEditorialAudit(key, stage, { ...audit, status: 'passed', confirmedAt: Date.now() });
+  };
+
   const runBookAudit = async () => {
-    if (!target || !managedFiles.length || auditLoading) return;
+    if (!target || !managedFiles.length || auditLoading) return [];
     setAuditLoading(true);
     try {
       const reports: Record<string, ChapterQualityReport> = {};
@@ -418,6 +524,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       }
       setQualityReports(reports); setConsistencyIssues([...new Set(issues)].slice(0, 100));
       notice.success({ message: '全书检查完成', description: `检查 ${Object.keys(reports).length} 章，发现 ${new Set(issues).size} 项一致性提示。`, placement: 'bottomRight' });
+      return [...new Set(issues)];
     } finally { setAuditLoading(false); }
   };
 
@@ -675,6 +782,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       knowledgeEntries: overrides?.knowledgeEntries ?? knowledgeEntries,
       evidenceRecords: overrides?.evidenceRecords ?? evidenceRecords,
       qualityReports: overrides?.qualityReports ?? qualityReports,
+      editorialAudits: overrides?.editorialAudits ?? editorialAudits,
       deploymentStatus: overrides?.deploymentStatus ?? deploymentStatus,
       splitMode: overrides?.splitMode ?? splitMode,
       organizeByPart: overrides?.organizeByPart ?? organizeByPart,
@@ -707,7 +815,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         try {
           diskProject = JSON.parse(diskManifest.data.content) as Partial<SavedProject>;
           setProjectTitle(diskProject.name || folder.name); setSource(diskProject.source || ''); setBookRequirement(diskProject.requirement || '');
-          setChapterBriefs(diskProject.chapterBriefs ?? {}); setChapterStatuses(diskProject.chapterStatuses ?? {}); setKnowledgeEntries(diskProject.knowledgeEntries ?? []); setEvidenceRecords(diskProject.evidenceRecords ?? []); setQualityReports(diskProject.qualityReports ?? {}); setDeploymentStatus(diskProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
+          setChapterBriefs(diskProject.chapterBriefs ?? {}); setChapterStatuses(diskProject.chapterStatuses ?? {}); setKnowledgeEntries(diskProject.knowledgeEntries ?? []); setEvidenceRecords(diskProject.evidenceRecords ?? []); setQualityReports(diskProject.qualityReports ?? {}); setEditorialAudits(diskProject.editorialAudits ?? {}); setDeploymentStatus(diskProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
           if (diskProject.git) { setGitRemoteUrl(diskProject.git.remoteUrl || ''); setGitRemoteName(diskProject.git.remoteName || 'origin'); setGitBranch(diskProject.git.branch || 'main'); }
         } catch { notice.warning({ message: '.chapter-project.json 无法解析', placement: 'bottomRight' }); }
       }
@@ -744,6 +852,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setKnowledgeEntries(openedProject.knowledgeEntries ?? []);
       setEvidenceRecords(openedProject.evidenceRecords ?? []);
       setQualityReports(openedProject.qualityReports ?? {});
+      setEditorialAudits(openedProject.editorialAudits ?? {});
       setDeploymentStatus(openedProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
       setSplitMode(openedProject.splitMode); setOrganizeByPart(openedProject.organizeByPart); setTemplate(openedProject.template);
       setGitRemoteUrl(openedProject.git?.remoteUrl ?? ''); setGitRemoteName(openedProject.git?.remoteName ?? 'origin'); setGitBranch(openedProject.git?.branch ?? 'main');
@@ -782,6 +891,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
         delete next[activeFile];
         return next;
       });
+      setEditorialAudits((current) => {
+        const invalidate = (audits: Partial<Record<EditorialStageId, EditorialAudit>> | undefined) => Object.fromEntries(Object.entries(audits ?? {}).map(([stage, audit]) => [stage, { ...audit, status: 'stale', confirmedAt: undefined }])) as Partial<Record<EditorialStageId, EditorialAudit>>;
+        return { ...current, [activeFile]: invalidate(current[activeFile]), __book__: invalidate(current.__book__) };
+      });
+      setFinalReadConfirmed(false);
       const currentState = chapterStatuses[activeFile]?.state ?? 'pending';
       const nextState = chapterStateAfterSave(currentState);
       if (nextState !== currentState) setChapterStatus(activeFile, nextState);
