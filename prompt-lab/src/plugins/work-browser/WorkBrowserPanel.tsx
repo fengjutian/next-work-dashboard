@@ -152,7 +152,7 @@ export function WorkBrowserPanel() {
       message.error(`新建标签页失败：${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
-  }, [activeWorkspace, refreshTabs, tabs]);
+  }, [activeWorkspace, refreshTabs, setActiveTab, tabs]);
 
   const createTabAt = useCallback(async (url: string, position: number, title?: string) => {
     if (!activeWorkspace) return null;
@@ -165,7 +165,7 @@ export function WorkBrowserPanel() {
     await refreshTabs(activeWorkspace.id);
     setActiveTab(created);
     return created;
-  }, [activeWorkspace, refreshTabs]);
+  }, [activeWorkspace, refreshTabs, setActiveTab]);
 
   const closeTabSet = useCallback(async (closing: Tab[]) => {
     if (!activeWorkspace || closing.length === 0) return;
@@ -183,7 +183,7 @@ export function WorkBrowserPanel() {
       message.error(`关闭标签页失败：${error instanceof Error ? error.message : String(error)}`);
       await refreshTabs(activeWorkspace.id);
     }
-  }, [activeWorkspace, activeTab, evictPages, refreshTabs, tabs]);
+  }, [activeWorkspace, activeTab, evictPages, refreshTabs, setActiveTab, tabs]);
 
   const addTabRight = useCallback(async (tab: Tab) => {
     const stored = await window.electronAPI.workBrowser.settings.get('workBrowser.homeUrl').catch(() => undefined);
@@ -284,7 +284,7 @@ export function WorkBrowserPanel() {
     void window.electronAPI.workBrowser.tab.update(tabId, patch).catch((error) => {
       console.warn('[work-browser] tab metadata update failed:', error);
     });
-  }, []);
+  }, [setActiveTab, setTabs]);
 
   return (
     <div className="work-browser-panel flex h-full min-h-0 flex-col overflow-hidden bg-background">
