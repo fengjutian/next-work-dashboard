@@ -549,7 +549,7 @@ export interface ElectronAPI {
       query: (input: { query: string; workspaceId?: string; topK?: number; scope?: 'workspace' | 'library' }) => Promise<{ systemPrompt: string; citations: any[]; chunks: any[]; context: any }>;
     };
     research: {
-      run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) => Promise<{ taskId: string; report: string; citations: any[]; reportPath?: string; took: number }>;
+      run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) => Promise<{ taskId: string; report: string; citations: any[]; claimEvidence: any[]; reportPath?: string; took: number }>;
       evidenceList: (researchId: string) => Promise<any[]>;
       setEvidenceStatus: (id: string, status: 'clue' | 'verified' | 'disputed') => Promise<void>;
     };

@@ -12,6 +12,7 @@ export interface ResearchResult {
   taskId: string;
   report: string;
   citations: Array<{ id: string; title: string; url: string; excerpt: string; status: 'clue' | 'verified' | 'disputed'; occurrenceCount: number }>;
+  claimEvidence: Array<{ claim: string; evidenceIds: string[]; disputed: boolean }>;
   reportPath?: string;
   took: number;
 }

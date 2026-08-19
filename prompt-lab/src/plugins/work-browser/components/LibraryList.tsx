@@ -1,9 +1,10 @@
 /**
  * LibraryList — 右侧 Library（已保存文档 + 搜索历史）
  */
-import { Tabs, List, Typography, Empty, Space, Tag } from '../ui';
+import { Tabs, List, Typography, Empty, Space, Tag, Input } from '../ui';
 import { FilePenLine, FileText, GitCompareArrows, Search, Upload } from 'lucide-react';
 import type { Document, SearchHistoryEntry } from '../../../core/work-browser/types';
+import { useEffect, useState } from 'react';
 
 export interface LibraryListProps {
   documents: Document[];
@@ -16,6 +17,8 @@ export interface LibraryListProps {
 }
 
 export function LibraryList({ documents, history, onOpenDocument, onEditDocument, onCompareDocument, onReplayQuery, onImportDocument }: LibraryListProps) {
+  const [doclingUrl, setDoclingUrl] = useState('');
+  useEffect(() => { void window.electronAPI.workBrowser.settings.get('workBrowser.docling.baseUrl').then((value) => setDoclingUrl(value || '')); }, []);
   return (
     <Tabs
       size="small"
@@ -29,6 +32,7 @@ export function LibraryList({ documents, history, onOpenDocument, onEditDocument
               <button type="button" onClick={onImportDocument} className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-primary">
                 <Upload size={13} />导入 PDF / Word / Excel / PowerPoint
               </button>
+              <Input value={doclingUrl} placeholder="Docling URL（扫描 PDF OCR，可选）" onChange={(event) => setDoclingUrl(event.target.value)} onBlur={() => void window.electronAPI.workBrowser.settings.set('workBrowser.docling.baseUrl', doclingUrl.trim())} />
               {documents.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有保存的文档" />
               ) : (
