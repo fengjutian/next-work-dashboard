@@ -82,6 +82,8 @@ export const workBrowserBridge = {
   research: {
     run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) =>
       ipcRenderer.invoke('work-browser:research:run', input),
+    evidenceList: (researchId: string) => ipcRenderer.invoke('work-browser:research:evidence-list', researchId),
+    setEvidenceStatus: (id: string, status: 'clue' | 'verified' | 'disputed') => ipcRenderer.invoke('work-browser:research:evidence-status', id, status),
   },
   agent: {
     run: (input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean }) =>
@@ -93,6 +95,11 @@ export const workBrowserBridge = {
     recordSavedWith: (workspaceId: string, documentIds: string[]) => ipcRenderer.invoke('work-browser:graph:record-saved-with', workspaceId, documentIds),
     recordEdge: (input: { kind: string; workspaceId: string; fromType: string; fromId: string; toType: string; toId: string; weight?: number; metadata?: Record<string, unknown> }) =>
       ipcRenderer.invoke('work-browser:graph:record-edge', input),
+  },
+  sync: {
+    preview: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => ipcRenderer.invoke('work-browser:sync:preview', workspaceId, target),
+    push: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => ipcRenderer.invoke('work-browser:sync:push', workspaceId, target, overwrite),
+    pull: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => ipcRenderer.invoke('work-browser:sync:pull', workspaceId, target, overwrite),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),

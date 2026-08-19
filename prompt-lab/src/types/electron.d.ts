@@ -549,6 +549,8 @@ export interface ElectronAPI {
     };
     research: {
       run: (input: { topic: string; workspaceId: string; autoSave?: boolean }) => Promise<{ taskId: string; report: string; citations: any[]; reportPath?: string; took: number }>;
+      evidenceList: (researchId: string) => Promise<any[]>;
+      setEvidenceStatus: (id: string, status: 'clue' | 'verified' | 'disputed') => Promise<void>;
     };
     agent: {
       run: (input: { userMessage: string; workspaceId?: string; systemPrompt?: string; maxSteps?: number; autoApproveDanger?: boolean; contextSources?: { workspace?: boolean; currentPage?: { url: string; title: string }; specificDocuments?: Array<{ id: string; title: string; url: string }> } }) => Promise<{ answer: string; iterations: number; toolCalls: any[]; steps: any[]; availableTools: string[] }>;
@@ -558,6 +560,11 @@ export interface ElectronAPI {
       listByWorkspace: (workspaceId: string, kind?: string) => Promise<unknown[]>;
       recordSavedWith: (workspaceId: string, documentIds: string[]) => Promise<number>;
       recordEdge: (input: { kind: string; workspaceId: string; fromType: string; fromId: string; toType: string; toId: string; weight?: number; metadata?: Record<string, unknown> }) => Promise<void>;
+    };
+    sync: {
+      preview: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => Promise<{ local: any[]; remote: any[]; conflicts: any[]; upload: string[]; download: string[] }>;
+      push: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => Promise<{ ok: boolean; conflicts: any[]; transferred: number }>;
+      pull: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => Promise<{ ok: boolean; conflicts: any[]; transferred: number }>;
     };
     settings: {
       get: (key: string) => Promise<string | null>;

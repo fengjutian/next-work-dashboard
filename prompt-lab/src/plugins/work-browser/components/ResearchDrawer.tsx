@@ -17,6 +17,7 @@ export interface ResearchDrawerProps {
   /** 预填主题（从 SearchBar 文本带入） */
   defaultTopic?: string;
   onCompleted?: (reportPath: string | undefined) => void;
+  onOpenCitation?: (url: string) => void;
 }
 
 const STAGE_LABELS: Record<ResearchProgress['stage'], string> = {
@@ -38,7 +39,7 @@ const RESEARCH_FLOW = [
   { icon: CheckCircle2, label: '生成报告' },
 ];
 
-export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, defaultTopic, onCompleted }: ResearchDrawerProps) {
+export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, defaultTopic, onCompleted, onOpenCitation }: ResearchDrawerProps) {
   const [topic, setTopic] = useState(defaultTopic || '');
   const [workspaceId, setWorkspaceId] = useState(defaultWorkspaceId || workspaces[0]?.id || '');
   const { loading, progress, result, error, run } = useResearch();
@@ -141,7 +142,8 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
                   {result.citations.slice(0, 8).map((c, i) => (
                     <Typography.Text key={i} ellipsis style={{ width: '100%' }}>
                       <Tag>{i + 1}</Tag>
-                      <Typography.Link href={c.url} target="_blank">{c.title}</Typography.Link>
+                      <Tag color={c.status === 'verified' ? 'green' : c.status === 'disputed' ? 'red' : 'gold'}>{c.status}</Tag>
+                      <button type="button" className="text-left text-primary hover:underline" onClick={() => onOpenCitation?.(c.url)}>{c.title}</button>
                     </Typography.Text>
                   ))}
                 </Space>

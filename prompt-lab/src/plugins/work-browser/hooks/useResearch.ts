@@ -11,7 +11,7 @@ export interface ResearchProgress {
 export interface ResearchResult {
   taskId: string;
   report: string;
-  citations: Array<{ title: string; url: string; excerpt: string }>;
+  citations: Array<{ id: string; title: string; url: string; excerpt: string; status: 'clue' | 'verified' | 'disputed'; occurrenceCount: number }>;
   reportPath?: string;
   took: number;
 }

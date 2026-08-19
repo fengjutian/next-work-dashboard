@@ -15,7 +15,7 @@
  * └──────────┴──────────────────────────────────┴──────────┘
  */
 import { Empty, message, Tabs, ToastHost } from './ui';
-import { Bot, BookOpen, FolderKanban, GitFork, ListFilter, ListTodo, PanelLeft, PanelRight } from 'lucide-react';
+import { Bot, BookOpen, FolderKanban, GitFork, ListFilter, ListTodo, PanelLeft, PanelRight, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import type {
@@ -36,6 +36,9 @@ import { useWorkspaces } from './hooks/useWorkspace';
 import { useSearch } from './hooks/useSearch';
 import { STORAGE_KEYS } from './constants';
 import { parseDocument } from '../document-knowledge/parser';
+import { useWorkbenchLayout } from './hooks/useWorkbenchLayout';
+import { SyncPanel } from './components/SyncPanel';
+import { usePageCache } from './hooks/usePageCache';
 
 export function WorkBrowserPanel() {
   const aiApi = useStore((state) => state.aiApi);
@@ -44,11 +47,7 @@ export function WorkBrowserPanel() {
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
-  const [cachedPages, setCachedPages] = useState<Tab[]>([]);
-  const [readyPages, setReadyPages] = useState<Record<string, boolean>>({});
-  const [displayedPageId, setDisplayedPageId] = useState<string | null>(null);
   const [closedTabs, setClosedTabs] = useState<Tab[]>([]);
-  const [webviewRefreshKeys, setWebviewRefreshKeys] = useState<Record<string, number>>({});
   const [documents, setDocuments] = useState<Document[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
@@ -59,8 +58,7 @@ export function WorkBrowserPanel() {
   const [cleanerEnabled, setCleanerEnabled] = useState(true);
   const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(undefined);
-  const [leftCollapsed, setLeftCollapsed] = useState(() => localStorage.getItem(STORAGE_KEYS.LEFT_SIDEBAR_COLLAPSED) === 'true');
-  const [rightCollapsed, setRightCollapsed] = useState(() => localStorage.getItem(STORAGE_KEYS.RIGHT_SIDEBAR_COLLAPSED) === 'true');
+  const { leftCollapsed, rightCollapsed, toggleLeftSidebar, toggleRightSidebar, gridTemplateColumns } = useWorkbenchLayout();
 
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
@@ -69,10 +67,10 @@ export function WorkBrowserPanel() {
   const tabsByWorkspaceRef = useRef(new Map<string, Tab[]>());
   const documentsByWorkspaceRef = useRef(new Map<string, Document[]>());
   const annotationsByWorkspaceRef = useRef(new Map<string, Annotation[]>());
-  const pageLastUsedRef = useRef(new Map<string, number>());
   const webContentRefs = useRef(new Map<string, WebContentHandle>());
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
+  const { cachedPages, displayedPageId, refreshKeys: webviewRefreshKeys, markReady: handlePageReadyChange, evict: evictPages, refresh: refreshPage } = usePageCache(activeTab);
 
   const editDocument = useCallback((document: Document) => {
     if (!document.contentPath) {
@@ -183,36 +181,8 @@ export function WorkBrowserPanel() {
   }, [activeWorkspaceId, refreshTabs, refreshDocuments, refreshAnnotations]);
 
   useEffect(() => {
-    if (!activeTab) return;
-    lastTabByWorkspaceRef.current.set(activeTab.workspaceId, activeTab.id);
-    pageLastUsedRef.current.set(activeTab.id, Date.now());
-    setCachedPages((current) => {
-      const existingIndex = current.findIndex((tab) => tab.id === activeTab.id);
-      const next = existingIndex >= 0
-        ? current.map((tab, index) => index === existingIndex ? activeTab : tab)
-        : [...current, activeTab];
-      if (next.length <= 8) return next;
-      const removable = next
-        .filter((tab) => !tab.isPinned && tab.id !== activeTab.id)
-        .sort((left, right) => (pageLastUsedRef.current.get(left.id) ?? 0) - (pageLastUsedRef.current.get(right.id) ?? 0))[0];
-      if (!removable) return next.slice(-8);
-      pageLastUsedRef.current.delete(removable.id);
-      return next.filter((tab) => tab.id !== removable.id);
-    });
+    if (activeTab) lastTabByWorkspaceRef.current.set(activeTab.workspaceId, activeTab.id);
   }, [activeTab]);
-
-  useEffect(() => {
-    if (!activeTab) {
-      setDisplayedPageId(null);
-    } else if (readyPages[activeTab.id]) {
-      setDisplayedPageId(activeTab.id);
-    }
-  }, [activeTab, readyPages]);
-
-  const handlePageReadyChange = useCallback((tabId: string, ready: boolean) => {
-    setReadyPages((current) => current[tabId] === ready ? current : { ...current, [tabId]: ready });
-    if (ready && activeTab?.id === tabId) setDisplayedPageId(tabId);
-  }, [activeTab?.id]);
 
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
 
@@ -290,9 +260,7 @@ export function WorkBrowserPanel() {
   const closeTabSet = useCallback(async (closing: Tab[]) => {
     if (!activeWorkspace || closing.length === 0) return;
     const closingIds = new Set<string>(closing.map((tab) => tab.id));
-    closingIds.forEach((id) => pageLastUsedRef.current.delete(id));
-    setCachedPages((current) => current.filter((tab) => !closingIds.has(tab.id)));
-    setReadyPages((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !closingIds.has(id))));
+    evictPages(closingIds);
     const remaining = tabs.filter((tab) => !closingIds.has(tab.id));
     setClosedTabs((current) => [...closing.slice().reverse(), ...current].slice(0, 20));
     try {
@@ -305,7 +273,7 @@ export function WorkBrowserPanel() {
       message.error(`关闭标签页失败：${error instanceof Error ? error.message : String(error)}`);
       await refreshTabs(activeWorkspace.id);
     }
-  }, [activeWorkspace, activeTab, refreshTabs, tabs]);
+  }, [activeWorkspace, activeTab, evictPages, refreshTabs, tabs]);
 
   const addTabRight = useCallback(async (tab: Tab) => {
     const stored = await window.electronAPI.workBrowser.settings.get('workBrowser.homeUrl').catch(() => undefined);
@@ -408,19 +376,6 @@ export function WorkBrowserPanel() {
     });
   }, []);
 
-  const toggleLeftSidebar = () => setLeftCollapsed((collapsed) => {
-    localStorage.setItem(STORAGE_KEYS.LEFT_SIDEBAR_COLLAPSED, String(!collapsed));
-    return !collapsed;
-  });
-  const toggleRightSidebar = () => setRightCollapsed((collapsed) => {
-    localStorage.setItem(STORAGE_KEYS.RIGHT_SIDEBAR_COLLAPSED, String(!collapsed));
-    return !collapsed;
-  });
-
-  const gridTemplateColumns = leftCollapsed
-    ? (rightCollapsed ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(250px, 310px)')
-    : (rightCollapsed ? 'minmax(180px, 220px) minmax(0, 1fr)' : 'minmax(180px, 220px) minmax(0, 1fr) minmax(250px, 310px)');
-
   return (
     <div className="work-browser-panel flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <ToastHost />
@@ -492,7 +447,7 @@ export function WorkBrowserPanel() {
                 onPin={togglePinnedTab}
                 onRefresh={(tab) => {
                   setActiveTab(tab);
-                  setWebviewRefreshKeys((current) => ({ ...current, [tab.id]: (current[tab.id] || 0) + 1 }));
+                  refreshPage(tab.id);
                 }}
                 onReopen={reopenClosedTab}
                 onAddRight={addTabRight}
@@ -599,6 +554,11 @@ export function WorkBrowserPanel() {
                     />
                   ),
                 },
+                {
+                  key: 'sync',
+                  label: <span className="flex items-center gap-1"><RefreshCw size={13} />同步</span>,
+                  children: <SyncPanel workspaceId={activeWorkspace.id} />,
+                },
               ]}
             />
           ) : (
@@ -629,6 +589,7 @@ export function WorkBrowserPanel() {
         defaultWorkspaceId={activeWorkspace?.id}
         defaultTopic={researchTopic}
         onCompleted={() => { if (activeWorkspace) void refreshDocuments(activeWorkspace.id); }}
+        onOpenCitation={(url) => { void handleAddTab(url); }}
       />
     </div>
   );
