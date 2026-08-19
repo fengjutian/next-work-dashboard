@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessNarrative, atomizeClaims, buildEvidenceReverseIndex, buildFootnotes, buildPublicationReadiness, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, extractFactLock, extractTimelineEvents, findDependentSources, findEntityConflicts, findEvidenceGaps, findSemanticDuplicates, findTimelineConflicts, formatCitation, locateQuoteContext, runProfessionalRules } from '../src/plugins/outline-scaffolder/editorial-analysis';
+import { assessNarrative, assessPacing, atomizeClaims, buildEvidenceReverseIndex, buildFootnotes, buildPublicationReadiness, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, extractFactLock, extractTimelineEvents, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, locateQuoteContext, runProfessionalRules, validateHistoricalTerms } from '../src/plugins/outline-scaffolder/editorial-analysis';
 
 describe('editorial analysis', () => {
   it('normalizes BCE dates and detects conflicting event dates', () => {
@@ -101,5 +101,24 @@ describe('editorial analysis', () => {
     expect(locateQuoteContext('统一文字', '此前争论很多，最终决定统一文字，随后推行。').found).toBe(true);
     const layers = classifyContent('a.md', '或许他在夜里作出了决定。这意味着政策发生转向。相传天降异象。');
     expect(layers.map((item) => item.layer)).toEqual(['reconstruction', 'interpretation', 'literary']);
+  });
+
+  it('detects impossible same-year person presences', () => {
+    const issues = findPresenceConflicts([{ person: '张三', year: 100, place: '咸阳', chapter: 'a.md', excerpt: '甲' }, { person: '张三', year: 100, place: '临淄', chapter: 'b.md', excerpt: '乙' }]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('blocker');
+  });
+
+  it('checks historical term ranges and numeric disagreements', () => {
+    const issues = validateHistoricalTerms([{ chapter: 'a.md', content: '公元前221年，朝廷设置刺史。' }], [{ term: '刺史', fromYear: -106 }]);
+    expect(issues).toHaveLength(1);
+    const disagreements = findNumericDisagreements([{ id: 'a', chapter: 'a.md', topic: '军队', value: 10, unit: '万', expression: '十万', evidenceIds: [] }, { id: 'b', chapter: 'b.md', topic: '军队', value: 20, unit: '万', expression: '二十万', evidenceIds: [] }]);
+    expect(disagreements[0].spread).toBe(10);
+  });
+
+  it('assesses pacing and question resolution', () => {
+    const result = assessPacing('a.md', '## 开端\n\n秦为何突然改变政策？\n\n秦王下令召见群臣，双方发生争论。\n\n最终，这次政策改变回应了秦为何改变政策的问题。');
+    expect(result.openingQuestion).toContain('为何');
+    expect(result.resolved).toBe(true);
   });
 });

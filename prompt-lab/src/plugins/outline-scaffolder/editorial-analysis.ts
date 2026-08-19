@@ -24,6 +24,62 @@ export interface EvidenceUsage { evidenceId: string; title: string; chapters: st
 export interface SourceCluster { key: string; evidenceIds: string[]; titles: string[]; warning: string }
 export interface QuoteContext { found: boolean; before: string; quote: string; after: string; message: string }
 export interface ContentClassification { id: string; chapter: string; text: string; layer: ContentLayer; certainty: CertaintyLevel; reason: string }
+export interface PersonRelation { id: string; from: string; to: string; kind: 'kinship' | 'official' | 'alliance' | 'conflict' | 'teacher' | 'appointment'; fromYear?: number; toYear?: number; evidenceIds: string[]; notes: string }
+export interface PersonPresence { person: string; year: number; place: string; chapter: string; excerpt: string }
+export interface PlaceMapping { id: string; historicalName: string; modernName: string; jurisdiction: string; fromYear?: number; toYear?: number; latitude?: number; longitude?: number; evidenceIds: string[] }
+export interface NumericClaim { id: string; chapter: string; topic: string; value: number; unit: string; expression: string; evidenceIds: string[] }
+export interface PacingAssessment { chapter: string; score: number; expositionRatio: number; paragraphLengths: number[]; openingQuestion: string; resolved: boolean; issues: string[] }
+export interface QualitySnapshot { id: string; createdAt: number; readiness: number; evidenceCoverage: number; blockers: number; narrativeScore: number }
+
+export function findPresenceConflicts(presences: PersonPresence[]): AnalysisIssue[] {
+  const groups = new Map<string, PersonPresence[]>();
+  presences.forEach((item) => groups.set(`${item.person}:${item.year}`, [...(groups.get(`${item.person}:${item.year}`) ?? []), item]));
+  return [...groups.entries()].flatMap(([key, group]) => {
+    const places = [...new Set(group.map((item) => item.place))];
+    return places.length > 1 ? [{ id: `presence:${key}`, kind: 'entity' as const, severity: 'blocker' as const, chapters: [...new Set(group.map((item) => item.chapter))], message: `${group[0].person}在${group[0].year}年同时出现在多个地点：${places.join('、')}`, excerpts: group.map((item) => item.excerpt) }] : [];
+  });
+}
+
+export function validateHistoricalTerms(documents: Array<{ chapter: string; content: string }>, rules: Array<{ term: string; fromYear?: number; toYear?: number; replacement?: string }>): AnalysisIssue[] {
+  return documents.flatMap((document) => rules.flatMap((rule) => [...document.content.matchAll(new RegExp(rule.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))].flatMap((match) => {
+    const context = sentenceAt(document.content, match.index ?? 0);
+    const yearMatch = context.match(/(?:公元前\s*)?(\d{1,4})\s*年/);
+    if (!yearMatch) return [];
+    const year = /公元前/.test(yearMatch[0]) ? -Number(yearMatch[1]) : Number(yearMatch[1]);
+    if ((rule.fromYear !== undefined && year < rule.fromYear) || (rule.toYear !== undefined && year > rule.toYear)) return [{ id: `term-era:${document.chapter}:${rule.term}:${match.index}`, kind: 'entity' as const, severity: 'blocker' as const, chapters: [document.chapter], message: `“${rule.term}”不适用于${year}年${rule.replacement ? `，建议核对“${rule.replacement}”` : ''}`, excerpts: [context] }];
+    return [];
+  })));
+}
+
+export function findNumericDisagreements(claims: NumericClaim[]): Array<{ topic: string; unit: string; claims: NumericClaim[]; spread: number }> {
+  const groups = new Map<string, NumericClaim[]>();
+  claims.forEach((claim) => groups.set(`${claim.topic}:${claim.unit}`, [...(groups.get(`${claim.topic}:${claim.unit}`) ?? []), claim]));
+  return [...groups.entries()].flatMap(([key, group]) => {
+    const values = [...new Set(group.map((item) => item.value))];
+    if (values.length < 2) return [];
+    return [{ topic: key.slice(0, key.lastIndexOf(':')), unit: group[0].unit, claims: group, spread: Math.max(...values) - Math.min(...values) }];
+  });
+}
+
+export function assessPacing(chapter: string, content: string): PacingAssessment {
+  const paragraphs = content.split(/\n\s*\n/).map((item) => item.trim()).filter((item) => item && !/^#/.test(item));
+  const paragraphLengths = paragraphs.map((item) => item.length);
+  const exposition = paragraphs.filter((item) => !/[“”]|(?:下令|抵达|回答|拒绝|出发|攻入|争论|逃亡)/.test(item)).reduce((sum, item) => sum + item.length, 0);
+  const total = paragraphLengths.reduce((sum, value) => sum + value, 0) || 1;
+  const expositionRatio = exposition / total;
+  const opening = paragraphs.slice(0, 2).join('');
+  const openingQuestion = opening.match(/[^。！？]{4,80}[？?]/)?.[0] ?? '';
+  const questionText = openingQuestion.replace(/[？?]/g, '');
+  const keywords = Array.from({ length: Math.max(0, questionText.length - 1) }, (_, index) => questionText.slice(index, index + 2)).filter((word) => !/^(为何|如何|什么|是否|能否|何时|何地)$/.test(word));
+  const ending = paragraphs.slice(-2).join('');
+  const resolved = Boolean(openingQuestion && keywords.some((word) => ending.includes(word)));
+  const issues: string[] = [];
+  if (expositionRatio > 0.78) issues.push('说明性文字占比过高，缺少人物行动或材料现场');
+  if (paragraphLengths.some((length) => length > 600)) issues.push('存在超过 600 字的长段落');
+  if (!openingQuestion) issues.push('开头没有建立明确问题或悬念'); else if (!resolved) issues.push('开头问题在结尾缺少回应');
+  const score = Math.max(0, Math.min(100, 100 - Math.max(0, expositionRatio - 0.55) * 100 - issues.length * 10));
+  return { chapter, score: Math.round(score), expositionRatio, paragraphLengths, openingQuestion, resolved, issues };
+}
 
 export function formatCitation(source: CitationInput, style: CitationStyle): string {
   const author = source.author?.trim() || source.source?.trim() || '佚名';
