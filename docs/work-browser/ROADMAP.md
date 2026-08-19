@@ -66,8 +66,8 @@
   - selector 失败时回退到 rangeText 文本搜索
   - 点击高亮 → sendToHost → WebContent 弹笔记侧边面板
 - ⏳ **Note 富文本**：复用 markdown-editor，集成 wiki-link / 反向引用
-- ⏳ **PDF / Docling 接入**：复用 document-knowledge 已有 PDF 解析
-- ⏳ **AI Context 切换**：当前页 / Workspace / 全库 / 选中文档 四档
+- ✅ **PDF / Office / Docling 接入**：PDF、DOCX、XLS/XLSX、PPTX 解析与归档；扫描 PDF 可调用 Docling OCR
+- ✅ **AI Context 切换**：当前页 / Workspace / 全库 / 选中文档四档
 - ⏳ **Embedding 升级的 Workspace auto-group**：用余弦相似度替换 Jaccard
 
 ## Phase 3：Task + Research + 可视化（**infra 已交付**）
@@ -133,12 +133,14 @@
   - 自引用边 / 非三类型边过滤
 - ✅ **验证**：typecheck 0 错、check:ipc work-browser 域 0 错、vitest 83/83、eslint 0 errors
 
-## Phase 4：Sync + 生态（建议 8–12 周）
+## Phase 4：Sync + 生态
 
-- ⏳ **Sync**：
-  - Phase 4.1: Syncthing（peer-to-peer）
-  - Phase 4.2: WebDAV / S3 / NAS
-  - Phase 4.3: 官方 Sync Service
+- ✅ **本地优先 Sync**：
+  - Syncthing 共享目录、WebDAV、S3 Compatible
+  - 持久化增量基线、两端删除传播、三类冲突检测
+  - 保留本地 / 保留远端 / 两份都保留，拉取失败自动回滚
+  - Electron safeStorage 加密同步目标与凭据
+- ⏳ **官方 Sync Service**：托管服务、账号体系与跨设备发现
 - ⏳ **Mobile Companion**：iOS / Android 端只读 + 标注
 - ⏳ **Team Workspace**：多人共享 + 权限 + 审计
 - ⏳ **Marketplace**：第三方 SearchProvider / CleanerRules / TaskTemplate

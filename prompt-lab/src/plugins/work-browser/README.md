@@ -1,6 +1,6 @@
 # Work Browser 插件
 
-PRD：57 章完整产品需求 → 本插件为 **Phase 1 MVP**（PRD 第 53 节）。
+PRD：57 章完整产品需求。插件已从 Phase 1 MVP 演进到本地知识、Research、Agent 与本地优先同步阶段。
 
 ## 本轮交付范围
 
@@ -13,6 +13,10 @@ PRD：57 章完整产品需求 → 本插件为 **Phase 1 MVP**（PRD 第 53 节
 | 20. 网页保存 | Save as Markdown + 原始 HTML 归档 + 版本检测 | ✅ |
 | 27. 本地搜索 | SQLite + 跨 Workspace 搜索历史 | ✅ Phase 1（SQLite）；Phase 2 接 LanceDB |
 | 32. AI Provider | OpenAI-compatible 协议（覆盖 OpenAI/DeepSeek/Qwen/Ollama） | ✅ Phase 1 |
+| 流式搜索 | Provider 独立超时、取消、单源重试、连续失败熔断 | ✅ |
+| PDF / Office | PDF、DOCX、XLS/XLSX、PPTX；Docling OCR；结构化表格/公式/批注/演讲者备注 | ✅ |
+| Research 证据闭环 | 持久化证据状态、人工核验、claim ↔ evidence 映射、引用回跳 | ✅ |
+| Workspace Sync | 增量基线、删除传播、冲突裁决、回滚、WebDAV/S3/Syncthing、凭据加密 | ✅ |
 | 47. 右键菜单 | Phase 2 | ⏳ |
 | 48. 快捷键 | Phase 2 | ⏳ |
 | 49. Command Palette | Phase 2 | ⏳ |
@@ -59,12 +63,9 @@ npm test -- work-browser  # 单元测试
 npm start
 ```
 
-## 已知 Phase 1 限制
+## 当前边界
 
-- **WebContent** 用 `<iframe sandbox>`，未接 Electron `<webview>` 注入净化 JS。
-- **Save Page** 由 main 端 fetch（不依赖渲染端 webview 取 HTML）。
-- **AI 摘要** 需在设置中配置 baseUrl/apiKey，未配置时不阻塞搜索。
-- **本地知识库全文搜索** 暂未接 LanceDB（Phase 2）。
-- **Annotation 高亮渲染** 暂未实现（数据模型就位）。
-- **Task Runner** 模板就位，UI 编排器待补。
-- **Web Replay / Network 可视化 / Sync** 在路线图 Phase 3-4。
+- AI 摘要 / Agent 需配置 OpenAI-compatible baseUrl、apiKey 与 model；未配置不阻塞普通搜索。
+- 扫描 PDF 的 OCR 需在 Library 中配置可访问的 Docling 服务地址。
+- WebDAV / S3 的真实端到端验证需要用户提供目标服务和凭据；内置逻辑与模拟协议测试已覆盖。
+- 官方托管 Sync Service、Mobile Companion、Team Workspace 与 Marketplace 仍属于后续生态范围。
