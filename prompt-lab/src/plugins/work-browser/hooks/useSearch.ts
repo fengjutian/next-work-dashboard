@@ -13,6 +13,7 @@ export function useSearch() {
   const requestIdRef = useRef(0);
   const activeRequestRef = useRef<string | null>(null);
   const queryRef = useRef<AggregatedSearchResponse['query'] | null>(null);
+  const lastInputRef = useRef<{ text: string; workspaceId?: string; scope: SearchScope } | null>(null);
 
   useEffect(() => window.electronAPI.workBrowser.search.onProgress((progress) => {
     if (progress.requestId !== activeRequestRef.current || !queryRef.current) return;
@@ -33,16 +34,17 @@ export function useSearch() {
     setLoading(false);
   }, []);
 
-  const run = useCallback(async (text: string, workspaceId?: string, scope: SearchScope = 'workspace') => {
+  const run = useCallback(async (text: string, workspaceId?: string, scope: SearchScope = 'workspace', providerIds?: string[]) => {
     if (!text.trim()) return null;
     const requestId = ++requestIdRef.current;
     if (activeRequestRef.current) void window.electronAPI.workBrowser.search.cancel(activeRequestRef.current);
     const streamId = crypto.randomUUID();
     activeRequestRef.current = streamId;
     queryRef.current = { text: text.trim(), locale: 'zh-CN', safeSearch: true, timeRange: 'all', page: 1, perPage: 20 };
+    lastInputRef.current = { text, workspaceId, scope };
     setLoading(true); setError(null);
     try {
-      const res = (await window.electronAPI.workBrowser.search.start(streamId, { text, workspaceId, scope })) as AggregatedSearchResponse;
+      const res = (await window.electronAPI.workBrowser.search.start(streamId, { text, workspaceId, scope, providerIds })) as AggregatedSearchResponse;
       if (requestId === requestIdRef.current) setData(res);
       return res;
     } catch (e) {
@@ -55,5 +57,10 @@ export function useSearch() {
     }
   }, []);
 
-  return { loading, data, error, run, cancel };
+  const retryProvider = useCallback((providerId: string) => {
+    const input = lastInputRef.current;
+    return input ? run(input.text, input.workspaceId, input.scope, [providerId]) : Promise.resolve(null);
+  }, [run]);
+
+  return { loading, data, error, run, cancel, retryProvider };
 }

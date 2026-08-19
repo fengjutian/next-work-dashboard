@@ -12,6 +12,8 @@ export interface SearchResultsProps {
   data: AggregatedSearchResponse | null;
   loading: boolean;
   onOpen: (url: string) => void;
+  onCancelSearch?: () => void;
+  onRetryProvider?: (providerId: string) => void;
 }
 
 function sourceIcon(source: string) {
@@ -20,7 +22,7 @@ function sourceIcon(source: string) {
   return <Globe size={14} />;
 }
 
-export function SearchResults({ open, onClose, data, loading, onOpen }: SearchResultsProps) {
+export function SearchResults({ open, onClose, data, loading, onOpen, onCancelSearch, onRetryProvider }: SearchResultsProps) {
   const availableProviders = data?.providers.filter((provider) => provider.ok && provider.count > 0) ?? [];
   const unavailableCount = data?.providers.filter((provider) => !provider.ok || provider.count === 0).length ?? 0;
 
@@ -35,7 +37,7 @@ export function SearchResults({ open, onClose, data, loading, onOpen }: SearchRe
       {loading && !data && <Spin tip="多引擎并行搜索中…" style={{ display: 'block', margin: '24px auto' }} />}
       {data && (
         <div className="space-y-4">
-          {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Spin size="small" />搜索引擎正在返回结果，列表会持续更新…</div>}
+          {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Spin size="small" />搜索引擎正在返回结果，列表会持续更新…<button type="button" className="ml-auto text-red-600 hover:underline" onClick={onCancelSearch}>取消</button></div>}
           {data.aiSummary && <AiSummaryCard summary={data.aiSummary} />}
           <div className="rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
@@ -53,6 +55,7 @@ export function SearchResults({ open, onClose, data, loading, onOpen }: SearchRe
                   <CircleSlash2 size={12} />{unavailableCount} 个未返回
                 </span>
               )}
+              {data.providers.filter((provider) => !provider.ok).map((provider) => <button key={`retry-${provider.providerId}`} type="button" className="text-primary hover:underline" onClick={() => onRetryProvider?.(provider.providerId)}>重试 {provider.providerId}</button>)}
             </div>
           </div>
           {data.results.length === 0 ? (

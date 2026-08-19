@@ -60,7 +60,7 @@ export function WorkBrowserPanel() {
   const aiConfigBridgeAvailableRef = useRef(true);
   const webContentRefs = useRef(new Map<string, WebContentHandle>());
   const { tabs, setTabs, activeTab, setActiveTab, documents, annotations, refreshTabs, refreshDocuments, restoreCached } = useWorkspaceResources(activeWorkspaceId);
-  const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
+  const { loading: searchLoading, data: searchData, run: runSearch, cancel: cancelSearch, retryProvider } = useSearch();
   const { cachedPages, displayedPageId, refreshKeys: webviewRefreshKeys, markReady: handlePageReadyChange, evict: evictPages, refresh: refreshPage } = usePageCache(activeTab);
 
   const editDocument = useCallback((document: Document) => {
@@ -482,6 +482,8 @@ export function WorkBrowserPanel() {
         data={searchData}
         loading={searchLoading}
         onOpen={handleOpenResult}
+        onCancelSearch={cancelSearch}
+        onRetryProvider={(providerId) => { void retryProvider(providerId); }}
       />
       <SavePageDialog
         open={saveOpen}
