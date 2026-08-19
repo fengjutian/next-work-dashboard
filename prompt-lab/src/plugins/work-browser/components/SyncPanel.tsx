@@ -14,7 +14,7 @@ export function SyncPanel({ workspaceId }: { workspaceId: string }) {
     ? [['rootPath', 'Syncthing 同步目录']]
     : kind === 'webdav'
       ? [['baseUrl', 'WebDAV URL'], ['username', '用户名'], ['password', '密码']]
-      : [['endpoint', 'S3 Endpoint'], ['region', 'Region'], ['bucket', 'Bucket'], ['accessKeyId', 'Access Key'], ['secretAccessKey', 'Secret Key'], ['prefix', 'Prefix（可选）']], [kind]);
+      : [['endpoint', 'S3 Endpoint'], ['region', 'Region'], ['bucket', 'Bucket'], ['accessKeyId', 'Access Key'], ['secretAccessKey', 'Secret Key'], ['sessionToken', 'Session Token（可选）'], ['prefix', 'Prefix（可选）']], [kind]);
   const target = { id: targetId.trim() || 'default', kind, config };
   const refreshTargets = async () => setSavedTargets(await window.electronAPI.workBrowser.sync.listTargets());
   useEffect(() => { void refreshTargets(); }, []);
