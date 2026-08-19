@@ -147,6 +147,14 @@ const EDITORIAL_STAGES: Array<{ id: EditorialStageId; label: string; scope: 'cha
   { id: 'consistency', label: '全书一致性校验', scope: 'book' },
   { id: 'format', label: '出版格式校验', scope: 'book' },
 ];
+const EDITORIAL_AI_FOCUS: Record<Exclude<EditorialStageId, 'consistency' | 'format'>, string> = {
+  completeness: '核对章节写作目标、核心问题、小节任务和必用材料是否得到实质回答；指出缺失、只有结论没有展开、越界写入其他章节的内容。',
+  structure: '检查每节是否有明确问题，段落是否形成观点—证据—分析，时间线、因果链、对比与转折是否完整；指出重复、跳跃、倒置和机械总结。',
+  facts: '逐条检查日期、数字、人物行动、制度范围、引语、群体态度、首次或唯一等强结论；区分史料记载、现代解释和作者推断，不凭模型记忆宣布已核实。',
+  professional: '按历史类专业编辑标准检查纪年、官职、地名、制度沿革、时代语境、现代分析概念、目的论和后世材料误作同时代事实。',
+  language: '检查错别字、病句、指代、重复、套话、AI腔、句式单调和空泛升华，同时保护准确的专业表达，不为追求文采改变事实强度。',
+  citations: '检查重要主张是否有对应来源，来源能否支持结论强度，引文是否需要原文核对，搜索摘要是否被误作证据，书目信息是否完整。',
+};
 const editorialSignature = (content: string) => `${content.length}:${content.slice(0, 160)}:${content.slice(-160)}`;
 const buildEditorialIssues = (stage: EditorialStageId, content: string, blockers: string[], warnings: string[]): EditorialIssue[] => {
   const issues: EditorialIssue[] = [];
@@ -224,6 +232,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [qualityReports, setQualityReports] = useState<Record<string, ChapterQualityReport>>({});
   const [editorialAudits, setEditorialAudits] = useState<Record<string, Partial<Record<EditorialStageId, EditorialAudit>>>>({});
   const [editorialRunning, setEditorialRunning] = useState<EditorialStageId | null>(null);
+  const [editorialAiStage, setEditorialAiStage] = useState<Exclude<EditorialStageId, 'consistency' | 'format'>>('completeness');
+  const [editorialAiLoading, setEditorialAiLoading] = useState(false);
   const [finalReadConfirmed, setFinalReadConfirmed] = useState(false);
   const [editorialChapterPath, setEditorialChapterPath] = useState('');
   const [reviewSuggestions, setReviewSuggestions] = useState<ReviewSuggestion[]>([]);
@@ -523,6 +533,29 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const audit = editorialAudits[key]?.[stage];
     if (!audit || audit.blockers.length) return;
     setEditorialAudit(key, stage, { ...audit, status: 'passed', confirmedAt: Date.now() });
+  };
+
+  const updateEditorialIssue = (path: string, stage: EditorialStageId, issueId: string, status: EditorialIssue['status']) => setEditorialAudits((current) => {
+    const audit = current[path]?.[stage];
+    if (!audit) return current;
+    return { ...current, [path]: { ...current[path], [stage]: { ...audit, issues: audit.issues?.map((issue) => issue.id === issueId ? { ...issue, status } : issue) } } };
+  });
+
+  const openEditorialIssue = async (path: string, issue: EditorialIssue, applySuggestion = false) => {
+    if (!target || dirty) { notice.warning({ message: '请先保存当前修改', placement: 'bottomRight' }); return; }
+    const read = await window.electronAPI.workspace.readTextFile(target.path, path);
+    if (!read.success || !read.data) { notice.error({ message: '无法读取问题所在章节', description: read.error, placement: 'bottomRight' }); return; }
+    const original = issue.originalText ?? '';
+    const located = original ? read.data.content.indexOf(original) : -1;
+    if (applySuggestion && (issue.suggestion === undefined || located < 0)) { notice.warning({ message: issue.suggestion === undefined ? '该问题没有可直接应用的文本建议' : '正文已经变化，无法安全应用建议', placement: 'bottomRight' }); return; }
+    const nextContent = applySuggestion ? `${read.data.content.slice(0, located)}${issue.suggestion}${read.data.content.slice(located + original.length)}` : read.data.content;
+    setActiveFile(path); setEditorialChapterPath(path); setDocumentContent(nextContent); setSavedContent(read.data.content); setModifiedAt(read.data.modifiedAt); setView('documents'); setEditorMode('edit');
+    if (applySuggestion) updateEditorialIssue(path, issue.stage, issue.id, 'accepted');
+    window.requestAnimationFrame(() => {
+      const start = applySuggestion ? located : located >= 0 ? located : issue.start ?? 0;
+      const length = applySuggestion ? issue.suggestion?.length ?? 0 : original.length;
+      editorRef.current?.focus(); editorRef.current?.setSelectionRange(start, start + length);
+    });
   };
 
   const runBookAudit = async () => {
@@ -1777,6 +1810,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">{([['overview', '规划看板'], ['knowledge', '全书知识库'], ['evidence', '史料证据台账'], ['editorial', '审校流水线'], ['quality', '一致性与门禁'], ['publish', '发布状态']] as const).map(([id, label]) => <Button key={id} size="sm" variant={managementTab === id ? 'default' : 'ghost'} onClick={() => setManagementTab(id)}>{label}</Button>)}<Button size="sm" variant="outline" className="ml-auto" disabled={auditLoading || !target} onClick={runBookAudit}>{auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行全书检查</Button></div>
       <div className="min-h-0 flex-1 overflow-auto p-6">
         {managementTab === 'editorial' && <div className="mx-auto max-w-6xl space-y-5">
+          {(editorialChapterPath || activeFile) && <section className="rounded-xl border border-border bg-card p-5 shadow-sm"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">结构化问题清单</h2><p className="text-xs text-muted-foreground">定位原文；有安全替换建议时可载入编辑器，确认后再保存。</p></div><span className="text-xs text-muted-foreground">{Object.values(editorialAudits[editorialChapterPath || activeFile] ?? {}).flatMap((audit) => audit?.issues ?? []).filter((issue) => issue.status === 'open').length} 项待处理</span></div><div className="max-h-80 space-y-2 overflow-auto">{Object.values(editorialAudits[editorialChapterPath || activeFile] ?? {}).flatMap((audit) => audit?.issues ?? []).map((issue) => <div key={`${issue.stage}-${issue.id}`} className={`rounded-md border p-3 ${issue.status === 'rejected' ? 'opacity-50' : issue.severity === 'blocker' ? 'border-destructive/40' : 'border-amber-500/30'}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-xs font-medium">{EDITORIAL_STAGES.find((stage) => stage.id === issue.stage)?.label} · {issue.type}</div><div className="mt-1 text-xs text-muted-foreground">{issue.message}</div>{issue.originalText && <div className="mt-2 line-clamp-2 rounded bg-muted/60 p-2 font-mono text-[11px]">{issue.originalText}</div>}{issue.suggestion !== undefined && <div className="mt-1 line-clamp-2 rounded bg-emerald-500/10 p-2 text-[11px] text-emerald-800">建议：{issue.suggestion || '删除该套话'}</div>}</div><span className="shrink-0 text-[10px] text-muted-foreground">{issue.status === 'open' ? '待处理' : issue.status === 'accepted' ? '已接受' : '已拒绝'}</span></div>{issue.status === 'open' && <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" disabled={!issue.originalText} onClick={() => void openEditorialIssue(editorialChapterPath || activeFile, issue)}>定位原文</Button>{issue.suggestion !== undefined && <Button size="sm" onClick={() => void openEditorialIssue(editorialChapterPath || activeFile, issue, true)}>载入建议</Button>}<Button size="sm" variant="ghost" onClick={() => updateEditorialIssue(editorialChapterPath || activeFile, issue.stage, issue.id, 'rejected')}>拒绝</Button></div>}</div>)}</div></section>}
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">八阶段审校流水线</h2><p className="mt-1 text-xs text-muted-foreground">章节按顺序完成前六项；全部章节通过后开放全书校验。正文修改并保存后，相关结果自动失效。</p></div><select value={editorialChapterPath || activeFile} onChange={(event) => setEditorialChapterPath(event.target.value)} className="max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">选择章节</option>{managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path)).map((path) => <option key={path} value={path}>{path.split('/').pop()}</option>)}</select></div>
             <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{EDITORIAL_STAGES.filter((stage) => stage.scope === 'chapter').map((stage, index) => { const path = editorialChapterPath || activeFile; const audit = path ? editorialAudits[path]?.[stage.id] : undefined; const statusText = audit?.status === 'passed' ? '已通过' : audit?.status === 'issues' ? `${audit.blockers.length} 项阻断，${audit.warnings.length} 项提示` : audit?.status === 'stale' ? '正文修改后已失效' : '尚未运行'; return <div key={stage.id} className="rounded-lg border border-border p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{index + 1}. {stage.label}</span><span className={`text-xs ${audit?.status === 'passed' ? 'text-emerald-600' : audit?.blockers.length ? 'text-destructive' : 'text-muted-foreground'}`}>{statusText}</span></div><Button size="sm" variant="outline" className="mt-3 w-full" disabled={!path || editorialRunning !== null} onClick={() => void runEditorialStage(stage.id, path)}>{editorialRunning === stage.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}运行检查</Button>{audit?.status === 'issues' && !audit.blockers.length && <Button size="sm" className="mt-2 w-full" onClick={() => confirmEditorialStage(stage.id, path)}>人工确认通过</Button>}<div className="mt-2 max-h-24 overflow-auto text-[11px]">{audit?.blockers.map((item) => <div key={item} className="text-destructive">阻断：{item}</div>)}{audit?.warnings.map((item) => <div key={item} className="text-amber-700">提示：{item}</div>)}</div></div>; })}</div>
