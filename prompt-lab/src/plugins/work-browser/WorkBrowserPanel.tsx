@@ -264,12 +264,21 @@ export function WorkBrowserPanel() {
       const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
       const file = new File([bytes], selected.name, { type: selected.mimeType, lastModified: selected.modifiedAt || Date.now() });
       const parsed = await parseDocument(file);
+      let plainText = parsed.plainText;
+      let sections = parsed.sections.map(({ title, content, page }) => ({ title, content, page }));
+      if (parsed.kind === 'pdf' && plainText.trim().length < 80) {
+        const ocr = await window.electronAPI.workBrowser.document.ocr(selected.path);
+        plainText = ocr.plainText;
+        sections = ocr.pages.length
+          ? ocr.pages.map((page) => ({ title: `第 ${page.page} 页`, content: page.text, page: page.page }))
+          : [{ title: parsed.name, content: ocr.markdown, page: undefined }];
+      }
       await window.electronAPI.workBrowser.document.import({
         workspaceId: activeWorkspace.id,
         sourcePath: selected.path,
         title: parsed.name,
-        plainText: parsed.plainText,
-        sections: parsed.sections.map(({ title, content, page }) => ({ title, content, page })),
+        plainText,
+        sections,
       });
       await refreshDocuments(activeWorkspace.id);
       message.success(`已导入并索引：${parsed.name}`);

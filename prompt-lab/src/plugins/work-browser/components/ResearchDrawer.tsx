@@ -42,6 +42,7 @@ const RESEARCH_FLOW = [
 export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, defaultTopic, onCompleted, onOpenCitation }: ResearchDrawerProps) {
   const [topic, setTopic] = useState(defaultTopic || '');
   const [workspaceId, setWorkspaceId] = useState(defaultWorkspaceId || workspaces[0]?.id || '');
+  const [evidenceStatus, setEvidenceStatus] = useState<Record<string, 'clue' | 'verified' | 'disputed'>>({});
   const { loading, progress, result, error, run } = useResearch();
 
   const handleStart = async () => {
@@ -142,7 +143,15 @@ export function ResearchDrawer({ open, onClose, workspaces, defaultWorkspaceId, 
                   {result.citations.slice(0, 8).map((c, i) => (
                     <Typography.Text key={i} ellipsis style={{ width: '100%' }}>
                       <Tag>{i + 1}</Tag>
-                      <Tag color={c.status === 'verified' ? 'green' : c.status === 'disputed' ? 'red' : 'gold'}>{c.status}</Tag>
+                      <Select
+                        size="small"
+                        value={evidenceStatus[c.id] || c.status}
+                        options={[{ value: 'clue', label: '线索' }, { value: 'verified', label: '已核验' }, { value: 'disputed', label: '有争议' }]}
+                        onChange={(status) => {
+                          setEvidenceStatus((current) => ({ ...current, [c.id]: status }));
+                          void window.electronAPI.workBrowser.research.setEvidenceStatus(c.id, status);
+                        }}
+                      />
                       <button type="button" className="text-left text-primary hover:underline" onClick={() => onOpenCitation?.(c.url)}>{c.title}</button>
                     </Typography.Text>
                   ))}

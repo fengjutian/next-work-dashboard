@@ -31,6 +31,8 @@ import { GraphStore } from '../../core/work-browser/graph/edges';
 import { ResearchEvidenceStore, type EvidenceStatus } from './research-evidence-store';
 import { WorkBrowserSyncService, type SyncTargetInput } from './sync-service';
 import { SyncTargetStore } from './sync-target-store';
+import { parseWithDocling } from './docling';
+import { mapClaimsToEvidence } from '../../core/work-browser/research/evidence-links';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
@@ -97,6 +99,14 @@ export function setupWorkBrowserIPC(): void {
   });
   ipcMain.handle('work-browser:document:import', async (_e, input: Parameters<typeof importParsedDocument>[0]) => {
     return await importParsedDocument(input, workspaces, documents);
+  });
+  ipcMain.handle('work-browser:document:ocr', async (_event, sourcePath: string) => {
+    const baseUrl = workspaces.getSetting('workBrowser.docling.baseUrl');
+    if (!baseUrl) throw new Error('DOCLING_NOT_CONFIGURED');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    try { return await parseWithDocling(sourcePath, baseUrl, controller.signal); }
+    finally { clearTimeout(timer); }
   });
 
   // ── Note ──
@@ -276,6 +286,7 @@ export function setupWorkBrowserIPC(): void {
       taskId: result.task.id,
       report: result.report,
       citations: evidence,
+      claimEvidence: mapClaimsToEvidence(result.report, evidence),
       reportPath: result.reportPath,
       took: result.took,
     };

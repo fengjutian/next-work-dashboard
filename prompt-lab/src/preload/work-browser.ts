@@ -30,6 +30,7 @@ export const workBrowserBridge = {
       ipcRenderer.invoke('work-browser:document:save', input),
     import: (input: { workspaceId: string; sourcePath: string; title: string; plainText: string; sections?: Array<{ title: string; content: string; page?: number }> }) =>
       ipcRenderer.invoke('work-browser:document:import', input),
+    ocr: (sourcePath: string) => ipcRenderer.invoke('work-browser:document:ocr', sourcePath),
   },
   note: {
     list: (workspaceId: string) => ipcRenderer.invoke('work-browser:note:list', workspaceId),
