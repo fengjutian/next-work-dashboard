@@ -67,7 +67,7 @@ export interface Tab {
 
 // ── Document ──
 
-export type DocumentSourceType = 'web' | 'pdf' | 'docx' | 'markdown' | 'note' | 'code';
+export type DocumentSourceType = 'web' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'markdown' | 'note' | 'code';
 
 export interface Document {
   id: DocumentId;

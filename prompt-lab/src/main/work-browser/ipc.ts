@@ -12,6 +12,7 @@ import { WorkspaceStore } from './workspace-store';
 import { DocumentStore } from './document-store';
 import { SearchRouter } from './search-router';
 import { savePageAsMarkdown } from './save';
+import { importParsedDocument } from './import-document';
 import { getCleanerPayload, getWebviewCleanerPreloadPath, setupWorkBrowserSession } from './cleaner';
 import { getMainWindow } from '../globals';
 import { suggestWorkspacesForDocument } from '../../core/work-browser/workspace/auto-group';
@@ -87,6 +88,9 @@ export function setupWorkBrowserIPC(): void {
   });
   ipcMain.handle('work-browser:document:save', async (_e, input: Parameters<typeof savePageAsMarkdown>[0]) => {
     return await savePageAsMarkdown(input, workspaces, documents);
+  });
+  ipcMain.handle('work-browser:document:import', async (_e, input: Parameters<typeof importParsedDocument>[0]) => {
+    return await importParsedDocument(input, workspaces, documents);
   });
 
   // ── Note ──

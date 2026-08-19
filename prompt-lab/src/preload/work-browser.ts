@@ -28,6 +28,8 @@ export const workBrowserBridge = {
     compare: (id: string) => ipcRenderer.invoke('work-browser:document:compare', id),
     save: (input: { workspaceId: string; tabId?: string | null; url: string; html?: string; title?: string }) =>
       ipcRenderer.invoke('work-browser:document:save', input),
+    import: (input: { workspaceId: string; sourcePath: string; title: string; plainText: string; sections?: Array<{ title: string; content: string; page?: number }> }) =>
+      ipcRenderer.invoke('work-browser:document:import', input),
   },
   note: {
     list: (workspaceId: string) => ipcRenderer.invoke('work-browser:note:list', workspaceId),

@@ -505,6 +505,7 @@ export interface ElectronAPI {
       versions: (id: string) => Promise<unknown[]>;
       compare: (id: string) => Promise<{ left: { label: string; content: string }; right: { label: string; content: string } }>;
       save: (input: { workspaceId: string; tabId?: string | null; url: string; html?: string; title?: string }) => Promise<{ documentId: string; contentPath: string; rawPath: string; contentHash: string; wordCount: number; isNewVersion: boolean; diffSummary: string | null }>;
+      import: (input: { workspaceId: string; sourcePath: string; title: string; plainText: string; sections?: Array<{ title: string; content: string; page?: number }> }) => Promise<unknown>;
     };
     note: {
       list: (workspaceId: string) => Promise<unknown[]>;

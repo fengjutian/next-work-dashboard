@@ -35,6 +35,7 @@ import { ResearchDrawer } from './components/ResearchDrawer';
 import { useWorkspaces } from './hooks/useWorkspace';
 import { useSearch } from './hooks/useSearch';
 import { STORAGE_KEYS } from './constants';
+import { parseDocument } from '../document-knowledge/parser';
 
 export function WorkBrowserPanel() {
   const aiApi = useStore((state) => state.aiApi);
@@ -375,6 +376,30 @@ export function WorkBrowserPanel() {
     await handleAddTab(url);
   }, [handleAddTab]);
 
+  const importOfficeDocument = useCallback(async () => {
+    if (!activeWorkspace) return;
+    const picked = await window.electronAPI.pickFile({ accept: '.pdf,.docx,.xlsx,.xls,.pptx' });
+    const selected = Array.isArray(picked) ? picked[0] : picked;
+    if (!selected) return;
+    try {
+      const binary = atob(selected.content);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const file = new File([bytes], selected.name, { type: selected.mimeType, lastModified: selected.modifiedAt || Date.now() });
+      const parsed = await parseDocument(file);
+      await window.electronAPI.workBrowser.document.import({
+        workspaceId: activeWorkspace.id,
+        sourcePath: selected.path,
+        title: parsed.name,
+        plainText: parsed.plainText,
+        sections: parsed.sections.map(({ title, content, page }) => ({ title, content, page })),
+      });
+      await refreshDocuments(activeWorkspace.id);
+      message.success(`已导入并索引：${parsed.name}`);
+    } catch (error) {
+      message.error(`文档导入失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [activeWorkspace, refreshDocuments]);
+
   const handleTabUpdate = useCallback((tabId: string, patch: Partial<Pick<Tab, 'title' | 'url' | 'favicon'>>) => {
     setTabs((current) => current.map((tab) => tab.id === tabId ? { ...tab, ...patch } : tab));
     setActiveTab((current) => current?.id === tabId ? { ...current, ...patch } : current);
@@ -541,6 +566,7 @@ export function WorkBrowserPanel() {
                       onEditDocument={editDocument}
                       onCompareDocument={(document) => { void compareDocument(document); }}
                       onReplayQuery={handleSearch}
+                      onImportDocument={() => void importOfficeDocument()}
                     />
                   ),
                 },

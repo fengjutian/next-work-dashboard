@@ -2,7 +2,7 @@
  * LibraryList — 右侧 Library（已保存文档 + 搜索历史）
  */
 import { Tabs, List, Typography, Empty, Space, Tag } from '../ui';
-import { FilePenLine, FileText, GitCompareArrows, Search } from 'lucide-react';
+import { FilePenLine, FileText, GitCompareArrows, Search, Upload } from 'lucide-react';
 import type { Document, SearchHistoryEntry } from '../../../core/work-browser/types';
 
 export interface LibraryListProps {
@@ -12,9 +12,10 @@ export interface LibraryListProps {
   onEditDocument: (doc: Document) => void;
   onCompareDocument: (doc: Document) => void;
   onReplayQuery: (text: string) => void;
+  onImportDocument: () => void;
 }
 
-export function LibraryList({ documents, history, onOpenDocument, onEditDocument, onCompareDocument, onReplayQuery }: LibraryListProps) {
+export function LibraryList({ documents, history, onOpenDocument, onEditDocument, onCompareDocument, onReplayQuery, onImportDocument }: LibraryListProps) {
   return (
     <Tabs
       size="small"
@@ -25,6 +26,9 @@ export function LibraryList({ documents, history, onOpenDocument, onEditDocument
           label: <span><FileText size={12} /> 文档 ({documents.length})</span>,
           children: (
             <div className="max-h-full overflow-auto p-2">
+              <button type="button" onClick={onImportDocument} className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-primary">
+                <Upload size={13} />导入 PDF / Word / Excel / PowerPoint
+              </button>
               {documents.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有保存的文档" />
               ) : (
