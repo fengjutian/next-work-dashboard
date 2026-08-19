@@ -13,6 +13,7 @@ import { session as electronSession, type Session } from 'electron';
 import { app } from 'electron';
 import { htmlClean } from '../../core/work-browser/parser';
 import { DEFAULT_CLEAN_OPTIONS, type CleanOptions } from '../../core/work-browser/types';
+import { isSafeWebNavigation } from '../../core/work-browser/security/url-policy';
 
 export const WORK_BROWSER_PARTITION = 'persist:work-browser';
 let _session: Session | null = null;
@@ -40,18 +41,26 @@ export function setupWorkBrowserSession(): Session {
   if (_sessionInitPromise) return _session as Session;
   const sess = getWorkBrowserSession();
   _sessionInitPromise = Promise.resolve(sess).then((s) => {
+    s.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    s.setPermissionCheckHandler(() => false);
+    s.setDevicePermissionHandler(() => false);
+    s.setDisplayMediaRequestHandler((_request, callback) => callback({}));
+    s.on('will-download', (event) => event.preventDefault());
+    s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+      if (!isSafeWebNavigation(details.url)) {
+        callback({ cancel: true });
+        return;
+      }
+      try {
+        const host = new URL(details.url).host;
+        const { blockedDomains } = getCleanerPayload();
+        callback({ cancel: blockedDomains.some((d) => host === d || host.endsWith('.' + d)) });
+      } catch {
+        callback({ cancel: true });
+      }
+    });
     const { blockedDomains } = getCleanerPayload();
     if (blockedDomains.length) {
-      s.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
-        try {
-          const host = new URL(details.url).host;
-          if (blockedDomains.some((d) => host === d || host.endsWith('.' + d))) {
-            callback({ cancel: true });
-            return;
-          }
-        } catch { /* ignore */ }
-        callback({ cancel: false });
-      });
       console.log(`[work-browser] session network cleaner: blocked ${blockedDomains.length} domains`);
     }
     return s;

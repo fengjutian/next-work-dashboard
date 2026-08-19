@@ -15,9 +15,12 @@ import type { WorkspaceStore } from './workspace-store';
 import type { DocumentStore } from './document-store';
 import type { DocumentId, TabId, WorkspaceId } from '../../core/work-browser/types';
 import { now } from '../../core/work-browser/types';
+import { assertSafeRemoteUrl } from '../../core/work-browser/security/url-policy';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
+const MAX_HTML_BYTES = 15 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
 
 export interface SavePageInput {
   workspaceId: WorkspaceId;
@@ -38,17 +41,48 @@ export interface SavePageResult {
   diffSummary: string | null;
 }
 
-async function fetchHtml(url: string, signal: AbortSignal): Promise<string> {
+async function fetchHtml(rawUrl: string, signal: AbortSignal, redirectCount = 0): Promise<string> {
+  const url = assertSafeRemoteUrl(rawUrl);
   const res = await fetch(url, {
     signal,
+    redirect: 'manual',
     headers: {
       'User-Agent': DEFAULT_UA,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     },
   });
+  if (res.status >= 300 && res.status < 400) {
+    if (redirectCount >= MAX_REDIRECTS) throw new Error('TOO_MANY_REDIRECTS');
+    const location = res.headers.get('location');
+    if (!location) throw new Error('REDIRECT_WITHOUT_LOCATION');
+    return fetchHtml(new URL(location, url).toString(), signal, redirectCount + 1);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return await res.text();
+  const contentType = res.headers.get('content-type')?.toLowerCase() || '';
+  if (contentType && !contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
+    throw new Error(`UNSUPPORTED_CONTENT_TYPE:${contentType}`);
+  }
+  const declaredLength = Number(res.headers.get('content-length') || 0);
+  if (declaredLength > MAX_HTML_BYTES) throw new Error('PAGE_TOO_LARGE');
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > MAX_HTML_BYTES) throw new Error('PAGE_TOO_LARGE');
+  return new TextDecoder().decode(bytes);
+}
+
+function yamlScalar(value: string): string {
+  return JSON.stringify(value.replace(/\u0000/g, ''));
+}
+
+async function atomicWrite(filePath: string, content: string): Promise<void> {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, content, 'utf8');
+  try {
+    await fs.rename(tempPath, filePath);
+  } catch (error) {
+    await fs.unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function savePageAsMarkdown(
@@ -56,6 +90,7 @@ export async function savePageAsMarkdown(
   workspaceStore: WorkspaceStore,
   documentStore: DocumentStore,
 ): Promise<SavePageResult> {
+  assertSafeRemoteUrl(input.url);
   const ws = workspaceStore.getWorkspace(input.workspaceId);
   if (!ws) throw new Error(`Workspace ${input.workspaceId} not found`);
 
@@ -75,7 +110,7 @@ export async function savePageAsMarkdown(
   const readability = await extractReadability(html);
   const title = input.title || readability.title || input.url;
   const contentHash = computeContentHash(readability.contentText);
-  const contentMd = `---\ntitle: ${title}\nurl: ${input.url}\nauthor: ${readability.author || ''}\npublished: ${readability.publishedAt ? new Date(readability.publishedAt).toISOString() : ''}\ncaptured: ${new Date().toISOString()}\nwordCount: ${readability.wordCount}\n---\n\n# ${title}\n\n${readability.contentMarkdown}\n`;
+  const contentMd = `---\ntitle: ${yamlScalar(title)}\nurl: ${yamlScalar(input.url)}\nauthor: ${yamlScalar(readability.author || '')}\npublished: ${yamlScalar(readability.publishedAt ? new Date(readability.publishedAt).toISOString() : '')}\ncaptured: ${yamlScalar(new Date().toISOString())}\nwordCount: ${readability.wordCount}\n---\n\n# ${title}\n\n${readability.contentMarkdown}\n`;
 
   // 3. 查重
   const existing = documentStore.listDocuments(input.workspaceId).find((d) => d.url === input.url);
@@ -114,8 +149,8 @@ export async function savePageAsMarkdown(
   const previousContentMd = existing && isNewVersion
     ? await fs.readFile(existing.contentPath, 'utf8').catch(() => null)
     : null;
-  await fs.writeFile(contentPath, contentMd, 'utf8');
-  await fs.writeFile(rawPath, html, 'utf8');
+  await atomicWrite(contentPath, contentMd);
+  await atomicWrite(rawPath, html);
   documentStore.upsertDocument({ ...doc, contentPath, rawPath, updatedAt: t, plainText: readability.contentText } as any);
 
   // 6. 异步入向量索引（不阻塞主流程）
