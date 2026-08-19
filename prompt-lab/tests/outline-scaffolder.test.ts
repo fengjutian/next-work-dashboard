@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
+import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
@@ -43,5 +43,18 @@ describe('outline scaffolder', () => {
   it('sorts and deduplicates discovered chapter files by numeric prefix', () => {
     expect(sortChapterPaths(['docs/28-尾声.md', 'docs/02-开端.md', 'docs/12-转折.md', 'docs/02-开端.md']))
       .toEqual(['docs/02-开端.md', 'docs/12-转折.md', 'docs/28-尾声.md']);
+  });
+
+  it('creates a compact reversible text diff', () => {
+    expect(compactTextDiff('秦法彻底摧毁旧制', '秦法显著改变了旧有制度')).toEqual({ prefix: '秦法', removed: '彻底摧毁旧制', added: '显著改变了旧有制度', suffix: '' });
+  });
+
+  it('counts only claims backed by verified evidence in coverage', () => {
+    expect(calculateClaimCoverage([
+      { status: 'supported', evidenceIds: ['verified'] },
+      { status: 'supported', evidenceIds: ['clue'] },
+      { status: 'disputed', evidenceIds: ['verified'] },
+      { status: 'supported', evidenceIds: ['verified', 'clue'] },
+    ], ['verified'])).toEqual({ total: 4, supported: 2, percentage: 50 });
   });
 });

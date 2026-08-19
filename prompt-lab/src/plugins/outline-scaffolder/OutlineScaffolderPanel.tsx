@@ -6,7 +6,7 @@ import { BookOpen, Check, FileText, FolderOpen, GitBranch, Loader2, Save, Sparkl
 import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
-import { chapterStateAfterSave, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
+import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -160,15 +160,8 @@ const EDITORIAL_AI_FOCUS: Record<Exclude<EditorialStageId, 'consistency' | 'form
   citations: '检查重要主张是否有对应来源，来源能否支持结论强度，引文是否需要原文核对，搜索摘要是否被误作证据，书目信息是否完整。',
 };
 const editorialSignature = (content: string) => `${content.length}:${content.slice(0, 160)}:${content.slice(-160)}`;
-const compactDiff = (original: string, replacement: string) => {
-  let prefix = 0;
-  while (prefix < original.length && prefix < replacement.length && original[prefix] === replacement[prefix]) prefix += 1;
-  let suffix = 0;
-  while (suffix < original.length - prefix && suffix < replacement.length - prefix && original[original.length - 1 - suffix] === replacement[replacement.length - 1 - suffix]) suffix += 1;
-  return { prefix: original.slice(0, prefix), removed: original.slice(prefix, original.length - suffix), added: replacement.slice(prefix, replacement.length - suffix), suffix: suffix ? original.slice(-suffix) : '' };
-};
 const EditorialDiff: React.FC<{ original: string; replacement: string }> = ({ original, replacement }) => {
-  const diff = compactDiff(original, replacement);
+  const diff = compactTextDiff(original, replacement);
   return <div className="mt-2 grid gap-2 text-[11px] md:grid-cols-2"><div className="rounded border border-red-500/20 bg-red-500/[0.06] p-2"><div className="mb-1 font-medium text-red-700">原文</div>{diff.prefix}<del className="bg-red-500/20">{diff.removed}</del>{diff.suffix}</div><div className="rounded border border-emerald-500/20 bg-emerald-500/[0.06] p-2"><div className="mb-1 font-medium text-emerald-700">建议稿</div>{diff.prefix}<ins className="bg-emerald-500/20 no-underline">{diff.added}</ins>{diff.suffix}</div></div>;
 };
 const buildEditorialIssues = (stage: EditorialStageId, content: string, blockers: string[], warnings: string[]): EditorialIssue[] => {
@@ -528,10 +521,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
           if (evidence.some((item) => item.status === 'verified') && !evidence.some((item) => item.status === 'verified' && item.anchor?.quote && content.includes(item.anchor.quote))) warnings.push('已核实证据尚未绑定到正文观点');
           const chapterClaims = claims.filter((claim) => claim.chapter === path);
           const verifiedEvidenceIds = new Set(evidence.filter((item) => item.status === 'verified').map((item) => item.id));
-          const supportedClaims = chapterClaims.filter((claim) => claim.status === 'supported' && claim.evidenceIds.some((id) => verifiedEvidenceIds.has(id)));
-          const coverage = chapterClaims.length ? Math.round((supportedClaims.length / chapterClaims.length) * 100) : 0;
+          const coverageResult = calculateClaimCoverage(chapterClaims, verifiedEvidenceIds);
+          const coverage = coverageResult.percentage;
           if (!chapterClaims.length) blockers.push('尚未运行事实准确性校验，无法建立主张—证据关系');
-          else if (coverage < 80) blockers.push(`重要主张证据覆盖率仅 ${coverage}%（${supportedClaims.length}/${chapterClaims.length}），发布门槛为 80%`);
+          else if (coverage < 80) blockers.push(`重要主张证据覆盖率仅 ${coverage}%（${coverageResult.supported}/${coverageResult.total}），发布门槛为 80%`);
           if (chapterClaims.some((claim) => claim.status === 'disputed')) warnings.push('仍有存在争议的主张，请在正文中交代争议边界');
           if (chapterClaims.some((claim) => claim.status === 'unsupported')) blockers.push('仍有明确标记为缺少支持的主张');
         }
@@ -1108,6 +1101,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
   const saveDocument = async () => {
     if (!target || !activeFile || !dirty) return;
+    if (finalReadConfirmed) { notice.warning({ message: '正式成稿已锁定，请先解锁后保存修改', placement: 'bottomRight' }); return; }
     setSaving(true);
     try {
       if (savedContent) {
@@ -2033,7 +2027,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </>}
         {pendingEditorialPatch && activeFile === pendingEditorialPatch.path && <div className="border-b border-border bg-card p-3"><div className="flex items-center justify-between"><div><div className="text-xs font-semibold">审校建议 Diff</div><div className="text-[11px] text-muted-foreground">建议已载入编辑器，保存后正式应用；继续编辑前可撤销。</div></div><Button size="sm" variant="outline" onClick={undoPendingEditorialPatch}>撤销载入</Button></div><EditorialDiff original={pendingEditorialPatch.original} replacement={pendingEditorialPatch.replacement} /></div>}
         {editorMode === 'edit' && activeFile && evidenceRecords.length > 0 && <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2"><span className="shrink-0 text-xs text-muted-foreground">证据绑定</span><select value={selectedEvidenceId} onChange={(event) => setSelectedEvidenceId(event.target.value)} className="min-w-0 max-w-sm flex-1 rounded border border-input bg-background px-2 py-1 text-xs"><option value="">选择史料</option>{evidenceRecords.map((item) => <option key={item.id} value={item.id}>{item.status === 'verified' ? '✓ ' : ''}{item.title}</option>)}</select><Button size="sm" variant="outline" disabled={!selectedEvidenceId} onMouseDown={(event) => event.preventDefault()} onClick={bindEvidenceToSelection}>绑定到选中文字</Button><span className="truncate text-xs text-muted-foreground">先在正文中选择一个完整观点或句子</span></div>}
-        <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea ref={editorRef} value={documentContent} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className="h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none" /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
+        <div className="min-h-0 flex-1 overflow-auto">{documentLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : !activeFile ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一个文档</div> : editorMode === 'edit' ? <textarea ref={editorRef} value={documentContent} readOnly={finalReadConfirmed} onChange={(event) => setDocumentContent(event.target.value)} spellCheck={false} className={`h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none ${finalReadConfirmed ? 'cursor-not-allowed opacity-80' : ''}`} /> : <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert"><ReactMarkdown remarkPlugins={[remarkGfm]}>{documentContent}</ReactMarkdown></article>}</div>
         {activeFile && <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground"><span>{dirty ? '有未保存的修改' : '所有修改已保存'}</span><span title="字数已排除 YAML 头信息、Markdown 标记、链接地址和注释">文章 {articleWordCount.toLocaleString()} 字 · 原始 {documentContent.length.toLocaleString()} 字符</span></div>}
       </main>
       {aiOpen && <aside className="flex min-h-0 flex-col border-l border-border bg-card">

@@ -14,6 +14,20 @@ export interface ChapterDocument {
 export type SplitMode = 'chapter' | 'section' | 'single';
 export type ChapterWorkflowState = 'pending' | 'generating' | 'draft' | 'review' | 'revising' | 'quality' | 'complete' | 'error';
 
+export function compactTextDiff(original: string, replacement: string) {
+  let prefixLength = 0;
+  while (prefixLength < original.length && prefixLength < replacement.length && original[prefixLength] === replacement[prefixLength]) prefixLength += 1;
+  let suffixLength = 0;
+  while (suffixLength < original.length - prefixLength && suffixLength < replacement.length - prefixLength && original[original.length - 1 - suffixLength] === replacement[replacement.length - 1 - suffixLength]) suffixLength += 1;
+  return { prefix: original.slice(0, prefixLength), removed: original.slice(prefixLength, original.length - suffixLength), added: replacement.slice(prefixLength, replacement.length - suffixLength), suffix: suffixLength ? original.slice(-suffixLength) : '' };
+}
+
+export function calculateClaimCoverage(claims: Array<{ status: string; evidenceIds: string[] }>, verifiedEvidenceIds: Iterable<string>) {
+  const verified = new Set(verifiedEvidenceIds);
+  const supported = claims.filter((claim) => claim.status === 'supported' && claim.evidenceIds.some((id) => verified.has(id))).length;
+  return { total: claims.length, supported, percentage: claims.length ? Math.round((supported / claims.length) * 100) : 0 };
+}
+
 export function chapterStateAfterSave(state: ChapterWorkflowState): ChapterWorkflowState {
   if (state === 'pending' || state === 'error') return 'draft';
   if (state === 'revising') return 'quality';
