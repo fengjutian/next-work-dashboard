@@ -563,7 +563,7 @@ export interface ElectronAPI {
       recordEdge: (input: { kind: string; workspaceId: string; fromType: string; fromId: string; toType: string; toId: string; weight?: number; metadata?: Record<string, unknown> }) => Promise<void>;
     };
     sync: {
-      preview: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => Promise<{ local: any[]; remote: any[]; conflicts: any[]; upload: string[]; download: string[] }>;
+      preview: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => Promise<{ local: any[]; remote: any[]; base: any[]; conflicts: Array<{ path: string; kind: string }>; upload: string[]; download: string[]; deleteLocal: string[]; deleteRemote: string[] }>;
       push: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => Promise<{ ok: boolean; conflicts: any[]; transferred: number }>;
       pull: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => Promise<{ ok: boolean; conflicts: any[]; transferred: number }>;
       resolve: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, relativePath: string, resolution: 'local' | 'remote' | 'keep-both') => Promise<{ ok: boolean }>;

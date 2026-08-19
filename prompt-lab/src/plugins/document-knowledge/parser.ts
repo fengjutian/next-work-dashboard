@@ -34,30 +34,77 @@ async function parsePdf(file: File): Promise<DocumentSection[]> {
 
 async function parseWord(file: File): Promise<DocumentSection[]> {
   const mammoth: any = await import('mammoth');
-  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-  const blocks = String(result.value).split(/\n{2,}/).map((value) => value.trim()).filter(Boolean);
-  return blocks.map((content, index) => section(`block-${index + 1}`, content.slice(0, 60), content));
+  const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+  const document = new DOMParser().parseFromString(String(result.value), 'text/html');
+  const sections: DocumentSection[] = [];
+  let title = file.name;
+  let chunks: string[] = [];
+  const flush = () => {
+    const content = chunks.filter(Boolean).join('\n\n').trim();
+    if (content) sections.push(section(`section-${sections.length + 1}`, title, content));
+    chunks = [];
+  };
+  for (const element of Array.from(document.body.children)) {
+    if (/^H[1-6]$/.test(element.tagName)) {
+      flush();
+      title = element.textContent?.trim() || `章节 ${sections.length + 1}`;
+      continue;
+    }
+    if (element.tagName === 'TABLE') {
+      const rows = Array.from(element.querySelectorAll('tr')).map((row) => Array.from(row.querySelectorAll('th,td')).map((cell) => cell.textContent?.trim() || '').join(' | '));
+      chunks.push(rows.join('\n'));
+    } else if (element.matches('ul,ol')) {
+      chunks.push(Array.from(element.querySelectorAll(':scope > li')).map((item, index) => `${element.tagName === 'OL' ? `${index + 1}.` : '-'} ${item.textContent?.trim() || ''}`).join('\n'));
+    } else {
+      chunks.push(element.textContent?.trim() || '');
+    }
+  }
+  flush();
+  return sections;
 }
 
 async function parseExcel(file: File): Promise<DocumentSection[]> {
-  const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
-  return workbook.SheetNames.map((name, index) => section(
-    `sheet-${index + 1}`,
-    name,
-    XLSX.utils.sheet_to_csv(workbook.Sheets[name], { blankrows: false }),
-  ));
+  const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array', cellFormula: true, cellDates: true });
+  return workbook.SheetNames.map((name, index) => {
+    const sheet = workbook.Sheets[name];
+    const formulas: string[] = [];
+    const links: string[] = [];
+    const comments: string[] = [];
+    for (const [address, rawCell] of Object.entries(sheet)) {
+      if (address.startsWith('!')) continue;
+      const cell = rawCell as XLSX.CellObject;
+      if (cell.f) formulas.push(`${address}: =${cell.f}`);
+      if (cell.l?.Target) links.push(`${address}: ${cell.l.Target}`);
+      for (const comment of cell.c || []) if (comment.t) comments.push(`${address}: ${comment.t}`);
+    }
+    const details = [
+      XLSX.utils.sheet_to_csv(sheet, { blankrows: false }),
+      formulas.length ? `### 公式\n${formulas.join('\n')}` : '',
+      links.length ? `### 超链接\n${links.join('\n')}` : '',
+      comments.length ? `### 批注\n${comments.join('\n')}` : '',
+    ].filter(Boolean).join('\n\n');
+    return section(`sheet-${index + 1}`, name, details);
+  });
 }
 
 async function parsePowerPoint(file: File): Promise<DocumentSection[]> {
-  const { parsePptxFile } = await import('@/plugins/ppt-preview/convert');
-  const result = await parsePptxFile(file);
+  const [{ parsePptxFile }, JSZipModule] = await Promise.all([import('@/plugins/ppt-preview/convert'), import('jszip')]);
+  const [result, zip] = await Promise.all([parsePptxFile(file), new JSZipModule.default().loadAsync(await file.arrayBuffer())]);
   if (result.status === 'error' || !result.slides) throw new Error(result.error ?? 'PPTX 解析失败');
-  return result.slides.map((slide) => section(
-    `slide-${slide.index}`,
-    slide.title || `第 ${slide.index} 页`,
-    [slide.title, slide.body].filter(Boolean).join('\n'),
-    slide.index,
-  ));
+  return Promise.all(result.slides.map(async (slide) => {
+    const notesFile = zip.file(`ppt/notesSlides/notesSlide${slide.index}.xml`);
+    let notes = '';
+    if (notesFile) {
+      const xml = new DOMParser().parseFromString(await notesFile.async('text'), 'text/xml');
+      notes = Array.from(xml.querySelectorAll('a\\:t, t')).map((node) => node.textContent?.trim() || '').filter(Boolean).join('\n');
+    }
+    return section(
+      `slide-${slide.index}`,
+      slide.title || `第 ${slide.index} 页`,
+      [slide.title, slide.body, notes ? `### 演讲者备注\n${notes}` : ''].filter(Boolean).join('\n'),
+      slide.index,
+    );
+  }));
 }
 
 export async function parseDocument(file: File): Promise<ParsedDocument> {
