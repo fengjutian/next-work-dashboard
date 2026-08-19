@@ -50,9 +50,9 @@ export const workBrowserBridge = {
   },
   search: {
     providers: () => ipcRenderer.invoke('work-browser:search:providers'),
-    run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) =>
+    run: (input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all'; providerIds?: string[] }) =>
       ipcRenderer.invoke('work-browser:search:run', input),
-    start: (requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) =>
+    start: (requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all'; providerIds?: string[] }) =>
       ipcRenderer.invoke('work-browser:search:start', requestId, input),
     cancel: (requestId: string) => ipcRenderer.invoke('work-browser:search:cancel', requestId),
     onProgress: (callback: (progress: { requestId: string; results: unknown[]; providers: unknown[]; took: number }) => void) => {

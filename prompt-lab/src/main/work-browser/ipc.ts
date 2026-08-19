@@ -383,10 +383,10 @@ export function setupWorkBrowserIPC(): void {
   // ── Search ──
 
   ipcMain.handle('work-browser:search:providers', () => search.listProviders());
-  ipcMain.handle('work-browser:search:run', async (_e, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => {
+  ipcMain.handle('work-browser:search:run', async (_e, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all'; providerIds?: string[] }) => {
     return await search.runSearch(input);
   });
-  ipcMain.handle('work-browser:search:start', async (event, requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }) => {
+  ipcMain.handle('work-browser:search:start', async (event, requestId: string, input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all'; providerIds?: string[] }) => {
     searchRequests.get(requestId)?.abort();
     const controller = new AbortController();
     searchRequests.set(requestId, controller);

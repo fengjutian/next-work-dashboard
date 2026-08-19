@@ -52,7 +52,7 @@ export function SyncPanel({ workspaceId }: { workspaceId: string }) {
       { value: 'syncthing', label: 'Syncthing 目录' }, { value: 'webdav', label: 'WebDAV' }, { value: 's3', label: 'S3 Compatible' },
     ]} />
     <Input value={targetId} placeholder="配置名称" onChange={(event) => setTargetId(event.target.value)} />
-    {savedTargets.length > 0 && <Select placeholder="载入已保存配置" value={undefined} onChange={(id) => void loadTarget(id)} options={savedTargets.map((item) => ({ value: item.id, label: `${item.id} · ${item.kind}` }))} />}
+    {savedTargets.length > 0 && <Select value={undefined} onChange={(id) => void loadTarget(id)} options={savedTargets.map((item) => ({ value: item.id, label: `载入 ${item.id} · ${item.kind}` }))} />}
     {fields.map(([key, label]) => <Input key={key} type={/password|secret/i.test(key) ? 'password' : 'text'} value={config[key] || ''} placeholder={label} onChange={(event) => setConfig((current) => ({ ...current, [key]: event.target.value }))} />)}
     <Space wrap><Button onClick={() => void saveTarget()}>安全保存配置</Button><Button loading={busy} onClick={() => void inspect()}>预览</Button><Button loading={busy} onClick={() => void transfer('push')}>推送</Button><Button loading={busy} onClick={() => void transfer('pull')}>拉取</Button></Space>
     {preview && <div className="space-y-2 rounded-lg border border-border p-3 text-xs">

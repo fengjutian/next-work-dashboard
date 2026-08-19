@@ -14,6 +14,7 @@ import type { WorkspaceStore } from './workspace-store';
 
 export class SearchRouter {
   private providers: SearchProvider[];
+  private health = new Map<string, { failures: number; retryAfter: number }>();
 
   constructor(
     private store: WorkspaceStore,
@@ -27,7 +28,7 @@ export class SearchRouter {
     return this.providers.map((p) => ({ id: p.id, name: p.name, capabilities: p.capabilities }));
   }
 
-  async runSearch(input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all' }, options: {
+  async runSearch(input: { text: string; locale?: string; perPage?: number; workspaceId?: string; scope?: 'web' | 'workspace' | 'library' | 'all'; providerIds?: string[] }, options: {
     signal?: AbortSignal;
     onProgress?: (progress: { results: AggregatedSearchResponse['results']; providers: AggregatedSearchResponse['providers']; took: number }) => void;
   } = {}): Promise<AggregatedSearchResponse> {
@@ -49,7 +50,11 @@ export class SearchRouter {
       ? (scope === 'workspace' ? { kind: 'workspace', workspaceId: input.workspaceId } : { kind: 'library' })
       : { kind: 'off' };
 
-    const response = await aggregateSearch(this.providers, query, {
+    const explicitlySelected = new Set(input.providerIds || []);
+    const providers = this.providers.filter((provider) => explicitlySelected.size
+      ? explicitlySelected.has(provider.id)
+      : (this.health.get(provider.id)?.retryAfter || 0) <= Date.now());
+    const response = await aggregateSearch(providers, query, {
       timeoutMs: 8000,
       concurrency: 4,
       localDb: useLocal ? this.db : undefined,
@@ -61,10 +66,18 @@ export class SearchRouter {
         return await summarizeResults(results, query, config);
       },
     });
+    for (const status of response.providers) {
+      if (status.providerId === 'local') continue;
+      if (status.ok) this.health.delete(status.providerId);
+      else {
+        const failures = (this.health.get(status.providerId)?.failures || 0) + 1;
+        this.health.set(status.providerId, { failures, retryAfter: failures >= 3 ? Date.now() + Math.min(300_000, 10_000 * (2 ** (failures - 3))) : 0 });
+      }
+    }
     this.store.appendSearchHistory({
       workspaceId: (input.workspaceId as any) || null,
       text: query.text,
-      providers: [...this.providers.map((p) => p.id), ...(useLocal ? ['local'] : [])],
+      providers: [...providers.map((p) => p.id), ...(useLocal ? ['local'] : [])],
       resultCount: response.results.length,
       executedAt: Date.now(),
     });
