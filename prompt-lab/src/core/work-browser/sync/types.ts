@@ -35,6 +35,14 @@ export interface SyncConflict {
   remote: SyncManifestEntry;
 }
 
+export interface IncrementalSyncPlan {
+  upload: string[];
+  download: string[];
+  deleteLocal: string[];
+  deleteRemote: string[];
+  conflicts: Array<{ path: string; kind: 'both-modified' | 'local-modified-remote-deleted' | 'remote-modified-local-deleted' }>;
+}
+
 export function normalizeSyncPath(value: string): string {
   const normalized = value.replace(/\\/g, '/').replace(/^\/+/, '').split('/').filter(Boolean);
   if (!normalized.length || normalized.some((part) => part === '.' || part === '..' || part.includes('\0'))) {
@@ -60,4 +68,33 @@ export function detectSyncConflicts(
     if (l.hash !== previous && r.hash !== previous) conflicts.push({ path, local: l, remote: r });
   }
   return conflicts;
+}
+
+export function buildIncrementalSyncPlan(base: SyncManifestEntry[], local: SyncManifestEntry[], remote: SyncManifestEntry[]): IncrementalSyncPlan {
+  const b = new Map(base.map((entry) => [entry.path, entry]));
+  const l = new Map(local.map((entry) => [entry.path, entry]));
+  const r = new Map(remote.map((entry) => [entry.path, entry]));
+  const plan: IncrementalSyncPlan = { upload: [], download: [], deleteLocal: [], deleteRemote: [], conflicts: [] };
+  for (const filePath of new Set([...b.keys(), ...l.keys(), ...r.keys()])) {
+    const baseEntry = b.get(filePath);
+    const localEntry = l.get(filePath);
+    const remoteEntry = r.get(filePath);
+    if (localEntry && remoteEntry) {
+      if (localEntry.hash === remoteEntry.hash) continue;
+      const localChanged = !baseEntry || localEntry.hash !== baseEntry.hash;
+      const remoteChanged = !baseEntry || remoteEntry.hash !== baseEntry.hash;
+      if (localChanged && remoteChanged) plan.conflicts.push({ path: filePath, kind: 'both-modified' });
+      else if (localChanged) plan.upload.push(filePath);
+      else plan.download.push(filePath);
+    } else if (localEntry) {
+      if (!baseEntry) plan.upload.push(filePath);
+      else if (localEntry.hash === baseEntry.hash) plan.deleteLocal.push(filePath);
+      else plan.conflicts.push({ path: filePath, kind: 'local-modified-remote-deleted' });
+    } else if (remoteEntry) {
+      if (!baseEntry) plan.download.push(filePath);
+      else if (remoteEntry.hash === baseEntry.hash) plan.deleteRemote.push(filePath);
+      else plan.conflicts.push({ path: filePath, kind: 'remote-modified-local-deleted' });
+    }
+  }
+  return plan;
 }
