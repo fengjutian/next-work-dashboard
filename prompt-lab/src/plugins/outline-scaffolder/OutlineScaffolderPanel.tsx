@@ -35,7 +35,11 @@ import {
 } from "./publication-export";
 import { migrateOutlineProject } from "./project-migrations";
 import { checksumText, createReleaseCandidate } from "./delivery";
-import { scheduleRetry, stableContentKey, type RetryJob } from "./review-runtime";
+import {
+  scheduleRetry,
+  stableContentKey,
+  type RetryJob,
+} from "./review-runtime";
 import {
   EDITORIAL_PRESETS,
   assessNarrative,
@@ -466,7 +470,10 @@ interface AiExecutionLog {
   outputChars: number;
   success: boolean;
 }
-interface EditorialRetryPayload { stage: Exclude<EditorialStageId, "consistency" | "format">; path: string }
+interface EditorialRetryPayload {
+  stage: Exclude<EditorialStageId, "consistency" | "format">;
+  path: string;
+}
 interface ReviewSuggestion {
   id: string;
   section: string;
@@ -843,7 +850,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
     );
   const [editorialAiLoading, setEditorialAiLoading] = useState(false);
   const aiReviewCacheRef = useRef<Record<string, string>>({});
-  const [aiRetryQueue, setAiRetryQueue] = useState<Array<RetryJob<EditorialRetryPayload>>>([]);
+  const [aiRetryQueue, setAiRetryQueue] = useState<
+    Array<RetryJob<EditorialRetryPayload>>
+  >([]);
   const [editorialBatchRunning, setEditorialBatchRunning] = useState(false);
   const [editorialBatchProgress, setEditorialBatchProgress] = useState({
     completed: 0,
@@ -888,7 +897,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [personRelations, setPersonRelations] = useState<PersonRelation[]>([]);
   const [personPresences, setPersonPresences] = useState<PersonPresence[]>([]);
   const [placeMappings, setPlaceMappings] = useState<PlaceMapping[]>([]);
-  const [historicalMapYear, setHistoricalMapYear] = useState<number | undefined>();
+  const [historicalMapYear, setHistoricalMapYear] = useState<
+    number | undefined
+  >();
   const [historicalTermRules, setHistoricalTermRules] = useState<
     HistoricalTermRule[]
   >([]);
@@ -949,7 +960,16 @@ export const OutlineScaffolderPanel: React.FC = () => {
     | "quality"
     | "publish"
   >("overview");
-  const [advancedSection, setAdvancedSection] = useState<"dashboard" | "analysis" | "sources" | "world" | "drafting" | "visualization" | "collaboration" | "delivery">("dashboard");
+  const [advancedSection, setAdvancedSection] = useState<
+    | "dashboard"
+    | "analysis"
+    | "sources"
+    | "world"
+    | "drafting"
+    | "visualization"
+    | "collaboration"
+    | "delivery"
+  >("dashboard");
   const [auditLoading, setAuditLoading] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [manifestSyncState, setManifestSyncState] = useState<
@@ -1729,7 +1749,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
           content: `书名：${projectTitle}\n章节：${path.split("/").pop()}\n写作目标：${brief.goal || "未填写"}\n核心问题：${brief.keyQuestions || "未填写"}\n必用材料：${brief.requiredSources || "未填写"}\n避免重复：${brief.avoidTopics || "未填写"}\n\n${aiConstraintBlock}\n\n证据台账：\n${evidence}\n\n正文：\n${read.data.content}`,
         },
       ];
-      const cacheKey = stableContentKey([stage, path, aiApi.model, read.data.content, evidence, aiConstraintBlock]);
+      const cacheKey = stableContentKey([
+        stage,
+        path,
+        aiApi.model,
+        read.data.content,
+        evidence,
+        aiConstraintBlock,
+      ]);
       let raw = aiReviewCacheRef.current[cacheKey] ?? "";
       if (!raw) {
         for await (const chunk of provider.chat(messages, {
@@ -1737,7 +1764,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
           temperature: 0.1,
           maxTokens: 6_000,
           stream: false,
-        })) raw += chunk.delta || "";
+        }))
+          raw += chunk.delta || "";
         aiReviewCacheRef.current[cacheKey] = raw;
       }
       const json = raw.match(/\[[\s\S]*\]/)?.[0];
@@ -1843,7 +1871,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
         });
       return true;
     } catch (error) {
-      if (path) setAiRetryQueue((current) => scheduleRetry(current, { stage, path }, error));
+      if (path)
+        setAiRetryQueue((current) =>
+          scheduleRetry(current, { stage, path }, error),
+        );
       if (!silent)
         notice.error({
           message: "AI 深度审校失败",
@@ -1922,8 +1953,21 @@ export const OutlineScaffolderPanel: React.FC = () => {
   };
   const retryFailedAiReviews = async () => {
     const due = aiRetryQueue.filter((job) => job.nextAttemptAt <= Date.now());
-    for (const job of due) { const success = await runEditorialAiStage(job.payload.stage, job.payload.path, true); if (success) setAiRetryQueue((current) => current.filter((item) => item.id !== job.id)); }
-    notice.info({ message: `AI 重试完成：处理 ${due.length} 项，队列剩余 ${aiRetryQueue.length} 项`, placement: "bottomRight" });
+    for (const job of due) {
+      const success = await runEditorialAiStage(
+        job.payload.stage,
+        job.payload.path,
+        true,
+      );
+      if (success)
+        setAiRetryQueue((current) =>
+          current.filter((item) => item.id !== job.id),
+        );
+    }
+    notice.info({
+      message: `AI 重试完成：处理 ${due.length} 项，队列剩余 ${aiRetryQueue.length} 项`,
+      placement: "bottomRight",
+    });
   };
 
   const confirmEditorialStage = (
@@ -3127,18 +3171,100 @@ export const OutlineScaffolderPanel: React.FC = () => {
   };
   const restoreProjectBackup = async () => {
     if (!target) return;
-    const manifestPath = window.prompt("输入备份清单路径", activeProject?.subfolder ? `${activeProject.subfolder}/backups/` : "backups/");
+    const manifestPath = window.prompt(
+      "输入备份清单路径",
+      activeProject?.subfolder
+        ? `${activeProject.subfolder}/backups/`
+        : "backups/",
+    );
     if (!manifestPath) return;
-    const resolved = manifestPath.endsWith("BACKUP-MANIFEST.json") ? manifestPath : `${manifestPath.replace(/\/$/, "")}/BACKUP-MANIFEST.json`;
+    const resolved = manifestPath.endsWith("BACKUP-MANIFEST.json")
+      ? manifestPath
+      : `${manifestPath.replace(/\/$/, "")}/BACKUP-MANIFEST.json`;
     try {
-      const readManifest = await window.electronAPI.workspace.readTextFile(target.path, resolved); if (!readManifest.success || !readManifest.data) throw new Error(readManifest.error || "备份清单不存在");
-      const parsed = JSON.parse(readManifest.data.content) as { files?: Array<{ path: string; checksum: string }>; sourceMap?: Array<{ sourcePath: string; backupPath: string }> };
-      const entries = await Promise.all((parsed.sourceMap ?? []).map(async (mapping) => { const backup = await window.electronAPI.workspace.readTextFile(target.path, mapping.backupPath); if (!backup.success || !backup.data) throw new Error(`无法读取 ${mapping.backupPath}`); const expected = parsed.files?.find((file) => file.path === mapping.backupPath)?.checksum; if (expected && checksumText(backup.data.content) !== expected) throw new Error(`备份校验失败：${mapping.sourcePath}`); const current = await window.electronAPI.workspace.readTextFile(target.path, mapping.sourcePath); return { ...mapping, content: backup.data.content, current }; }));
-      const changed = entries.filter((entry) => !entry.current.success || entry.current.data?.content !== entry.content); if (!changed.length) { notice.info({ message: "备份与当前项目一致", placement: "bottomRight" }); return; }
-      if (!window.confirm(`将从校验通过的备份恢复 ${changed.length} 个文件。当前内容会先由你现有的项目备份机制保留。继续？`)) return;
-      for (const entry of changed) { if (entry.current.success && entry.current.data) await window.electronAPI.workspace.writeTextFile(target.path, entry.sourcePath, entry.content, { encoding: "utf8", lineEnding: "LF", expectedModifiedAt: entry.current.data.modifiedAt }); else await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: "create", path: entry.sourcePath, content: entry.content, encoding: "utf8", lineEnding: "LF" }]); }
-      notice.success({ message: `已恢复 ${changed.length} 个文件`, description: "请重新打开项目以载入恢复内容。", placement: "bottomRight" });
-    } catch (error) { notice.error({ message: "备份恢复失败", description: error instanceof Error ? error.message : String(error), placement: "bottomRight" }); }
+      const readManifest = await window.electronAPI.workspace.readTextFile(
+        target.path,
+        resolved,
+      );
+      if (!readManifest.success || !readManifest.data)
+        throw new Error(readManifest.error || "备份清单不存在");
+      const parsed = JSON.parse(readManifest.data.content) as {
+        files?: Array<{ path: string; checksum: string }>;
+        sourceMap?: Array<{ sourcePath: string; backupPath: string }>;
+      };
+      const entries = await Promise.all(
+        (parsed.sourceMap ?? []).map(async (mapping) => {
+          const backup = await window.electronAPI.workspace.readTextFile(
+            target.path,
+            mapping.backupPath,
+          );
+          if (!backup.success || !backup.data)
+            throw new Error(`无法读取 ${mapping.backupPath}`);
+          const expected = parsed.files?.find(
+            (file) => file.path === mapping.backupPath,
+          )?.checksum;
+          if (expected && checksumText(backup.data.content) !== expected)
+            throw new Error(`备份校验失败：${mapping.sourcePath}`);
+          const current = await window.electronAPI.workspace.readTextFile(
+            target.path,
+            mapping.sourcePath,
+          );
+          return { ...mapping, content: backup.data.content, current };
+        }),
+      );
+      const changed = entries.filter(
+        (entry) =>
+          !entry.current.success ||
+          entry.current.data?.content !== entry.content,
+      );
+      if (!changed.length) {
+        notice.info({
+          message: "备份与当前项目一致",
+          placement: "bottomRight",
+        });
+        return;
+      }
+      if (
+        !window.confirm(
+          `将从校验通过的备份恢复 ${changed.length} 个文件。当前内容会先由你现有的项目备份机制保留。继续？`,
+        )
+      )
+        return;
+      for (const entry of changed) {
+        if (entry.current.success && entry.current.data)
+          await window.electronAPI.workspace.writeTextFile(
+            target.path,
+            entry.sourcePath,
+            entry.content,
+            {
+              encoding: "utf8",
+              lineEnding: "LF",
+              expectedModifiedAt: entry.current.data.modifiedAt,
+            },
+          );
+        else
+          await window.electronAPI.workspace.mutateFiles(target.path, [
+            {
+              kind: "create",
+              path: entry.sourcePath,
+              content: entry.content,
+              encoding: "utf8",
+              lineEnding: "LF",
+            },
+          ]);
+      }
+      notice.success({
+        message: `已恢复 ${changed.length} 个文件`,
+        description: "请重新打开项目以载入恢复内容。",
+        placement: "bottomRight",
+      });
+    } catch (error) {
+      notice.error({
+        message: "备份恢复失败",
+        description: error instanceof Error ? error.message : String(error),
+        placement: "bottomRight",
+      });
+    }
   };
   const addCommentFromSelection = () => {
     if (!activeFile || !editorRef.current) return;
@@ -5334,19 +5460,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
             }),
           ),
         ),
-        window.electronAPI.outlineResearch
-          .search(queries)
-          .catch((error) => ({
-            results: [],
-            providers: [
-              {
-                providerId: "historical-fallback",
-                ok: false,
-                count: 0,
-                error: error instanceof Error ? error.message : String(error),
-              },
-            ],
-          })),
+        window.electronAPI.outlineResearch.search(queries).catch((error) => ({
+          results: [],
+          providers: [
+            {
+              providerId: "historical-fallback",
+              ok: false,
+              count: 0,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        })),
       ]);
       const unique = new Map<string, ResearchSourceCard>();
       const workResults = workSearches.flatMap((entry) =>
@@ -6420,8 +6544,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const manifest =
         JSON.stringify(
           {
-            schemaVersion: 9,
-            version: 9,
+            schemaVersion: 10,
+            version: 10,
             name: projectTitle,
             requirement: bookRequirement,
             source,
@@ -7086,7 +7210,31 @@ export const OutlineScaffolderPanel: React.FC = () => {
             </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-6">
-            {managementTab === "advanced" && <nav className="mx-auto mb-5 flex max-w-7xl flex-wrap gap-2 rounded-xl border border-border bg-card p-2">{([['dashboard', '总览'], ['analysis', '全书分析'], ['sources', '史料与引用'], ['world', '人物·地名·年代'], ['drafting', '智能成稿'], ['visualization', '图谱与自动化'], ['collaboration', '协作签核'], ['delivery', '交付发布']] as const).map(([id, label]) => <Button key={id} size="sm" variant={advancedSection === id ? 'default' : 'ghost'} onClick={() => setAdvancedSection(id)}>{label}</Button>)}</nav>}
+            {managementTab === "advanced" && (
+              <nav className="mx-auto mb-5 flex max-w-7xl flex-wrap gap-2 rounded-xl border border-border bg-card p-2">
+                {(
+                  [
+                    ["dashboard", "总览"],
+                    ["analysis", "全书分析"],
+                    ["sources", "史料与引用"],
+                    ["world", "人物·地名·年代"],
+                    ["drafting", "智能成稿"],
+                    ["visualization", "图谱与自动化"],
+                    ["collaboration", "协作签核"],
+                    ["delivery", "交付发布"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <Button
+                    key={id}
+                    size="sm"
+                    variant={advancedSection === id ? "default" : "ghost"}
+                    onClick={() => setAdvancedSection(id)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </nav>
+            )}
             {managementTab === "advanced" && advancedSection === "delivery" && (
               <div className="mx-auto mb-5 max-w-7xl space-y-5">
                 <section className="rounded-xl border border-border bg-card p-4">
@@ -7127,10 +7275,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
                       >
                         导出 HTML 印刷稿
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => void exportPublicationFormats()}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void exportPublicationFormats()}
+                      >
                         导出 DOCX / PDF / EPUB
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => void restoreProjectBackup()}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void restoreProjectBackup()}
+                      >
                         备份恢复向导
                       </Button>
                     </div>
@@ -7311,9 +7467,55 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   </section>
                 </div>
                 <section className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">历史地理图</h3><p className="text-xs text-muted-foreground">按经纬度投影古今地名，并可按年代过滤辖属。</p></div><input type="number" value={historicalMapYear ?? ""} onChange={(event) => setHistoricalMapYear(event.target.value ? Number(event.target.value) : undefined)} placeholder="筛选年份" className="w-28 rounded border border-input bg-background p-1 text-xs" /></div>
-                  <svg viewBox="0 0 720 420" className="mt-3 h-72 w-full rounded bg-muted/20">{historicalMapPoints.map((point) => <g key={point.id} opacity={point.active ? 1 : 0.2}><circle cx={point.x} cy={point.y} r="8" className="fill-primary stroke-background" /><text x={point.x + 12} y={point.y + 4} fontSize="12" fill="currentColor">{point.historicalName} · {point.modernName}</text></g>)}</svg>
-                  {!historicalMapPoints.length && <div className="py-8 text-center text-xs text-muted-foreground">请在“人物·地名·年代”中为地名补充经纬度。</div>}
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold">历史地理图</h3>
+                      <p className="text-xs text-muted-foreground">
+                        按经纬度投影古今地名，并可按年代过滤辖属。
+                      </p>
+                    </div>
+                    <input
+                      type="number"
+                      value={historicalMapYear ?? ""}
+                      onChange={(event) =>
+                        setHistoricalMapYear(
+                          event.target.value
+                            ? Number(event.target.value)
+                            : undefined,
+                        )
+                      }
+                      placeholder="筛选年份"
+                      className="w-28 rounded border border-input bg-background p-1 text-xs"
+                    />
+                  </div>
+                  <svg
+                    viewBox="0 0 720 420"
+                    className="mt-3 h-72 w-full rounded bg-muted/20"
+                  >
+                    {historicalMapPoints.map((point) => (
+                      <g key={point.id} opacity={point.active ? 1 : 0.2}>
+                        <circle
+                          cx={point.x}
+                          cy={point.y}
+                          r="8"
+                          className="fill-primary stroke-background"
+                        />
+                        <text
+                          x={point.x + 12}
+                          y={point.y + 4}
+                          fontSize="12"
+                          fill="currentColor"
+                        >
+                          {point.historicalName} · {point.modernName}
+                        </text>
+                      </g>
+                    ))}
+                  </svg>
+                  {!historicalMapPoints.length && (
+                    <div className="py-8 text-center text-xs text-muted-foreground">
+                      请在“人物·地名·年代”中为地名补充经纬度。
+                    </div>
+                  )}
                 </section>
                 <section className="rounded-xl border border-border bg-card p-4">
                   <h3 className="font-semibold">发布说明</h3>
@@ -7607,262 +7809,263 @@ export const OutlineScaffolderPanel: React.FC = () => {
                 </div>
               </div>
             )}
-            {managementTab === "advanced" && advancedSection === "visualization" && (
-              <div className="mx-auto mb-5 max-w-7xl space-y-5">
-                <section className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex flex-wrap justify-between gap-3">
-                    <div>
-                      <h2 className="font-semibold">可视化与自动化工作台</h2>
-                      <p className="text-xs text-muted-foreground">
-                        关系、时间、证据和质量视图，以及任务、恢复和增量回归。
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={generateTasksFromIssues}
-                      >
-                        问题批量转任务
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void loadVersionFiles()}
-                      >
-                        载入快照列表
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void stageSnapshotRestore()}
-                      >
-                        恢复所选快照
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => void runIncrementalReview()}
-                      >
-                        增量回归审校
-                      </Button>
-                    </div>
-                  </div>
-                  {affectedChapters.length > 0 && (
-                    <div className="mt-3 text-xs text-primary">
-                      最近受影响章节：
-                      {affectedChapters
-                        .map((item) => item.split("/").pop())
-                        .join("、")}
-                    </div>
-                  )}
-                </section>
-                <div className="grid gap-5 lg:grid-cols-2">
+            {managementTab === "advanced" &&
+              advancedSection === "visualization" && (
+                <div className="mx-auto mb-5 max-w-7xl space-y-5">
                   <section className="rounded-xl border border-border bg-card p-4">
-                    <h3 className="font-semibold">人物关系图</h3>
-                    <svg
-                      viewBox="0 0 720 420"
-                      className="mt-3 h-72 w-full rounded bg-muted/20"
-                    >
-                      {relationshipGraph.edges.map((edge) => {
-                        const from = relationshipGraph.nodes.find(
-                          (item) => item.id === edge.from,
-                        );
-                        const to = relationshipGraph.nodes.find(
-                          (item) => item.id === edge.to,
-                        );
-                        if (!from || !to) return null;
-                        return (
-                          <g key={edge.id}>
-                            <line
-                              x1={from.x}
-                              y1={from.y}
-                              x2={to.x}
-                              y2={to.y}
-                              stroke="currentColor"
-                              opacity="0.25"
-                            />
-                            <text
-                              x={(from.x + to.x) / 2}
-                              y={(from.y + to.y) / 2}
-                              fontSize="11"
-                              fill="currentColor"
-                            >
-                              {edge.label}
-                            </text>
-                          </g>
-                        );
-                      })}
-                      {relationshipGraph.nodes.map((node) => (
-                        <g key={node.id}>
-                          <circle
-                            cx={node.x}
-                            cy={node.y}
-                            r="28"
-                            className="fill-primary/15 stroke-primary"
-                          />
-                          <text
-                            x={node.x}
-                            y={node.y + 4}
-                            textAnchor="middle"
-                            fontSize="12"
-                            fill="currentColor"
-                          >
-                            {node.label.slice(0, 6)}
-                          </text>
-                        </g>
-                      ))}
-                    </svg>
-                  </section>
-                  <section className="rounded-xl border border-border bg-card p-4">
-                    <h3 className="font-semibold">全书时间轴</h3>
-                    <div className="mt-3 max-h-72 space-y-2 overflow-auto">
-                      {[...timelineEvents]
-                        .sort(
-                          (a, b) =>
-                            (a.normalizedYear ?? 0) - (b.normalizedYear ?? 0),
-                        )
-                        .map((event) => (
-                          <button
-                            type="button"
-                            key={event.id}
-                            onClick={() => void openDocument(event.chapter)}
-                            className="grid w-full grid-cols-[90px_1fr] gap-3 rounded border border-border p-2 text-left text-xs hover:bg-muted/50"
-                          >
-                            <span className="font-semibold text-primary">
-                              {event.expression}
-                            </span>
-                            <span>
-                              <span className="font-medium">
-                                {event.chapter.split("/").pop()}
-                              </span>
-                              <span className="block text-muted-foreground">
-                                {event.context}
-                              </span>
-                            </span>
-                          </button>
-                        ))}
-                    </div>
-                  </section>
-                </div>
-                <section className="rounded-xl border border-border bg-card p-4">
-                  <h3 className="font-semibold">证据网络</h3>
-                  <div className="mt-3 grid gap-2 md:grid-cols-3">
-                    {evidenceReverseIndex.slice(0, 60).map((usage) => (
-                      <div
-                        key={usage.evidenceId}
-                        className="rounded border border-border p-2 text-xs"
-                      >
-                        <div className="font-medium text-primary">
-                          来源：{usage.title}
-                        </div>
-                        <div className="mt-1 text-muted-foreground">
-                          →{" "}
-                          {usage.chapters
-                            .map((item) => item.split("/").pop())
-                            .join("、") || "未关联章节"}
-                        </div>
-                        <div className="text-muted-foreground">
-                          → {usage.claimIds.length} 个主张 ·{" "}
-                          {usage.quotes.length} 处引文
-                        </div>
+                    <div className="flex flex-wrap justify-between gap-3">
+                      <div>
+                        <h2 className="font-semibold">可视化与自动化工作台</h2>
+                        <p className="text-xs text-muted-foreground">
+                          关系、时间、证据和质量视图，以及任务、恢复和增量回归。
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                </section>
-                <section className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h3 className="font-semibold">章节质量热力图</h3>
-                      <p className="text-xs text-muted-foreground">
-                        综合阻断、证据缺口、语义重复和故事性。
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={qualityBaselineId}
-                        onChange={(event) =>
-                          setQualityBaselineId(event.target.value)
-                        }
-                        className="rounded border border-input bg-background p-1 text-xs"
-                      >
-                        <option value="">选择质量基线</option>
-                        {qualitySnapshots.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {new Date(item.createdAt).toLocaleString()} ·{" "}
-                            {item.readiness}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                    {chapterHeatmap.map((item) => (
-                      <button
-                        type="button"
-                        key={item.chapter}
-                        onClick={() => void openDocument(item.chapter)}
-                        className={`rounded border p-3 text-left text-xs ${item.level === "blocked" ? "border-red-500/40 bg-red-500/15" : item.level === "risk" ? "border-orange-500/40 bg-orange-500/15" : item.level === "watch" ? "border-amber-500/30 bg-amber-500/10" : "border-emerald-500/30 bg-emerald-500/10"}`}
-                      >
-                        <div className="truncate font-medium">
-                          {item.chapter.split("/").pop()}
-                        </div>
-                        <div className="mt-1 text-2xl font-semibold">
-                          {item.score}
-                        </div>
-                        <div className="text-muted-foreground">
-                          阻断 {item.blockers} · 缺口 {item.gaps} · 重复{" "}
-                          {item.duplicates}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                  {qualityRegressions.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {qualityRegressions.map((item) => (
-                        <span
-                          key={item.metric}
-                          className={`rounded px-2 py-1 text-xs ${item.regressed ? "bg-red-500/10 text-red-700" : "bg-emerald-500/10 text-emerald-700"}`}
-                        >
-                          {item.metric}：{item.before} → {item.after}（
-                          {item.delta > 0 ? "+" : ""}
-                          {item.delta}）
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </section>
-                <section className="rounded-xl border border-border bg-card p-4">
-                  <h3 className="font-semibold">高级问题快速定位</h3>
-                  <div className="mt-3 max-h-72 space-y-2 overflow-auto">
-                    {bookAnalysisIssues.slice(0, 100).map((issue) => (
-                      <div
-                        key={issue.id}
-                        className="flex items-center justify-between gap-3 rounded border border-border p-2 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate font-medium">
-                            {issue.message}
-                          </div>
-                          <div className="text-muted-foreground">
-                            {issue.chapters
-                              .map((item) => item.split("/").pop())
-                              .join("、")}
-                          </div>
-                        </div>
+                      <div className="flex flex-wrap gap-2">
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={!issue.chapters.length}
-                          onClick={() => void locateAnalysisIssue(issue)}
+                          onClick={generateTasksFromIssues}
                         >
-                          定位
+                          问题批量转任务
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void loadVersionFiles()}
+                        >
+                          载入快照列表
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void stageSnapshotRestore()}
+                        >
+                          恢复所选快照
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => void runIncrementalReview()}
+                        >
+                          增量回归审校
                         </Button>
                       </div>
-                    ))}
+                    </div>
+                    {affectedChapters.length > 0 && (
+                      <div className="mt-3 text-xs text-primary">
+                        最近受影响章节：
+                        {affectedChapters
+                          .map((item) => item.split("/").pop())
+                          .join("、")}
+                      </div>
+                    )}
+                  </section>
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    <section className="rounded-xl border border-border bg-card p-4">
+                      <h3 className="font-semibold">人物关系图</h3>
+                      <svg
+                        viewBox="0 0 720 420"
+                        className="mt-3 h-72 w-full rounded bg-muted/20"
+                      >
+                        {relationshipGraph.edges.map((edge) => {
+                          const from = relationshipGraph.nodes.find(
+                            (item) => item.id === edge.from,
+                          );
+                          const to = relationshipGraph.nodes.find(
+                            (item) => item.id === edge.to,
+                          );
+                          if (!from || !to) return null;
+                          return (
+                            <g key={edge.id}>
+                              <line
+                                x1={from.x}
+                                y1={from.y}
+                                x2={to.x}
+                                y2={to.y}
+                                stroke="currentColor"
+                                opacity="0.25"
+                              />
+                              <text
+                                x={(from.x + to.x) / 2}
+                                y={(from.y + to.y) / 2}
+                                fontSize="11"
+                                fill="currentColor"
+                              >
+                                {edge.label}
+                              </text>
+                            </g>
+                          );
+                        })}
+                        {relationshipGraph.nodes.map((node) => (
+                          <g key={node.id}>
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r="28"
+                              className="fill-primary/15 stroke-primary"
+                            />
+                            <text
+                              x={node.x}
+                              y={node.y + 4}
+                              textAnchor="middle"
+                              fontSize="12"
+                              fill="currentColor"
+                            >
+                              {node.label.slice(0, 6)}
+                            </text>
+                          </g>
+                        ))}
+                      </svg>
+                    </section>
+                    <section className="rounded-xl border border-border bg-card p-4">
+                      <h3 className="font-semibold">全书时间轴</h3>
+                      <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+                        {[...timelineEvents]
+                          .sort(
+                            (a, b) =>
+                              (a.normalizedYear ?? 0) - (b.normalizedYear ?? 0),
+                          )
+                          .map((event) => (
+                            <button
+                              type="button"
+                              key={event.id}
+                              onClick={() => void openDocument(event.chapter)}
+                              className="grid w-full grid-cols-[90px_1fr] gap-3 rounded border border-border p-2 text-left text-xs hover:bg-muted/50"
+                            >
+                              <span className="font-semibold text-primary">
+                                {event.expression}
+                              </span>
+                              <span>
+                                <span className="font-medium">
+                                  {event.chapter.split("/").pop()}
+                                </span>
+                                <span className="block text-muted-foreground">
+                                  {event.context}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    </section>
                   </div>
-                </section>
-              </div>
-            )}
+                  <section className="rounded-xl border border-border bg-card p-4">
+                    <h3 className="font-semibold">证据网络</h3>
+                    <div className="mt-3 grid gap-2 md:grid-cols-3">
+                      {evidenceReverseIndex.slice(0, 60).map((usage) => (
+                        <div
+                          key={usage.evidenceId}
+                          className="rounded border border-border p-2 text-xs"
+                        >
+                          <div className="font-medium text-primary">
+                            来源：{usage.title}
+                          </div>
+                          <div className="mt-1 text-muted-foreground">
+                            →{" "}
+                            {usage.chapters
+                              .map((item) => item.split("/").pop())
+                              .join("、") || "未关联章节"}
+                          </div>
+                          <div className="text-muted-foreground">
+                            → {usage.claimIds.length} 个主张 ·{" "}
+                            {usage.quotes.length} 处引文
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                  <section className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold">章节质量热力图</h3>
+                        <p className="text-xs text-muted-foreground">
+                          综合阻断、证据缺口、语义重复和故事性。
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={qualityBaselineId}
+                          onChange={(event) =>
+                            setQualityBaselineId(event.target.value)
+                          }
+                          className="rounded border border-input bg-background p-1 text-xs"
+                        >
+                          <option value="">选择质量基线</option>
+                          {qualitySnapshots.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {new Date(item.createdAt).toLocaleString()} ·{" "}
+                              {item.readiness}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      {chapterHeatmap.map((item) => (
+                        <button
+                          type="button"
+                          key={item.chapter}
+                          onClick={() => void openDocument(item.chapter)}
+                          className={`rounded border p-3 text-left text-xs ${item.level === "blocked" ? "border-red-500/40 bg-red-500/15" : item.level === "risk" ? "border-orange-500/40 bg-orange-500/15" : item.level === "watch" ? "border-amber-500/30 bg-amber-500/10" : "border-emerald-500/30 bg-emerald-500/10"}`}
+                        >
+                          <div className="truncate font-medium">
+                            {item.chapter.split("/").pop()}
+                          </div>
+                          <div className="mt-1 text-2xl font-semibold">
+                            {item.score}
+                          </div>
+                          <div className="text-muted-foreground">
+                            阻断 {item.blockers} · 缺口 {item.gaps} · 重复{" "}
+                            {item.duplicates}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    {qualityRegressions.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {qualityRegressions.map((item) => (
+                          <span
+                            key={item.metric}
+                            className={`rounded px-2 py-1 text-xs ${item.regressed ? "bg-red-500/10 text-red-700" : "bg-emerald-500/10 text-emerald-700"}`}
+                          >
+                            {item.metric}：{item.before} → {item.after}（
+                            {item.delta > 0 ? "+" : ""}
+                            {item.delta}）
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                  <section className="rounded-xl border border-border bg-card p-4">
+                    <h3 className="font-semibold">高级问题快速定位</h3>
+                    <div className="mt-3 max-h-72 space-y-2 overflow-auto">
+                      {bookAnalysisIssues.slice(0, 100).map((issue) => (
+                        <div
+                          key={issue.id}
+                          className="flex items-center justify-between gap-3 rounded border border-border p-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">
+                              {issue.message}
+                            </div>
+                            <div className="text-muted-foreground">
+                              {issue.chapters
+                                .map((item) => item.split("/").pop())
+                                .join("、")}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!issue.chapters.length}
+                            onClick={() => void locateAnalysisIssue(issue)}
+                          >
+                            定位
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              )}
             {managementTab === "advanced" && advancedSection === "world" && (
               <div className="mx-auto mb-5 max-w-7xl space-y-5">
                 <div className="grid gap-5 lg:grid-cols-2">
@@ -8204,8 +8407,46 @@ export const OutlineScaffolderPanel: React.FC = () => {
                             placeholder="历史辖属"
                             className="rounded border border-input bg-background p-1 text-xs"
                           />
-                          <input type="number" value={item.longitude ?? ""} onChange={(event) => setPlaceMappings((current) => current.map((entry) => entry.id === item.id ? { ...entry, longitude: event.target.value ? Number(event.target.value) : undefined } : entry))} placeholder="经度" className="rounded border border-input bg-background p-1 text-xs" />
-                          <input type="number" value={item.latitude ?? ""} onChange={(event) => setPlaceMappings((current) => current.map((entry) => entry.id === item.id ? { ...entry, latitude: event.target.value ? Number(event.target.value) : undefined } : entry))} placeholder="纬度" className="rounded border border-input bg-background p-1 text-xs" />
+                          <input
+                            type="number"
+                            value={item.longitude ?? ""}
+                            onChange={(event) =>
+                              setPlaceMappings((current) =>
+                                current.map((entry) =>
+                                  entry.id === item.id
+                                    ? {
+                                        ...entry,
+                                        longitude: event.target.value
+                                          ? Number(event.target.value)
+                                          : undefined,
+                                      }
+                                    : entry,
+                                ),
+                              )
+                            }
+                            placeholder="经度"
+                            className="rounded border border-input bg-background p-1 text-xs"
+                          />
+                          <input
+                            type="number"
+                            value={item.latitude ?? ""}
+                            onChange={(event) =>
+                              setPlaceMappings((current) =>
+                                current.map((entry) =>
+                                  entry.id === item.id
+                                    ? {
+                                        ...entry,
+                                        latitude: event.target.value
+                                          ? Number(event.target.value)
+                                          : undefined,
+                                      }
+                                    : entry,
+                                ),
+                              )
+                            }
+                            placeholder="纬度"
+                            className="rounded border border-input bg-background p-1 text-xs"
+                          />
                         </div>
                       ))}
                     </div>
@@ -8772,151 +9013,152 @@ export const OutlineScaffolderPanel: React.FC = () => {
                 </div>
               </div>
             )}
-            {managementTab === "advanced" && advancedSection === "dashboard" && (
-              <div className="mx-auto mb-5 max-w-7xl space-y-5">
-                <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <h2 className="font-semibold">出版前总报告</h2>
-                      <p className="text-xs text-muted-foreground">
-                        汇总审校阻断、证据缺口、故事性和角色签核。
-                      </p>
-                    </div>
-                    <div
-                      className={`text-4xl font-semibold ${publicationReadiness.blockers.length ? "text-amber-700" : "text-emerald-600"}`}
-                    >
-                      {publicationReadiness.score}
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-2 sm:grid-cols-5">
-                    {Object.entries(publicationReadiness.metrics).map(
-                      ([key, value]) => (
-                        <div
-                          key={key}
-                          className="rounded bg-muted/50 p-2 text-center"
-                        >
-                          <div className="text-xl font-semibold">{value}</div>
-                          <div className="text-[10px] text-muted-foreground">
-                            {
-                              (
-                                {
-                                  chapters: "章节",
-                                  evidenceGaps: "证据缺口",
-                                  controversies: "争议卡",
-                                  approvedRoles: "已签核",
-                                  averageNarrativeScore: "故事性均分",
-                                } as Record<string, string>
-                              )[key]
-                            }
-                          </div>
-                        </div>
-                      ),
-                    )}
-                  </div>
-                  <div className="mt-3 space-y-1 text-xs">
-                    {publicationReadiness.blockers.map((item) => (
-                      <div key={item} className="text-destructive">
-                        阻断：{item}
+            {managementTab === "advanced" &&
+              advancedSection === "dashboard" && (
+                <div className="mx-auto mb-5 max-w-7xl space-y-5">
+                  <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <h2 className="font-semibold">出版前总报告</h2>
+                        <p className="text-xs text-muted-foreground">
+                          汇总审校阻断、证据缺口、故事性和角色签核。
+                        </p>
                       </div>
-                    ))}
-                    {publicationReadiness.warnings.map((item) => (
-                      <div key={item} className="text-amber-700">
-                        提示：{item}
+                      <div
+                        className={`text-4xl font-semibold ${publicationReadiness.blockers.length ? "text-amber-700" : "text-emerald-600"}`}
+                      >
+                        {publicationReadiness.score}
                       </div>
-                    ))}
-                  </div>
-                </section>
-                <div className="grid gap-5 lg:grid-cols-2">
-                  <section className="rounded-xl border border-border bg-card p-4">
-                    <h3 className="font-semibold">
-                      史料缺口地图{" "}
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {evidenceGaps.length} 项
-                      </span>
-                    </h3>
-                    <div className="mt-3 max-h-80 space-y-2 overflow-auto">
-                      {evidenceGaps.map((gap) => (
-                        <div
-                          key={`${gap.claimId}-${gap.kind}`}
-                          className="rounded border border-border p-2 text-xs"
-                        >
-                          <div className="flex justify-between gap-2">
-                            <span className="font-medium">
-                              {gap.chapter.split("/").pop()}
-                            </span>
-                            <span
-                              className={
-                                gap.kind === "missing" ||
-                                gap.kind === "contradictory"
-                                  ? "text-destructive"
-                                  : "text-amber-700"
-                              }
-                            >
+                    </div>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-5">
+                      {Object.entries(publicationReadiness.metrics).map(
+                        ([key, value]) => (
+                          <div
+                            key={key}
+                            className="rounded bg-muted/50 p-2 text-center"
+                          >
+                            <div className="text-xl font-semibold">{value}</div>
+                            <div className="text-[10px] text-muted-foreground">
                               {
                                 (
                                   {
-                                    missing: "无来源",
-                                    weak: "弱支持",
-                                    "single-source": "单一来源",
-                                    contradictory: "存在反证",
-                                  } as const
-                                )[gap.kind]
+                                    chapters: "章节",
+                                    evidenceGaps: "证据缺口",
+                                    controversies: "争议卡",
+                                    approvedRoles: "已签核",
+                                    averageNarrativeScore: "故事性均分",
+                                  } as Record<string, string>
+                                )[key]
                               }
-                            </span>
-                          </div>
-                          <div className="mt-1 text-muted-foreground">
-                            {gap.claim}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                  <section className="rounded-xl border border-border bg-card p-4">
-                    <h3 className="font-semibold">章节故事性与叙事风险</h3>
-                    <div className="mt-3 max-h-80 space-y-2 overflow-auto">
-                      {Object.entries(narrativeAssessments).map(
-                        ([path, assessment]) => (
-                          <div
-                            key={path}
-                            className="rounded border border-border p-2 text-xs"
-                          >
-                            <div className="flex justify-between">
-                              <span className="font-medium">
-                                {path.split("/").pop()}
-                              </span>
-                              <span
-                                className={
-                                  assessment.score >= 70
-                                    ? "text-emerald-600"
-                                    : "text-amber-700"
-                                }
-                              >
-                                {assessment.score} 分
-                              </span>
                             </div>
-                            <div className="mt-1 text-muted-foreground">
-                              场景 {assessment.sceneSignals} · 行动{" "}
-                              {assessment.actionSignals} · 冲突{" "}
-                              {assessment.conflictSignals} · 转折{" "}
-                              {assessment.transitionSignals} · 空泛表达{" "}
-                              {assessment.abstractSignals}
-                            </div>
-                            {assessment.issues.slice(0, 3).map((issue) => (
-                              <div
-                                key={issue.id}
-                                className="mt-1 text-amber-700"
-                              >
-                                {issue.message}
-                              </div>
-                            ))}
                           </div>
                         ),
                       )}
                     </div>
+                    <div className="mt-3 space-y-1 text-xs">
+                      {publicationReadiness.blockers.map((item) => (
+                        <div key={item} className="text-destructive">
+                          阻断：{item}
+                        </div>
+                      ))}
+                      {publicationReadiness.warnings.map((item) => (
+                        <div key={item} className="text-amber-700">
+                          提示：{item}
+                        </div>
+                      ))}
+                    </div>
                   </section>
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    <section className="rounded-xl border border-border bg-card p-4">
+                      <h3 className="font-semibold">
+                        史料缺口地图{" "}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          {evidenceGaps.length} 项
+                        </span>
+                      </h3>
+                      <div className="mt-3 max-h-80 space-y-2 overflow-auto">
+                        {evidenceGaps.map((gap) => (
+                          <div
+                            key={`${gap.claimId}-${gap.kind}`}
+                            className="rounded border border-border p-2 text-xs"
+                          >
+                            <div className="flex justify-between gap-2">
+                              <span className="font-medium">
+                                {gap.chapter.split("/").pop()}
+                              </span>
+                              <span
+                                className={
+                                  gap.kind === "missing" ||
+                                  gap.kind === "contradictory"
+                                    ? "text-destructive"
+                                    : "text-amber-700"
+                                }
+                              >
+                                {
+                                  (
+                                    {
+                                      missing: "无来源",
+                                      weak: "弱支持",
+                                      "single-source": "单一来源",
+                                      contradictory: "存在反证",
+                                    } as const
+                                  )[gap.kind]
+                                }
+                              </span>
+                            </div>
+                            <div className="mt-1 text-muted-foreground">
+                              {gap.claim}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="rounded-xl border border-border bg-card p-4">
+                      <h3 className="font-semibold">章节故事性与叙事风险</h3>
+                      <div className="mt-3 max-h-80 space-y-2 overflow-auto">
+                        {Object.entries(narrativeAssessments).map(
+                          ([path, assessment]) => (
+                            <div
+                              key={path}
+                              className="rounded border border-border p-2 text-xs"
+                            >
+                              <div className="flex justify-between">
+                                <span className="font-medium">
+                                  {path.split("/").pop()}
+                                </span>
+                                <span
+                                  className={
+                                    assessment.score >= 70
+                                      ? "text-emerald-600"
+                                      : "text-amber-700"
+                                  }
+                                >
+                                  {assessment.score} 分
+                                </span>
+                              </div>
+                              <div className="mt-1 text-muted-foreground">
+                                场景 {assessment.sceneSignals} · 行动{" "}
+                                {assessment.actionSignals} · 冲突{" "}
+                                {assessment.conflictSignals} · 转折{" "}
+                                {assessment.transitionSignals} · 空泛表达{" "}
+                                {assessment.abstractSignals}
+                              </div>
+                              {assessment.issues.slice(0, 3).map((issue) => (
+                                <div
+                                  key={issue.id}
+                                  className="mt-1 text-amber-700"
+                                >
+                                  {issue.message}
+                                </div>
+                              ))}
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </section>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
             {managementTab === "evidence" && (
               <div className="mx-auto mb-4 max-w-6xl rounded-xl border border-border bg-card p-4">
                 <h3 className="font-semibold">主张支持强度</h3>
@@ -9058,177 +9300,183 @@ export const OutlineScaffolderPanel: React.FC = () => {
                 })}
               </div>
             )}
-            {managementTab === "advanced" && advancedSection === "collaboration" && (
-              <div className="mx-auto mb-5 grid max-w-7xl gap-5 lg:grid-cols-2">
-                <section className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">学术争议卡</h3>
-                    <Button size="sm" onClick={addControversy}>
-                      新增
-                    </Button>
-                  </div>
-                  {controversies.map((card) => (
-                    <div
-                      key={card.id}
-                      className="mt-3 rounded border border-border p-3"
-                    >
-                      <input
-                        value={card.topic}
-                        onChange={(event) =>
-                          updateControversy(card.id, {
-                            topic: event.target.value,
-                          })
-                        }
-                        className="w-full rounded border border-input bg-background p-2 text-sm"
-                      />
-                      {card.positions.map((position, index) => (
-                        <textarea
-                          key={index}
-                          value={position.argument}
+            {managementTab === "advanced" &&
+              advancedSection === "collaboration" && (
+                <div className="mx-auto mb-5 grid max-w-7xl gap-5 lg:grid-cols-2">
+                  <section className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">学术争议卡</h3>
+                      <Button size="sm" onClick={addControversy}>
+                        新增
+                      </Button>
+                    </div>
+                    {controversies.map((card) => (
+                      <div
+                        key={card.id}
+                        className="mt-3 rounded border border-border p-3"
+                      >
+                        <input
+                          value={card.topic}
                           onChange={(event) =>
                             updateControversy(card.id, {
-                              positions: card.positions.map(
-                                (entry, entryIndex) =>
-                                  entryIndex === index
-                                    ? { ...entry, argument: event.target.value }
-                                    : entry,
-                              ),
+                              topic: event.target.value,
                             })
                           }
-                          placeholder={`${position.label}及依据`}
+                          className="w-full rounded border border-input bg-background p-2 text-sm"
+                        />
+                        {card.positions.map((position, index) => (
+                          <textarea
+                            key={index}
+                            value={position.argument}
+                            onChange={(event) =>
+                              updateControversy(card.id, {
+                                positions: card.positions.map(
+                                  (entry, entryIndex) =>
+                                    entryIndex === index
+                                      ? {
+                                          ...entry,
+                                          argument: event.target.value,
+                                        }
+                                      : entry,
+                                ),
+                              })
+                            }
+                            placeholder={`${position.label}及依据`}
+                            className="mt-2 min-h-14 w-full rounded border border-input bg-background p-2 text-xs"
+                          />
+                        ))}
+                        <input
+                          value={card.adoptedPosition}
+                          onChange={(event) =>
+                            updateControversy(card.id, {
+                              adoptedPosition: event.target.value,
+                            })
+                          }
+                          placeholder="本书采用立场"
+                          className="mt-2 w-full rounded border border-input bg-background p-2 text-xs"
+                        />
+                        <textarea
+                          value={card.rationale}
+                          onChange={(event) =>
+                            updateControversy(card.id, {
+                              rationale: event.target.value,
+                            })
+                          }
+                          placeholder="理由与保留意见"
                           className="mt-2 min-h-14 w-full rounded border border-input bg-background p-2 text-xs"
                         />
-                      ))}
-                      <input
-                        value={card.adoptedPosition}
-                        onChange={(event) =>
-                          updateControversy(card.id, {
-                            adoptedPosition: event.target.value,
-                          })
-                        }
-                        placeholder="本书采用立场"
-                        className="mt-2 w-full rounded border border-input bg-background p-2 text-xs"
-                      />
-                      <textarea
-                        value={card.rationale}
-                        onChange={(event) =>
-                          updateControversy(card.id, {
-                            rationale: event.target.value,
-                          })
-                        }
-                        placeholder="理由与保留意见"
-                        className="mt-2 min-h-14 w-full rounded border border-input bg-background p-2 text-xs"
-                      />
-                    </div>
-                  ))}
-                </section>
-                <section className="space-y-5">
-                  <div className="rounded-xl border border-border bg-card p-4">
-                    <div className="flex justify-between">
-                      <h3 className="font-semibold">多角色签核</h3>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={ensureRoleApprovals}
-                      >
-                        生成签核表
-                      </Button>
-                    </div>
-                    {roleApprovals.map((approval) => (
-                      <div
-                        key={approval.id}
-                        className="mt-2 grid gap-2 md:grid-cols-[100px_1fr_130px]"
-                      >
-                        <span className="text-xs">{approval.role}</span>
-                        <input
-                          value={approval.reviewer}
-                          onChange={(event) =>
-                            updateRoleApproval(approval.id, {
-                              reviewer: event.target.value,
-                            })
-                          }
-                          placeholder="签核人"
-                          className="rounded border border-input bg-background p-1 text-xs"
-                        />
-                        <select
-                          value={approval.status}
-                          onChange={(event) =>
-                            updateRoleApproval(approval.id, {
-                              status: event.target
-                                .value as RoleApproval["status"],
-                            })
-                          }
-                          className="rounded border border-input bg-background p-1 text-xs"
-                        >
-                          <option value="pending">待签核</option>
-                          <option value="approved">通过</option>
-                          <option value="changes-requested">退回</option>
-                        </select>
                       </div>
                     ))}
-                  </div>
-                  <div className="rounded-xl border border-border bg-card p-4">
-                    <div className="flex justify-between">
-                      <h3 className="font-semibold">任意版本比较</h3>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void loadVersionFiles()}
-                      >
-                        刷新
-                      </Button>
-                    </div>
-                    <div className="mt-2 grid gap-2 md:grid-cols-2">
-                      {[leftVersion, rightVersion].map((value, index) => (
-                        <select
-                          key={index}
-                          value={value}
-                          onChange={(event) =>
-                            index
-                              ? setRightVersion(event.target.value)
-                              : setLeftVersion(event.target.value)
-                          }
-                          className="rounded border border-input bg-background p-2 text-xs"
+                  </section>
+                  <section className="space-y-5">
+                    <div className="rounded-xl border border-border bg-card p-4">
+                      <div className="flex justify-between">
+                        <h3 className="font-semibold">多角色签核</h3>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={ensureRoleApprovals}
                         >
-                          <option value="">选择版本</option>
-                          {versionFiles.map((path) => (
-                            <option key={path} value={path}>
-                              {path}
-                            </option>
-                          ))}
-                        </select>
+                          生成签核表
+                        </Button>
+                      </div>
+                      {roleApprovals.map((approval) => (
+                        <div
+                          key={approval.id}
+                          className="mt-2 grid gap-2 md:grid-cols-[100px_1fr_130px]"
+                        >
+                          <span className="text-xs">{approval.role}</span>
+                          <input
+                            value={approval.reviewer}
+                            onChange={(event) =>
+                              updateRoleApproval(approval.id, {
+                                reviewer: event.target.value,
+                              })
+                            }
+                            placeholder="签核人"
+                            className="rounded border border-input bg-background p-1 text-xs"
+                          />
+                          <select
+                            value={approval.status}
+                            onChange={(event) =>
+                              updateRoleApproval(approval.id, {
+                                status: event.target
+                                  .value as RoleApproval["status"],
+                              })
+                            }
+                            className="rounded border border-input bg-background p-1 text-xs"
+                          >
+                            <option value="pending">待签核</option>
+                            <option value="approved">通过</option>
+                            <option value="changes-requested">退回</option>
+                          </select>
+                        </div>
                       ))}
                     </div>
-                    <Button
-                      size="sm"
-                      className="mt-2 w-full"
-                      onClick={() => void runVersionComparison()}
-                    >
-                      比较
-                    </Button>
-                    {versionComparison && (
-                      <div className="mt-3 text-xs">
-                        相似度 {Math.round(versionComparison.similarity * 100)}
-                        %，删除 {versionComparison.removed.length} 行，新增{" "}
-                        {versionComparison.added.length} 行
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          <pre className="max-h-32 overflow-auto whitespace-pre-wrap bg-red-500/[0.06] p-2">
-                            {versionComparison.removed
-                              .map((line) => `− ${line}`)
-                              .join("\n")}
-                          </pre>
-                          <pre className="max-h-32 overflow-auto whitespace-pre-wrap bg-emerald-500/[0.06] p-2">
-                            {versionComparison.added
-                              .map((line) => `+ ${line}`)
-                              .join("\n")}
-                          </pre>
-                        </div>
+                    <div className="rounded-xl border border-border bg-card p-4">
+                      <div className="flex justify-between">
+                        <h3 className="font-semibold">任意版本比较</h3>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void loadVersionFiles()}
+                        >
+                          刷新
+                        </Button>
                       </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-            )}
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        {[leftVersion, rightVersion].map((value, index) => (
+                          <select
+                            key={index}
+                            value={value}
+                            onChange={(event) =>
+                              index
+                                ? setRightVersion(event.target.value)
+                                : setLeftVersion(event.target.value)
+                            }
+                            className="rounded border border-input bg-background p-2 text-xs"
+                          >
+                            <option value="">选择版本</option>
+                            {versionFiles.map((path) => (
+                              <option key={path} value={path}>
+                                {path}
+                              </option>
+                            ))}
+                          </select>
+                        ))}
+                      </div>
+                      <Button
+                        size="sm"
+                        className="mt-2 w-full"
+                        onClick={() => void runVersionComparison()}
+                      >
+                        比较
+                      </Button>
+                      {versionComparison && (
+                        <div className="mt-3 text-xs">
+                          相似度{" "}
+                          {Math.round(versionComparison.similarity * 100)}
+                          %，删除 {
+                            versionComparison.removed.length
+                          } 行，新增 {versionComparison.added.length} 行
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <pre className="max-h-32 overflow-auto whitespace-pre-wrap bg-red-500/[0.06] p-2">
+                              {versionComparison.removed
+                                .map((line) => `− ${line}`)
+                                .join("\n")}
+                            </pre>
+                            <pre className="max-h-32 overflow-auto whitespace-pre-wrap bg-emerald-500/[0.06] p-2">
+                              {versionComparison.added
+                                .map((line) => `+ ${line}`)
+                                .join("\n")}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              )}
             {managementTab === "advanced" && advancedSection === "analysis" && (
               <div className="mx-auto max-w-7xl space-y-5">
                 <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -9631,7 +9879,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
                       )}
                       AI 深度检查
                     </Button>
-                    <Button variant="outline" disabled={editorialAiLoading || !aiRetryQueue.length} onClick={() => void retryFailedAiReviews()}>
+                    <Button
+                      variant="outline"
+                      disabled={editorialAiLoading || !aiRetryQueue.length}
+                      onClick={() => void retryFailedAiReviews()}
+                    >
                       重试失败项 {aiRetryQueue.length}
                     </Button>
                   </div>
