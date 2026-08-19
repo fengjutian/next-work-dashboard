@@ -57,4 +57,11 @@ describe('outline scaffolder', () => {
       { status: 'supported', evidenceIds: ['verified', 'clue'] },
     ], ['verified'])).toEqual({ total: 4, supported: 2, percentage: 50 });
   });
+
+  it('excludes insufficient evidence from coverage', () => {
+    expect(calculateClaimCoverage([
+      { status: 'supported', evidenceIds: ['weak'], evidenceStrengths: { weak: 'insufficient' } },
+      { status: 'supported', evidenceIds: ['direct'], evidenceStrengths: { direct: 'direct' } },
+    ], ['weak', 'direct'])).toEqual({ total: 2, supported: 1, percentage: 50 });
+  });
 });

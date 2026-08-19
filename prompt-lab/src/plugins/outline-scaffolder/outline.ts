@@ -22,9 +22,9 @@ export function compactTextDiff(original: string, replacement: string) {
   return { prefix: original.slice(0, prefixLength), removed: original.slice(prefixLength, original.length - suffixLength), added: replacement.slice(prefixLength, replacement.length - suffixLength), suffix: suffixLength ? original.slice(-suffixLength) : '' };
 }
 
-export function calculateClaimCoverage(claims: Array<{ status: string; evidenceIds: string[] }>, verifiedEvidenceIds: Iterable<string>) {
+export function calculateClaimCoverage(claims: Array<{ status: string; evidenceIds: string[]; evidenceStrengths?: Record<string, string> }>, verifiedEvidenceIds: Iterable<string>) {
   const verified = new Set(verifiedEvidenceIds);
-  const supported = claims.filter((claim) => claim.status === 'supported' && claim.evidenceIds.some((id) => verified.has(id))).length;
+  const supported = claims.filter((claim) => claim.status === 'supported' && claim.evidenceIds.some((id) => verified.has(id) && !['insufficient', 'contradictory'].includes(claim.evidenceStrengths?.[id] ?? 'indirect'))).length;
   return { total: claims.length, supported, percentage: claims.length ? Math.round((supported / claims.length) * 100) : 0 };
 }
 

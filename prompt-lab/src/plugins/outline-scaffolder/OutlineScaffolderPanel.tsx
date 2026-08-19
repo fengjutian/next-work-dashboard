@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
+import { checkQuoteAgainstSource, compareDocumentVersions, extractTimelineEvents, findEntityConflicts, findSemanticDuplicates, findTimelineConflicts, runProfessionalRules, type AnalysisIssue, type EditorialRole, type ProfessionalRulePackId, type SemanticDuplicate, type SourceLevel, type SupportStrength, type TimelineEvent, type VersionComparison } from './editorial-analysis';
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -85,6 +86,12 @@ interface SavedProject {
   finalReadConfirmed?: boolean;
   claims?: ClaimRecord[];
   finalSnapshot?: FinalSnapshot;
+  timelineEvents?: TimelineEvent[];
+  bookAnalysisIssues?: AnalysisIssue[];
+  semanticDuplicates?: SemanticDuplicate[];
+  controversies?: ControversyCard[];
+  professionalRulePacks?: ProfessionalRulePackId[];
+  roleApprovals?: RoleApproval[];
   deploymentStatus?: DeploymentStatus;
   splitMode: SplitMode;
   organizeByPart: boolean;
@@ -114,13 +121,15 @@ interface ChapterWritingBrief {
 }
 
 interface KnowledgeEntry { id: string; kind: 'person' | 'event' | 'place' | 'term' | 'date'; name: string; canonical: string; aliases: string; notes: string }
-interface EvidenceRecord { id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; anchor?: { quote: string }; createdAt: number }
+interface EvidenceRecord { id: string; title: string; url: string; source: string; chapter: string; status: 'clue' | 'verified' | 'disputed'; notes: string; sourceLevel?: SourceLevel; sourceExcerpt?: string; bibliographic?: string; accessedAt?: number; anchor?: { quote: string }; createdAt: number }
 interface ChapterQualityReport { score: number; blockers: string[]; warnings: string[]; wordCount: number; checkedAt: number }
 type EditorialStageId = 'completeness' | 'structure' | 'facts' | 'professional' | 'language' | 'citations' | 'consistency' | 'format';
 interface EditorialIssue { id: string; stage: EditorialStageId; severity: 'blocker' | 'warning'; type: string; message: string; originalText?: string; suggestion?: string; start?: number; end?: number; status: 'open' | 'accepted' | 'rejected'; decisionNote?: string; decidedAt?: number }
 interface EditorialAudit { status: 'pending' | 'issues' | 'passed' | 'stale'; blockers: string[]; warnings: string[]; issues?: EditorialIssue[]; checkedAt: number; confirmedAt?: number; contentSignature?: string }
-interface ClaimRecord { id: string; chapter: string; text: string; type: string; evidenceIds: string[]; status: 'unreviewed' | 'supported' | 'disputed' | 'unsupported'; notes: string; updatedAt: number }
+interface ClaimRecord { id: string; chapter: string; text: string; type: string; evidenceIds: string[]; evidenceStrengths?: Record<string, SupportStrength>; status: 'unreviewed' | 'supported' | 'disputed' | 'unsupported'; notes: string; updatedAt: number }
 interface FinalSnapshot { path: string; createdAt: number; signature: string }
+interface ControversyCard { id: string; topic: string; chapter: string; positions: Array<{ label: string; argument: string; evidenceIds: string[] }>; adoptedPosition: string; rationale: string; updatedAt: number }
+interface RoleApproval { id: string; role: EditorialRole; reviewer: string; scope: string; status: 'pending' | 'approved' | 'changes-requested'; notes: string; decidedAt?: number }
 interface ReviewSuggestion { id: string; section: string; position: string; issue: string; suggestion: string; decision: 'pending' | 'accepted' | 'rejected' }
 interface ReviewPatch { id: string; suggestionId: string; original: string; replacement: string; state: 'ready' | 'applied' | 'conflict' }
 interface GateFixTarget { path: string; blockers: string[] }
@@ -249,6 +258,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [finalReadConfirmed, setFinalReadConfirmed] = useState(false);
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [finalSnapshot, setFinalSnapshot] = useState<FinalSnapshot | undefined>();
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [bookAnalysisIssues, setBookAnalysisIssues] = useState<AnalysisIssue[]>([]);
+  const [semanticDuplicates, setSemanticDuplicates] = useState<SemanticDuplicate[]>([]);
+  const [controversies, setControversies] = useState<ControversyCard[]>([]);
+  const [professionalRulePacks, setProfessionalRulePacks] = useState<ProfessionalRulePackId[]>(['history', 'general']);
+  const [roleApprovals, setRoleApprovals] = useState<RoleApproval[]>([]);
+  const [bookAnalysisLoading, setBookAnalysisLoading] = useState(false);
+  const [versionFiles, setVersionFiles] = useState<string[]>([]);
+  const [leftVersion, setLeftVersion] = useState('');
+  const [rightVersion, setRightVersion] = useState('');
+  const [versionComparison, setVersionComparison] = useState<VersionComparison | null>(null);
   const [editorialChapterPath, setEditorialChapterPath] = useState('');
   const [pendingEditorialPatch, setPendingEditorialPatch] = useState<{ path: string; issueId: string; stage: EditorialStageId; original: string; replacement: string; start: number } | null>(null);
   const [reviewSuggestions, setReviewSuggestions] = useState<ReviewSuggestion[]>([]);
@@ -262,7 +282,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [gateFixTargets, setGateFixTargets] = useState<GateFixTarget[]>([]);
   const gateFixTargetsRef = useRef<GateFixTarget[]>([]);
   const gateRepairActiveRef = useRef(false);
-  const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'editorial' | 'quality' | 'publish'>('overview');
+  const [managementTab, setManagementTab] = useState<'overview' | 'knowledge' | 'evidence' | 'editorial' | 'advanced' | 'quality' | 'publish'>('overview');
   const [auditLoading, setAuditLoading] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [manifestSyncState, setManifestSyncState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -709,6 +729,27 @@ export const OutlineScaffolderPanel: React.FC = () => {
     } finally { setAuditLoading(false); }
   };
 
+  const runAdvancedBookAnalysis = async () => {
+    if (!target || !managedFiles.length || bookAnalysisLoading) return;
+    setBookAnalysisLoading(true);
+    try {
+      const documents: Array<{ chapter: string; content: string }> = [];
+      for (const chapter of managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path))) {
+        const read = await window.electronAPI.workspace.readTextFile(target.path, chapter);
+        if (read.success && read.data) documents.push({ chapter, content: read.data.content });
+      }
+      const events = documents.flatMap((document) => extractTimelineEvents(document.chapter, document.content));
+      const entityRules = knowledgeEntries.map((entry) => ({ kind: entry.kind, canonical: entry.canonical || entry.name, aliases: [entry.name, ...entry.aliases.split(/[、，,;；\n]+/).map((item) => item.trim()).filter(Boolean)].filter((item) => item !== (entry.canonical || entry.name)), notes: entry.notes }));
+      const timelineIssues = findTimelineConflicts(events);
+      const entityIssues = findEntityConflicts(documents, entityRules);
+      const professionalIssues = documents.flatMap((document) => runProfessionalRules(document.content, professionalRulePacks).map((issue) => ({ ...issue, chapters: [document.chapter] })));
+      const duplicates = findSemanticDuplicates(documents);
+      setTimelineEvents(events); setSemanticDuplicates(duplicates); setBookAnalysisIssues([...timelineIssues, ...entityIssues, ...professionalIssues]);
+      notice.success({ message: '全书高级分析完成', description: `时间事件 ${events.length} 条、实体/专业问题 ${timelineIssues.length + entityIssues.length + professionalIssues.length} 项、语义重复 ${duplicates.length} 组。`, placement: 'bottomRight' });
+    } catch (error) { notice.error({ message: '全书高级分析失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); }
+    finally { setBookAnalysisLoading(false); }
+  };
+
   const extractBookKnowledge = async () => {
     if (!target || !managedFiles.length || knowledgeLoading) return;
     if (!aiApi.apiKey?.trim()) { notice.warning({ message: '请先配置助写模型', placement: 'bottomRight' }); return; }
@@ -802,7 +843,35 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (next.status === 'supported' && !next.evidenceIds.some((evidenceId) => verifiedIds.has(evidenceId))) { notice.warning({ message: '“有证据支持”至少需要绑定一条已核实证据', placement: 'bottomRight' }); return { ...next, status: 'unreviewed' }; }
     return next;
   }));
-  const toggleClaimEvidence = (claim: ClaimRecord, evidenceId: string) => updateClaim(claim.id, { evidenceIds: claim.evidenceIds.includes(evidenceId) ? claim.evidenceIds.filter((id) => id !== evidenceId) : [...claim.evidenceIds, evidenceId] });
+  const toggleClaimEvidence = (claim: ClaimRecord, evidenceId: string) => {
+    const removing = claim.evidenceIds.includes(evidenceId);
+    const evidenceStrengths = { ...(claim.evidenceStrengths ?? {}) };
+    if (removing) delete evidenceStrengths[evidenceId]; else evidenceStrengths[evidenceId] = 'indirect';
+    updateClaim(claim.id, { evidenceIds: removing ? claim.evidenceIds.filter((id) => id !== evidenceId) : [...claim.evidenceIds, evidenceId], evidenceStrengths });
+  };
+
+  const addControversy = () => setControversies((current) => [...current, { id: `controversy-${Date.now()}`, topic: '待命名争议', chapter: editorialChapterPath || activeFile || '', positions: [{ label: '观点 A', argument: '', evidenceIds: [] }, { label: '观点 B', argument: '', evidenceIds: [] }], adoptedPosition: '', rationale: '', updatedAt: Date.now() }]);
+  const updateControversy = (id: string, patch: Partial<ControversyCard>) => setControversies((current) => current.map((item) => item.id === id ? { ...item, ...patch, updatedAt: Date.now() } : item));
+  const ensureRoleApprovals = () => setRoleApprovals((current) => {
+    const roles: EditorialRole[] = ['author', 'editor', 'fact-checker', 'subject-reviewer', 'final-reviewer'];
+    return roles.map((role) => current.find((item) => item.role === role && item.scope === '全书') ?? { id: `approval-${role}-${Date.now()}`, role, reviewer: '', scope: '全书', status: 'pending', notes: '' });
+  });
+  const updateRoleApproval = (id: string, patch: Partial<RoleApproval>) => setRoleApprovals((current) => current.map((item) => item.id === id ? { ...item, ...patch, decidedAt: patch.status && patch.status !== 'pending' ? Date.now() : item.decidedAt } : item));
+  const loadVersionFiles = async () => {
+    if (!target) return;
+    const listing = await window.electronAPI.workspace.listFiles(target.path);
+    if (!listing.success || !listing.data) return;
+    const paths = listing.data.map((item) => item.path.replace(/\\/g, '/')).filter((path) => path.toLowerCase().endsWith('.md'));
+    setVersionFiles(paths);
+    setLeftVersion((current) => current || paths.find((path) => path.includes('/.history/') || path.startsWith('.history/')) || paths[0] || '');
+    setRightVersion((current) => current || activeFile || paths.find((path) => !path.includes('.history/')) || paths[1] || '');
+  };
+  const runVersionComparison = async () => {
+    if (!target || !leftVersion || !rightVersion) return;
+    const [left, right] = await Promise.all([window.electronAPI.workspace.readTextFile(target.path, leftVersion), window.electronAPI.workspace.readTextFile(target.path, rightVersion)]);
+    if (!left.success || !left.data || !right.success || !right.data) { notice.error({ message: '版本读取失败', placement: 'bottomRight' }); return; }
+    setVersionComparison(compareDocumentVersions(left.data.content, right.data.content));
+  };
 
   const refreshPagesDeployment = async () => {
     if (!gitRemoteUrl.trim() || deploymentChecking) return;
@@ -917,6 +986,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         finalReadConfirmed,
         claims,
         finalSnapshot,
+        timelineEvents,
+        bookAnalysisIssues,
+        semanticDuplicates,
+        controversies,
+        professionalRulePacks,
+        roleApprovals,
         deploymentStatus,
         git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
         pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
@@ -924,14 +999,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, claims, deploymentStatus, editorialAudits, evidenceRecords, finalReadConfirmed, finalSnapshot, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports]);
+  }, [activeProjectId, bookAnalysisIssues, bookRequirement, chapterBriefs, chapterStatuses, claims, controversies, deploymentStatus, editorialAudits, evidenceRecords, finalReadConfirmed, finalSnapshot, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, professionalRulePacks, projectTitle, qualityReports, roleApprovals, semanticDuplicates, timelineEvents]);
 
   useEffect(() => {
     if (!activeProjectId || !target || !managedFiles.length) return;
     const timer = window.setTimeout(async () => {
       setManifestSyncState('saving');
       const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
-      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const manifest = `${JSON.stringify({ schemaVersion: 3, version: 3, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, timelineEvents, bookAnalysisIssues, semanticDuplicates, controversies, professionalRulePacks, roleApprovals, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       try {
         const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
         const result = existing.success && existing.data
@@ -941,7 +1016,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } catch { setManifestSyncState('error'); }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [activeProject, activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, claims, deploymentStatus, editorialAudits, evidenceRecords, finalReadConfirmed, finalSnapshot, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, managedFiles, organizeByPart, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports, source, splitMode, target, template]);
+  }, [activeProject, activeProjectId, bookAnalysisIssues, bookRequirement, chapterBriefs, chapterStatuses, claims, controversies, deploymentStatus, editorialAudits, evidenceRecords, finalReadConfirmed, finalSnapshot, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, managedFiles, organizeByPart, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, professionalRulePacks, projectTitle, qualityReports, roleApprovals, semanticDuplicates, source, splitMode, target, template, timelineEvents]);
 
   useEffect(() => {
     if (!finalReadConfirmed || !target || !managedFiles.length || finalSnapshotCreatingRef.current) return;
@@ -1009,6 +1084,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
       finalReadConfirmed: overrides?.finalReadConfirmed ?? finalReadConfirmed,
       claims: overrides?.claims ?? claims,
       finalSnapshot: overrides?.finalSnapshot ?? finalSnapshot,
+      timelineEvents: overrides?.timelineEvents ?? timelineEvents,
+      bookAnalysisIssues: overrides?.bookAnalysisIssues ?? bookAnalysisIssues,
+      semanticDuplicates: overrides?.semanticDuplicates ?? semanticDuplicates,
+      controversies: overrides?.controversies ?? controversies,
+      professionalRulePacks: overrides?.professionalRulePacks ?? professionalRulePacks,
+      roleApprovals: overrides?.roleApprovals ?? roleApprovals,
       deploymentStatus: overrides?.deploymentStatus ?? deploymentStatus,
       splitMode: overrides?.splitMode ?? splitMode,
       organizeByPart: overrides?.organizeByPart ?? organizeByPart,
@@ -1041,7 +1122,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         try {
           diskProject = JSON.parse(diskManifest.data.content) as Partial<SavedProject>;
           setProjectTitle(diskProject.name || folder.name); setSource(diskProject.source || ''); setBookRequirement(diskProject.requirement || '');
-          setChapterBriefs(diskProject.chapterBriefs ?? {}); setChapterStatuses(diskProject.chapterStatuses ?? {}); setKnowledgeEntries(diskProject.knowledgeEntries ?? []); setEvidenceRecords(diskProject.evidenceRecords ?? []); setQualityReports(diskProject.qualityReports ?? {}); setEditorialAudits(diskProject.editorialAudits ?? {}); setFinalReadConfirmed(diskProject.finalReadConfirmed ?? false); setClaims(diskProject.claims ?? []); setFinalSnapshot(diskProject.finalSnapshot); setDeploymentStatus(diskProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
+          setChapterBriefs(diskProject.chapterBriefs ?? {}); setChapterStatuses(diskProject.chapterStatuses ?? {}); setKnowledgeEntries(diskProject.knowledgeEntries ?? []); setEvidenceRecords(diskProject.evidenceRecords ?? []); setQualityReports(diskProject.qualityReports ?? {}); setEditorialAudits(diskProject.editorialAudits ?? {}); setFinalReadConfirmed(diskProject.finalReadConfirmed ?? false); setClaims(diskProject.claims ?? []); setFinalSnapshot(diskProject.finalSnapshot); setTimelineEvents(diskProject.timelineEvents ?? []); setBookAnalysisIssues(diskProject.bookAnalysisIssues ?? []); setSemanticDuplicates(diskProject.semanticDuplicates ?? []); setControversies(diskProject.controversies ?? []); setProfessionalRulePacks(diskProject.professionalRulePacks ?? ['history', 'general']); setRoleApprovals(diskProject.roleApprovals ?? []); setDeploymentStatus(diskProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
           if (diskProject.git) { setGitRemoteUrl(diskProject.git.remoteUrl || ''); setGitRemoteName(diskProject.git.remoteName || 'origin'); setGitBranch(diskProject.git.branch || 'main'); }
         } catch { notice.warning({ message: '.chapter-project.json 无法解析', placement: 'bottomRight' }); }
       }
@@ -1082,6 +1163,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setFinalReadConfirmed(openedProject.finalReadConfirmed ?? false);
       setClaims(openedProject.claims ?? []);
       setFinalSnapshot(openedProject.finalSnapshot);
+      setTimelineEvents(openedProject.timelineEvents ?? []);
+      setBookAnalysisIssues(openedProject.bookAnalysisIssues ?? []);
+      setSemanticDuplicates(openedProject.semanticDuplicates ?? []);
+      setControversies(openedProject.controversies ?? []);
+      setProfessionalRulePacks(openedProject.professionalRulePacks ?? ['history', 'general']);
+      setRoleApprovals(openedProject.roleApprovals ?? []);
       setDeploymentStatus(openedProject.deploymentStatus ?? { state: 'unconfigured', updatedAt: 0 });
       setSplitMode(openedProject.splitMode); setOrganizeByPart(openedProject.organizeByPart); setTemplate(openedProject.template);
       setGitRemoteUrl(openedProject.git?.remoteUrl ?? ''); setGitRemoteName(openedProject.git?.remoteName ?? 'origin'); setGitBranch(openedProject.git?.branch ?? 'main');
@@ -1622,7 +1709,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!uniqueIssues.length) {
       const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
       const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
-      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const manifest = `${JSON.stringify({ schemaVersion: 3, version: 3, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, timelineEvents, bookAnalysisIssues, semanticDuplicates, controversies, professionalRulePacks, roleApprovals, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       const synced = existing.success && existing.data ? await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: existing.data.modifiedAt }) : { success: false, error: '项目清单不存在' };
       if (!synced.success) uniqueIssues.push(`项目清单同步失败：${synced.error || '未知错误'}`); else setManifestSyncState('saved');
     }
@@ -1913,7 +2000,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
       const initialStatuses: Record<string, ChapterGenerationStatus> = Object.fromEntries(paths.map((path) => [path, chapterStatuses[path] ?? { state: 'pending', updatedAt: Date.now() }]));
       setChapterStatuses(initialStatuses);
-      const manifest = JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, deploymentStatus, splitMode, organizeByPart, template, files: paths, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2) + '\n';
+      const manifest = JSON.stringify({ schemaVersion: 3, version: 3, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, timelineEvents, bookAnalysisIssues, semanticDuplicates, controversies, professionalRulePacks, roleApprovals, deploymentStatus, splitMode, organizeByPart, template, files: paths, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2) + '\n';
       const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
       if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
@@ -1973,8 +2060,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}第四步：生成 {documents.length || 0} 个章节文档</Button>
       </div>
     </div> : view === 'management' ? <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">{([['overview', '规划看板'], ['knowledge', '全书知识库'], ['evidence', '史料证据台账'], ['editorial', '审校流水线'], ['quality', '一致性与门禁'], ['publish', '发布状态']] as const).map(([id, label]) => <Button key={id} size="sm" variant={managementTab === id ? 'default' : 'ghost'} onClick={() => setManagementTab(id)}>{label}</Button>)}<Button size="sm" variant="outline" className="ml-auto" disabled={auditLoading || !target} onClick={runBookAudit}>{auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行全书检查</Button></div>
+      <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">{([['overview', '规划看板'], ['knowledge', '全书知识库'], ['evidence', '史料证据台账'], ['editorial', '审校流水线'], ['advanced', '高级审校'], ['quality', '一致性与门禁'], ['publish', '发布状态']] as const).map(([id, label]) => <Button key={id} size="sm" variant={managementTab === id ? 'default' : 'ghost'} onClick={() => setManagementTab(id)}>{label}</Button>)}<Button size="sm" variant="outline" className="ml-auto" disabled={auditLoading || !target} onClick={runBookAudit}>{auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行全书检查</Button></div>
       <div className="min-h-0 flex-1 overflow-auto p-6">
+        {managementTab === 'evidence' && <div className="mx-auto mb-4 max-w-6xl rounded-xl border border-border bg-card p-4"><h3 className="font-semibold">主张支持强度</h3><p className="text-xs text-muted-foreground">逐条判断来源是直接、间接、背景支持，还是不足或相反。</p><div className="mt-3 max-h-72 space-y-2 overflow-auto">{claims.flatMap((claim) => claim.evidenceIds.map((evidenceId) => { const evidence = evidenceRecords.find((item) => item.id === evidenceId); return <div key={`${claim.id}-${evidenceId}`} className="grid gap-2 rounded border border-border p-2 md:grid-cols-[1fr_220px]"><div className="min-w-0 text-xs"><div className="truncate font-medium">{claim.text}</div><div className="truncate text-muted-foreground">{evidence?.title ?? '证据已删除'}</div></div><select value={claim.evidenceStrengths?.[evidenceId] ?? 'indirect'} onChange={(event) => updateClaim(claim.id, { evidenceStrengths: { ...(claim.evidenceStrengths ?? {}), [evidenceId]: event.target.value as SupportStrength } })} className="rounded border border-input bg-background p-2 text-xs"><option value="direct">直接支持</option><option value="indirect">间接支持</option><option value="contextual">背景支持</option><option value="insufficient">支持不足</option><option value="contradictory">证据相反</option></select></div>; }))}</div></div>}
+        {managementTab === 'evidence' && <div className="mx-auto mb-4 max-w-6xl space-y-3">{evidenceRecords.map((item) => { const result = item.anchor?.quote && item.sourceExcerpt ? checkQuoteAgainstSource(item.anchor.quote, item.sourceExcerpt) : null; const update = (patch: Partial<EvidenceRecord>) => setEvidenceRecords((current) => current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry)); return <section key={`source-${item.id}`} className="rounded-xl border border-border bg-card p-4"><div className="flex justify-between gap-3 text-sm font-medium"><span className="truncate">{item.title}</span><span className={result?.exact ? 'text-emerald-600' : 'text-amber-700'}>{result ? `${result.message} ${Math.round(result.similarity * 100)}%` : '待核对原文'}</span></div><div className="mt-3 grid gap-3 md:grid-cols-2"><select value={item.sourceLevel ?? 'search-clue'} onChange={(event) => update({ sourceLevel: event.target.value as SourceLevel })} className="rounded border border-input bg-background p-2 text-xs"><option value="primary">一手史料</option><option value="near-contemporary">近同时代材料</option><option value="later-history">后出史书</option><option value="archaeology">考古材料</option><option value="modern-research">现代研究</option><option value="search-clue">检索线索</option></select><input value={item.bibliographic ?? ''} onChange={(event) => update({ bibliographic: event.target.value })} placeholder="作者、书名/篇名、版本、页码" className="rounded border border-input bg-background p-2 text-xs" /><textarea value={item.anchor?.quote ?? ''} onChange={(event) => update({ anchor: { quote: event.target.value } })} placeholder="正文引文" className="min-h-16 rounded border border-input bg-background p-2 text-xs" /><textarea value={item.sourceExcerpt ?? ''} onChange={(event) => update({ sourceExcerpt: event.target.value, accessedAt: Date.now() })} placeholder="来源原文摘录" className="min-h-16 rounded border border-input bg-background p-2 text-xs" /></div></section>; })}</div>}
+        {managementTab === 'advanced' && <div className="mx-auto mb-5 grid max-w-7xl gap-5 lg:grid-cols-2"><section className="rounded-xl border border-border bg-card p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">学术争议卡</h3><Button size="sm" onClick={addControversy}>新增</Button></div>{controversies.map((card) => <div key={card.id} className="mt-3 rounded border border-border p-3"><input value={card.topic} onChange={(event) => updateControversy(card.id, { topic: event.target.value })} className="w-full rounded border border-input bg-background p-2 text-sm" />{card.positions.map((position, index) => <textarea key={index} value={position.argument} onChange={(event) => updateControversy(card.id, { positions: card.positions.map((entry, entryIndex) => entryIndex === index ? { ...entry, argument: event.target.value } : entry) })} placeholder={`${position.label}及依据`} className="mt-2 min-h-14 w-full rounded border border-input bg-background p-2 text-xs" />)}<input value={card.adoptedPosition} onChange={(event) => updateControversy(card.id, { adoptedPosition: event.target.value })} placeholder="本书采用立场" className="mt-2 w-full rounded border border-input bg-background p-2 text-xs" /><textarea value={card.rationale} onChange={(event) => updateControversy(card.id, { rationale: event.target.value })} placeholder="理由与保留意见" className="mt-2 min-h-14 w-full rounded border border-input bg-background p-2 text-xs" /></div>)}</section><section className="space-y-5"><div className="rounded-xl border border-border bg-card p-4"><div className="flex justify-between"><h3 className="font-semibold">多角色签核</h3><Button size="sm" variant="outline" onClick={ensureRoleApprovals}>生成签核表</Button></div>{roleApprovals.map((approval) => <div key={approval.id} className="mt-2 grid gap-2 md:grid-cols-[100px_1fr_130px]"><span className="text-xs">{approval.role}</span><input value={approval.reviewer} onChange={(event) => updateRoleApproval(approval.id, { reviewer: event.target.value })} placeholder="签核人" className="rounded border border-input bg-background p-1 text-xs" /><select value={approval.status} onChange={(event) => updateRoleApproval(approval.id, { status: event.target.value as RoleApproval['status'] })} className="rounded border border-input bg-background p-1 text-xs"><option value="pending">待签核</option><option value="approved">通过</option><option value="changes-requested">退回</option></select></div>)}</div><div className="rounded-xl border border-border bg-card p-4"><div className="flex justify-between"><h3 className="font-semibold">任意版本比较</h3><Button size="sm" variant="outline" onClick={() => void loadVersionFiles()}>刷新</Button></div><div className="mt-2 grid gap-2 md:grid-cols-2">{[leftVersion, rightVersion].map((value, index) => <select key={index} value={value} onChange={(event) => index ? setRightVersion(event.target.value) : setLeftVersion(event.target.value)} className="rounded border border-input bg-background p-2 text-xs"><option value="">选择版本</option>{versionFiles.map((path) => <option key={path} value={path}>{path}</option>)}</select>)}</div><Button size="sm" className="mt-2 w-full" onClick={() => void runVersionComparison()}>比较</Button>{versionComparison && <div className="mt-3 text-xs">相似度 {Math.round(versionComparison.similarity * 100)}%，删除 {versionComparison.removed.length} 行，新增 {versionComparison.added.length} 行<div className="mt-2 grid grid-cols-2 gap-2"><pre className="max-h-32 overflow-auto whitespace-pre-wrap bg-red-500/[0.06] p-2">{versionComparison.removed.map((line) => `− ${line}`).join('\n')}</pre><pre className="max-h-32 overflow-auto whitespace-pre-wrap bg-emerald-500/[0.06] p-2">{versionComparison.added.map((line) => `+ ${line}`).join('\n')}</pre></div></div>}</div></section></div>}
+        {managementTab === 'advanced' && <div className="mx-auto max-w-7xl space-y-5"><section className="rounded-xl border border-border bg-card p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">全书时间线、实体与语义分析</h2><p className="text-xs text-muted-foreground">扫描全部章节，检查年代冲突、知识库规范写法、专业规则和跨章近似段落。</p></div><Button disabled={bookAnalysisLoading || !target} onClick={() => void runAdvancedBookAnalysis()}>{bookAnalysisLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行高级分析</Button></div><div className="mt-4 flex flex-wrap gap-2">{(['history', 'law', 'medicine', 'finance', 'technology', 'general'] as ProfessionalRulePackId[]).map((pack) => <label key={pack} className={`flex cursor-pointer items-center gap-2 rounded border px-3 py-1.5 text-xs ${professionalRulePacks.includes(pack) ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}><input type="checkbox" checked={professionalRulePacks.includes(pack)} onChange={() => setProfessionalRulePacks((current) => current.includes(pack) ? current.filter((item) => item !== pack) : [...current, pack])} />{{ history: '历史', law: '法律', medicine: '医学', finance: '财经', technology: '计算机', general: '通用语言' }[pack]}</label>)}</div></section><div className="grid gap-5 lg:grid-cols-3"><section className="rounded-xl border border-border bg-card p-4 shadow-sm"><h3 className="font-semibold">时间线 <span className="text-xs font-normal text-muted-foreground">{timelineEvents.length} 条</span></h3><div className="mt-3 max-h-96 space-y-2 overflow-auto">{[...timelineEvents].sort((a, b) => (a.normalizedYear ?? 0) - (b.normalizedYear ?? 0)).map((event) => <div key={event.id} className="rounded border border-border p-2 text-xs"><div className="font-medium">{event.expression} · {event.chapter.split('/').pop()}</div><div className="mt-1 text-muted-foreground">{event.context}</div></div>)}</div></section><section className="rounded-xl border border-border bg-card p-4 shadow-sm"><h3 className="font-semibold">冲突与专业问题 <span className="text-xs font-normal text-muted-foreground">{bookAnalysisIssues.length} 项</span></h3><div className="mt-3 max-h-96 space-y-2 overflow-auto">{bookAnalysisIssues.map((issue) => <div key={issue.id} className={`rounded border p-2 text-xs ${issue.severity === 'blocker' ? 'border-destructive/40' : 'border-amber-500/30'}`}><div className="font-medium">{issue.message}</div><div className="mt-1 text-muted-foreground">{issue.chapters.map((item) => item.split('/').pop()).join('、')}</div>{issue.excerpts.slice(0, 2).map((excerpt) => <div key={excerpt} className="mt-1 rounded bg-muted/50 p-1">{excerpt}</div>)}</div>)}</div></section><section className="rounded-xl border border-border bg-card p-4 shadow-sm"><h3 className="font-semibold">跨章语义重复 <span className="text-xs font-normal text-muted-foreground">{semanticDuplicates.length} 组</span></h3><div className="mt-3 max-h-96 space-y-2 overflow-auto">{semanticDuplicates.map((duplicate, index) => <div key={`${duplicate.leftChapter}-${duplicate.rightChapter}-${index}`} className="rounded border border-border p-2 text-xs"><div className="font-medium">相似度 {Math.round(duplicate.similarity * 100)}% · {duplicate.leftChapter.split('/').pop()} ↔ {duplicate.rightChapter.split('/').pop()}</div><div className="mt-1 line-clamp-2 text-muted-foreground">{duplicate.leftText}</div><div className="mt-1 line-clamp-2 text-muted-foreground">{duplicate.rightText}</div></div>)}</div></section></div></div>}
         {managementTab === 'editorial' && <div className="mx-auto max-w-6xl space-y-5">
           {finalReadConfirmed && <section className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/[0.07] p-4"><div><div className="text-sm font-semibold text-emerald-700">正式成稿已锁定</div><div className="text-xs text-muted-foreground">{finalSnapshot ? `快照：${finalSnapshot.path} · ${new Date(finalSnapshot.createdAt).toLocaleString()}` : '正在生成全书快照…'}</div></div><Button variant="outline" onClick={unlockFinalDraft}>解锁修改</Button></section>}
           {(editorialChapterPath || activeFile) && (() => { const path = editorialChapterPath || activeFile; const chapterClaims = claims.filter((claim) => claim.chapter === path); const supported = chapterClaims.filter((claim) => claim.status === 'supported' && claim.evidenceIds.length); const coverage = chapterClaims.length ? Math.round((supported.length / chapterClaims.length) * 100) : 0; return <section className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="text-sm font-semibold">主张—证据绑定</h2><p className="text-xs text-muted-foreground">事实校验自动抽取高风险主张；至少 80% 获得已核实证据支持，才能通过引用校验。</p></div><div className={`text-2xl font-semibold ${coverage >= 80 ? 'text-emerald-600' : 'text-amber-700'}`}>{coverage}%</div></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full ${coverage >= 80 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${coverage}%` }} /></div><div className="mt-3 max-h-96 space-y-2 overflow-auto">{chapterClaims.map((claim) => <div key={claim.id} className="rounded-md border border-border p-3"><div className="text-xs font-medium">{claim.type}</div><div className="mt-1 text-xs text-muted-foreground">{claim.text}</div><div className="mt-2 grid gap-2 md:grid-cols-[150px_1fr]"><select value={claim.status} onChange={(event) => updateClaim(claim.id, { status: event.target.value as ClaimRecord['status'] })} className="rounded border border-input bg-background px-2 py-1 text-xs"><option value="unreviewed">未审查</option><option value="supported">有证据支持</option><option value="disputed">存在争议</option><option value="unsupported">缺少支持</option></select><div className="flex flex-wrap gap-2">{evidenceRecords.filter((evidence) => evidence.chapter === path).map((evidence) => <label key={evidence.id} className={`flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-[11px] ${claim.evidenceIds.includes(evidence.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}><input type="checkbox" checked={claim.evidenceIds.includes(evidence.id)} onChange={() => toggleClaimEvidence(claim, evidence.id)} />{evidence.status === 'verified' ? '✓' : evidence.status === 'disputed' ? '!' : '?'} {evidence.title}</label>)}</div></div><input value={claim.notes} onChange={(event) => updateClaim(claim.id, { notes: event.target.value })} placeholder="核实说明、证据边界或争议处理" className="mt-2 w-full rounded border border-input bg-background px-2 py-1 text-xs" /></div>)}{!chapterClaims.length && <div className="py-8 text-center text-xs text-muted-foreground">请先运行“事实准确性校验”或对应 AI 深度审校。</div>}</div></section>; })()}
