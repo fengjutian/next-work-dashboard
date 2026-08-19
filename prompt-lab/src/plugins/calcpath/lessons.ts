@@ -21,7 +21,7 @@ export const LESSONS: Record<string, LessonContent> = {
   integrals: { id: 'integrals', title: '积分', stage: '微积分核心', question: '无数个微小量如何组成一个整体？', insight: '积分把连续累积转化为可计算的极限，并通过基本定理与导数互相连接。', prerequisites: ['导数', '面积', '求和'], concepts: [{ title: '黎曼和', body: '把区域切成许多窄条，面积和在宽度趋近零时形成积分。' }, { title: '微积分基本定理', body: '求导与积分在适当条件下互为逆运算。', formula: '∫ₐᵇ f(x)dx = F(b)−F(a)' }], example: { question: '求 ∫2x dx', steps: ['寻找导数等于 2x 的函数', 'x² 的导数是 2x', '补上积分常数'], answer: 'x²+C' }, next: ['微分方程', '概率', '多元积分'] },
 };
 
-const future = (id: string, title: string, question: string, prerequisites: string[]) => ({ id, title, stage: '大学数学方向', question, insight: '这里是当前微积分路径继续生长的方向。完成前置能力后，CalcPath 会展开为可学习的完整课程。', prerequisites, concepts: [{ title: '学习目标', body: question }, { title: '前置路线', body: prerequisites.join(' → ') }], example: { question: '当前阶段', steps: ['建立高中数学地基', '跨过极限与变化率桥梁', '掌握导数与积分'], answer: '完成前置路径后解锁' }, next: [] });
+const future = (id: string, title: string, question: string, prerequisites: string[]): LessonContent => ({ id, title, stage: '大学数学方向', question, insight: '这里是当前微积分路径继续生长的方向。完成前置能力后，CalcPath 会展开为可学习的完整课程。', prerequisites, concepts: [{ title: '学习目标', body: question }, { title: '前置路线', body: prerequisites.join(' → ') }], example: { question: '当前阶段', steps: ['建立高中数学地基', '跨过极限与变化率桥梁', '掌握导数与积分'], answer: '完成前置路径后解锁' }, next: [] });
 LESSONS.multivariable = future('multivariable', '多元微积分', '当输出同时受多个变量影响时，如何描述变化？', ['导数', '向量']);
 LESSONS.diffeq = future('diffeq', '微分方程', '已知变化规律，如何反推出系统随时间的状态？', ['导数', '积分']);
 LESSONS.series = future('series', '级数与 Taylor', '如何用无限多项式逼近复杂函数？', ['极限', '高阶导数']);

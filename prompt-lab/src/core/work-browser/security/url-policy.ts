@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 
 const BLOCKED_HOSTS = new Set([
   'localhost',
@@ -19,6 +20,21 @@ export function assertSafeRemoteUrl(rawUrl: string): URL {
 
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (BLOCKED_HOSTS.has(host) || host.endsWith('.localhost') || isPrivateAddress(host)) {
+    throw new Error('PRIVATE_NETWORK_URL_BLOCKED');
+  }
+  return url;
+}
+
+export async function assertPublicRemoteUrl(rawUrl: string): Promise<URL> {
+  const url = assertSafeRemoteUrl(rawUrl);
+  if (isIP(url.hostname)) return url;
+  let addresses: Array<{ address: string; family: number }>;
+  try {
+    addresses = await lookup(url.hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error('URL_HOST_LOOKUP_FAILED');
+  }
+  if (!addresses.length || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new Error('PRIVATE_NETWORK_URL_BLOCKED');
   }
   return url;

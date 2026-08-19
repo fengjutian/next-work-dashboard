@@ -2,7 +2,7 @@ export const OUTLINE_PROJECT_SCHEMA_VERSION = 10;
 
 type ProjectRecord = Record<string, unknown>;
 const list = (value: unknown) => Array.isArray(value) ? value : [];
-const object = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+const object = (value: unknown): ProjectRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as ProjectRecord : {};
 
 const migrations: Record<number, (project: ProjectRecord) => ProjectRecord> = {
   1: (p) => ({ ...p, chapterBriefs: object(p.chapterBriefs), chapterStatuses: object(p.chapterStatuses) }),

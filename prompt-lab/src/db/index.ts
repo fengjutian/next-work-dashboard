@@ -1541,7 +1541,7 @@ function sqlWithoutCommentsAndLiterals(sql: string): string {
     .trim();
 }
 
-export function validateReadonlyDatabaseSql(sql: string): { valid: true } | { valid: false; message: string; offset?: number } {
+export function validateReadonlyDatabaseSql(sql: string): { valid: boolean; message?: string; offset?: number } {
   const cleaned = sqlWithoutCommentsAndLiterals(sql).replace(/;+\s*$/, '').trim();
   if (!cleaned) return { valid: false, message: '请输入 SQL 查询' };
   const semicolon = cleaned.indexOf(';');
@@ -1576,7 +1576,7 @@ export function runReadonlyDatabaseSql(sql: string, options: { offset?: number; 
     const offsetHint = token ? sql.toLocaleLowerCase().indexOf(token.toLocaleLowerCase()) : -1;
     throw new Error(offsetHint >= 0 ? `${message}（位置 ${offsetHint + 1}）` : message);
   }
-  const columns = statement.getColumnNames();
+  const columns = (statement as typeof statement & { getColumnNames(): string[] }).getColumnNames();
   const values: unknown[][] = [];
   let seen = 0;
   let hasMore = false;
@@ -1737,7 +1737,7 @@ export function getDatabaseTablePage(
   if (filterValues.length) dataStatement.bind(filterValues);
   const values: unknown[][] = [];
   while (dataStatement.step()) values.push(dataStatement.get());
-  const resultColumns = dataStatement.getColumnNames();
+  const resultColumns = (dataStatement as typeof dataStatement & { getColumnNames(): string[] }).getColumnNames();
   dataStatement.free();
   let totalRows = options.totalRows;
   if (totalRows === undefined) {

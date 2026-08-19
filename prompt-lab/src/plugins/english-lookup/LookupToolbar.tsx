@@ -16,6 +16,7 @@ interface Props {
   onSubmit: () => void;
   onHistory: (value: string) => void;
   onClearHistory: () => void;
+  onArticle: () => void;
   onVoice: (value: 'en-US' | 'en-GB') => void;
   onRate: (value: number) => void;
 }

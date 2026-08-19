@@ -1,6 +1,8 @@
 import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import { setMainWindow, removeMainWindow, getTray } from './globals';
+import { getWebviewCleanerPreloadPath, WORK_BROWSER_PARTITION } from './work-browser/cleaner';
+import { isSafeWebNavigation } from '../core/work-browser/security/url-policy';
 
 export function createWindow(preloadPath: string) {
   const win = new BrowserWindow({
@@ -23,6 +25,25 @@ export function createWindow(preloadPath: string) {
   });
 
   setMainWindow(win);
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (params.partition !== WORK_BROWSER_PARTITION) return;
+    if (!isSafeWebNavigation(params.src)) {
+      event.preventDefault();
+      return;
+    }
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    webPreferences.preload = getWebviewCleanerPreloadPath();
+  });
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    if (guest.session.getPartition() === WORK_BROWSER_PARTITION) {
+      guest.setWindowOpenHandler(() => ({ action: 'deny' }));
+      guest.on('will-navigate', (event, url) => {
+        if (!isSafeWebNavigation(url)) event.preventDefault();
+      });
+    }
+  });
   win.on('focus', () => setMainWindow(win));
   win.once('closed', () => removeMainWindow(win));
 

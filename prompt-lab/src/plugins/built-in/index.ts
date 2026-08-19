@@ -222,7 +222,7 @@ const builtInPlugins: Plugin[] = [
   {
     id: 'calcpath', name: 'CalcPath 微积分', icon: BookOpen, component: CalcPathPanel, enabled: false, order: 22, keepAlive: true,
     contributions: { commands: [{ id: 'calcpath.practice', title: '开始自适应微积分练习', category: 'CalcPath' }] },
-    activate: (context) => context.commands.register('calcpath.practice', () => window.dispatchEvent(new CustomEvent('calcpath:practice'))),
+    activate: (context) => context.commands.register('calcpath.practice', () => { window.dispatchEvent(new CustomEvent('calcpath:practice')); }),
   },
   {
     id: 'translator',
@@ -658,7 +658,7 @@ const builtInPlugins: Plugin[] = [
     enabled: false,
     order: 11,
     keepAlive: true,
-    activate: (context) => context.commands.register('english-lookup.search', () => window.dispatchEvent(new CustomEvent('english-lookup:search'))),
+    activate: (context) => context.commands.register('english-lookup.search', () => { window.dispatchEvent(new CustomEvent('english-lookup:search')); }),
     contributions: {
       commands: [{ id: 'english-lookup.search', title: '查询英语单词', category: 'AI 英语查询' }],
       views: [{ id: 'english-lookup.main', title: 'AI 英语查询', component: EnglishLookupPanel, location: 'main' }],
@@ -776,8 +776,8 @@ const builtInPlugins: Plugin[] = [
     order: 28,
     keepAlive: true,
     activate: (context) => {
-      context.subscriptions.add(context.commands.register('thinking-lab.new', () => window.dispatchEvent(new CustomEvent('thinking-lab:command', { detail: { command: 'new' } }))));
-      context.subscriptions.add(context.commands.register('thinking-lab.history', () => window.dispatchEvent(new CustomEvent('thinking-lab:command', { detail: { command: 'history' } }))));
+      context.subscriptions.add(context.commands.register('thinking-lab.new', () => { window.dispatchEvent(new CustomEvent('thinking-lab:command', { detail: { command: 'new' } })); }));
+      context.subscriptions.add(context.commands.register('thinking-lab.history', () => { window.dispatchEvent(new CustomEvent('thinking-lab:command', { detail: { command: 'history' } })); }));
     },
     contributions: {
       commands: [

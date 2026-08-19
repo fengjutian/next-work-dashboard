@@ -8,7 +8,7 @@ import { createOpenAIProvider, type ChatMessage } from '@/core/llm';
 import { useStore } from '@/store/store';
 import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
 import { createDocxBase64, createEpubBase64, createPdfBase64, type PublicationBook } from './publication-export';
-import { migrateOutlineProject, OUTLINE_PROJECT_SCHEMA_VERSION } from './project-migrations';
+import { migrateOutlineProject } from './project-migrations';
 import { EDITORIAL_PRESETS, assessNarrative, assessPacing, atomizeClaims, buildAIConstraintBlock, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, createBackupManifest, evaluateExportGate, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, renderPrintHtml, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms, type AnalysisIssue, type CitationStyle, type ContentClassification, type EditorialPresetId, type EditorialRole, type EvidenceGap, type FactLock, type IndexEntry, type NarrativeAssessment, type NumericClaim, type PacingAssessment, type PersonPresence, type PersonRelation, type PlaceMapping, type ProfessionalRulePackId, type QualitySnapshot, type SemanticDuplicate, type SourceLevel, type SupportStrength, type TimelineEvent, type VersionComparison } from './editorial-analysis';
 
 const DEFAULT_TEMPLATE = `# {{title}}
@@ -954,6 +954,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   };
   const exportPublicationBundle = async () => {
     if (!target) return;
+    await exportPublicationFormats();
     const root = activeProject?.subfolder ? `${activeProject.subfolder}/publication` : 'publication';
     const directory = await window.electronAPI.workspace.createDirectory(target.path, root);
     if (!directory.success && !/EEXIST|ALREADY_EXISTS/.test(String(directory.error))) { notice.error({ message: '出版资料目录创建失败', description: directory.error, placement: 'bottomRight' }); return; }

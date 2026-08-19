@@ -15,7 +15,7 @@ import type { WorkspaceStore } from './workspace-store';
 import type { DocumentStore } from './document-store';
 import type { DocumentId, TabId, WorkspaceId } from '../../core/work-browser/types';
 import { now } from '../../core/work-browser/types';
-import { assertSafeRemoteUrl } from '../../core/work-browser/security/url-policy';
+import { assertPublicRemoteUrl, assertSafeRemoteUrl } from '../../core/work-browser/security/url-policy';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
@@ -42,7 +42,7 @@ export interface SavePageResult {
 }
 
 async function fetchHtml(rawUrl: string, signal: AbortSignal, redirectCount = 0): Promise<string> {
-  const url = assertSafeRemoteUrl(rawUrl);
+  const url = await assertPublicRemoteUrl(rawUrl);
   const res = await fetch(url, {
     signal,
     redirect: 'manual',
@@ -71,7 +71,7 @@ async function fetchHtml(rawUrl: string, signal: AbortSignal, redirectCount = 0)
 }
 
 function yamlScalar(value: string): string {
-  return JSON.stringify(value.replace(/\u0000/g, ''));
+  return JSON.stringify(value.split(String.fromCharCode(0)).join(''));
 }
 
 async function atomicWrite(filePath: string, content: string): Promise<void> {
