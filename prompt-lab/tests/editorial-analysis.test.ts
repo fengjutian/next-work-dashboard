@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessNarrative, atomizeClaims, buildPublicationReadiness, checkQuoteAgainstSource, compareDocumentVersions, compareFactLocks, extractFactLock, extractTimelineEvents, findEntityConflicts, findEvidenceGaps, findSemanticDuplicates, findTimelineConflicts, runProfessionalRules } from '../src/plugins/outline-scaffolder/editorial-analysis';
+import { assessNarrative, atomizeClaims, buildEvidenceReverseIndex, buildFootnotes, buildPublicationReadiness, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, extractFactLock, extractTimelineEvents, findDependentSources, findEntityConflicts, findEvidenceGaps, findSemanticDuplicates, findTimelineConflicts, formatCitation, locateQuoteContext, runProfessionalRules } from '../src/plugins/outline-scaffolder/editorial-analysis';
 
 describe('editorial analysis', () => {
   it('normalizes BCE dates and detects conflicting event dates', () => {
@@ -80,5 +80,26 @@ describe('editorial analysis', () => {
     const report = buildPublicationReadiness({ chapters: 3, unresolvedBlockers: 1, evidenceGaps: [{ claimId: 'a', chapter: 'a.md', claim: 'x', kind: 'missing', message: 'missing' }], controversyCount: 1, approvedRoles: 3, requiredRoles: 5, averageNarrativeScore: 55 });
     expect(report.blockers).toHaveLength(3);
     expect(report.score).toBeLessThan(100);
+  });
+
+  it('formats citations and inserts deduplicated footnotes', () => {
+    const source = { id: 'e1', title: '史记·秦始皇本纪', author: '司马迁', year: '前1世纪', url: 'https://example.com', quote: '分天下以为三十六郡' };
+    expect(formatCitation(source, 'gb-t-7714')).toContain('司马迁');
+    const result = buildFootnotes('材料称“分天下以为三十六郡”。', [source], 'chicago-notes');
+    expect(result.content).toContain('[^1]');
+    expect(result.notes).toHaveLength(1);
+  });
+
+  it('builds reverse evidence usage and detects dependent sources', () => {
+    const usage = buildEvidenceReverseIndex([{ id: 'e1', title: '材料', chapter: 'a.md', anchor: { quote: '引文' } }], [{ id: 'c1', chapter: 'b.md', evidenceIds: ['e1'] }]);
+    expect(usage[0].chapters).toEqual(['a.md', 'b.md']);
+    const clusters = findDependentSources([{ id: 'e1', title: '甲', url: 'https://example.com/a?x=1', source: '甲' }, { id: 'e2', title: '乙', url: 'https://example.com/a', source: '乙' }]);
+    expect(clusters).toHaveLength(1);
+  });
+
+  it('shows quote context and classifies reconstruction versus interpretation', () => {
+    expect(locateQuoteContext('统一文字', '此前争论很多，最终决定统一文字，随后推行。').found).toBe(true);
+    const layers = classifyContent('a.md', '或许他在夜里作出了决定。这意味着政策发生转向。相传天降异象。');
+    expect(layers.map((item) => item.layer)).toEqual(['reconstruction', 'interpretation', 'literary']);
   });
 });

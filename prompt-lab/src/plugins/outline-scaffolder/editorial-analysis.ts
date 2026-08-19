@@ -16,6 +16,69 @@ export interface NarrativeAssessment { score: number; sceneSignals: number; acti
 export interface FactLock { dates: string[]; numbers: string[]; names: string[]; quotes: string[] }
 export interface FactLockViolation { kind: keyof FactLock; removed: string[]; added: string[] }
 export interface PublicationReadiness { score: number; blockers: string[]; warnings: string[]; metrics: Record<string, number> }
+export type CitationStyle = 'gb-t-7714' | 'chicago-notes' | 'mla' | 'apa';
+export type CertaintyLevel = 'certain' | 'probable' | 'inferred' | 'legendary';
+export type ContentLayer = 'documented' | 'reconstruction' | 'interpretation' | 'literary';
+export interface CitationInput { id: string; title: string; author?: string; publisher?: string; year?: string; url?: string; accessedAt?: number; source?: string }
+export interface EvidenceUsage { evidenceId: string; title: string; chapters: string[]; claimIds: string[]; quotes: string[] }
+export interface SourceCluster { key: string; evidenceIds: string[]; titles: string[]; warning: string }
+export interface QuoteContext { found: boolean; before: string; quote: string; after: string; message: string }
+export interface ContentClassification { id: string; chapter: string; text: string; layer: ContentLayer; certainty: CertaintyLevel; reason: string }
+
+export function formatCitation(source: CitationInput, style: CitationStyle): string {
+  const author = source.author?.trim() || source.source?.trim() || '佚名';
+  const title = source.title.trim() || '未题名资料';
+  const year = source.year?.trim() || '日期不详';
+  const accessed = source.accessedAt ? new Date(source.accessedAt).toISOString().slice(0, 10) : '';
+  if (style === 'gb-t-7714') return `${author}. ${title}[EB/OL]. (${year})${source.url ? `[${accessed || '引用日期不详'}]. ${source.url}` : ''}.`;
+  if (style === 'chicago-notes') return `${author}, “${title},” ${year}${source.url ? `, accessed ${accessed || 'n.d.'}, ${source.url}` : ''}.`;
+  if (style === 'mla') return `${author}. “${title}.” ${source.publisher || source.source || ''}, ${year}.${source.url ? ` ${source.url}. Accessed ${accessed || 'n.d.'}.` : ''}`.replace(/\s+/g, ' ').trim();
+  return `${author}. (${year}). ${title}.${source.publisher ? ` ${source.publisher}.` : ''}${source.url ? ` ${source.url}` : ''}`;
+}
+
+export function buildFootnotes(content: string, sources: Array<CitationInput & { quote?: string }>, style: CitationStyle): { content: string; notes: string[] } {
+  let next = content; const notes: string[] = [];
+  sources.forEach((source) => {
+    if (!source.quote || !next.includes(source.quote)) return;
+    let noteIndex = notes.findIndex((note) => note === formatCitation(source, style));
+    if (noteIndex < 0) { notes.push(formatCitation(source, style)); noteIndex = notes.length - 1; }
+    const marker = `[^${noteIndex + 1}]`;
+    if (!next.includes(`${source.quote}${marker}`)) next = next.replace(source.quote, `${source.quote}${marker}`);
+  });
+  const body = notes.map((note, index) => `[^${index + 1}]: ${note}`).join('\n');
+  return { content: body ? `${next.trimEnd()}\n\n${body}\n` : next, notes };
+}
+
+export function buildEvidenceReverseIndex(evidence: Array<{ id: string; title: string; chapter: string; anchor?: { quote: string } }>, claims: Array<{ id: string; chapter: string; evidenceIds: string[] }>): EvidenceUsage[] {
+  return evidence.map((item) => ({ evidenceId: item.id, title: item.title, chapters: [...new Set([item.chapter, ...claims.filter((claim) => claim.evidenceIds.includes(item.id)).map((claim) => claim.chapter)].filter(Boolean))], claimIds: claims.filter((claim) => claim.evidenceIds.includes(item.id)).map((claim) => claim.id), quotes: item.anchor?.quote ? [item.anchor.quote] : [] }));
+}
+
+export function findDependentSources(sources: Array<{ id: string; title: string; url: string; source: string; notes?: string }>): SourceCluster[] {
+  const normalizeUrl = (url: string) => { try { const parsed = new URL(url); return `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname.replace(/\/$/, '')}`; } catch { return url.toLowerCase().replace(/[?#].*$/, ''); } };
+  const groups = new Map<string, typeof sources>();
+  sources.forEach((source) => {
+    const cited = source.notes?.match(/(?:转引自|转载自|据)\s*[《“]?([^》”。，;；]{3,60})/)?.[1]?.trim();
+    const key = cited ? `citation:${cited}` : `url:${normalizeUrl(source.url)}`;
+    groups.set(key, [...(groups.get(key) ?? []), source]);
+  });
+  return [...groups.entries()].filter(([, group]) => group.length > 1).map(([key, group]) => ({ key, evidenceIds: group.map((item) => item.id), titles: group.map((item) => item.title), warning: `${group.length} 条来源可能并非相互独立，实际指向同一网页或转引材料` }));
+}
+
+export function locateQuoteContext(quote: string, sourceExcerpt: string, radius = 100): QuoteContext {
+  const index = sourceExcerpt.indexOf(quote);
+  if (index < 0) return { found: false, before: '', quote, after: '', message: '原文摘录中未找到完全一致的引文' };
+  return { found: true, before: sourceExcerpt.slice(Math.max(0, index - radius), index), quote, after: sourceExcerpt.slice(index + quote.length, index + quote.length + radius), message: '已找到引文，并保留前后文供断章取义检查' };
+}
+
+export function classifyContent(chapter: string, content: string): ContentClassification[] {
+  return content.split(/(?<=[。！？!?])\s*|\n+/).map((text) => text.trim()).filter((text) => text.length >= 6).map((text, index) => {
+    let layer: ContentLayer = 'documented'; let certainty: CertaintyLevel = 'certain'; let reason = '陈述性事实，仍需由证据台账确认';
+    if (/传说|相传|据说|后世附会|民间故事/.test(text)) { layer = 'literary'; certainty = 'legendary'; reason = '包含传说或后世附会信号'; }
+    else if (/也许|或许|可能|大概|推测|想必|似乎|可以想象/.test(text)) { layer = 'reconstruction'; certainty = 'inferred'; reason = '包含推测或场景复原信号'; }
+    else if (/这意味着|可以看出|由此可见|本质上|反映了|表明了/.test(text)) { layer = 'interpretation'; certainty = 'probable'; reason = '属于作者分析或解释'; }
+    return { id: `${chapter}:layer:${index}`, chapter, text, layer, certainty, reason };
+  });
+}
 
 export function atomizeClaims(chapter: string, content: string): AtomicClaim[] {
   const sentences = content.replace(/^#{1,6}\s+.*$/gm, '').split(/(?<=[。！？!?；;])\s*|\n+/).map((item) => item.trim()).filter((item) => item.length >= 8);
