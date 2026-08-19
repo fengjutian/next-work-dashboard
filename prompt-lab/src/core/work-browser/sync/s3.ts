@@ -8,6 +8,7 @@ export interface S3Config {
   bucket: string;
   accessKeyId: string;
   secretAccessKey: string;
+  sessionToken?: string;
   prefix?: string;
 }
 
@@ -17,16 +18,20 @@ export class S3SyncAdapter implements SyncAdapter {
 
   async list(workspaceId: string): Promise<SyncEntry[]> {
     const prefix = this.key(workspaceId, '');
-    const response = await this.request('GET', '', new Uint8Array(), { 'list-type': '2', prefix });
-    const xml = await response.text();
-    return [...xml.matchAll(/<Contents>[\s\S]*?<Key>([^<]+)<\/Key>[\s\S]*?<LastModified>([^<]+)<\/LastModified>[\s\S]*?<ETag>"?([^<"]+)"?<\/ETag>[\s\S]*?<Size>(\d+)<\/Size>[\s\S]*?<\/Contents>/g)]
-      .map((match) => ({
+    const entries: SyncEntry[] = [];
+    let continuationToken = '';
+    do {
+      const response = await this.request('GET', '', new Uint8Array(), { 'list-type': '2', prefix, ...(continuationToken ? { 'continuation-token': continuationToken } : {}) });
+      const xml = await response.text();
+      entries.push(...[...xml.matchAll(/<Contents>[\s\S]*?<Key>([^<]+)<\/Key>[\s\S]*?<LastModified>([^<]+)<\/LastModified>[\s\S]*?<ETag>"?([^<"]+)"?<\/ETag>[\s\S]*?<Size>(\d+)<\/Size>[\s\S]*?<\/Contents>/g)].map((match) => ({
         path: decodeXml(match[1]).slice(prefix.length),
         modifiedAt: Date.parse(match[2]),
         etag: match[3],
         size: Number(match[4]),
-      }))
-      .filter((entry) => entry.path);
+      })).filter((entry) => entry.path));
+      continuationToken = /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1] || '';
+    } while (continuationToken);
+    return entries;
   }
 
   async get(workspaceId: string, path: string): Promise<SyncFile> {
@@ -58,8 +63,9 @@ export class S3SyncAdapter implements SyncAdapter {
     const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
     const date = amzDate.slice(0, 8);
     const payloadHash = sha256(body);
-    const canonicalHeaders = `host:${endpoint.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
-    const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+    const tokenHeader = this.config.sessionToken ? `x-amz-security-token:${this.config.sessionToken}\n` : '';
+    const canonicalHeaders = `host:${endpoint.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n${tokenHeader}`;
+    const signedHeaders = `host;x-amz-content-sha256;x-amz-date${this.config.sessionToken ? ';x-amz-security-token' : ''}`;
     const canonicalRequest = [method, canonicalUri, canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\n');
     const scope = `${date}/${this.config.region}/s3/aws4_request`;
     const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256(canonicalRequest)}`;
@@ -72,6 +78,7 @@ export class S3SyncAdapter implements SyncAdapter {
         'x-amz-date': amzDate,
         'x-amz-content-sha256': payloadHash,
         Authorization: `AWS4-HMAC-SHA256 Credential=${this.config.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+        ...(this.config.sessionToken ? { 'x-amz-security-token': this.config.sessionToken } : {}),
       },
     });
     if (!response.ok) throw new Error(`S3_HTTP_${response.status}`);

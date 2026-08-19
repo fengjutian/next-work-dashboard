@@ -296,6 +296,7 @@ export function setupWorkBrowserIPC(): void {
   ipcMain.handle('work-browser:sync:preview', (_event, workspaceId: string, target: SyncTargetInput) => syncService.preview(workspaceId, target));
   ipcMain.handle('work-browser:sync:push', (_event, workspaceId: string, target: SyncTargetInput, overwrite?: boolean) => syncService.push(workspaceId, target, !!overwrite));
   ipcMain.handle('work-browser:sync:pull', (_event, workspaceId: string, target: SyncTargetInput, overwrite?: boolean) => syncService.pull(workspaceId, target, !!overwrite));
+  ipcMain.handle('work-browser:sync:resolve', (_event, workspaceId: string, target: SyncTargetInput, relativePath: string, resolution: 'local' | 'remote' | 'keep-both') => syncService.resolveConflict(workspaceId, target, relativePath, resolution));
   ipcMain.handle('work-browser:sync:target-list', () => syncTargets.list());
   ipcMain.handle('work-browser:sync:target-get', (_event, id: string) => syncTargets.get(id));
   ipcMain.handle('work-browser:sync:target-save', (_event, target: SyncTargetInput) => syncTargets.save(target));

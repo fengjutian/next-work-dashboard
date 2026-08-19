@@ -45,6 +45,12 @@ export function SyncPanel({ workspaceId }: { workspaceId: string }) {
     } catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
+  const resolveConflict = async (path: string, resolution: 'local' | 'remote' | 'keep-both') => {
+    setBusy(true);
+    try { await window.electronAPI.workBrowser.sync.resolve(workspaceId, target, path, resolution); await inspect(); message.success(`冲突已处理：${path}`); }
+    catch (error) { message.error(error instanceof Error ? error.message : String(error)); }
+    finally { setBusy(false); }
+  };
 
   return <div className="space-y-3 p-3">
     <div><Typography.Text strong>Workspace Sync</Typography.Text><div className="mt-1 text-[11px] text-muted-foreground">默认拒绝覆盖双向修改，凭据仅用于本次会话。</div></div>
@@ -57,7 +63,7 @@ export function SyncPanel({ workspaceId }: { workspaceId: string }) {
     <Space wrap><Button onClick={() => void saveTarget()}>安全保存配置</Button><Button loading={busy} onClick={() => void inspect()}>预览</Button><Button loading={busy} onClick={() => void transfer('push')}>推送</Button><Button loading={busy} onClick={() => void transfer('pull')}>拉取</Button></Space>
     {preview && <div className="space-y-2 rounded-lg border border-border p-3 text-xs">
       <div className="flex gap-2"><Tag color="blue">上传 {preview.upload.length}</Tag><Tag color="green">下载 {preview.download.length}</Tag><Tag color={preview.conflicts.length ? 'red' : 'default'}>冲突 {preview.conflicts.length}</Tag></div>
-      {preview.conflicts.slice(0, 8).map((conflict) => <div key={conflict.path} className="truncate text-red-600">冲突：{conflict.path}</div>)}
+      {preview.conflicts.slice(0, 8).map((conflict) => <div key={conflict.path} className="space-y-1 rounded border border-red-200 p-2 text-red-600"><div className="truncate">冲突：{conflict.path}</div><Space wrap><Button size="small" disabled={busy} onClick={() => void resolveConflict(conflict.path, 'local')}>保留本地</Button><Button size="small" disabled={busy} onClick={() => void resolveConflict(conflict.path, 'remote')}>保留远端</Button><Button size="small" disabled={busy} onClick={() => void resolveConflict(conflict.path, 'keep-both')}>两份都保留</Button></Space></div>)}
     </div>}
   </div>;
 }

@@ -65,6 +65,34 @@ export class WorkBrowserSyncService {
     return { ok: true, conflicts: [], transferred };
   }
 
+  async resolveConflict(workspaceId: string, target: SyncTargetInput, relativePath: string, resolution: 'local' | 'remote' | 'keep-both') {
+    const adapter = createAdapter(target);
+    const root = this.workspaceRoot(workspaceId);
+    const safePath = normalizeSyncPath(relativePath);
+    const localPath = safeResolve(root, safePath);
+    const localData = await fs.readFile(localPath).catch(() => null);
+    const remoteFile = await adapter.get(workspaceId, safePath).catch(() => null);
+    if (resolution === 'local') {
+      if (localData) await adapter.put(workspaceId, { path: safePath, data: localData });
+      else await adapter.remove(workspaceId, safePath).catch(() => undefined);
+    } else if (resolution === 'remote') {
+      if (remoteFile) await atomicLocalWrite(localPath, remoteFile.data);
+      else await fs.unlink(localPath).catch(() => undefined);
+    } else {
+      if (!localData || !remoteFile) throw new Error('KEEP_BOTH_REQUIRES_TWO_VERSIONS');
+      const parsed = path.posix.parse(safePath);
+      const conflictPath = path.posix.join(parsed.dir, `${parsed.name}.remote-${Date.now()}${parsed.ext}`);
+      await atomicLocalWrite(safeResolve(root, conflictPath), remoteFile.data);
+      await Promise.all([
+        adapter.put(workspaceId, { path: safePath, data: localData }),
+        adapter.put(workspaceId, { path: conflictPath, data: remoteFile.data }),
+      ]);
+    }
+    const baseline = await localManifest(root);
+    await this.writeBaseline(workspaceId, target.id, baseline);
+    return { ok: true };
+  }
+
   private workspaceRoot(workspaceId: string): string {
     const workspace = this.workspaces.getWorkspace(workspaceId as never);
     if (!workspace) throw new Error('WORKSPACE_NOT_FOUND');
@@ -85,9 +113,13 @@ export class WorkBrowserSyncService {
     const sourceMap = new Map(source.map((entry) => [entry.path, entry]));
     applied.forEach((filePath) => { const entry = sourceMap.get(filePath); if (entry) map.set(filePath, entry); });
     deleted.forEach((filePath) => map.delete(filePath));
+    await this.writeBaseline(workspaceId, targetId, [...map.values()]);
+  }
+
+  private async writeBaseline(workspaceId: string, targetId: string, manifest: SyncManifestEntry[]): Promise<void> {
     const destination = this.baselinePath(workspaceId, targetId);
     await fs.mkdir(path.dirname(destination), { recursive: true });
-    await atomicLocalWrite(destination, new TextEncoder().encode(JSON.stringify([...map.values()], null, 2)));
+    await atomicLocalWrite(destination, new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
   }
 }
 
@@ -96,7 +128,7 @@ function createAdapter(target: SyncTargetInput): SyncAdapter {
   if (target.kind === 'webdav') return new WebDavSyncAdapter({ baseUrl: required(target.config, 'baseUrl'), username: target.config.username, password: target.config.password });
   return new S3SyncAdapter({
     endpoint: required(target.config, 'endpoint'), region: required(target.config, 'region'), bucket: required(target.config, 'bucket'),
-    accessKeyId: required(target.config, 'accessKeyId'), secretAccessKey: required(target.config, 'secretAccessKey'), prefix: target.config.prefix,
+    accessKeyId: required(target.config, 'accessKeyId'), secretAccessKey: required(target.config, 'secretAccessKey'), sessionToken: target.config.sessionToken, prefix: target.config.prefix,
   });
 }
 
