@@ -17,7 +17,7 @@ export class S3SyncAdapter implements SyncAdapter {
   constructor(private config: S3Config) {}
 
   async list(workspaceId: string): Promise<SyncEntry[]> {
-    const prefix = this.key(workspaceId, '');
+    const prefix = `${this.key(workspaceId, '')}/`;
     const entries: SyncEntry[] = [];
     let continuationToken = '';
     do {
@@ -29,7 +29,7 @@ export class S3SyncAdapter implements SyncAdapter {
         etag: match[3],
         size: Number(match[4]),
       })).filter((entry) => entry.path));
-      continuationToken = /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1] || '';
+      continuationToken = decodeXml(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/.exec(xml)?.[1] || '');
     } while (continuationToken);
     return entries;
   }

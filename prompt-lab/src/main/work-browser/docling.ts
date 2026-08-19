@@ -26,7 +26,7 @@ export function normalizeDoclingResponse(payload: unknown): DoclingResult {
     const record = page as Record<string, unknown>;
     return { page: Number(record.page_no || record.page || index + 1), text: String(record.text || record.content || '') };
   }).filter((page) => page.text.trim());
-  const plainText = String(document.text || pages.map((page) => page.text).join('\n\n') || markdown.replace(/[#*_`>\[\]()]/g, ' ')).trim();
+  const plainText = String(document.text || pages.map((page) => page.text).join('\n\n') || markdown.replace(/[#*_`()><]/g, ' ').replace(/\[/g, ' ').replace(/\]/g, ' ')).trim();
   if (!plainText) throw new Error('DOCLING_EMPTY_RESULT');
   return { plainText, markdown: markdown || plainText, pages };
 }
