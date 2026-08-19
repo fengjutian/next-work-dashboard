@@ -24,7 +24,7 @@ import type {
 import { SearchBar } from './components/SearchBar';
 import { WorkspaceList } from './components/WorkspaceList';
 import { TabBar } from './components/TabBar';
-import { WebContent } from './components/WebContent';
+import { WebContent, type WebContentHandle } from './components/WebContent';
 import { LibraryList } from './components/LibraryList';
 import { TaskList } from './components/TaskList';
 import { GraphView } from './components/GraphView';
@@ -69,6 +69,7 @@ export function WorkBrowserPanel() {
   const documentsByWorkspaceRef = useRef(new Map<string, Document[]>());
   const annotationsByWorkspaceRef = useRef(new Map<string, Annotation[]>());
   const pageLastUsedRef = useRef(new Map<string, number>());
+  const webContentRefs = useRef(new Map<string, WebContentHandle>());
   activeWorkspaceIdRef.current = activeWorkspaceId;
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
 
@@ -343,10 +344,14 @@ export function WorkBrowserPanel() {
 
   const handleSave = useCallback(async (input: { url: string; title?: string; workspaceId: string }) => {
     try {
+      const html = activeTab?.url === input.url
+        ? await webContentRefs.current.get(activeTab.id)?.captureHtml().catch(() => undefined)
+        : undefined;
       const r = await window.electronAPI.workBrowser.document.save({
         workspaceId: input.workspaceId,
         url: input.url,
         title: input.title,
+        html,
         tabId: input.workspaceId === activeWorkspace?.id ? activeTab?.id : undefined,
       });
       message.success(`已保存：${r.wordCount} 词${r.isNewVersion ? `（新版本 ${r.diffSummary}）` : ''}`);
@@ -494,6 +499,10 @@ export function WorkBrowserPanel() {
                       aria-hidden={!visible}
                     >
                       <WebContent
+                        ref={(handle) => {
+                          if (handle) webContentRefs.current.set(page.id, handle);
+                          else webContentRefs.current.delete(page.id);
+                        }}
                         tab={page}
                         cleanerEnabled={cleanerEnabled}
                         blockedDomains={blockedDomains}

@@ -9,7 +9,7 @@
  */
 import { Alert, Tag, Tooltip, Button, Space, Typography } from '../ui';
 import { ArrowRight, BookOpen, Check, FlaskConical, Globe2, Search, Settings2, Sparkles, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { Tab } from '../../../core/work-browser/types';
 import { AnnotationPopover } from './AnnotationPopover';
 
@@ -24,6 +24,10 @@ export interface WebContentProps {
   onResearch?: (topic: string) => void;
   onTabUpdate?: (tabId: string, patch: Partial<Pick<Tab, 'title' | 'url' | 'favicon'>>) => void;
   onReadyChange?: (tabId: string, ready: boolean) => void;
+}
+
+export interface WebContentHandle {
+  captureHtml: () => Promise<string | undefined>;
 }
 
 declare global {
@@ -70,7 +74,7 @@ function executeInReadyWebview(webview: Electron.WebviewTag, script: string) {
   }
 }
 
-export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate, onReadyChange }: WebContentProps) {
+export const WebContent = forwardRef<WebContentHandle, WebContentProps>(function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDocumentId, onSelectionChange, onOpenUrl, onResearch, onTabUpdate, onReadyChange }, ref) {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const hasEverLoadedRef = useRef(false);
   const loadSettleTimerRef = useRef<number>();
@@ -83,6 +87,15 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
   const [homeUrl, setHomeUrl] = useState('https://www.google.com');
   const [homeSettingsOpen, setHomeSettingsOpen] = useState(false);
   const [customHomeUrl, setCustomHomeUrl] = useState('');
+
+  useImperativeHandle(ref, () => ({
+    captureHtml: async () => {
+      const webview = webviewRef.current;
+      if (!webview || !loaded) return undefined;
+      const html = await webview.executeJavaScript('document.documentElement.outerHTML');
+      return typeof html === 'string' ? html : undefined;
+    },
+  }), [loaded]);
 
   const openInInternalTab = useCallback((url: string) => {
     if (!/^https?:\/\//i.test(url)) return;
@@ -388,7 +401,7 @@ export function WebContent({ tab, cleanerEnabled, blockedDomains = [], activeDoc
       )}
     </div>
   );
-}
+});
 
 function AnnotationSidePanel({ annotation, onClose }: { annotation: { id: string; note: string; rangeText: string; color: string; url: string }; onClose: () => void }) {
   return (

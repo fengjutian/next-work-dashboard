@@ -34,7 +34,8 @@ import {
   type PublicationBook,
 } from "./publication-export";
 import { migrateOutlineProject } from "./project-migrations";
-import { createReleaseCandidate } from "./delivery";
+import { checksumText, createReleaseCandidate } from "./delivery";
+import { scheduleRetry, stableContentKey, type RetryJob } from "./review-runtime";
 import {
   EDITORIAL_PRESETS,
   assessNarrative,
@@ -465,6 +466,7 @@ interface AiExecutionLog {
   outputChars: number;
   success: boolean;
 }
+interface EditorialRetryPayload { stage: Exclude<EditorialStageId, "consistency" | "format">; path: string }
 interface ReviewSuggestion {
   id: string;
   section: string;
@@ -840,6 +842,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
       "completeness",
     );
   const [editorialAiLoading, setEditorialAiLoading] = useState(false);
+  const aiReviewCacheRef = useRef<Record<string, string>>({});
+  const [aiRetryQueue, setAiRetryQueue] = useState<Array<RetryJob<EditorialRetryPayload>>>([]);
   const [editorialBatchRunning, setEditorialBatchRunning] = useState(false);
   const [editorialBatchProgress, setEditorialBatchProgress] = useState({
     completed: 0,
@@ -1725,14 +1729,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
           content: `书名：${projectTitle}\n章节：${path.split("/").pop()}\n写作目标：${brief.goal || "未填写"}\n核心问题：${brief.keyQuestions || "未填写"}\n必用材料：${brief.requiredSources || "未填写"}\n避免重复：${brief.avoidTopics || "未填写"}\n\n${aiConstraintBlock}\n\n证据台账：\n${evidence}\n\n正文：\n${read.data.content}`,
         },
       ];
-      let raw = "";
-      for await (const chunk of provider.chat(messages, {
-        model: aiApi.model,
-        temperature: 0.1,
-        maxTokens: 6_000,
-        stream: false,
-      }))
-        raw += chunk.delta || "";
+      const cacheKey = stableContentKey([stage, path, aiApi.model, read.data.content, evidence, aiConstraintBlock]);
+      let raw = aiReviewCacheRef.current[cacheKey] ?? "";
+      if (!raw) {
+        for await (const chunk of provider.chat(messages, {
+          model: aiApi.model,
+          temperature: 0.1,
+          maxTokens: 6_000,
+          stream: false,
+        })) raw += chunk.delta || "";
+        aiReviewCacheRef.current[cacheKey] = raw;
+      }
       const json = raw.match(/\[[\s\S]*\]/)?.[0];
       if (!json) throw new Error("模型没有返回有效 JSON 数组");
       const parsed = JSON.parse(json) as Array<Record<string, unknown>>;
@@ -1836,6 +1843,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         });
       return true;
     } catch (error) {
+      if (path) setAiRetryQueue((current) => scheduleRetry(current, { stage, path }, error));
       if (!silent)
         notice.error({
           message: "AI 深度审校失败",
@@ -1911,6 +1919,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
       description: `成功 ${completed} 章，失败 ${failed} 章，剩余 ${Math.max(0, candidates.length - completed - failed)} 章。`,
       placement: "bottomRight",
     });
+  };
+  const retryFailedAiReviews = async () => {
+    const due = aiRetryQueue.filter((job) => job.nextAttemptAt <= Date.now());
+    for (const job of due) { const success = await runEditorialAiStage(job.payload.stage, job.payload.path, true); if (success) setAiRetryQueue((current) => current.filter((item) => item.id !== job.id)); }
+    notice.info({ message: `AI 重试完成：处理 ${due.length} 项，队列剩余 ${aiRetryQueue.length} 项`, placement: "bottomRight" });
   };
 
   const confirmEditorialStage = (
@@ -3111,6 +3124,21 @@ export const OutlineScaffolderPanel: React.FC = () => {
       description: root,
       placement: "bottomRight",
     });
+  };
+  const restoreProjectBackup = async () => {
+    if (!target) return;
+    const manifestPath = window.prompt("输入备份清单路径", activeProject?.subfolder ? `${activeProject.subfolder}/backups/` : "backups/");
+    if (!manifestPath) return;
+    const resolved = manifestPath.endsWith("BACKUP-MANIFEST.json") ? manifestPath : `${manifestPath.replace(/\/$/, "")}/BACKUP-MANIFEST.json`;
+    try {
+      const readManifest = await window.electronAPI.workspace.readTextFile(target.path, resolved); if (!readManifest.success || !readManifest.data) throw new Error(readManifest.error || "备份清单不存在");
+      const parsed = JSON.parse(readManifest.data.content) as { files?: Array<{ path: string; checksum: string }>; sourceMap?: Array<{ sourcePath: string; backupPath: string }> };
+      const entries = await Promise.all((parsed.sourceMap ?? []).map(async (mapping) => { const backup = await window.electronAPI.workspace.readTextFile(target.path, mapping.backupPath); if (!backup.success || !backup.data) throw new Error(`无法读取 ${mapping.backupPath}`); const expected = parsed.files?.find((file) => file.path === mapping.backupPath)?.checksum; if (expected && checksumText(backup.data.content) !== expected) throw new Error(`备份校验失败：${mapping.sourcePath}`); const current = await window.electronAPI.workspace.readTextFile(target.path, mapping.sourcePath); return { ...mapping, content: backup.data.content, current }; }));
+      const changed = entries.filter((entry) => !entry.current.success || entry.current.data?.content !== entry.content); if (!changed.length) { notice.info({ message: "备份与当前项目一致", placement: "bottomRight" }); return; }
+      if (!window.confirm(`将从校验通过的备份恢复 ${changed.length} 个文件。当前内容会先由你现有的项目备份机制保留。继续？`)) return;
+      for (const entry of changed) { if (entry.current.success && entry.current.data) await window.electronAPI.workspace.writeTextFile(target.path, entry.sourcePath, entry.content, { encoding: "utf8", lineEnding: "LF", expectedModifiedAt: entry.current.data.modifiedAt }); else await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: "create", path: entry.sourcePath, content: entry.content, encoding: "utf8", lineEnding: "LF" }]); }
+      notice.success({ message: `已恢复 ${changed.length} 个文件`, description: "请重新打开项目以载入恢复内容。", placement: "bottomRight" });
+    } catch (error) { notice.error({ message: "备份恢复失败", description: error instanceof Error ? error.message : String(error), placement: "bottomRight" }); }
   };
   const addCommentFromSelection = () => {
     if (!activeFile || !editorRef.current) return;
@@ -7102,6 +7130,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
                       <Button size="sm" variant="outline" onClick={() => void exportPublicationFormats()}>
                         导出 DOCX / PDF / EPUB
                       </Button>
+                      <Button size="sm" variant="outline" onClick={() => void restoreProjectBackup()}>
+                        备份恢复向导
+                      </Button>
                     </div>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr]">
@@ -9599,6 +9630,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
                         <Sparkles className="mr-2 h-4 w-4" />
                       )}
                       AI 深度检查
+                    </Button>
+                    <Button variant="outline" disabled={editorialAiLoading || !aiRetryQueue.length} onClick={() => void retryFailedAiReviews()}>
+                      重试失败项 {aiRetryQueue.length}
                     </Button>
                   </div>
                 </section>
