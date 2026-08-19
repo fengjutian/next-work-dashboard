@@ -32,9 +32,10 @@ export function SearchResults({ open, onClose, data, loading, onOpen }: SearchRe
       width={680}
       destroyOnClose
     >
-      {loading && <Spin tip="多引擎并行搜索中…" style={{ display: 'block', margin: '24px auto' }} />}
-      {!loading && data && (
+      {loading && !data && <Spin tip="多引擎并行搜索中…" style={{ display: 'block', margin: '24px auto' }} />}
+      {data && (
         <div className="space-y-4">
+          {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Spin size="small" />搜索引擎正在返回结果，列表会持续更新…</div>}
           {data.aiSummary && <AiSummaryCard summary={data.aiSummary} />}
           <div className="rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">

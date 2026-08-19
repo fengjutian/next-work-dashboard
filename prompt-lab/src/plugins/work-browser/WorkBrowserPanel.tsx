@@ -252,9 +252,9 @@ export function WorkBrowserPanel() {
   };
 
   const handleSearch = useCallback(async (text: string, scope: 'web' | 'workspace' | 'library' = 'workspace') => {
+    setSearchOpen(true);
     const result = await runSearch(text, activeWorkspace?.id, scope);
-    if (result) setSearchOpen(true);
-    else message.error('搜索失败，请检查搜索服务配置后重试');
+    if (!result) message.error('搜索失败，请检查搜索服务配置后重试');
     void refreshHistory();
   }, [activeWorkspace?.id, runSearch, refreshHistory]);
 
