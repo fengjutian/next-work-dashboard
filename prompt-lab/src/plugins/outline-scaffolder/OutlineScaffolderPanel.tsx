@@ -234,6 +234,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [editorialRunning, setEditorialRunning] = useState<EditorialStageId | null>(null);
   const [editorialAiStage, setEditorialAiStage] = useState<Exclude<EditorialStageId, 'consistency' | 'format'>>('completeness');
   const [editorialAiLoading, setEditorialAiLoading] = useState(false);
+  const [editorialBatchRunning, setEditorialBatchRunning] = useState(false);
+  const [editorialBatchProgress, setEditorialBatchProgress] = useState({ completed: 0, total: 0, failed: 0, current: '' });
+  const editorialBatchStopRef = useRef(false);
   const [finalReadConfirmed, setFinalReadConfirmed] = useState(false);
   const [editorialChapterPath, setEditorialChapterPath] = useState('');
   const [reviewSuggestions, setReviewSuggestions] = useState<ReviewSuggestion[]>([]);
@@ -526,10 +529,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
     finally { setEditorialRunning(null); }
   };
 
-  const runEditorialAiStage = async (stage: Exclude<EditorialStageId, 'consistency' | 'format'>, path = editorialChapterPath || activeFile) => {
-    if (!target || !path || editorialAiLoading) return;
-    if (!aiApi.apiKey?.trim()) { notice.warning({ message: '请先配置助写模型', placement: 'bottomRight' }); return; }
-    if (path === activeFile && dirty) { notice.warning({ message: '请先保存当前修改', placement: 'bottomRight' }); return; }
+  const runEditorialAiStage = async (stage: Exclude<EditorialStageId, 'consistency' | 'format'>, path = editorialChapterPath || activeFile, silent = false): Promise<boolean> => {
+    if (!target || !path || (editorialAiLoading && !editorialBatchRunning)) return false;
+    if (!aiApi.apiKey?.trim()) { if (!silent) notice.warning({ message: '请先配置助写模型', placement: 'bottomRight' }); return false; }
+    if (path === activeFile && dirty) { if (!silent) notice.warning({ message: '请先保存当前修改', placement: 'bottomRight' }); return false; }
     setEditorialAiLoading(true);
     try {
       const read = await window.electronAPI.workspace.readTextFile(target.path, path);
@@ -569,9 +572,32 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const blockers = [...new Set([...(existing?.blockers ?? []), ...open.filter((issue) => issue.severity === 'blocker').map((issue) => issue.message)])];
       const warnings = [...new Set([...(existing?.warnings ?? []), ...open.filter((issue) => issue.severity === 'warning').map((issue) => issue.message)])];
       setEditorialAudit(path, stage, { status: blockers.length || warnings.length ? 'issues' : 'passed', blockers, warnings, issues: merged, checkedAt: Date.now(), confirmedAt: blockers.length || warnings.length ? undefined : Date.now(), contentSignature: editorialSignature(read.data.content) });
-      notice.success({ message: 'AI 深度审校完成', description: `新增 ${aiIssues.length} 项候选问题，请逐条核对。`, placement: 'bottomRight' });
-    } catch (error) { notice.error({ message: 'AI 深度审校失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); }
+      if (!silent) notice.success({ message: 'AI 深度审校完成', description: `新增 ${aiIssues.length} 项候选问题，请逐条核对。`, placement: 'bottomRight' });
+      return true;
+    } catch (error) { if (!silent) notice.error({ message: 'AI 深度审校失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); return false; }
     finally { setEditorialAiLoading(false); }
+  };
+
+  const runEditorialBatch = async () => {
+    if (!target || editorialBatchRunning || !aiApi.apiKey?.trim()) return;
+    if (dirty) { notice.warning({ message: '请先保存当前修改', placement: 'bottomRight' }); return; }
+    const chapterFiles = managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path));
+    const candidates = chapterFiles.filter((path) => editorialAudits[path]?.[editorialAiStage]?.status !== 'passed');
+    if (!candidates.length) { notice.info({ message: '该阶段没有待检查或已失效章节', placement: 'bottomRight' }); return; }
+    if (!window.confirm(`将串行执行“${EDITORIAL_STAGES.find((stage) => stage.id === editorialAiStage)?.label}”AI 深度审校，共 ${candidates.length} 章。该操作会产生模型调用费用，是否继续？`)) return;
+    editorialBatchStopRef.current = false; setEditorialBatchRunning(true); setEditorialBatchProgress({ completed: 0, total: candidates.length, failed: 0, current: '' });
+    let completed = 0;
+    let failed = 0;
+    for (const path of candidates) {
+      if (editorialBatchStopRef.current) break;
+      const current = path.split('/').pop() ?? path;
+      setEditorialBatchProgress({ completed, total: candidates.length, failed, current });
+      const success = await runEditorialAiStage(editorialAiStage, path, true);
+      if (success) completed += 1; else failed += 1;
+      setEditorialBatchProgress({ completed, total: candidates.length, failed, current });
+    }
+    setEditorialBatchRunning(false);
+    notice.info({ message: editorialBatchStopRef.current ? '批量审校已停止' : '批量审校完成', description: `成功 ${completed} 章，失败 ${failed} 章，剩余 ${Math.max(0, candidates.length - completed - failed)} 章。`, placement: 'bottomRight' });
   };
 
   const confirmEditorialStage = (stage: EditorialStageId, path = activeFile) => {
@@ -1858,6 +1884,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">{([['overview', '规划看板'], ['knowledge', '全书知识库'], ['evidence', '史料证据台账'], ['editorial', '审校流水线'], ['quality', '一致性与门禁'], ['publish', '发布状态']] as const).map(([id, label]) => <Button key={id} size="sm" variant={managementTab === id ? 'default' : 'ghost'} onClick={() => setManagementTab(id)}>{label}</Button>)}<Button size="sm" variant="outline" className="ml-auto" disabled={auditLoading || !target} onClick={runBookAudit}>{auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行全书检查</Button></div>
       <div className="min-h-0 flex-1 overflow-auto p-6">
         {managementTab === 'editorial' && <div className="mx-auto max-w-6xl space-y-5">
+          <section className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="flex flex-wrap items-center gap-3"><div className="min-w-[220px] flex-1"><div className="text-sm font-semibold">批量 AI 审校队列</div><p className="text-xs text-muted-foreground">仅处理当前所选阶段中未通过或已失效的章节，可停止后继续。</p></div>{editorialBatchRunning ? <><div className="min-w-[220px] flex-1"><div className="mb-1 flex justify-between text-xs"><span className="truncate">{editorialBatchProgress.current || '准备中'}</span><span>{editorialBatchProgress.completed}/{editorialBatchProgress.total} · 失败 {editorialBatchProgress.failed}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${editorialBatchProgress.total ? Math.round(((editorialBatchProgress.completed + editorialBatchProgress.failed) / editorialBatchProgress.total) * 100) : 0}%` }} /></div></div><Button variant="outline" onClick={() => { editorialBatchStopRef.current = true; }}>完成当前章后停止</Button></> : <Button disabled={!aiApi.apiKey?.trim() || editorialAiLoading} onClick={() => void runEditorialBatch()}><Sparkles className="mr-2 h-4 w-4" />批量检查未通过章节</Button>}</div></section>
           <section className="rounded-xl border border-primary/20 bg-primary/[0.03] p-4"><div className="flex flex-wrap items-center gap-3"><div className="min-w-[220px] flex-1"><div className="text-sm font-semibold">AI 分阶段深度审校</div><p className="text-xs text-muted-foreground">基于当前章节、写作卡和证据台账生成严格结构化问题。</p></div><select value={editorialAiStage} onChange={(event) => setEditorialAiStage(event.target.value as Exclude<EditorialStageId, 'consistency' | 'format'>)} className="rounded-md border border-input bg-background px-3 py-2 text-sm">{EDITORIAL_STAGES.filter((stage): stage is { id: Exclude<EditorialStageId, 'consistency' | 'format'>; label: string; scope: 'chapter' } => stage.scope === 'chapter').map((stage) => <option key={stage.id} value={stage.id}>{stage.label}</option>)}</select><Button disabled={editorialAiLoading || !(editorialChapterPath || activeFile) || !aiApi.apiKey?.trim()} onClick={() => void runEditorialAiStage(editorialAiStage)}>{editorialAiLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 深度检查</Button></div></section>
           {(editorialChapterPath || activeFile) && <section className="rounded-xl border border-border bg-card p-5 shadow-sm"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-semibold">结构化问题清单</h2><p className="text-xs text-muted-foreground">定位原文；有安全替换建议时可载入编辑器，确认后再保存。</p></div><span className="text-xs text-muted-foreground">{Object.values(editorialAudits[editorialChapterPath || activeFile] ?? {}).flatMap((audit) => audit?.issues ?? []).filter((issue) => issue.status === 'open').length} 项待处理</span></div><div className="max-h-80 space-y-2 overflow-auto">{Object.values(editorialAudits[editorialChapterPath || activeFile] ?? {}).flatMap((audit) => audit?.issues ?? []).map((issue) => <div key={`${issue.stage}-${issue.id}`} className={`rounded-md border p-3 ${issue.status === 'rejected' ? 'opacity-50' : issue.severity === 'blocker' ? 'border-destructive/40' : 'border-amber-500/30'}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-xs font-medium">{EDITORIAL_STAGES.find((stage) => stage.id === issue.stage)?.label} · {issue.type}</div><div className="mt-1 text-xs text-muted-foreground">{issue.message}</div>{issue.originalText && <div className="mt-2 line-clamp-2 rounded bg-muted/60 p-2 font-mono text-[11px]">{issue.originalText}</div>}{issue.suggestion !== undefined && <div className="mt-1 line-clamp-2 rounded bg-emerald-500/10 p-2 text-[11px] text-emerald-800">建议：{issue.suggestion || '删除该套话'}</div>}</div><span className="shrink-0 text-[10px] text-muted-foreground">{issue.status === 'open' ? '待处理' : issue.status === 'accepted' ? '已接受' : '已拒绝'}</span></div>{issue.status === 'open' && <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" disabled={!issue.originalText} onClick={() => void openEditorialIssue(editorialChapterPath || activeFile, issue)}>定位原文</Button>{issue.suggestion !== undefined && <Button size="sm" onClick={() => void openEditorialIssue(editorialChapterPath || activeFile, issue, true)}>载入建议</Button>}<Button size="sm" variant="ghost" onClick={() => updateEditorialIssue(editorialChapterPath || activeFile, issue.stage, issue.id, 'rejected')}>拒绝</Button></div>}</div>)}</div></section>}
           <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
