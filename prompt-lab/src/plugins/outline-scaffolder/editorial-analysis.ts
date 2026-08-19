@@ -41,6 +41,15 @@ export type EditorialPresetId = 'academic-history' | 'popular-history' | 'biogra
 export interface EditorialPreset { id: EditorialPresetId; label: string; requiredRulePacks: ProfessionalRulePackId[]; minimumCoverage: number; minimumNarrative: number; requiredRoles: EditorialRole[]; guidance: string[] }
 export interface ExportGate { allowed: boolean; blockers: string[] }
 export interface BackupEntry { path: string; size: number; checksum: string }
+export interface HistoricalMapPoint extends PlaceMapping { x: number; y: number; active: boolean }
+
+export function layoutHistoricalMap(places: PlaceMapping[], year?: number, width = 720, height = 420): HistoricalMapPoint[] {
+  const located = places.filter((place) => Number.isFinite(place.latitude) && Number.isFinite(place.longitude));
+  if (!located.length) return [];
+  const latitudes = located.map((place) => place.latitude as number); const longitudes = located.map((place) => place.longitude as number);
+  const minLat = Math.min(...latitudes); const maxLat = Math.max(...latitudes); const minLon = Math.min(...longitudes); const maxLon = Math.max(...longitudes);
+  return located.map((place) => ({ ...place, x: 30 + ((place.longitude as number) - minLon) / Math.max(1, maxLon - minLon) * (width - 60), y: 30 + (maxLat - (place.latitude as number)) / Math.max(1, maxLat - minLat) * (height - 60), active: year === undefined || (place.fromYear === undefined || year >= place.fromYear) && (place.toYear === undefined || year <= place.toYear) }));
+}
 
 export const EDITORIAL_PRESETS: Record<EditorialPresetId, EditorialPreset> = {
   'academic-history': { id: 'academic-history', label: '学术史著', requiredRulePacks: ['history', 'general'], minimumCoverage: 90, minimumNarrative: 45, requiredRoles: ['author', 'editor', 'fact-checker', 'subject-reviewer', 'final-reviewer'], guidance: ['区分史料记载、现代解释与作者推断', '重要结论至少两条独立来源', '完整记录版本、页码和争议边界'] },

@@ -43,6 +43,13 @@ export class DocumentStore {
       .run(v.id, v.documentId, v.contentHash, v.rawPath, v.diffSummary, v.wordDelta, v.capturedAt);
   }
 
+  upsertDocumentWithVersion(doc: Document & { plainText?: string }, version: DocumentVersion): void {
+    this.db.transaction(() => {
+      this.upsertDocument(doc);
+      this.appendVersion(version);
+    })();
+  }
+
   listVersions(documentId: DocumentId, limit = 20): DocumentVersion[] {
     const rows = this.db.prepare('SELECT * FROM document_versions WHERE document_id = ? ORDER BY captured_at DESC LIMIT ?').all(documentId, limit) as any[];
     return rows.map((r) => ({

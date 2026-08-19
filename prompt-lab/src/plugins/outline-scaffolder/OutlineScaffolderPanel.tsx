@@ -9,6 +9,7 @@ import { useStore } from '@/store/store';
 import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths, type ChapterWorkflowState, type OutlineNode, type SplitMode } from './outline';
 import { createDocxBase64, createEpubBase64, createPdfBase64, type PublicationBook } from './publication-export';
 import { migrateOutlineProject } from './project-migrations';
+import { createReleaseCandidate } from './delivery';
 import { EDITORIAL_PRESETS, assessNarrative, assessPacing, atomizeClaims, buildAIConstraintBlock, buildBookIndex, buildChapterHeatmap, buildEvidenceReverseIndex, buildFootnotes, buildMergeSuggestions, buildPublicationReadiness, calibrateAssertionStrength, checkQuoteAgainstSource, classifyContent, compareDocumentVersions, compareFactLocks, compareQualitySnapshots, createBackupManifest, evaluateExportGate, extractFactLock, extractTimelineEvents, findAffectedChapters, findDependentSources, findEntityConflicts, findEvidenceGaps, findNumericDisagreements, findPresenceConflicts, findSemanticDuplicates, findTimelineConflicts, formatCitation, generateChapterTransition, layoutRelationshipGraph, locateQuoteContext, renderControversySection, renderPrintHtml, runProfessionalRules, suggestEvidenceBasedRewrites, validateHistoricalTerms, type AnalysisIssue, type CitationStyle, type ContentClassification, type EditorialPresetId, type EditorialRole, type EvidenceGap, type FactLock, type IndexEntry, type NarrativeAssessment, type NumericClaim, type PacingAssessment, type PersonPresence, type PersonRelation, type PlaceMapping, type ProfessionalRulePackId, type QualitySnapshot, type SemanticDuplicate, type SourceLevel, type SupportStrength, type TimelineEvent, type VersionComparison } from './editorial-analysis';
 
 const DEFAULT_TEMPLATE = `# {{title}}
@@ -1029,10 +1030,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
     await window.electronAPI.workspace.createDirectory(target.path, activeProject?.subfolder ? `${activeProject.subfolder}/backups` : 'backups'); await window.electronAPI.workspace.createDirectory(target.path, root);
     const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json'; const manifest = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
     const operations: Array<{ kind: 'create'; path: string; content: string; encoding: 'utf8'; lineEnding: 'LF' }> = [];
+    const sourceMap: Array<{ sourcePath: string; backupPath: string }> = [];
     if (manifest.success && manifest.data) operations.push({ kind: 'create', path: `${root}/chapter-project.json`, content: manifest.data.content, encoding: 'utf8', lineEnding: 'LF' });
-    for (const path of managedFiles.filter((item) => item.toLowerCase().endsWith('.md'))) { const read = await window.electronAPI.workspace.readTextFile(target.path, path); if (read.success && read.data) operations.push({ kind: 'create', path: `${root}/documents/${path.replaceAll('/', '__')}`, content: read.data.content, encoding: 'utf8', lineEnding: 'LF' }); }
+    for (const path of managedFiles.filter((item) => item.toLowerCase().endsWith('.md'))) { const read = await window.electronAPI.workspace.readTextFile(target.path, path); if (read.success && read.data) { const backupPath = `${root}/documents/${path.replaceAll('/', '__')}`; operations.push({ kind: 'create', path: backupPath, content: read.data.content, encoding: 'utf8', lineEnding: 'LF' }); sourceMap.push({ sourcePath: path, backupPath }); } }
     const backupManifest = createBackupManifest(operations.map((item) => ({ path: item.path, content: item.content })));
-    operations.push({ kind: 'create', path: `${root}/BACKUP-MANIFEST.json`, content: `${JSON.stringify({ schemaVersion: 1, createdAt, files: backupManifest }, null, 2)}\n`, encoding: 'utf8', lineEnding: 'LF' });
+    operations.push({ kind: 'create', path: `${root}/BACKUP-MANIFEST.json`, content: `${JSON.stringify({ schemaVersion: 2, createdAt, files: backupManifest, sourceMap }, null, 2)}\n`, encoding: 'utf8', lineEnding: 'LF' });
     await window.electronAPI.workspace.createDirectory(target.path, `${root}/documents`); const result = await window.electronAPI.workspace.mutateFiles(target.path, operations);
     if (!result.success) { notice.error({ message: '项目备份失败', description: result.error, placement: 'bottomRight' }); return; }
     notice.success({ message: '项目备份已生成', description: root, placement: 'bottomRight' });
@@ -1075,6 +1077,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const safe = projectTitle.replace(/[<>:"/\\|?*]/g, '-').slice(0, 60) || 'manuscript';
       const [docx, epub, pdf] = await Promise.all([createDocxBase64(book), createEpubBase64(book), createPdfBase64(book)]);
       for (const [extension, content] of [['docx', docx], ['epub', epub], ['pdf', pdf]] as const) { const result = await window.electronAPI.workspace.writeBinaryFile(target.path, `${root}/${safe}.${extension}`, content); if (!result.success) throw new Error(result.error); }
+      if (exportGate.allowed) { const candidate = createReleaseCandidate(exportGate, releaseRecords.map((item) => item.version)); setReleaseRecords((current) => [{ id: `release-${candidate.createdAt}`, label: candidate.label, version: candidate.version, notes: candidate.notes, createdAt: candidate.createdAt }, ...current]); }
       notice.success({ message: '出版文件已生成', description: `${root}（DOCX / PDF / EPUB）`, placement: 'bottomRight' });
     } catch (error) { notice.error({ message: '出版文件生成失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' }); }
   };

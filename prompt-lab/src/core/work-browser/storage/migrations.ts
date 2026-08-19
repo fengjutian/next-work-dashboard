@@ -100,6 +100,24 @@ const ALL_MIGRATIONS: Migration[] = [
       backfillNotes.run();
     },
   },
+  {
+    version: 4,
+    description: 'Persistent document embedding index jobs',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS document_index_jobs (
+          document_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          error TEXT,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_document_index_jobs_status
+          ON document_index_jobs(status, updated_at);
+      `);
+    },
+  },
 ];
 
 export interface MigrationResult {

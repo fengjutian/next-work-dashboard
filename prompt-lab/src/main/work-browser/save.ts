@@ -126,7 +126,6 @@ export async function savePageAsMarkdown(
   let doc;
   if (existing) {
     doc = { ...existing, title, contentHash, wordCount: readability.wordCount, summary: readability.excerpt, updatedAt: t };
-    documentStore.upsertDocument({ ...doc, plainText: readability.contentText } as any);
   } else {
     const id = newDocument({
       workspaceId: input.workspaceId,
@@ -145,49 +144,63 @@ export async function savePageAsMarkdown(
 
   // 5. 写文件
   const contentPath = path.join(docsDir, `${doc.id}.md`);
+  const contentPath = path.join(docsDir, `${doc.id}.md`);
   const rawPath = path.join(rawDir, `${doc.id}-${t}.html`);
-  const previousContentMd = existing && isNewVersion
+  const previousContentMd = existing
     ? await fs.readFile(existing.contentPath, 'utf8').catch(() => null)
     : null;
   await atomicWrite(contentPath, contentMd);
   await atomicWrite(rawPath, html);
-  documentStore.upsertDocument({ ...doc, contentPath, rawPath, updatedAt: t, plainText: readability.contentText } as any);
+  // The document row and its version are committed together below.
 
   // 6. 异步入向量索引（不阻塞主流程）
   // 动态 import 避免循环依赖 + 减少启动期
   const { enqueueIndexDocument } = await import('./embedding');
-  enqueueIndexDocument({
+  const indexInput = {
     documentId: doc.id,
     title,
     plainText: readability.contentText,
     workspaceId: input.workspaceId,
     url: input.url,
-  });
+  };
 
   // 6. 追加版本
   let diffSummary: string | null = null;
+  let version: ReturnType<typeof newDocumentVersion>;
   if (existing && isNewVersion) {
     try {
       const hunks = lineDiff(previousContentMd ?? '', contentMd);
       diffSummary = summarizeDiff(hunks);
     } catch { diffSummary = 'unable to diff'; }
-    documentStore.appendVersion(newDocumentVersion({
+    version = newDocumentVersion({
       documentId: doc.id,
       contentHash,
       rawPath,
       prevWordCount: existing.wordCount,
       wordCount: readability.wordCount,
       diffSummary,
-    }));
+    });
   } else {
-    documentStore.appendVersion(newDocumentVersion({
+    version = newDocumentVersion({
       documentId: doc.id,
       contentHash,
       rawPath,
-      prevWordCount: 0,
+      prevWordCount: existing?.wordCount ?? 0,
       wordCount: readability.wordCount,
-    }));
+    });
   }
+
+  try {
+    documentStore.upsertDocumentWithVersion(
+      { ...doc, contentPath, rawPath, updatedAt: t, plainText: readability.contentText } as any,
+      version,
+    );
+  } catch (error) {
+    await rollbackFiles(contentPath, rawPath, previousContentMd);
+    throw error;
+  }
+  const { enqueueIndexDocument } = await import('./embedding');
+  enqueueIndexDocument(indexInput);
 
   return {
     documentId: doc.id,
@@ -198,6 +211,12 @@ export async function savePageAsMarkdown(
     isNewVersion,
     diffSummary,
   };
+}
+
+async function rollbackFiles(contentPath: string, rawPath: string, previousContent: string | null): Promise<void> {
+  await fs.unlink(rawPath).catch(() => undefined);
+  if (previousContent === null) await fs.unlink(contentPath).catch(() => undefined);
+  else await atomicWrite(contentPath, previousContent);
 }
 
 function appPath(...parts: string[]): string {

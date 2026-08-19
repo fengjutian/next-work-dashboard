@@ -14,6 +14,7 @@ import { chunkText, embedBatch, DEFAULT_MODEL_ID } from '../../core/work-browser
 import type { LanceDocumentIndexOperation } from '../lancedb-memory';
 import { applyLanceDocumentOperations } from '../lancedb-memory';
 import type { DocumentId } from '../../core/work-browser/types';
+import { getDatabase } from './database';
 
 export interface IndexDocumentInput {
   documentId: DocumentId;
@@ -31,13 +32,38 @@ let _queue: Promise<void> = Promise.resolve();
  * 串行化：单 worker 顺序处理，避免同时下载模型/抢占 GPU
  */
 export function enqueueIndexDocument(input: IndexDocumentInput): void {
-  _queue = _queue.then(() =>
-    indexDocument(input)
-      .then(() => undefined)
-      .catch((e: unknown) => {
-        console.error(`[work-browser] index failed for ${input.documentId}:`, e);
-      })
-  );
+  updateJob(input.documentId, 'pending', 0, null);
+  _queue = _queue.then(() => runIndexJob(input));
+}
+
+async function runIndexJob(input: IndexDocumentInput): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    updateJob(input.documentId, 'indexing', attempt, null);
+    try {
+      await indexDocument(input);
+      updateJob(input.documentId, 'indexed', attempt, null);
+      return;
+    } catch (error) {
+      lastError = error;
+      updateJob(input.documentId, attempt === 3 ? 'failed' : 'pending', attempt, errorMessage(error));
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** (attempt - 1))));
+    }
+  }
+  console.error(`[work-browser] index failed for ${input.documentId}:`, lastError);
+}
+
+function updateJob(documentId: DocumentId, status: 'pending' | 'indexing' | 'indexed' | 'failed', attempts: number, error: string | null): void {
+  getDatabase().prepare(`
+    INSERT INTO document_index_jobs(document_id, status, attempts, error, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(document_id) DO UPDATE SET
+      status=excluded.status, attempts=excluded.attempts, error=excluded.error, updated_at=excluded.updated_at
+  `).run(documentId, status, attempts, error, Date.now());
+}
+
+function errorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
 }
 
 /** 等所有排队任务完成（用于测试 / 应用退出） */

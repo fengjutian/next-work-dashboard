@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, session } from 'electron';
 import path from 'node:path';
 import { setMainWindow, removeMainWindow, getTray } from './globals';
 import { getWebviewCleanerPreloadPath, WORK_BROWSER_PARTITION } from './work-browser/cleaner';
@@ -37,7 +37,7 @@ export function createWindow(preloadPath: string) {
     webPreferences.preload = getWebviewCleanerPreloadPath();
   });
   win.webContents.on('did-attach-webview', (_event, guest) => {
-    if (guest.session.getPartition() === WORK_BROWSER_PARTITION) {
+    if (guest.session === session.fromPartition(WORK_BROWSER_PARTITION)) {
       guest.setWindowOpenHandler(() => ({ action: 'deny' }));
       guest.on('will-navigate', (event, url) => {
         if (!isSafeWebNavigation(url)) event.preventDefault();
