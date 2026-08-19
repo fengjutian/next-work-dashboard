@@ -19,7 +19,7 @@ import { Bot, BookOpen, FolderKanban, GitFork, ListFilter, ListTodo, PanelLeft, 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import type {
-  Workspace, Tab, Document, Annotation, SearchHistoryEntry,
+  Workspace, Tab, Document, SearchHistoryEntry,
 } from '../../core/work-browser/types';
 import { SearchBar } from './components/SearchBar';
 import { WorkspaceList } from './components/WorkspaceList';
@@ -34,41 +34,32 @@ import { SavePageDialog } from './components/SavePageDialog';
 import { ResearchDrawer } from './components/ResearchDrawer';
 import { useWorkspaces } from './hooks/useWorkspace';
 import { useSearch } from './hooks/useSearch';
-import { STORAGE_KEYS } from './constants';
 import { parseDocument } from '../document-knowledge/parser';
 import { useWorkbenchLayout } from './hooks/useWorkbenchLayout';
 import { SyncPanel } from './components/SyncPanel';
 import { usePageCache } from './hooks/usePageCache';
+import { useCleanerSettings } from './hooks/useCleanerSettings';
+import { useWorkspaceResources } from './hooks/useWorkspaceResources';
 
 export function WorkBrowserPanel() {
   const aiApi = useStore((state) => state.aiApi);
   const setActiveActivity = useStore((state) => state.setActiveActivity);
   const { workspaces, create: createWorkspace, update: updateWorkspace } = useWorkspaces(false);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
-  const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeTab, setActiveTab] = useState<Tab | null>(null);
   const [closedTabs, setClosedTabs] = useState<Tab[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
   const [researchTopic, setResearchTopic] = useState('');
-  const [cleanerEnabled, setCleanerEnabled] = useState(true);
-  const [blockedDomains, setBlockedDomains] = useState<string[]>([]);
+  const { cleanerEnabled, blockedDomains, toggleCleaner } = useCleanerSettings();
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(undefined);
   const { leftCollapsed, rightCollapsed, toggleLeftSidebar, toggleRightSidebar, gridTemplateColumns } = useWorkbenchLayout();
 
   const activeWorkspaceId = activeWorkspace?.id;
-  const activeWorkspaceIdRef = useRef<string | undefined>(undefined);
   const aiConfigBridgeAvailableRef = useRef(true);
-  const lastTabByWorkspaceRef = useRef(new Map<string, string>());
-  const tabsByWorkspaceRef = useRef(new Map<string, Tab[]>());
-  const documentsByWorkspaceRef = useRef(new Map<string, Document[]>());
-  const annotationsByWorkspaceRef = useRef(new Map<string, Annotation[]>());
   const webContentRefs = useRef(new Map<string, WebContentHandle>());
-  activeWorkspaceIdRef.current = activeWorkspaceId;
+  const { tabs, setTabs, activeTab, setActiveTab, documents, annotations, refreshTabs, refreshDocuments, restoreCached } = useWorkspaceResources(activeWorkspaceId);
   const { loading: searchLoading, data: searchData, run: runSearch } = useSearch();
   const { cachedPages, displayedPageId, refreshKeys: webviewRefreshKeys, markReady: handlePageReadyChange, evict: evictPages, refresh: refreshPage } = usePageCache(activeTab);
 
@@ -124,45 +115,6 @@ export function WorkBrowserPanel() {
   }, [workspaces]);
 
   // 加载 active workspace 的 tabs / documents
-  const refreshTabs = useCallback(async (wsId: string) => {
-    try {
-      const list = (await window.electronAPI.workBrowser.tab.list(wsId)) as Tab[];
-      tabsByWorkspaceRef.current.set(wsId, list);
-      if (activeWorkspaceIdRef.current !== wsId) return;
-      setTabs(list);
-      setActiveTab((current) => {
-        const rememberedId = lastTabByWorkspaceRef.current.get(wsId);
-        return list.find((tab) => tab.id === rememberedId) ?? list.find((tab) => tab.id === current?.id) ?? list[0] ?? null;
-      });
-    } catch (error) {
-      if (activeWorkspaceIdRef.current === wsId) message.error(`标签页加载失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, []);
-
-  const refreshDocuments = useCallback(async (wsId: string) => {
-    try {
-      const docs = (await window.electronAPI.workBrowser.document.list(wsId, 100)) as Document[];
-      documentsByWorkspaceRef.current.set(wsId, docs);
-      if (activeWorkspaceIdRef.current === wsId) setDocuments(docs);
-    } catch (error) {
-      if (activeWorkspaceIdRef.current === wsId) message.error(`文档加载失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, []);
-
-  const refreshAnnotations = useCallback(async (wsId: string) => {
-    try {
-      const anns = (await window.electronAPI.workBrowser.annotation.listByWorkspace(wsId)) as Annotation[];
-      annotationsByWorkspaceRef.current.set(wsId, anns);
-      if (activeWorkspaceIdRef.current === wsId) setAnnotations(anns);
-    } catch (error) {
-      // Annotation Graph 是增强能力；旧版主进程未注册该 channel 时不阻塞浏览器主体。
-      if (!String(error).includes('No handler registered')) {
-        console.warn('[work-browser] workspace annotations unavailable:', error);
-      }
-      if (activeWorkspaceIdRef.current === wsId) setAnnotations([]);
-    }
-  }, []);
-
   const refreshHistory = useCallback(async () => {
     try {
       const h = (await window.electronAPI.workBrowser.search.history(50)) as SearchHistoryEntry[];
@@ -172,55 +124,13 @@ export function WorkBrowserPanel() {
     }
   }, []);
 
-  useEffect(() => {
-    if (activeWorkspaceId) {
-      void refreshTabs(activeWorkspaceId);
-      void refreshDocuments(activeWorkspaceId);
-      void refreshAnnotations(activeWorkspaceId);
-    }
-  }, [activeWorkspaceId, refreshTabs, refreshDocuments, refreshAnnotations]);
-
-  useEffect(() => {
-    if (activeTab) lastTabByWorkspaceRef.current.set(activeTab.workspaceId, activeTab.id);
-  }, [activeTab]);
-
   useEffect(() => { void refreshHistory(); }, [refreshHistory]);
 
   const selectWorkspace = useCallback((workspace: Workspace) => {
     if (workspace.id === activeWorkspace?.id) return;
-    const cachedTabs = tabsByWorkspaceRef.current.get(workspace.id);
-    const cachedDocuments = documentsByWorkspaceRef.current.get(workspace.id);
-    const cachedAnnotations = annotationsByWorkspaceRef.current.get(workspace.id);
+    restoreCached(workspace.id);
     setActiveWorkspace(workspace);
-    if (cachedTabs) {
-      setTabs(cachedTabs);
-      const rememberedId = lastTabByWorkspaceRef.current.get(workspace.id);
-      setActiveTab(cachedTabs.find((tab) => tab.id === rememberedId) ?? cachedTabs[0] ?? null);
-    }
-    if (cachedDocuments) setDocuments(cachedDocuments);
-    if (cachedAnnotations) setAnnotations(cachedAnnotations);
-  }, [activeWorkspace?.id]);
-
-  // Cleaner 配置
-  useEffect(() => {
-    void window.electronAPI.workBrowser.cleaner.payload()
-      .then((p) => setBlockedDomains(p.blockedDomains))
-      .catch((error) => console.warn('[work-browser] cleaner payload unavailable:', error));
-    const stored = localStorage.getItem(STORAGE_KEYS.CLEANER_OPTIONS);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (typeof parsed.enabled === 'boolean') setCleanerEnabled(parsed.enabled);
-      } catch { /* ignore */ }
-    }
-  }, []);
-
-  const toggleCleaner = () => {
-    const next = !cleanerEnabled;
-    setCleanerEnabled(next);
-    localStorage.setItem(STORAGE_KEYS.CLEANER_OPTIONS, JSON.stringify({ enabled: next }));
-    message.success(next ? '已开启净化' : '已关闭净化');
-  };
+  }, [activeWorkspace?.id, restoreCached]);
 
   const handleSearch = useCallback(async (text: string, scope: 'web' | 'workspace' | 'library' = 'workspace') => {
     setSearchOpen(true);
