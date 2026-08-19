@@ -202,6 +202,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [editorialAudits, setEditorialAudits] = useState<Record<string, Partial<Record<EditorialStageId, EditorialAudit>>>>({});
   const [editorialRunning, setEditorialRunning] = useState<EditorialStageId | null>(null);
   const [finalReadConfirmed, setFinalReadConfirmed] = useState(false);
+  const [editorialChapterPath, setEditorialChapterPath] = useState('');
   const [reviewSuggestions, setReviewSuggestions] = useState<ReviewSuggestion[]>([]);
   const [reviewPatches, setReviewPatches] = useState<ReviewPatch[]>([]);
   const [reviewPatchLoading, setReviewPatchLoading] = useState(false);
@@ -724,6 +725,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         knowledgeEntries,
         evidenceRecords,
         qualityReports,
+        editorialAudits,
         deploymentStatus,
         git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch },
         pages: { title: pagesTitle || projectTitle, description: pagesDescription || `${projectTitle}在线阅读`, author: pagesAuthor || '作者', language: pagesLanguage || 'zh-CN', repositoryName: pagesRepositoryName || 'my-book', customDomain: pagesCustomDomain, accentColor: pagesAccentColor },
@@ -731,14 +733,14 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } : project));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, evidenceRecords, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports]);
+  }, [activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, editorialAudits, evidenceRecords, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports]);
 
   useEffect(() => {
     if (!activeProjectId || !target || !managedFiles.length) return;
     const timer = window.setTimeout(async () => {
       setManifestSyncState('saving');
       const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
-      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       try {
         const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
         const result = existing.success && existing.data
@@ -748,7 +750,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } catch { setManifestSyncState('error'); }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [activeProject, activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, evidenceRecords, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, managedFiles, organizeByPart, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports, source, splitMode, target, template]);
+  }, [activeProject, activeProjectId, bookRequirement, chapterBriefs, chapterStatuses, deploymentStatus, editorialAudits, evidenceRecords, gitBranch, gitRemoteName, gitRemoteUrl, knowledgeEntries, managedFiles, organizeByPart, pagesAccentColor, pagesAuthor, pagesCustomDomain, pagesDescription, pagesLanguage, pagesRepositoryName, pagesTitle, projectTitle, qualityReports, source, splitMode, target, template]);
 
   const switchView = (next: 'generator' | 'documents' | 'management') => {
     if (next !== view && dirty && !window.confirm('当前文档尚未保存，确定离开吗？')) return;
@@ -761,7 +763,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     try {
       const result = await window.electronAPI.workspace.readTextFile(folder.path, path);
       if (!result.success || !result.data) throw new Error(result.error);
-      setActiveFile(path); setDocumentContent(result.data.content); setSavedContent(result.data.content); setModifiedAt(result.data.modifiedAt);
+      setActiveFile(path); setEditorialChapterPath(path); setDocumentContent(result.data.content); setSavedContent(result.data.content); setModifiedAt(result.data.modifiedAt);
     } catch (error) {
       notice.error({ message: '读取文档失败', description: error instanceof Error ? error.message : String(error), placement: 'bottomRight' });
     } finally { setDocumentLoading(false); }
@@ -1391,7 +1393,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!uniqueIssues.length) {
       const manifestPath = activeProject?.subfolder ? `${activeProject.subfolder}/.chapter-project.json` : '.chapter-project.json';
       const existing = await window.electronAPI.workspace.readTextFile(target.path, manifestPath);
-      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
+      const manifest = `${JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, editorialAudits, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       const synced = existing.success && existing.data ? await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', expectedModifiedAt: existing.data.modifiedAt }) : { success: false, error: '项目清单不存在' };
       if (!synced.success) uniqueIssues.push(`项目清单同步失败：${synced.error || '未知错误'}`); else setManifestSyncState('saved');
     }
@@ -1682,7 +1684,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const manifestPath = outputFolder ? `${outputFolder}/.chapter-project.json` : '.chapter-project.json';
       const initialStatuses: Record<string, ChapterGenerationStatus> = Object.fromEntries(paths.map((path) => [path, chapterStatuses[path] ?? { state: 'pending', updatedAt: Date.now() }]));
       setChapterStatuses(initialStatuses);
-      const manifest = JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, knowledgeEntries, evidenceRecords, qualityReports, deploymentStatus, splitMode, organizeByPart, template, files: paths, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2) + '\n';
+      const manifest = JSON.stringify({ schemaVersion: 2, version: 2, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: initialStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, deploymentStatus, splitMode, organizeByPart, template, files: paths, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? '' : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2) + '\n';
       const manifestResult = await window.electronAPI.workspace.mutateFiles(target.path, [{ kind: 'create', path: manifestPath, content: manifest, encoding: 'utf8', lineEnding: 'LF' }]);
       if (!manifestResult.success && String(manifestResult.error).includes('ALREADY_EXISTS')) {
         const updated = await window.electronAPI.workspace.writeTextFile(target.path, manifestPath, manifest, { encoding: 'utf8', lineEnding: 'LF', force: true });
@@ -1742,8 +1744,15 @@ export const OutlineScaffolderPanel: React.FC = () => {
         <Button size="lg" disabled={!target || documents.length === 0 || creating} onClick={generate}>{creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}第四步：生成 {documents.length || 0} 个章节文档</Button>
       </div>
     </div> : view === 'management' ? <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">{([['overview', '规划看板'], ['knowledge', '全书知识库'], ['evidence', '史料证据台账'], ['quality', '一致性与门禁'], ['publish', '发布状态']] as const).map(([id, label]) => <Button key={id} size="sm" variant={managementTab === id ? 'default' : 'ghost'} onClick={() => setManagementTab(id)}>{label}</Button>)}<Button size="sm" variant="outline" className="ml-auto" disabled={auditLoading || !target} onClick={runBookAudit}>{auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行全书检查</Button></div>
+      <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">{([['overview', '规划看板'], ['knowledge', '全书知识库'], ['evidence', '史料证据台账'], ['editorial', '审校流水线'], ['quality', '一致性与门禁'], ['publish', '发布状态']] as const).map(([id, label]) => <Button key={id} size="sm" variant={managementTab === id ? 'default' : 'ghost'} onClick={() => setManagementTab(id)}>{label}</Button>)}<Button size="sm" variant="outline" className="ml-auto" disabled={auditLoading || !target} onClick={runBookAudit}>{auditLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}运行全书检查</Button></div>
       <div className="min-h-0 flex-1 overflow-auto p-6">
+        {managementTab === 'editorial' && <div className="mx-auto max-w-6xl space-y-5">
+          <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">八阶段审校流水线</h2><p className="mt-1 text-xs text-muted-foreground">章节按顺序完成前六项；全部章节通过后开放全书校验。正文修改并保存后，相关结果自动失效。</p></div><select value={editorialChapterPath || activeFile} onChange={(event) => setEditorialChapterPath(event.target.value)} className="max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">选择章节</option>{managedFiles.filter((path) => path.toLowerCase().endsWith('.md') && !/README\.md$/i.test(path)).map((path) => <option key={path} value={path}>{path.split('/').pop()}</option>)}</select></div>
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{EDITORIAL_STAGES.filter((stage) => stage.scope === 'chapter').map((stage, index) => { const path = editorialChapterPath || activeFile; const audit = path ? editorialAudits[path]?.[stage.id] : undefined; const statusText = audit?.status === 'passed' ? '已通过' : audit?.status === 'issues' ? `${audit.blockers.length} 项阻断，${audit.warnings.length} 项提示` : audit?.status === 'stale' ? '正文修改后已失效' : '尚未运行'; return <div key={stage.id} className="rounded-lg border border-border p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{index + 1}. {stage.label}</span><span className={`text-xs ${audit?.status === 'passed' ? 'text-emerald-600' : audit?.blockers.length ? 'text-destructive' : 'text-muted-foreground'}`}>{statusText}</span></div><Button size="sm" variant="outline" className="mt-3 w-full" disabled={!path || editorialRunning !== null} onClick={() => void runEditorialStage(stage.id, path)}>{editorialRunning === stage.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}运行检查</Button>{audit?.status === 'issues' && !audit.blockers.length && <Button size="sm" className="mt-2 w-full" onClick={() => confirmEditorialStage(stage.id, path)}>人工确认通过</Button>}<div className="mt-2 max-h-24 overflow-auto text-[11px]">{audit?.blockers.map((item) => <div key={item} className="text-destructive">阻断：{item}</div>)}{audit?.warnings.map((item) => <div key={item} className="text-amber-700">提示：{item}</div>)}</div></div>; })}</div>
+          </section>
+          <section className="grid gap-3 md:grid-cols-3">{EDITORIAL_STAGES.filter((stage) => stage.scope === 'book').map((stage, index) => { const audit = editorialAudits.__book__?.[stage.id]; return <div key={stage.id} className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="font-medium">{index + 7}. {stage.label}</div><p className="mt-1 text-xs text-muted-foreground">{audit?.status === 'passed' ? '已通过' : audit?.status === 'issues' ? `${audit.blockers.length} 项阻断，${audit.warnings.length} 项提示` : audit?.status === 'stale' ? '正文修改后已失效' : '前六项全部通过后开放'}</p><Button size="sm" variant="outline" className="mt-3 w-full" disabled={editorialRunning !== null} onClick={() => void runEditorialStage(stage.id)}>{editorialRunning === stage.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}运行检查</Button>{audit?.status === 'issues' && !audit.blockers.length && <Button size="sm" className="mt-2 w-full" onClick={() => confirmEditorialStage(stage.id)}>人工确认通过</Button>}<div className="mt-2 max-h-24 overflow-auto text-[11px]">{audit?.blockers.map((item) => <div key={item} className="text-destructive">阻断：{item}</div>)}{audit?.warnings.map((item) => <div key={item} className="text-amber-700">提示：{item}</div>)}</div></div>; })}<div className="rounded-xl border border-border bg-card p-4 shadow-sm"><div className="font-medium">最终人工通读</div><p className="mt-1 text-xs text-muted-foreground">{finalReadConfirmed ? '已确认，书稿进入正式成稿状态' : '出版格式校验通过后开放'}</p><Button size="sm" className="mt-3 w-full" disabled={editorialAudits.__book__?.format?.status !== 'passed' || finalReadConfirmed} onClick={() => setFinalReadConfirmed(true)}>{finalReadConfirmed ? '正式成稿' : '确认通读完成'}</Button></div></section>
+        </div>}
         {managementTab === 'overview' && <div className="mx-auto max-w-7xl space-y-5">
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">{[
             ['章节总数', managedFiles.filter((path) => !/README\.md$/i.test(path)).length, 'text-foreground'],
