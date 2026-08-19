@@ -144,7 +144,6 @@ export async function savePageAsMarkdown(
 
   // 5. 写文件
   const contentPath = path.join(docsDir, `${doc.id}.md`);
-  const contentPath = path.join(docsDir, `${doc.id}.md`);
   const rawPath = path.join(rawDir, `${doc.id}-${t}.html`);
   const previousContentMd = existing
     ? await fs.readFile(existing.contentPath, 'utf8').catch(() => null)
@@ -199,7 +198,6 @@ export async function savePageAsMarkdown(
     await rollbackFiles(contentPath, rawPath, previousContentMd);
     throw error;
   }
-  const { enqueueIndexDocument } = await import('./embedding');
   enqueueIndexDocument(indexInput);
 
   return {

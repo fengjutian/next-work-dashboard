@@ -38,9 +38,7 @@ export async function aggregateSearch(
   const queue = [...providers];
   const all: SearchResult[] = [];
   const statuses: SearchProviderStatus[] = [];
-  const controller = new AbortController();
   // 全局取消：timeoutMs 全部 provider 共享上限
-  const timer = setTimeout(() => controller.abort(), timeoutMs + 500);
 
   const workers: Array<Promise<void>> = [];
   for (let w = 0; w < Math.min(concurrency, queue.length); w++) {
@@ -48,8 +46,10 @@ export async function aggregateSearch(
       while (queue.length) {
         const p = queue.shift()!;
         const t0 = Date.now();
+        const controller = new AbortController();
+        const providerTimer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          const results = await p.search(query, controller.signal);
+          const results = await withTimeout(p.search(query, controller.signal), timeoutMs, p.id);
           for (const r of results) {
             all.push(normalizeResult(r, p.id));
           }
@@ -57,12 +57,13 @@ export async function aggregateSearch(
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           statuses.push({ providerId: p.id, ok: false, count: 0, error: msg, took: Date.now() - t0 });
+        } finally {
+          clearTimeout(providerTimer);
         }
       }
     })());
   }
   await Promise.all(workers);
-  clearTimeout(timer);
 
   const deduped = dedupeResults(all);
   const ranked = rankResults(deduped).slice(0, query.perPage);
@@ -111,6 +112,18 @@ export async function aggregateSearch(
     took: Date.now() - started,
     aiSummary,
   };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, providerId: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`PROVIDER_TIMEOUT:${providerId}`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function normalizeResult(r: SearchResult, defaultSource: string): SearchResult {

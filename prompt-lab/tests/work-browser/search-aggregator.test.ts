@@ -102,6 +102,20 @@ describe('aggregateSearch', () => {
     expect(r.providers.find((p) => p.providerId === 'fail')?.ok).toBe(false);
   });
 
+  it('times out a provider even when it ignores AbortSignal', async () => {
+    const providers: SearchProvider[] = [{
+      id: 'hung', name: 'hung', capabilities: { web: true, images: false, news: false, code: false, suggestions: false },
+      async search() {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return [];
+      },
+    }];
+    const started = Date.now();
+    const result = await aggregateSearch(providers, baseQuery, { timeoutMs: 20, concurrency: 1 });
+    expect(Date.now() - started).toBeLessThan(150);
+    expect(result.providers[0]).toMatchObject({ providerId: 'hung', ok: false, error: 'PROVIDER_TIMEOUT:hung' });
+  });
+
   it('dedupes across providers in final result', async () => {
     const providers: SearchProvider[] = [
       {
