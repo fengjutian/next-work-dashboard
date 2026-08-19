@@ -565,6 +565,10 @@ export interface ElectronAPI {
       preview: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => Promise<{ local: any[]; remote: any[]; conflicts: any[]; upload: string[]; download: string[] }>;
       push: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => Promise<{ ok: boolean; conflicts: any[]; transferred: number }>;
       pull: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => Promise<{ ok: boolean; conflicts: any[]; transferred: number }>;
+      listTargets: () => Promise<Array<{ id: string; kind: 'webdav' | 's3' | 'syncthing'; updatedAt: number }>>;
+      getTarget: (id: string) => Promise<{ id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> } | null>;
+      saveTarget: (target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => Promise<void>;
+      deleteTarget: (id: string) => Promise<void>;
     };
     settings: {
       get: (key: string) => Promise<string | null>;

@@ -100,6 +100,10 @@ export const workBrowserBridge = {
     preview: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => ipcRenderer.invoke('work-browser:sync:preview', workspaceId, target),
     push: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => ipcRenderer.invoke('work-browser:sync:push', workspaceId, target, overwrite),
     pull: (workspaceId: string, target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }, overwrite?: boolean) => ipcRenderer.invoke('work-browser:sync:pull', workspaceId, target, overwrite),
+    listTargets: () => ipcRenderer.invoke('work-browser:sync:target-list'),
+    getTarget: (id: string) => ipcRenderer.invoke('work-browser:sync:target-get', id),
+    saveTarget: (target: { id: string; kind: 'webdav' | 's3' | 'syncthing'; config: Record<string, string> }) => ipcRenderer.invoke('work-browser:sync:target-save', target),
+    deleteTarget: (id: string) => ipcRenderer.invoke('work-browser:sync:target-delete', id),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('work-browser:settings:get', key),

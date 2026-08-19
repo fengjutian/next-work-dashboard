@@ -30,6 +30,7 @@ import { buildMcpAgentTools, recordMcpAgentDenial } from './mcp-tools';
 import { GraphStore } from '../../core/work-browser/graph/edges';
 import { ResearchEvidenceStore, type EvidenceStatus } from './research-evidence-store';
 import { WorkBrowserSyncService, type SyncTargetInput } from './sync-service';
+import { SyncTargetStore } from './sync-target-store';
 import type {
   WorkspaceId, TabId, DocumentId, ConversationId, TaskId, TaskStatus, Task, AnnotationId,
 } from '../../core/work-browser/types';
@@ -51,6 +52,7 @@ export function setupWorkBrowserIPC(): void {
   const graph = new GraphStore(db);
   const evidenceStore = new ResearchEvidenceStore(db);
   const syncService = new WorkBrowserSyncService(workspaces);
+  const syncTargets = new SyncTargetStore();
   const searchRequests = new Map<string, AbortController>();
 
   // ── Workspace ──
@@ -283,6 +285,10 @@ export function setupWorkBrowserIPC(): void {
   ipcMain.handle('work-browser:sync:preview', (_event, workspaceId: string, target: SyncTargetInput) => syncService.preview(workspaceId, target));
   ipcMain.handle('work-browser:sync:push', (_event, workspaceId: string, target: SyncTargetInput, overwrite?: boolean) => syncService.push(workspaceId, target, !!overwrite));
   ipcMain.handle('work-browser:sync:pull', (_event, workspaceId: string, target: SyncTargetInput, overwrite?: boolean) => syncService.pull(workspaceId, target, !!overwrite));
+  ipcMain.handle('work-browser:sync:target-list', () => syncTargets.list());
+  ipcMain.handle('work-browser:sync:target-get', (_event, id: string) => syncTargets.get(id));
+  ipcMain.handle('work-browser:sync:target-save', (_event, target: SyncTargetInput) => syncTargets.save(target));
+  ipcMain.handle('work-browser:sync:target-delete', (_event, id: string) => syncTargets.remove(id));
 
   // Task 自动编排：跑一个 task 的所有 step，用 auto-handler 链
   ipcMain.handle('work-browser:task:run-auto', async (_e, taskId: TaskId) => {
