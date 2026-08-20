@@ -24,6 +24,7 @@ const videoPlayerResource = path.join(projectRoot, 'resources', 'video-player');
 const mycastResource = path.join(projectRoot, 'resources', 'mycast');
 const netProbeResource = path.join(projectRoot, 'resources', 'net-probe');
 const voiceEngineResource = path.join(projectRoot, 'resources', 'voice-engine');
+const ffmpegResource = path.join(projectRoot, 'resources', 'ffmpeg');
 
 function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
   const segments = name.split('/');
@@ -100,6 +101,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
       ...(process.env.NWD_BUNDLE_NET_PROBE === '1' && fs.existsSync(netProbeResource) ? [netProbeResource] : []),
       ...(process.env.NWD_BUNDLE_VOICE_ENGINE === '1' && fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),
+      ...(process.env.NWD_BUNDLE_FFMPEG === '1' && fs.existsSync(ffmpegResource) ? [ffmpegResource] : []),
     ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**',

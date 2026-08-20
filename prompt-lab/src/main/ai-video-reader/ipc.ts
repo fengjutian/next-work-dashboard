@@ -19,20 +19,41 @@ function hydrate(project: VideoReaderProject): VideoReaderProject {
   return { ...project, mediaUrl: pathToFileURL(project.sourcePath).href };
 }
 
-function findFfmpeg(): string {
-  const executable = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-  const bundled = path.join(process.resourcesPath, 'ffmpeg', process.platform, executable);
-  if (app.isPackaged && fs.existsSync(bundled)) return bundled;
+function findMediaBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
+  const executable = process.platform === 'win32' ? `${name}.exe` : name;
+  const platformDirectory = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
+  const bundled = path.join(process.resourcesPath, 'ffmpeg', platformDirectory, executable);
+  const development = path.join(app.getAppPath(), 'resources', 'ffmpeg', platformDirectory, executable);
+  if (fs.existsSync(bundled)) return bundled;
+  if (fs.existsSync(development)) return development;
   for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
     const candidate = path.join(directory, executable);
     if (fs.existsSync(candidate)) return candidate;
   }
-  return executable;
+  return null;
+}
+
+function runBinary(binary: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { windowsHide: true }); let stdout = ''; let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); }); child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('error', reject); child.on('close', (code) => code === 0 ? resolve({ stdout, stderr }) : reject(new Error(stderr || `${path.basename(binary)} exited with ${code}`)));
+  });
+}
+
+async function probeMedia(sourcePath: string): Promise<Partial<VideoReaderProject>> {
+  const binary = findMediaBinary('ffprobe'); if (!binary) return {};
+  const { stdout } = await runBinary(binary, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height', '-of', 'json', sourcePath]);
+  const result = JSON.parse(stdout) as { format?: { duration?: string }; streams?: Array<{ codec_type: string; codec_name?: string; width?: number; height?: number }> };
+  const video = result.streams?.find((item) => item.codec_type === 'video'); const audio = result.streams?.find((item) => item.codec_type === 'audio');
+  return { durationMs: Math.round(Number(result.format?.duration ?? 0) * 1000), width: video?.width, height: video?.height, videoCodec: video?.codec_name, audioCodec: audio?.codec_name };
 }
 
 function extractAudio(sourcePath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(findFfmpeg(), ['-y', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', outputPath], { windowsHide: true });
+    const binary = findMediaBinary('ffmpeg');
+    if (!binary) { reject(new Error('未找到 FFmpeg。请安装到系统 PATH，或放入 resources/ffmpeg/<platform>/')); return; }
+    const child = spawn(binary, ['-y', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', outputPath], { windowsHide: true });
     let diagnostics = '';
     child.stderr.on('data', (chunk) => { diagnostics = `${diagnostics}${String(chunk)}`.slice(-4000); });
     child.on('error', (error) => reject(new Error(`无法启动 FFmpeg：${error.message}`)));
@@ -57,6 +78,12 @@ async function transcribeAudio(audioPath: string, config: { baseUrl: string; api
 }
 
 export function setupAiVideoReaderIPC(): void {
+  ipcMain.handle('ai-video-reader:runtime-status', async () => {
+    const ffmpeg = findMediaBinary('ffmpeg'); const ffprobe = findMediaBinary('ffprobe');
+    let version: string | undefined;
+    if (ffmpeg) { try { const result = await runBinary(ffmpeg, ['-version']); version = result.stdout.split(/\r?\n/)[0]; } catch { /* reported as unavailable below */ } }
+    return { ffmpeg: { available: Boolean(ffmpeg && version), path: ffmpeg ?? undefined, version }, ffprobe: { available: Boolean(ffprobe), path: ffprobe ?? undefined } };
+  });
   ipcMain.handle('ai-video-reader:list-projects', () => load().map(hydrate));
   ipcMain.handle('ai-video-reader:import-video', async () => {
     const picked = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: '视频', extensions: ['mp4', 'mkv', 'mov', 'webm', 'm4v', 'avi'] }] });
@@ -67,7 +94,8 @@ export function setupAiVideoReaderIPC(): void {
     const existing = projects.find((item) => item.sourcePath === sourcePath && item.sourceMtime === stat.mtimeMs);
     if (existing) return hydrate(existing);
     const now = Date.now();
-    const project: VideoReaderProject = { id: `video-${now.toString(36)}`, name: path.basename(sourcePath, path.extname(sourcePath)), sourcePath, mediaUrl: '', sourceSize: stat.size, sourceMtime: stat.mtimeMs, durationMs: 0, status: 'ready', segments: [], chapters: [], createdAt: now, updatedAt: now };
+    let mediaInfo: Partial<VideoReaderProject> = {}; try { mediaInfo = await probeMedia(sourcePath); } catch { /* importing remains available without ffprobe */ }
+    const project: VideoReaderProject = { id: `video-${now.toString(36)}`, name: path.basename(sourcePath, path.extname(sourcePath)), sourcePath, mediaUrl: '', sourceSize: stat.size, sourceMtime: stat.mtimeMs, durationMs: 0, ...mediaInfo, status: 'ready', segments: [], chapters: [], createdAt: now, updatedAt: now };
     projects.unshift(project); save(projects); return hydrate(project);
   });
   ipcMain.handle('ai-video-reader:import-transcript', async (_event, projectId: string) => {

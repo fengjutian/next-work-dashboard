@@ -588,6 +588,7 @@ const electronAPI: ElectronAPI = {
   securityAudit: securityAuditBridge,
 
   aiVideoReader: {
+    runtimeStatus: () => ipcRenderer.invoke('ai-video-reader:runtime-status'),
     listProjects: () => ipcRenderer.invoke('ai-video-reader:list-projects'),
     importVideo: () => ipcRenderer.invoke('ai-video-reader:import-video'),
     importTranscript: (projectId: string) => ipcRenderer.invoke('ai-video-reader:import-transcript', projectId),

@@ -24,6 +24,10 @@ export interface VideoReaderProject {
   sourceSize: number;
   sourceMtime: number;
   durationMs: number;
+  width?: number;
+  height?: number;
+  videoCodec?: string;
+  audioCodec?: string;
   status: VideoProjectStatus;
   language?: string;
   summary?: string;
@@ -39,6 +43,7 @@ export interface TranscriptImportResult {
 }
 
 export interface VideoReaderApi {
+  runtimeStatus(): Promise<{ ffmpeg: { available: boolean; path?: string; version?: string }; ffprobe: { available: boolean; path?: string } }>;
   listProjects(): Promise<VideoReaderProject[]>;
   importVideo(): Promise<VideoReaderProject | null>;
   importTranscript(projectId: string): Promise<VideoReaderProject | null>;
