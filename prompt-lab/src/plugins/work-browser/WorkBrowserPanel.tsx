@@ -423,7 +423,7 @@ export function WorkBrowserPanel() {
             </div>
           )}
         </main>
-        {!rightCollapsed && <aside className="min-h-0 overflow-hidden bg-card/90">
+        {!rightCollapsed && <aside className="min-h-0 overflow-hidden border-l border-border/70 bg-card/95 shadow-[-8px_0_24px_-24px_rgba(0,0,0,0.45)]">
           {activeWorkspace ? (
             <Tabs
               size="small"
