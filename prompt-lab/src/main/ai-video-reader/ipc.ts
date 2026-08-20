@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import type {
   TranscriptSegment,
   VideoChapter,
+  VideoReaderAsrConfig,
   VideoReaderProject,
 } from "../../core/ai-video-reader/types";
 import {
@@ -41,6 +42,7 @@ interface ChunkResult {
 interface TranscriptionCheckpoint {
   sourceMtime: number;
   model: string;
+  provider: string;
   chunks: Record<string, ChunkResult>;
 }
 
@@ -420,9 +422,13 @@ function extractAudioChunks(
   });
 }
 
+function wavDurationSeconds(audioPath: string): number {
+  return Math.max(0.01, (fs.statSync(audioPath).size - 44) / 32_000);
+}
+
 async function transcribeAudio(
   audioPath: string,
-  config: { baseUrl: string; apiKey: string; model: string; language?: string },
+  config: VideoReaderAsrConfig,
   signal: AbortSignal,
 ) {
   const endpoint = `${config.baseUrl.replace(/\/$/, "")}/audio/transcriptions`;
@@ -433,9 +439,12 @@ async function transcribeAudio(
     "audio.wav",
   );
   form.append("model", config.model);
-  form.append("response_format", "verbose_json");
-  form.append("timestamp_granularities[]", "segment");
-  if (config.language?.trim()) form.append("language", config.language.trim());
+  if (config.provider !== "siliconflow") {
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "segment");
+    if (config.language?.trim())
+      form.append("language", config.language.trim());
+  }
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${config.apiKey}` },
@@ -448,20 +457,28 @@ async function transcribeAudio(
       `ASR 请求失败（${response.status}）：${body.slice(0, 600)}`,
     );
   const parsed = JSON.parse(body) as {
+    text?: string;
     language?: string;
     duration?: number;
     segments?: Array<{ start: number; end: number; text: string }>;
   };
-  if (!parsed.segments?.length)
-    throw new Error(
-      "ASR Provider 未返回 segment timestamps；请确认支持 verbose_json",
-    );
-  return parsed;
+  if (parsed.segments?.length) return parsed;
+  if (config.provider === "siliconflow" && parsed.text?.trim()) {
+    const duration = wavDurationSeconds(audioPath);
+    return {
+      ...parsed,
+      duration,
+      segments: [{ start: 0, end: duration, text: parsed.text.trim() }],
+    };
+  }
+  throw new Error(
+    "ASR Provider 未返回 segment timestamps；请确认支持 verbose_json",
+  );
 }
 
 async function transcribeWithRetry(
   audioPath: string,
-  config: { baseUrl: string; apiKey: string; model: string; language?: string },
+  config: VideoReaderAsrConfig,
   signal: AbortSignal,
 ): Promise<ChunkResult> {
   let lastError: unknown;
@@ -754,16 +771,7 @@ export function setupAiVideoReaderIPC(): void {
   );
   ipcMain.handle(
     "ai-video-reader:transcribe",
-    async (
-      _event,
-      projectId: string,
-      config: {
-        baseUrl: string;
-        apiKey: string;
-        model: string;
-        language?: string;
-      },
-    ) => {
+    async (_event, projectId: string, config: VideoReaderAsrConfig) => {
       if (!config.baseUrl || !config.apiKey || !config.model)
         throw new Error("请完整填写 ASR Base URL、API Key 和模型");
       const projects = load();
@@ -784,6 +792,7 @@ export function setupAiVideoReaderIPC(): void {
       let checkpoint: TranscriptionCheckpoint = {
         sourceMtime: project.sourceMtime,
         model: config.model,
+        provider: config.provider || "openai-compatible",
         chunks: {},
       };
       try {
@@ -792,7 +801,8 @@ export function setupAiVideoReaderIPC(): void {
         ) as TranscriptionCheckpoint;
         if (
           stored.sourceMtime === project.sourceMtime &&
-          stored.model === config.model
+          stored.model === config.model &&
+          stored.provider === (config.provider || "openai-compatible")
         )
           checkpoint = stored;
       } catch {
@@ -822,6 +832,7 @@ export function setupAiVideoReaderIPC(): void {
           checkpoint = {
             sourceMtime: project.sourceMtime,
             model: config.model,
+            provider: config.provider || "openai-compatible",
             chunks: {},
           };
           sendProgress(_event.sender, "extracting", 5, "正在提取并切分音频");

@@ -598,7 +598,7 @@ const electronAPI: ElectronAPI = {
     importTranscript: (projectId: string) => ipcRenderer.invoke('ai-video-reader:import-transcript', projectId),
     deleteProject: (projectId: string) => ipcRenderer.invoke('ai-video-reader:delete-project', projectId),
     exportTranscript: (projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json') => ipcRenderer.invoke('ai-video-reader:export-transcript', projectId, format),
-    transcribe: (projectId: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }) => ipcRenderer.invoke('ai-video-reader:transcribe', projectId, config),
+    transcribe: (projectId: string, config: import('./core/ai-video-reader/types').VideoReaderAsrConfig) => ipcRenderer.invoke('ai-video-reader:transcribe', projectId, config),
     cancelTranscription: (projectId: string) => ipcRenderer.invoke('ai-video-reader:cancel-transcription', projectId),
     onTaskProgress: (callback: (progress: import('./core/ai-video-reader/types').VideoReaderTaskProgress) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: import('./core/ai-video-reader/types').VideoReaderTaskProgress) => callback(progress);

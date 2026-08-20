@@ -13,6 +13,7 @@ import {
 } from "antd";
 import type {
   VideoAnswer,
+  VideoReaderAsrProvider,
   VideoReaderProject,
   VideoReaderTaskProgress,
 } from "@/core/ai-video-reader/types";
@@ -54,11 +55,13 @@ export function AiVideoReaderPanel() {
   }>();
   const [taskProgress, setTaskProgress] = useState<VideoReaderTaskProgress>();
   const [asrForm] = Form.useForm<{
+    provider: VideoReaderAsrProvider;
     baseUrl: string;
     apiKey: string;
     model: string;
     language?: string;
   }>();
+  const asrProvider = Form.useWatch("provider", asrForm);
   const [analysisForm] = Form.useForm<{
     baseUrl: string;
     apiKey: string;
@@ -663,18 +666,53 @@ export function AiVideoReaderPanel() {
         destroyOnHidden={false}
       >
         <p className="mb-4 text-sm text-muted-foreground">
-          需要本机可用的 FFmpeg，以及支持 verbose_json 时间戳的
-          OpenAI-compatible ASR。
+          {asrProvider === "siliconflow"
+            ? "硅基流动返回全文；应用会按 10 分钟音频分片生成粗粒度时间轴。"
+            : "OpenAI-compatible 模式要求服务支持 verbose_json 分段时间戳。"}
         </p>
         <Form
           form={asrForm}
           layout="vertical"
           initialValues={{
+            provider: "openai-compatible",
             baseUrl: "https://api.openai.com/v1",
             model: "whisper-1",
             language: "zh",
           }}
         >
+          <Form.Item
+            name="provider"
+            label="服务商"
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                {
+                  value: "openai-compatible",
+                  label: "OpenAI-compatible（精确时间戳）",
+                },
+                {
+                  value: "siliconflow",
+                  label: "硅基流动（国内，粗粒度时间轴）",
+                },
+              ]}
+              onChange={(provider: VideoReaderAsrProvider) => {
+                asrForm.setFieldsValue(
+                  provider === "siliconflow"
+                    ? {
+                        baseUrl: "https://api.siliconflow.cn/v1",
+                        model: "FunAudioLLM/SenseVoiceSmall",
+                        language: undefined,
+                      }
+                    : {
+                        baseUrl: "https://api.openai.com/v1",
+                        model: "whisper-1",
+                        language: "zh",
+                      },
+                );
+              }}
+            />
+          </Form.Item>
           <Form.Item
             name="baseUrl"
             label="Base URL"
@@ -688,7 +726,11 @@ export function AiVideoReaderPanel() {
           <Form.Item name="model" label="模型" rules={[{ required: true }]}>
             <Input placeholder="whisper-1" />
           </Form.Item>
-          <Form.Item name="language" label="语言（可选）">
+          <Form.Item
+            name="language"
+            label="语言（可选）"
+            hidden={asrProvider === "siliconflow"}
+          >
             <Input placeholder="zh" />
           </Form.Item>
         </Form>

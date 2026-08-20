@@ -59,6 +59,15 @@ export interface VideoReaderTaskProgress {
   detail: string;
 }
 
+export type VideoReaderAsrProvider = "openai-compatible" | "siliconflow";
+export interface VideoReaderAsrConfig {
+  provider?: VideoReaderAsrProvider;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language?: string;
+}
+
 export interface VideoReaderApi {
   runtimeStatus(): Promise<{
     ffmpeg: { available: boolean; path?: string; version?: string };
@@ -76,12 +85,7 @@ export interface VideoReaderApi {
   ): Promise<string | null>;
   transcribe(
     projectId: string,
-    config: {
-      baseUrl: string;
-      apiKey: string;
-      model: string;
-      language?: string;
-    },
+    config: VideoReaderAsrConfig,
   ): Promise<VideoReaderProject>;
   cancelTranscription(projectId: string): Promise<boolean>;
   onTaskProgress(
