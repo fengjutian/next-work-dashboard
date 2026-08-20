@@ -12,7 +12,7 @@ import type {
   VideoResolution,
   VideoTaskStatus,
 } from './types';
-import { POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS } from './core/api';
+import { DEFAULT_MODEL, POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS } from './core/api';
 import {
   attachFile,
   createTask,
@@ -138,7 +138,7 @@ function makeReferenceKey(): string {
 }
 
 /**
- * AI 扩写：把用户短句扩成 MiniMax-H3 视频生成能直接吃的提示词。
+ * AI 扩写：把用户短句扩成 MiniMax 视频生成模型能直接使用的提示词。
  * 视频 prompt 跟图片 prompt 的核心区别：时间轴 + 运动 + 镜头调度。
  * 输出要保持中文，220–500 字，覆盖主体 / 动作 / 镜头 / 光线 / 氛围。
  */
@@ -157,7 +157,7 @@ async function expandVideoPrompt(
     : mode === 'start-end-to-video' ? '这是首尾帧生视频模式，重点描述从首帧过渡到尾帧的过程。'
     : mode === 'reference-to-video' ? '这是参考生视频模式，重点描述参考主体的特征延续 + 动作编排。'
     : '这是文生视频模式，从零构建一个完整的画面。';
-  const systemPrompt = `你是专业视频导演和文生视频提示词设计师，擅长为 MiniMax-H3 多模态视频模型写提示词。${modeHint}
+  const systemPrompt = `你是专业视频导演和文生视频提示词设计师，擅长为 MiniMax 视频生成模型写提示词。${modeHint}
 
 将用户的简短想法扩写成一段具体、生动、可直接用于视频生成的中文描述。必须保留用户主体与意图，补充：
 - 主体在时间轴上的动作（开场 → 发展 → 收尾）
@@ -376,7 +376,7 @@ export const VideoGenerationPanel: React.FC = () => {
 
   const [apiKey, setApiKey] = useState<string>(() => readStoredApiKey());
   const [baseUrl, setBaseUrl] = useState<string>(() => readStoredBaseUrl());
-  const [model, setModel] = useState<string>('MiniMax-H3');
+  const [model, setModel] = useState<string>(DEFAULT_MODEL);
   const [prompt, setPrompt] = useState<string>('');
   const [mode, setMode] = useState<VideoGenerationMode>('text-to-video');
   const [duration, setDuration] = useState<number>(6);
@@ -436,7 +436,7 @@ export const VideoGenerationPanel: React.FC = () => {
 
   // 轮询单个任务直到终态。失败 / 超时 / 取消都会停。
   const pollOnce = useCallback(async (poll: ActivePoll): Promise<void> => {
-    const response = await window.electronAPI.videoGeneration.query({ baseUrl: poll.baseUrl, apiKey: poll.apiKey, taskId: poll.taskId });
+    const response = await window.electronAPI.videoGeneration.query({ baseUrl: poll.baseUrl, apiKey: poll.apiKey, taskId: poll.taskId, model: poll.model });
     if (!response.success || !response.info) {
       // 单独一次失败不立即放弃，再试 1 次；attempts 增 1。
       if (poll.attempts + 1 >= POLL_MAX_ATTEMPTS) {
@@ -579,7 +579,7 @@ export const VideoGenerationPanel: React.FC = () => {
     const payload: VideoGenerationRequest = {
       apiKey: apiKey.trim(),
       baseUrl: baseUrl.trim() || undefined,
-      model: model.trim() || 'MiniMax-H3',
+      model: model.trim() || DEFAULT_MODEL,
       prompt: prompt.trim(),
       duration,
       resolution,
@@ -672,7 +672,7 @@ export const VideoGenerationPanel: React.FC = () => {
         id: recordId,
         taskId: response.taskId,
         prompt: payload.prompt,
-        model: payload.model || 'MiniMax-H3',
+        model: payload.model || DEFAULT_MODEL,
         mode: payload.mode || 'text-to-video',
         duration: payload.duration || 6,
         resolution: payload.resolution || '768P',
@@ -686,7 +686,7 @@ export const VideoGenerationPanel: React.FC = () => {
         attempts: 0,
         apiKey: payload.apiKey,
         baseUrl: payload.baseUrl || baseUrl,
-        model: payload.model || 'MiniMax-H3',
+        model: payload.model || DEFAULT_MODEL,
       });
       showInfo('视频生成任务已提交', `MiniMax task_id: ${response.taskId}，每 ${POLL_INTERVAL_MS / 1000} 秒轮询一次。`);
     } catch (err) {
@@ -707,7 +707,7 @@ export const VideoGenerationPanel: React.FC = () => {
     // 还在上游队列 / 处理中的任务：先通知 MiniMax 取消，再删本地
     if (record.status === 'queued' || record.status === 'preparing' || record.status === 'processing') {
       try {
-        const cancel = await window.electronAPI.videoGeneration.cancel({ apiKey, baseUrl, taskId: record.taskId });
+        const cancel = await window.electronAPI.videoGeneration.cancel({ apiKey, baseUrl, taskId: record.taskId, model: record.model });
         if (!cancel.success) {
           showError(`MiniMax 取消任务失败：${cancel.error || '未知错误'}（仍会删除本地记录）`);
         }
@@ -782,7 +782,7 @@ export const VideoGenerationPanel: React.FC = () => {
             <Sparkles className="h-5 w-5 text-primary" />视频生成
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            基于 MiniMax-H3 多模态视频模型，支持文生视频、首/尾帧、参考生视频。
+            默认使用套餐支持的 Hailuo 2.3；也可切换到 MiniMax-H3 多模态视频模型。
           </p>
         </div>
 
@@ -940,7 +940,11 @@ export const VideoGenerationPanel: React.FC = () => {
 
         <label className="mb-4 grid gap-1 text-xs">
           模型
-          <input className="h-9 rounded-md border bg-background px-3" value={model} onChange={(event) => setModel(event.target.value)} placeholder="MiniMax-H3" />
+          <select className="h-9 rounded-md border bg-background px-3" value={model} onChange={(event) => setModel(event.target.value)}>
+            <option value="MiniMax-Hailuo-2.3">MiniMax Hailuo 2.3（Max 套餐，3 条/日）</option>
+            <option value="MiniMax-Hailuo-02">MiniMax Hailuo 02（首尾帧）</option>
+            <option value="MiniMax-H3">MiniMax H3（需单独权益）</option>
+          </select>
         </label>
 
         <Button className="w-full" disabled={submitting} onClick={() => void handleSubmit()}>

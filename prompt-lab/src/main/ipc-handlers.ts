@@ -653,7 +653,7 @@ export function setupIPC(webviewPreloadPath: string) {
       const text = await response.text();
       let data: unknown = null;
       try { data = JSON.parse(text); } catch { /* keep null */ }
-      if (!response.ok) return { success: false, error: `提交失败（HTTP ${response.status}）：${text.slice(0, 500)}` };
+      if (!response.ok) return { success: false, error: apiModule.formatMiniMaxHttpError(response.status, data, text) };
       const submit = parseSubmitResponse(data);
       if (!submit.success || !submit.taskId) return { success: false, error: submit.error, baseResp: submit.baseResp };
       return { success: true, taskId: submit.taskId, baseResp: submit.baseResp };
@@ -663,15 +663,15 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  ipcMain.handle('video-generation:query', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string }) => {
+  ipcMain.handle('video-generation:query', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => {
     try {
       const apiKey = String(payload?.apiKey || '').trim();
       const taskId = String(payload?.taskId || '').trim();
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
       if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
       if (!taskId) return { success: false, error: 'taskId 不能为空' };
-      const { buildQueryRequest, parseTaskResponse } = await import('../plugins/video-generation/core/api');
-      const { endpoint, init } = buildQueryRequest(baseUrl, apiKey, taskId);
+      const apiModule = await import('../plugins/video-generation/core/api');
+      const { endpoint, init } = apiModule.buildQueryRequest(baseUrl, apiKey, taskId, payload.model);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);
       let response: Response;
@@ -681,8 +681,19 @@ export function setupIPC(webviewPreloadPath: string) {
       const text = await response.text();
       let data: unknown = null;
       try { data = JSON.parse(text); } catch { /* keep null */ }
-      if (!response.ok) return { success: false, error: `查询失败（HTTP ${response.status}）：${text.slice(0, 500)}` };
-      const info = parseTaskResponse(data, taskId);
+      if (!response.ok) return { success: false, error: apiModule.formatMiniMaxHttpError(response.status, data, text) };
+      const info = apiModule.parseTaskResponse(data, taskId);
+      if (info.status === 'succeeded' && !info.videoUrl && info.fileId) {
+        const fileRequest = apiModule.buildFileRetrieveRequest(baseUrl, apiKey, info.fileId);
+        const fileResponse = await fetch(fileRequest.endpoint, fileRequest.init);
+        const fileText = await fileResponse.text();
+        let fileData: unknown = null;
+        try { fileData = JSON.parse(fileText); } catch { /* keep null */ }
+        if (!fileResponse.ok) return { success: false, error: apiModule.formatMiniMaxHttpError(fileResponse.status, fileData, fileText) };
+        const retrieved = apiModule.parseFileRetrieveResponse(fileData);
+        if (!retrieved.videoUrl) return { success: false, error: retrieved.error || '无法获取视频下载地址' };
+        info.videoUrl = retrieved.videoUrl;
+      }
       return { success: true, info };
     } catch (err) {
       const message = err instanceof Error && err.name === 'AbortError' ? '查询任务超时（30 秒）' : (err instanceof Error ? err.message : String(err));
@@ -693,14 +704,17 @@ export function setupIPC(webviewPreloadPath: string) {
   // 取消 / 删除上游任务（DELETE /v2/video_generation/{task_id}）。
   // MiniMax 文档：取消排队中的任务，或删除成功和失败的任务记录。
   // 终态已 succeed / failed / cancelled 的任务也会被服务端清理记录。
-  ipcMain.handle('video-generation:cancel', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string }) => {
+  ipcMain.handle('video-generation:cancel', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => {
     try {
       const apiKey = String(payload?.apiKey || '').trim();
       const taskId = String(payload?.taskId || '').trim();
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
       if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
       if (!taskId) return { success: false, error: 'taskId 不能为空' };
-      const { buildCancelRequest } = await import('../plugins/video-generation/core/api');
+      const { buildCancelRequest, usesH3Protocol } = await import('../plugins/video-generation/core/api');
+      if (!usesH3Protocol(payload.model)) {
+        return { success: true, baseResp: { statusCode: 0, statusMsg: 'Hailuo v1 不支持取消上游任务，已停止本地轮询' } };
+      }
       const { endpoint, init } = buildCancelRequest(baseUrl, apiKey, taskId);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);

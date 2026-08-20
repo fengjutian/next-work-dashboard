@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCancelRequest,
   buildCreateRequest,
+  buildFileRetrieveRequest,
   buildQueryRequest,
   DEFAULT_BASE_URL,
   DEFAULT_DURATION,
@@ -9,6 +10,8 @@ import {
   DEFAULT_RATIO,
   DEFAULT_RESOLUTION,
   normalizeRequest,
+  formatMiniMaxHttpError,
+  parseFileRetrieveResponse,
   parseSubmitResponse,
   parseTaskResponse,
   POLL_INTERVAL_MS,
@@ -44,7 +47,7 @@ describe('video-generation / core / api', () => {
     });
 
     it('clamps duration into [4, 15] and falls back to default on garbage', () => {
-      const ok = normalizeRequest({ apiKey: 'sk', prompt: 'p', duration: 9 });
+      const ok = normalizeRequest({ apiKey: 'sk', prompt: 'p', duration: 9, model: 'MiniMax-H3' });
       expect(ok.ok).toBe(true);
       if (ok.ok) expect(ok.value.duration).toBe(9);
 
@@ -73,6 +76,7 @@ describe('video-generation / core / api', () => {
       const result = normalizeRequest({
         apiKey: 'sk',
         prompt: 'p',
+        model: 'MiniMax-H3',
         mode: 'reference-to-video',
         firstFrameUrl: 'https://x/a.png',
         lastFrameUrl: 'https://x/b.png',
@@ -97,15 +101,24 @@ describe('video-generation / core / api', () => {
   });
 
   describe('buildCreateRequest', () => {
-    it('targets /v2/video_generation with bearer auth and the assembled payload', () => {
+    it('targets Hailuo /v1/video_generation by default', () => {
       const normalized = normalizeRequest({ apiKey: 'sk-test', prompt: 'hello' });
       if (!normalized.ok) throw new Error(normalized.error);
       const { endpoint, init } = buildCreateRequest(normalized.value);
-      expect(endpoint).toBe('https://api.minimaxi.com/v2/video_generation');
+      expect(endpoint).toBe('https://api.minimaxi.com/v1/video_generation');
       expect(init.method).toBe('POST');
       const headers = init.headers as Record<string, string>;
       expect(headers.Authorization).toBe('Bearer sk-test');
       expect(headers['Content-Type']).toBe('application/json');
+      const body = JSON.parse(String(init.body));
+      expect(body).toEqual({ model: 'MiniMax-Hailuo-2.3', prompt: 'hello', duration: 6, resolution: '768P' });
+    });
+
+    it('keeps the H3 /v2 content protocol when H3 is selected', () => {
+      const normalized = normalizeRequest({ apiKey: 'sk-test', prompt: 'hello', model: 'MiniMax-H3' });
+      if (!normalized.ok) throw new Error(normalized.error);
+      const { endpoint, init } = buildCreateRequest(normalized.value);
+      expect(endpoint).toBe('https://api.minimaxi.com/v2/video_generation');
       const body = JSON.parse(String(init.body));
       expect(body).toMatchObject({ model: 'MiniMax-H3', duration: 6, resolution: '768P', ratio: '16:9' });
       expect(body.content[0]).toEqual({ type: 'text', text: 'hello' });
@@ -114,7 +127,7 @@ describe('video-generation / core / api', () => {
 
   describe('buildQueryRequest', () => {
     it('targets /v2/query/video_generation/{taskId} with bearer auth', () => {
-      const { endpoint, init } = buildQueryRequest('https://api.minimaxi.com/', 'sk-test', 'task-1');
+      const { endpoint, init } = buildQueryRequest('https://api.minimaxi.com/', 'sk-test', 'task-1', 'MiniMax-H3');
       expect(endpoint).toBe('https://api.minimaxi.com/v2/query/video_generation/task-1');
       expect(init.method).toBe('GET');
       const headers = init.headers as Record<string, string>;
@@ -122,8 +135,15 @@ describe('video-generation / core / api', () => {
     });
 
     it('encodes taskId in case it contains unsafe characters', () => {
-      const { endpoint } = buildQueryRequest('https://api.minimaxi.com', 'sk', 'a/b c');
+      const { endpoint } = buildQueryRequest('https://api.minimaxi.com', 'sk', 'a/b c', 'MiniMax-H3');
       expect(endpoint).toBe('https://api.minimaxi.com/v2/query/video_generation/a%2Fb%20c');
+    });
+
+    it('uses the Hailuo v1 query and file retrieval endpoints', () => {
+      expect(buildQueryRequest('https://api.minimaxi.com/', 'sk', 'a/b c', 'MiniMax-Hailuo-2.3').endpoint)
+        .toBe('https://api.minimaxi.com/v1/query/video_generation?task_id=a%2Fb%20c');
+      expect(buildFileRetrieveRequest('https://api.minimaxi.com/', 'sk', 'file/1').endpoint)
+        .toBe('https://api.minimaxi.com/v1/files/retrieve?file_id=file%2F1');
     });
   });
 
@@ -182,9 +202,25 @@ describe('video-generation / core / api', () => {
       expect(fail.error).toBe('safety filter');
     });
 
+    it('extracts a Hailuo v1 file_id and its download URL', () => {
+      const task = parseTaskResponse({ status: 'Success', file_id: 'file-1', base_resp: { status_code: 0 } }, 't');
+      expect(task.status).toBe('succeeded');
+      expect(task.fileId).toBe('file-1');
+      expect(parseFileRetrieveResponse({ file: { download_url: 'https://cdn/x.mp4' }, base_resp: { status_code: 0 } }).videoUrl)
+        .toBe('https://cdn/x.mp4');
+    });
+
     it('returns unknown status when payload is not an object', () => {
       expect(parseTaskResponse(null, 't').status).toBe('unknown');
       expect(parseTaskResponse('string', 't').status).toBe('unknown');
+    });
+  });
+
+  describe('account errors', () => {
+    it('turns H3 TokenPlan error 2013 into an actionable model hint', () => {
+      const error = formatMiniMaxHttpError(400, { error: { message: 'TokenPlan 或 Credit 暂不支持 MiniMax-H3 系列模型 (2013)' } }, '');
+      expect(error).toMatch(/Hailuo 2\.3/);
+      expect(error).toMatch(/不支持 H3/);
     });
   });
 

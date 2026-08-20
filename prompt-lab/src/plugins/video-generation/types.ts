@@ -80,6 +80,8 @@ export interface VideoTaskInfo {
   status: VideoTaskStatus;
   /** 成片下载地址（仅 succeeded 时存在） */
   videoUrl?: string;
+  /** Hailuo v1 completes with a file_id, which is exchanged for a download URL. */
+  fileId?: string;
   /** 上游原始 task payload，便于排查 */
   raw?: unknown;
   error?: string;

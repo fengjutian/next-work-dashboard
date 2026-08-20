@@ -179,11 +179,11 @@ const electronAPI: ElectronAPI = {
   videoGeneration: {
     create: (payload: import('./plugins/video-generation/types').VideoGenerationRequest) =>
       ipcRenderer.invoke('video-generation:create', payload),
-    query: (payload: { baseUrl?: string; apiKey: string; taskId: string }) =>
+    query: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) =>
       ipcRenderer.invoke('video-generation:query', payload),
     download: (payload: { taskId: string; videoUrl: string; recordId: string }) =>
       ipcRenderer.invoke('video-generation:download', payload),
-    cancel: (payload: { baseUrl?: string; apiKey: string; taskId: string }) =>
+    cancel: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) =>
       ipcRenderer.invoke('video-generation:cancel', payload),
     uploadReference: (payload: { name: string; mimeType: string; data: ArrayBuffer; ttlHours?: number }) =>
       ipcRenderer.invoke('video-generation:upload-reference', payload) as Promise<{ success: boolean; url?: string; ttlHours?: number; bytes?: number; error?: string }>,
