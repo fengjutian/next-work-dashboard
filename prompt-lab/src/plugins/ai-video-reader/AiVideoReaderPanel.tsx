@@ -21,6 +21,7 @@ import {
   normalizeSegments,
   splitSegment,
 } from "@/core/ai-video-reader/editing";
+import { Trash2 } from "@/components/icons";
 
 const time = (ms: number) =>
   `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
@@ -81,7 +82,13 @@ export function AiVideoReaderPanel() {
   const prepareCompatiblePlayback = async () => {
     if (!selected || preparingPlayback) return;
     setPreparingPlayback(true);
-    setPlaybackError("正在使用 FFmpeg 生成兼容播放版本，请稍候…");
+    setPlaybackError(undefined);
+    setTaskProgress({
+      projectId: selected.id,
+      stage: "transcoding",
+      progress: 1,
+      detail: "正在准备兼容播放版本",
+    });
     try {
       const url = await window.electronAPI.aiVideoReader.preparePlayback(
         selected.id,
@@ -89,9 +96,15 @@ export function AiVideoReaderPanel() {
       setPlaybackUrl(url);
       setPlaybackError(undefined);
     } catch (error) {
-      setPlaybackError(error instanceof Error ? error.message : "兼容转码失败");
+      const detail = error instanceof Error ? error.message : "兼容转码失败";
+      setPlaybackError(
+        /No handler registered.*prepare-playback/i.test(detail)
+          ? "播放服务尚未加载，请完全退出应用（包括托盘）后重新启动"
+          : detail,
+      );
     } finally {
       setPreparingPlayback(false);
+      setTaskProgress(undefined);
     }
   };
   const visibleSegments = useMemo(
@@ -256,18 +269,26 @@ export function AiVideoReaderPanel() {
       return;
     }
     if (key === "delete") {
-      Modal.confirm({
-        title: "删除项目？",
-        content: "会删除 Transcript、索引和缓存，但不会删除原视频。",
-        okButtonProps: { danger: true },
-        onOk: async () => {
-          await window.electronAPI.aiVideoReader.deleteProject(selected.id);
-          const result = await window.electronAPI.aiVideoReader.listProjects();
-          setProjects(result);
-          setSelectedId(result[0]?.id);
-        },
-      });
+      confirmDeleteProject(selected);
     }
+  };
+  const confirmDeleteProject = (project: VideoReaderProject) => {
+    Modal.confirm({
+      title: `删除“${project.name}”？`,
+      content:
+        "将删除项目记录、Transcript、索引和缓存，但不会删除原始视频文件。",
+      okText: "删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await window.electronAPI.aiVideoReader.deleteProject(project.id);
+        playbackAttempts.current.delete(project.id);
+        const result = await window.electronAPI.aiVideoReader.listProjects();
+        setProjects(result);
+        if (selectedId === project.id) setSelectedId(result[0]?.id);
+        message.success("项目已删除");
+      },
+    });
   };
   const openEditor = (segmentId: string) => {
     const segment = selected?.segments.find((item) => item.id === segmentId);
@@ -372,20 +393,34 @@ export function AiVideoReaderPanel() {
             />
           ) : (
             projects.map((project) => (
-              <button
-                key={project.id}
-                onClick={() => setSelectedId(project.id)}
-                className={`mb-1 w-full rounded-lg px-3 py-2 text-left transition-colors ${project.id === selectedId ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-              >
-                <div className="truncate text-sm font-medium">
-                  {project.name}
-                </div>
-                <div className="mt-1 text-xs opacity-60">
-                  {project.segments.length
-                    ? `${project.segments.length} 个片段`
-                    : "等待转写"}
-                </div>
-              </button>
+              <div key={project.id} className="group relative mb-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(project.id)}
+                  className={`w-full rounded-lg px-3 py-2 pr-10 text-left transition-colors ${project.id === selectedId ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                >
+                  <div className="truncate text-sm font-medium">
+                    {project.name}
+                  </div>
+                  <div className="mt-1 text-xs opacity-60">
+                    {project.segments.length
+                      ? `${project.segments.length} 个片段`
+                      : "等待转写"}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`删除 ${project.name}`}
+                  title="删除项目"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    confirmDeleteProject(project);
+                  }}
+                  className={`absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md transition-opacity hover:bg-destructive/15 hover:text-destructive ${project.id === selectedId ? "text-primary-foreground/70 opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -470,7 +505,7 @@ export function AiVideoReaderPanel() {
               <Button size="small">更多</Button>
             </Dropdown>
           </header>
-          {(transcribing || analyzing) &&
+          {(transcribing || analyzing || preparingPlayback) &&
           taskProgress?.projectId === selected.id ? (
             <div className="flex items-center gap-3 border-b border-border bg-muted/20 px-4 py-2 text-xs text-muted-foreground">
               <span className="w-44 truncate">{taskProgress.detail}</span>
@@ -625,7 +660,7 @@ export function AiVideoReaderPanel() {
         onOk={() => void transcribe()}
         onCancel={() => !transcribing && setAsrOpen(false)}
         okText="提取音频并转写"
-        destroyOnClose={false}
+        destroyOnHidden={false}
       >
         <p className="mb-4 text-sm text-muted-foreground">
           需要本机可用的 FFmpeg，以及支持 verbose_json 时间戳的
@@ -665,7 +700,7 @@ export function AiVideoReaderPanel() {
         onOk={() => void analyze()}
         onCancel={() => !analyzing && setAnalysisOpen(false)}
         okText="开始分析"
-        destroyOnClose={false}
+        destroyOnHidden={false}
       >
         <Form
           form={analysisForm}
@@ -697,7 +732,7 @@ export function AiVideoReaderPanel() {
         onOk={() => void ask()}
         onCancel={() => !asking && setAskOpen(false)}
         okText="提问"
-        destroyOnClose={false}
+        destroyOnHidden={false}
       >
         <Form
           form={askForm}

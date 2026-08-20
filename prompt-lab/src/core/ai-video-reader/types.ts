@@ -1,4 +1,5 @@
-export type VideoProjectStatus = 'ready' | 'transcribing' | 'complete' | 'error' | 'cancelled';
+export type VideoProjectStatus =
+  "ready" | "transcribing" | "complete" | "error" | "cancelled";
 
 export interface TranscriptSegment {
   id: string;
@@ -16,8 +17,14 @@ export interface VideoChapter {
   endMs: number;
 }
 
-export interface VideoSearchResult extends TranscriptSegment { projectId: string; projectName: string }
-export interface VideoAnswer { answer: string; citations: TranscriptSegment[] }
+export interface VideoSearchResult extends TranscriptSegment {
+  projectId: string;
+  projectName: string;
+}
+export interface VideoAnswer {
+  answer: string;
+  citations: TranscriptSegment[];
+}
 
 export interface VideoReaderProject {
   id: string;
@@ -47,29 +54,55 @@ export interface TranscriptImportResult {
 
 export interface VideoReaderTaskProgress {
   projectId: string;
-  stage: 'extracting' | 'transcribing' | 'analyzing' | 'saving';
+  stage: "extracting" | "transcoding" | "transcribing" | "analyzing" | "saving";
   progress: number;
   detail: string;
 }
 
 export interface VideoReaderApi {
-  runtimeStatus(): Promise<{ ffmpeg: { available: boolean; path?: string; version?: string }; ffprobe: { available: boolean; path?: string } }>;
+  runtimeStatus(): Promise<{
+    ffmpeg: { available: boolean; path?: string; version?: string };
+    ffprobe: { available: boolean; path?: string };
+  }>;
   selectFfmpeg(): Promise<string | null>;
   preparePlayback(projectId: string): Promise<string>;
   listProjects(): Promise<VideoReaderProject[]>;
   importVideo(): Promise<VideoReaderProject | null>;
   importTranscript(projectId: string): Promise<VideoReaderProject | null>;
   deleteProject(projectId: string): Promise<boolean>;
-  exportTranscript(projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json'): Promise<string | null>;
-  transcribe(projectId: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }): Promise<VideoReaderProject>;
+  exportTranscript(
+    projectId: string,
+    format: "srt" | "vtt" | "txt" | "md" | "json",
+  ): Promise<string | null>;
+  transcribe(
+    projectId: string,
+    config: {
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      language?: string;
+    },
+  ): Promise<VideoReaderProject>;
   cancelTranscription(projectId: string): Promise<boolean>;
-  onTaskProgress(handler: (progress: VideoReaderTaskProgress) => void): () => void;
-  analyze(projectId: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoReaderProject>;
+  onTaskProgress(
+    handler: (progress: VideoReaderTaskProgress) => void,
+  ): () => void;
+  analyze(
+    projectId: string,
+    config: { baseUrl: string; apiKey: string; model: string },
+  ): Promise<VideoReaderProject>;
   search(query: string, projectId?: string): Promise<VideoSearchResult[]>;
-  ask(projectId: string, question: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoAnswer>;
+  ask(
+    projectId: string,
+    question: string,
+    config: { baseUrl: string; apiKey: string; model: string },
+  ): Promise<VideoAnswer>;
   renameProject(projectId: string, name: string): Promise<VideoReaderProject>;
   relinkVideo(projectId: string): Promise<VideoReaderProject | null>;
   cacheInfo(projectId: string): Promise<{ bytes: number; files: number }>;
   clearCache(projectId: string): Promise<boolean>;
-  saveTranscript(projectId: string, segments: TranscriptSegment[]): Promise<VideoReaderProject>;
+  saveTranscript(
+    projectId: string,
+    segments: TranscriptSegment[],
+  ): Promise<VideoReaderProject>;
 }
