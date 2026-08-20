@@ -169,9 +169,13 @@ export function createChapterDocuments(nodes: OutlineNode[], folderOrOptions: st
     ? chapters.flatMap(({ node, part }) => node.children.length ? node.children.map((child) => ({ node: child, part })) : [{ node, part }])
     : chapters;
   const width = Math.max(2, String(targets.length).length);
+  const parts = [...new Map(located.filter(({ node }) => PART_PATTERN.test(node.title)).map(({ node }) => [node.id, node])).values()];
+  const partWidth = Math.max(2, String(parts.length).length);
+  const partOrder = new Map(parts.map((part, index) => [part.id, String(index + 1).padStart(partWidth, '0')]));
   return targets.map(({ node, part }, index) => {
     const filename = `${String(index + 1).padStart(width, '0')}-${safeName(node.title)}.md`;
-    const directories = [folder.trim() ? safeName(folder) : '', options.organizeByPart && part ? safeName(part.title) : ''].filter(Boolean);
+    const partDirectory = options.organizeByPart && part ? `${partOrder.get(part.id) ?? '00'}-${safeName(part.title)}` : '';
+    const directories = [folder.trim() ? safeName(folder) : '', partDirectory].filter(Boolean);
     const path = [...directories, filename].join('/');
     const headings = node.children.map((child) => renderNode(child, node.level)).join('');
     return {

@@ -9,7 +9,6 @@ import {
   FolderOpen,
   GitBranch,
   Loader2,
-  RefreshCw,
   Save,
   Sparkles,
 } from "@/components/icons";
@@ -1037,9 +1036,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [checking, setChecking] = useState(false);
-  const [view, setView] = useState<"generator" | "documents" | "management">(
-    "generator",
-  );
+  const [view, setView] = useState<
+    "generator" | "documents" | "management"
+  >("generator");
   const [managedFiles, setManagedFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState("");
   const [editorMode, setEditorMode] = useState<"edit" | "preview">("edit");
@@ -4348,7 +4347,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
     target,
   ]);
 
-  const switchView = (next: "generator" | "documents" | "management") => {
+  const switchView = (
+    next: "generator" | "documents" | "management",
+  ) => {
     if (
       next !== view &&
       dirty &&
@@ -4516,6 +4517,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setSelectedBatchFiles([]);
     setBatchPromptPresetId("general");
     setBatchWritingPrompt(BATCH_PROMPT_PRESETS.general.prompt);
+    setShowBatchPromptEditor(false);
     // A saved project may intentionally be restored from its local history
     // when its manifest is unavailable. Only raw folder imports need blank
     // project metadata as their safe baseline.
@@ -4818,11 +4820,6 @@ export const OutlineScaffolderPanel: React.FC = () => {
       });
     }
   };
-
-  const removeSavedProject = (id: string) =>
-    setRecentProjects((current) =>
-      current.filter((project) => project.id !== id),
-    );
 
   const saveDocument = async () => {
     if (!target || !activeFile || !dirty) return;
@@ -7023,48 +7020,6 @@ export const OutlineScaffolderPanel: React.FC = () => {
             </div>
           </section>
           <div className="flex min-h-0 flex-col gap-5">
-            {recentProjects.length > 0 && (
-              <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold">最近项目</h2>
-                  <span className="text-xs text-muted-foreground">
-                    {recentProjects.length}
-                  </span>
-                </div>
-                <div className="max-h-36 space-y-1 overflow-auto">
-                  {recentProjects.map((project) => (
-                    <div
-                      key={project.id}
-                      className="group flex items-center gap-2 rounded-md hover:bg-muted"
-                    >
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 px-2 py-2 text-left"
-                        onClick={() => openSavedProject(project)}
-                      >
-                        <span className="block truncate text-sm font-medium">
-                          {project.name}
-                        </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {project.rootPath}
-                          {project.subfolder
-                            ? ` / ${project.subfolder}`
-                            : ""} · {project.files.length} 个文档
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2 text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-                        title="从列表移除（不会删除文件）"
-                        onClick={() => removeSavedProject(project.id)}
-                      >
-                        移除
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
             <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <h2 className="mb-3 text-sm font-semibold">输出设置</h2>
               <div className="space-y-3">
@@ -11069,12 +11024,10 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   </>
                 ) : (
                   <div className="space-y-2">
-                    <label className="block text-xs">
-                      <span className="mb-1 block text-muted-foreground">
-                        写作提示词预设
-                      </span>
+                    <div className="flex gap-1">
                       <select
-                        className="h-8 w-full rounded-md border border-input bg-background px-2"
+                        className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs"
+                        aria-label="写作提示词预设"
                         value={batchPromptPresetId}
                         onChange={(event) => {
                           const preset = event.target.value as BatchPromptPresetId;
@@ -11094,16 +11047,28 @@ export const OutlineScaffolderPanel: React.FC = () => {
                         )}
                         <option value="custom">自定义</option>
                       </select>
-                    </label>
-                    <textarea
-                      className="min-h-24 w-full resize-y rounded-md border border-input bg-background p-2 text-xs"
-                      value={batchWritingPrompt}
-                      onChange={(event) => {
-                        setBatchWritingPrompt(event.target.value);
-                        setBatchPromptPresetId("custom");
-                      }}
-                      placeholder="填写生成和重新生成章节时使用的领域、文风和禁写要求"
-                    />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 px-2 text-xs"
+                        onClick={() =>
+                          setShowBatchPromptEditor((current) => !current)
+                        }
+                      >
+                        {showBatchPromptEditor ? "收起" : "编辑"}
+                      </Button>
+                    </div>
+                    {showBatchPromptEditor && (
+                      <textarea
+                        className="min-h-20 w-full resize-y rounded-md border border-input bg-background p-2 text-xs"
+                        value={batchWritingPrompt}
+                        onChange={(event) => {
+                          setBatchWritingPrompt(event.target.value);
+                          setBatchPromptPresetId("custom");
+                        }}
+                        placeholder="领域、文风和禁写要求"
+                      />
+                    )}
                     <Button
                       size="sm"
                       className="w-full"
@@ -11120,28 +11085,28 @@ export const OutlineScaffolderPanel: React.FC = () => {
                       <Sparkles className="mr-2 h-4 w-4" />
                       生成待写作章节
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      disabled={!aiApi.apiKey?.trim()}
-                      onClick={() => void runBatchGeneration("rewrite")}
-                    >
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      批量重写全部章节
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      disabled={
-                        !aiApi.apiKey?.trim() || !selectedBatchFiles.length
-                      }
-                      onClick={() => void runBatchGeneration("selected")}
-                    >
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      重新生成所选章节（{selectedBatchFiles.length}）
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="px-2 text-xs"
+                        disabled={!aiApi.apiKey?.trim()}
+                        onClick={() => void runBatchGeneration("rewrite")}
+                      >
+                        重写全部
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="px-2 text-xs"
+                        disabled={
+                          !aiApi.apiKey?.trim() || !selectedBatchFiles.length
+                        }
+                        onClick={() => void runBatchGeneration("selected")}
+                      >
+                        重写所选（{selectedBatchFiles.length}）
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -11198,28 +11163,6 @@ export const OutlineScaffolderPanel: React.FC = () => {
                     </button>
                   );
                 })
-              ) : recentProjects.length ? (
-                <div>
-                  <div className="px-2 py-2 text-xs font-medium text-muted-foreground">
-                    历史项目
-                  </div>
-                  {recentProjects.map((project) => (
-                    <button
-                      type="button"
-                      key={project.id}
-                      className="mb-1 w-full rounded-md px-2 py-2 text-left hover:bg-muted"
-                      onClick={() => openSavedProject(project)}
-                    >
-                      <span className="block truncate text-sm font-medium">
-                        {project.name}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {project.files.length} 个文档 ·{" "}
-                        {new Date(project.updatedAt).toLocaleDateString()}
-                      </span>
-                    </button>
-                  ))}
-                </div>
               ) : (
                 <div className="p-3 text-sm text-muted-foreground">
                   生成文档或选择目录后，点击“加载已有文档”。

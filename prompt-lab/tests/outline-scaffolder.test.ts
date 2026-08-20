@@ -25,10 +25,19 @@ describe('outline scaffolder', () => {
   it('supports section, single-file and part-folder modes', () => {
     const nodes = parseOutline('# 第一篇 基础\n## 第一章 开始\n### 1.1 准备\n### 1.2 安装');
     const sections = createChapterDocuments(nodes, { folder: '书', splitMode: 'section', organizeByPart: true });
-    expect(sections.map((item) => item.path)).toEqual(['书/第一篇 基础/01-1.1 准备.md', '书/第一篇 基础/02-1.2 安装.md']);
+    expect(sections.map((item) => item.path)).toEqual(['书/01-第一篇 基础/01-1.1 准备.md', '书/01-第一篇 基础/02-1.2 安装.md']);
     const single = createChapterDocuments(nodes, { folder: '书', splitMode: 'single', projectTitle: '指南' });
     expect(single).toHaveLength(1);
     expect(single[0].path).toBe('书/指南.md');
+  });
+
+  it('prefixes part directories so lexicographic hosts keep outline order', () => {
+    const source = Array.from({ length: 12 }, (_, index) => `# 第${index + 1}部\n## 第${index + 1}章 章节`).join('\n');
+    const paths = createChapterDocuments(parseOutline(source), { organizeByPart: true }).map((item) => item.path);
+    expect(paths[0]).toMatch(/^01-/);
+    expect(paths[6]).toMatch(/^07-/);
+    expect(paths[11]).toMatch(/^12-/);
+    expect([...paths].sort()).toEqual(paths);
   });
 
   it('advances saved chapters through explicit review stages', () => {
