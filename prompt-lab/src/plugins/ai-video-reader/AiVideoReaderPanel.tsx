@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, Empty, Form, Input, Modal, Progress, Select, Spin, message } from 'antd';
 import type { VideoAnswer, VideoReaderProject, VideoReaderTaskProgress } from '@/core/ai-video-reader/types';
+import { mergeWithNext, normalizeSegments, splitSegment } from '@/core/ai-video-reader/editing';
 
 const time = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
 
@@ -15,6 +16,10 @@ export function AiVideoReaderPanel() {
   const [askOpen, setAskOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [editingId, setEditingId] = useState<string>();
+  const [editText, setEditText] = useState('');
+  const [editStart, setEditStart] = useState(0);
+  const [editEnd, setEditEnd] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -75,6 +80,21 @@ export function AiVideoReaderPanel() {
       Modal.confirm({ title: '删除项目？', content: '会删除 Transcript、索引和缓存，但不会删除原视频。', okButtonProps: { danger: true }, onOk: async () => { await window.electronAPI.aiVideoReader.deleteProject(selected.id); const result = await window.electronAPI.aiVideoReader.listProjects(); setProjects(result); setSelectedId(result[0]?.id); } });
     }
   };
+  const openEditor = (segmentId: string) => {
+    const segment = selected?.segments.find((item) => item.id === segmentId); if (!segment) return;
+    setEditingId(segment.id); setEditText(segment.text); setEditStart(segment.startMs); setEditEnd(segment.endMs);
+  };
+  const persistSegments = async (segments: NonNullable<typeof selected>['segments']) => {
+    if (!selected) return; const project = await window.electronAPI.aiVideoReader.saveTranscript(selected.id, segments); await refresh(project.id); setEditingId(undefined); message.success('Transcript 已保存并重建索引');
+  };
+  const saveEditedSegment = async () => {
+    if (!selected || !editingId) return;
+    await persistSegments(normalizeSegments(selected.segments.map((item) => item.id === editingId ? { ...item, startMs: editStart, endMs: editEnd, text: editText } : item)));
+  };
+  const splitEditedSegment = async () => {
+    if (!selected || !editingId) return; const middleTime = Math.round((editStart + editEnd) / 2); const middleText = Math.max(1, Math.round(editText.length / 2));
+    await persistSegments(splitSegment(selected.segments.map((item) => item.id === editingId ? { ...item, startMs: editStart, endMs: editEnd, text: editText } : item), editingId, middleTime, editText.slice(0, middleText), editText.slice(middleText)));
+  };
   const seek = (ms: number) => { if (videoRef.current) { videoRef.current.currentTime = ms / 1000; void videoRef.current.play(); } };
   if (loading) return <div className="flex h-full items-center justify-center"><Spin /></div>;
   return <div className="flex h-full min-h-0 bg-slate-950 text-slate-100">
@@ -88,7 +108,7 @@ export function AiVideoReaderPanel() {
       {(transcribing || analyzing) && taskProgress?.projectId === selected.id ? <div className="flex items-center gap-3 border-b border-slate-800 px-4 py-2 text-xs text-slate-400"><span className="w-44 truncate">{taskProgress.detail}</span><Progress percent={taskProgress.progress} size="small" showInfo={false} className="m-0 flex-1" /></div> : null}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,1.1fr)_minmax(320px,0.9fr)]">
         <section className="flex min-h-0 flex-col border-r border-slate-800"><div className="bg-black p-3"><video key={selected.id} ref={videoRef} src={selected.mediaUrl} controls className="aspect-video w-full bg-black" onTimeUpdate={(event) => setCurrentMs(event.currentTarget.currentTime * 1000)} /><div className="mt-2 text-xs text-slate-500">{selected.width && selected.height ? `${selected.width}×${selected.height}` : '分辨率未知'} · {selected.videoCodec ?? '视频编码未知'} · {selected.audioCodec ?? '音频编码未知'} · {selected.durationMs ? time(selected.durationMs) : '时长未知'}</div></div><div className="min-h-0 flex-1 overflow-auto p-5">{selected.chapters.length ? <><h2 className="mb-2 text-lg font-semibold">章节</h2><div className="mb-5 flex flex-wrap gap-2">{selected.chapters.map((chapter) => <Button key={chapter.id} size="small" onClick={() => seek(chapter.startMs)}>{time(chapter.startMs)} {chapter.title}</Button>)}</div></> : null}<h2 className="mb-3 text-lg font-semibold">内容摘要</h2><p className="whitespace-pre-wrap text-sm leading-7 text-slate-300">{selected.summary || '导入转写后，可继续生成章节、摘要和知识点。'}</p></div></section>
-        <section className="flex min-h-0 flex-col">{answer ? <div className="border-b border-slate-800 bg-blue-500/5 p-4"><div className="mb-2 text-sm leading-6">{answer.answer}</div><div className="flex flex-wrap gap-1">{answer.citations.map((citation) => <Button key={citation.id} size="small" type="link" onClick={() => seek(citation.startMs)}>[{time(citation.startMs)}]</Button>)}</div></div> : null}<div className="border-b border-slate-800 p-3"><Input.Search allowClear placeholder="搜索 Transcript" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="min-h-0 flex-1 overflow-auto p-3">{!selected.segments.length ? <Empty description="请导入 SRT、VTT 或带时间戳 JSON" /> : visibleSegments.map((segment) => { const active = currentMs >= segment.startMs && currentMs < segment.endMs; return <button key={segment.id} onClick={() => seek(segment.startMs)} className={`mb-1 block w-full rounded-lg p-3 text-left ${active ? 'bg-blue-600/30 ring-1 ring-blue-500' : 'hover:bg-slate-800'}`}><span className="mr-3 font-mono text-xs text-blue-400">{time(segment.startMs)}</span><span className="text-sm leading-6 text-slate-200">{segment.text}</span></button>; })}</div></section>
+        <section className="flex min-h-0 flex-col">{answer ? <div className="border-b border-slate-800 bg-blue-500/5 p-4"><div className="mb-2 text-sm leading-6">{answer.answer}</div><div className="flex flex-wrap gap-1">{answer.citations.map((citation) => <Button key={citation.id} size="small" type="link" onClick={() => seek(citation.startMs)}>[{time(citation.startMs)}]</Button>)}</div></div> : null}<div className="border-b border-slate-800 p-3"><Input.Search allowClear placeholder="搜索 Transcript；双击片段可校对" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="min-h-0 flex-1 overflow-auto p-3">{!selected.segments.length ? <Empty description="请导入 SRT、VTT 或带时间戳 JSON" /> : visibleSegments.map((segment) => { const active = currentMs >= segment.startMs && currentMs < segment.endMs; return <button key={segment.id} onClick={() => seek(segment.startMs)} onDoubleClick={() => openEditor(segment.id)} className={`mb-1 block w-full rounded-lg p-3 text-left ${active ? 'bg-blue-600/30 ring-1 ring-blue-500' : 'hover:bg-slate-800'}`}><span className="mr-3 font-mono text-xs text-blue-400">{time(segment.startMs)}</span><span className="text-sm leading-6 text-slate-200">{segment.text}</span></button>; })}</div></section>
       </div>
     </main>}
     <Modal title="视频 AI 转写" open={asrOpen} confirmLoading={transcribing} onOk={() => void transcribe()} onCancel={() => !transcribing && setAsrOpen(false)} okText="提取音频并转写" destroyOnClose={false}>
@@ -116,5 +136,10 @@ export function AiVideoReaderPanel() {
       </Form>
     </Modal>
     <Modal title="重命名项目" open={renameOpen} onOk={() => void renameProject()} onCancel={() => setRenameOpen(false)} okText="保存"><Input value={renameValue} maxLength={120} onChange={(event) => setRenameValue(event.target.value)} onPressEnter={() => void renameProject()} /></Modal>
+    <Modal title="校对 Transcript 片段" open={Boolean(editingId)} onOk={() => void saveEditedSegment()} onCancel={() => setEditingId(undefined)} okText="保存">
+      <div className="mb-3 grid grid-cols-2 gap-3"><Input type="number" addonBefore="开始 ms" value={editStart} onChange={(event) => setEditStart(Number(event.target.value))} /><Input type="number" addonBefore="结束 ms" value={editEnd} onChange={(event) => setEditEnd(Number(event.target.value))} /></div>
+      <Input.TextArea value={editText} autoSize={{ minRows: 4, maxRows: 10 }} onChange={(event) => setEditText(event.target.value)} />
+      <div className="mt-3 flex gap-2"><Button onClick={() => void splitEditedSegment()}>从中间拆分</Button><Button disabled={!selected || selected.segments.at(-1)?.id === editingId} onClick={() => selected && editingId && void persistSegments(mergeWithNext(selected.segments, editingId))}>与下一段合并</Button><Button danger onClick={() => selected && editingId && void persistSegments(normalizeSegments(selected.segments.filter((item) => item.id !== editingId)))}>删除片段</Button></div>
+    </Modal>
   </div>;
 }
