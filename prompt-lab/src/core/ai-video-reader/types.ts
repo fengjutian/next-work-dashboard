@@ -44,4 +44,5 @@ export interface VideoReaderApi {
   importTranscript(projectId: string): Promise<VideoReaderProject | null>;
   deleteProject(projectId: string): Promise<boolean>;
   exportTranscript(projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json'): Promise<string | null>;
+  transcribe(projectId: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }): Promise<VideoReaderProject>;
 }
