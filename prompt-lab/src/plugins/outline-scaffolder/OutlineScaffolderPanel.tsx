@@ -191,26 +191,55 @@ const insertBeforeSourceReferences = (existing: string, addition: string) => {
   const references = existing.slice(marker).trimStart();
   return `${body}\n\n${addition.trim()}\n\n${references.trimEnd()}\n`;
 };
-const parseReviewSuggestions = (report: string): ReviewSuggestion[] =>
-  [
-    ...report.matchAll(
-      /-\s*\*\*位置\*\*[：:]\s*([^\n]+)([\s\S]*?)(?=\n-\s*\*\*位置\*\*|\n##\s|$)/g,
-    ),
-  ].map((match, index) => {
-    const body = match[2];
-    const field = (name: string) =>
-      body
-        .match(new RegExp(`\\*\\*${name}\\*\\*[：:]\\s*([^\\n]+)`))?.[1]
-        ?.trim() ?? "";
+const parseReviewSuggestions = (report: string): ReviewSuggestion[] => {
+  const marker = /(?:^|\n)\s*(?:[-*+]\s*|\d+[.)、]\s*)?(?:\*\*)?位置(?:\*\*)?[：:]\s*([^\n]+)/g;
+  const matches = [...report.matchAll(marker)];
+  const field = (body: string, names: string[]) => {
+    for (const name of names) {
+      const value = body.match(
+        new RegExp(`(?:^|\\n)\\s*(?:[-*+]\\s*)?(?:\\*\\*)?${name}(?:\\*\\*)?[：:]\\s*([^\\n]+)`, "i"),
+      )?.[1];
+      if (value?.trim()) return value.trim();
+    }
+    return "";
+  };
+  const structured = matches.map((match, index) => {
+    const start = (match.index ?? 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? report.length;
+    const body = report.slice(start, end).split(/\n##\s/)[0];
     return {
       id: `${Date.now()}-${index}`,
-      section: field("类型") || "审校建议",
-      position: match[1].trim(),
-      issue: field("问题") || field("为什么值得扩写"),
-      suggestion: field("建议") || field("扩写方向"),
+      section: field(body, ["类型"]) || "审校建议",
+      position: match[1].replace(/[*`]/g, "").trim(),
+      issue: field(body, ["问题", "为什么值得扩写", "风险", "说明"]),
+      suggestion: field(body, ["建议", "扩写方向", "修改建议", "建议改法"]),
       decision: "pending" as const,
     };
   });
+  if (structured.length) return structured;
+
+  const fallback: ReviewSuggestion[] = [];
+  let section = "审校建议";
+  for (const rawLine of report.split(/\r?\n/)) {
+    const heading = rawLine.match(/^#{2,4}\s+(.+)/)?.[1]?.trim();
+    if (heading) {
+      section = heading;
+      continue;
+    }
+    const item = rawLine.match(/^\s*(?:[-*+]\s+|\d+[.)、]\s+)(.+)/)?.[1]?.trim();
+    if (!item || item.length < 12 || /未发现明确错误|必须修改|建议修改|可选扩写/.test(item)) continue;
+    const quote = item.match(/[“「『"]([^”」』"]{2,40})[”」』"]/)?.[1];
+    fallback.push({
+      id: `${Date.now()}-fallback-${fallback.length}`,
+      section,
+      position: quote || section,
+      issue: item.replace(/\*\*/g, ""),
+      suggestion: "按完整审校报告中的方向处理此项",
+      decision: "pending",
+    });
+  }
+  return fallback.slice(0, 40);
+};
 
 interface SavedProject {
   id: string;
@@ -1050,6 +1079,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [recentProjects, setRecentProjects] =
     useState<SavedProject[]>(loadSavedProjects);
   const [projectHistoryReady, setProjectHistoryReady] = useState(false);
+  const [projectListOpen, setProjectListOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMode, setAiMode] = useState<
     "generate" | "continue" | "polish" | "revise"
@@ -1072,6 +1102,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewResultOpen, setReviewResultOpen] = useState(false);
   const [reviewBaseUrl, setReviewBaseUrl] = useState(
     "https://api.minimaxi.com/v1",
   );
@@ -4821,6 +4852,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
     }
   };
 
+  const removeSavedProject = (id: string) =>
+    setRecentProjects((current) =>
+      current.filter((project) => project.id !== id),
+    );
+
   const saveDocument = async () => {
     if (!target || !activeFile || !dirty) return;
     if (finalReadConfirmed) {
@@ -5270,6 +5306,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       if (!result.trim())
         throw new Error("审校模型没有返回内容，请检查模型配置。");
       setReviewSuggestions(parseReviewSuggestions(result));
+      setReviewResultOpen(true);
       setChapterStatus(activeFile, "revising");
     } catch (error) {
       if (requestId === aiRequestRef.current) {
@@ -6867,6 +6904,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
           )}
           <Button
             size="sm"
+            variant="ghost"
+            onClick={() => setProjectListOpen(true)}
+          >
+            项目目录
+          </Button>
+          <Button
+            size="sm"
             variant={view === "generator" ? "default" : "ghost"}
             onClick={() => switchView("generator")}
           >
@@ -6892,6 +6936,84 @@ export const OutlineScaffolderPanel: React.FC = () => {
           </div>
         </div>
       </header>
+      {projectListOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setProjectListOpen(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="项目目录"
+            className="flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <h2 className="text-sm font-semibold">项目目录</h2>
+                <p className="text-xs text-muted-foreground">
+                  {recentProjects.length} 个项目
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setProjectListOpen(false)}
+              >
+                关闭
+              </Button>
+            </div>
+            <div className="min-h-0 overflow-auto p-2">
+              {recentProjects.length ? (
+                recentProjects.map((project) => (
+                  <div
+                    key={project.id}
+                    className={`mb-1 flex items-center gap-2 rounded-lg px-3 py-2 ${activeProject?.id === project.id ? "bg-primary/10" : "hover:bg-muted"}`}
+                  >
+                    <BookOpen className="h-4 w-4 shrink-0 text-primary" />
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => {
+                        setProjectListOpen(false);
+                        void openSavedProject(project);
+                      }}
+                    >
+                      <span className="block truncate text-sm font-medium">
+                        {project.name}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {project.rootPath}
+                        {project.subfolder ? ` / ${project.subfolder}` : ""} · {project.files.length} 个文档
+                      </span>
+                    </button>
+                    {activeProject?.id === project.id && (
+                      <span className="text-[10px] text-emerald-700">当前</span>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="px-2 text-xs"
+                      onClick={() => {
+                        if (window.confirm(`从目录移除“${project.name}”？不会删除文件。`))
+                          removeSavedProject(project.id);
+                      }}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  暂无项目记录
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       {view === "generator" ? (
         <div className="grid min-h-0 flex-1 auto-rows-max content-start grid-cols-1 gap-4 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
           <nav
@@ -11524,7 +11646,6 @@ export const OutlineScaffolderPanel: React.FC = () => {
                     onChange={(event) =>
                       setAiMode(event.target.value as typeof aiMode)
                     }
-                    disabled={aiLoading}
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
                   >
                     <option value="generate">生成本章正文</option>
@@ -11538,7 +11659,6 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   <textarea
                     value={aiInstruction}
                     onChange={(event) => setAiInstruction(event.target.value)}
-                    disabled={aiLoading}
                     placeholder={
                       aiMode === "revise"
                         ? "例如：删除第三节重复内容；核正某个日期；扩写制度背景 300 字；其余段落保持不变"
@@ -11552,7 +11672,6 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   <textarea
                     value={aiSources}
                     onChange={(event) => setAiSources(event.target.value)}
-                    disabled={aiLoading}
                     placeholder="粘贴史书原文、考古材料、论文摘要、可靠网页摘录或自己整理的史实。建议同时注明书名、作者、篇章或链接。"
                     className="mt-1 h-32 w-full resize-none rounded-md border border-input bg-background p-2 text-sm text-foreground"
                   />
@@ -11894,25 +12013,80 @@ export const OutlineScaffolderPanel: React.FC = () => {
                     分析错误与扩写空间
                   </Button>
                 )}
+                {aiResult && !aiLoading && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setReviewResultOpen(true)}
+                  >
+                    查看分析结果
+                  </Button>
+                )}
                 {aiError && (
                   <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
                     {aiError}
                   </div>
                 )}
               </div>
+              {reviewResultOpen && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5"
+                  role="presentation"
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget)
+                      setReviewResultOpen(false);
+                  }}
+                >
+                  <section
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="审校分析结果"
+                    className="flex h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+                  >
+                    <div className="flex items-center justify-between border-b border-border px-5 py-3">
+                      <div>
+                        <h2 className="font-semibold">审校分析结果</h2>
+                        <p className="text-xs text-muted-foreground">
+                          {activeFile.split("/").pop()} · {reviewSuggestions.length} 条可处理意见
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setReviewResultOpen(false)}
+                      >
+                        关闭
+                      </Button>
+                    </div>
               <div className="min-h-0 flex-1 overflow-auto p-4">
                 {reviewSuggestions.length > 0 && (
                   <div className="mb-4 space-y-2">
-                    <div className="flex items-center justify-between text-xs font-semibold">
+                    <div className="flex items-center justify-between gap-2 text-xs font-semibold">
                       <span>逐条处理审校意见</span>
-                      <span className="text-muted-foreground">
-                        已采纳{" "}
-                        {
-                          reviewSuggestions.filter(
-                            (item) => item.decision === "accepted",
-                          ).length
-                        }
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">
+                          已采纳{" "}
+                          {
+                            reviewSuggestions.filter(
+                              (item) => item.decision === "accepted",
+                            ).length
+                          }
+                        </span>
+                        <button
+                          type="button"
+                          className="text-primary hover:underline"
+                          onClick={() =>
+                            setReviewSuggestions((current) =>
+                              current.map((item) => ({
+                                ...item,
+                                decision: "accepted",
+                              })),
+                            )
+                          }
+                        >
+                          全部采纳
+                        </button>
+                      </div>
                     </div>
                     {reviewSuggestions.map((item) => (
                       <div
@@ -12029,11 +12203,24 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   </div>
                 )}
                 {aiResult ? (
-                  <article className="prose prose-sm max-w-none dark:prose-invert">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {aiResult}
-                    </ReactMarkdown>
-                  </article>
+                  <details
+                    className="rounded-md border border-border bg-muted/20"
+                    open={!reviewSuggestions.length}
+                  >
+                    <summary className="sticky top-0 cursor-pointer bg-card px-3 py-2 text-xs font-semibold">
+                      完整审校报告
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        {reviewSuggestions.length
+                          ? "点击展开"
+                          : "未识别到结构化意见，请查看原报告"}
+                      </span>
+                    </summary>
+                    <article className="prose prose-sm max-h-[48vh] max-w-none overflow-auto border-t border-border p-3 dark:prose-invert">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {aiResult}
+                      </ReactMarkdown>
+                    </article>
+                  </details>
                 ) : (
                   <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">
                     AI 将列出明确错误、待核实内容、
@@ -12095,6 +12282,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   推荐逐段应用 Diff；全文修改范围更大，执行前会再次确认。
                 </p>
               </div>
+                  </section>
+                </div>
+              )}
             </aside>
           )}
           {imageOpen && (
