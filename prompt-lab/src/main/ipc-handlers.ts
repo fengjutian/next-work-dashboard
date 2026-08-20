@@ -531,19 +531,50 @@ export function setupIPC(webviewPreloadPath: string) {
             }),
           });
           const text = await response.text();
-          let data: { data?: { image_base64?: string[]; image_urls?: string[] }; base_resp?: { status_code?: number; status_msg?: string } } | null;
+          let data: {
+            id?: string;
+            data?: {
+              image_base64?: string[] | string;
+              image_urls?: string[] | string;
+              images?: Array<{ image_base64?: string; image_url?: string; url?: string }>;
+            };
+            metadata?: { failed_count?: number | string; success_count?: number | string };
+            base_resp?: { status_code?: number | string; status_msg?: string };
+            error?: { code?: number | string; message?: string } | string;
+          } | null;
           try { data = JSON.parse(text) as typeof data; } catch { data = null; }
-          if (!response.ok || data?.base_resp?.status_code) return { success: false, error: data?.base_resp?.status_msg || text.slice(0, 1000) || `MiniMax 返回 ${response.status}` };
-          const encoded = data?.data?.image_base64?.[0];
+          const statusCode = Number(data?.base_resp?.status_code ?? 0);
+          const serviceError = typeof data?.error === 'string' ? data.error : data?.error?.message;
+          if (!response.ok || (Number.isFinite(statusCode) && statusCode !== 0)) {
+            const message = data?.base_resp?.status_msg || serviceError || text.slice(0, 1000) || `MiniMax 返回 HTTP ${response.status}`;
+            return { success: false, error: `MiniMax 图片生成失败${statusCode ? `（错误码 ${statusCode}）` : ''}：${message}` };
+          }
+          const base64Result = data?.data?.image_base64;
+          const encoded = (Array.isArray(base64Result) ? base64Result[0] : base64Result)
+            || data?.data?.images?.[0]?.image_base64;
           if (encoded) return { success: true, imageDataUrl: `data:image/jpeg;base64,${encoded}` };
-          const imageUrl = data?.data?.image_urls?.[0];
+          const urlResult = data?.data?.image_urls;
+          const imageUrl = (Array.isArray(urlResult) ? urlResult[0] : urlResult)
+            || data?.data?.images?.[0]?.image_url
+            || data?.data?.images?.[0]?.url;
           if (imageUrl) {
             const imageResponse = await fetch(imageUrl, { signal: AbortSignal.timeout(120_000) });
             if (!imageResponse.ok) return { success: false, error: '图片已生成，但下载 MiniMax 临时结果失败' };
             const mime = imageResponse.headers.get('content-type') || 'image/jpeg';
             return { success: true, imageDataUrl: `data:${mime};base64,${Buffer.from(await imageResponse.arrayBuffer()).toString('base64')}` };
           }
-          return { success: false, error: 'MiniMax 没有返回图片，请检查账户额度与模型权限' };
+          const failedCount = Number(data?.metadata?.failed_count ?? 0);
+          const successCount = Number(data?.metadata?.success_count ?? 0);
+          const details = [
+            data?.base_resp?.status_msg && data.base_resp.status_msg !== 'success' ? data.base_resp.status_msg : '',
+            failedCount > 0 ? `失败 ${failedCount} 张` : '',
+            Number.isFinite(successCount) ? `成功 ${successCount} 张` : '',
+            data?.id ? `任务 ID：${data.id}` : '',
+          ].filter(Boolean).join('；');
+          return {
+            success: false,
+            error: `MiniMax 请求已完成，但没有返回可用图片${details ? `（${details}）` : ''}。可能被内容安全策略拦截；请调整提示词后重试，若持续失败再检查套餐额度与 image-01 权限。`,
+          };
         } finally { clearTimeout(timeout); }
       }
       if (!/^https:\/\//i.test(baseUrl) || !apiKey || !model || !prompt) return { success: false, error: '图片服务配置或提示词不完整' };

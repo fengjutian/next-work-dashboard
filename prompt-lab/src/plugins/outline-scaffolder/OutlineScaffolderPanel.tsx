@@ -1184,6 +1184,58 @@ export const OutlineScaffolderPanel: React.FC = () => {
   useEffect(() => {
     activeFileRef.current = activeFile;
   }, [activeFile]);
+  useEffect(() => {
+    if (editorMode !== "preview" || !target || !activeFile) return;
+    const sources = [
+      ...documentContent.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g),
+    ]
+      .map((match) => match[1])
+      .filter((source) => !/^(?:data:|https?:|blob:)/i.test(source));
+    if (!sources.length) {
+      setPreviewImageUrls({});
+      return;
+    }
+    let cancelled = false;
+    const base = activeFile.split("/").slice(0, -1);
+    const resolveRelative = (source: string) => {
+      const parts = source.replace(/\\/g, "/").split("/");
+      const resolved = source.startsWith("/") ? [] : [...base];
+      for (const part of parts) {
+        if (!part || part === ".") continue;
+        if (part === "..") resolved.pop();
+        else resolved.push(decodeURIComponent(part));
+      }
+      return resolved.join("/");
+    };
+    void Promise.all(
+      [...new Set(sources)].map(async (source) => {
+        const relativePath = resolveRelative(source);
+        const result = await window.electronAPI.workspace.readBinaryFile(
+          target.path,
+          relativePath,
+        );
+        if (!result.success || !result.data) return null;
+        const extension = relativePath.split(".").pop()?.toLowerCase();
+        const mime =
+          extension === "png"
+            ? "image/png"
+            : extension === "webp"
+              ? "image/webp"
+              : extension === "gif"
+                ? "image/gif"
+                : "image/jpeg";
+        return [source, `data:${mime};base64,${result.data.content}`] as const;
+      }),
+    ).then((entries) => {
+      if (!cancelled)
+        setPreviewImageUrls(
+          Object.fromEntries(entries.filter((entry) => entry !== null)),
+        );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFile, documentContent, editorMode, target]);
   const generatorStage = nodes.length
     ? target
       ? 3
@@ -4424,6 +4476,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setActiveFile(path);
       setEditorialChapterPath(path);
       setDocumentContent(result.data.content);
+      setDocumentUndo(null);
       setSavedContent(result.data.content);
       setModifiedAt(result.data.modifiedAt);
     } catch (error) {
@@ -4927,6 +4980,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       );
       if (!result.success || !result.data) throw new Error(result.error);
       setSavedContent(documentContent);
+      setDocumentUndo(null);
       setModifiedAt(result.data.modifiedAt);
       setFactLocks((current) => ({ ...current, [activeFile]: afterLock }));
       setChangeLog((current) =>
@@ -5219,6 +5273,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           aiMode === "continue"
             ? insertBeforeSourceReferences(documentContent, result)
             : `${result.trimEnd()}\n`;
+        setDocumentUndo({ content: documentContent, label: "AI 新增内容" });
         setDocumentContent(next);
         setEditorMode("edit");
         setAiOpen(false);
@@ -5917,6 +5972,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           .replaceAll("[", "")
           .replaceAll("]", "")
           .slice(0, 80) || "章节插图";
+      setDocumentUndo({ content: documentContent, label: "插入图片" });
       setDocumentContent(
         (current) => `${current.trimEnd()}\n\n![${alt}](${relativePath})\n`,
       );
@@ -11669,7 +11725,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
                 />
               ) : (
                 <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      img: ({ src, alt, ...props }) => (
+                        <img
+                          {...props}
+                          src={previewImageUrls[src || ""] || src}
+                          alt={alt || "章节插图"}
+                        />
+                      ),
+                    }}
+                  >
                     {documentContent}
                   </ReactMarkdown>
                 </article>
@@ -11677,7 +11744,25 @@ export const OutlineScaffolderPanel: React.FC = () => {
             </div>
             {activeFile && (
               <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground">
-                <span>{dirty ? "有未保存的修改" : "所有修改已保存"}</span>
+                <div className="flex items-center gap-3">
+                  <span>{dirty ? "有未保存的修改" : "所有修改已保存"}</span>
+                  {documentUndo && dirty && (
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      onClick={() => {
+                        setDocumentContent(documentUndo.content);
+                        notice.info({
+                          message: `已撤销：${documentUndo.label}`,
+                          placement: "bottomRight",
+                        });
+                        setDocumentUndo(null);
+                      }}
+                    >
+                      撤销上次新增
+                    </button>
+                  )}
+                </div>
                 <span title="字数已排除 YAML 头信息、Markdown 标记、链接地址和注释">
                   文章 {articleWordCount.toLocaleString()} 字 · 原始{" "}
                   {documentContent.length.toLocaleString()} 字符
