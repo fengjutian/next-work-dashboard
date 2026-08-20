@@ -23,6 +23,22 @@ function hydrate(project: VideoReaderProject): VideoReaderProject {
   return { ...project, mediaUrl: pathToFileURL(project.sourcePath).href };
 }
 
+function projectCacheDirectory(projectId: string): string {
+  if (!/^video-[a-z0-9]+$/i.test(projectId)) throw new Error('无效项目 ID');
+  return path.join(app.getPath('userData'), 'ai-video-reader', 'cache', projectId);
+}
+
+function directoryStats(directory: string): { bytes: number; files: number } {
+  if (!fs.existsSync(directory)) return { bytes: 0, files: 0 };
+  let bytes = 0; let files = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) { const nested = directoryStats(target); bytes += nested.bytes; files += nested.files; }
+    else if (entry.isFile()) { bytes += fs.statSync(target).size; files += 1; }
+  }
+  return { bytes, files };
+}
+
 function findMediaBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
   const executable = process.platform === 'win32' ? `${name}.exe` : name;
   const platformDirectory = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
@@ -152,7 +168,7 @@ export function setupAiVideoReaderIPC(): void {
     project.segments = result.segments; project.language = result.language; project.status = 'complete'; project.updatedAt = Date.now();
     save(projects); indexVideoProject(project); return hydrate(project);
   });
-  ipcMain.handle('ai-video-reader:delete-project', (_event, projectId: string) => { const projects = load(); const next = projects.filter((item) => item.id !== projectId); save(next); removeVideoProject(projectId); return next.length !== projects.length; });
+  ipcMain.handle('ai-video-reader:delete-project', (_event, projectId: string) => { const projects = load(); const next = projects.filter((item) => item.id !== projectId); save(next); removeVideoProject(projectId); const cache = projectCacheDirectory(projectId); if (fs.existsSync(cache)) fs.rmSync(cache, { recursive: true, force: true }); return next.length !== projects.length; });
   ipcMain.handle('ai-video-reader:export-transcript', async (_event, projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json') => {
     const project = load().find((item) => item.id === projectId); if (!project) throw new Error('视频项目不存在');
     const picked = await dialog.showSaveDialog({ defaultPath: `${project.name}.${format}` }); if (picked.canceled || !picked.filePath) return null;
@@ -248,5 +264,24 @@ export function setupAiVideoReaderIPC(): void {
     const content = await chatCompletion(config, [{ role: 'system', content: '你只能依据提供的视频片段回答。输出 JSON：{"answer":"回答","citationIds":["segment-id"]}。citationIds 只能使用上下文方括号中的 ID。如果上下文不足，明确说明无法从当前视频确定。' }, { role: 'user', content: `问题：${question}\n\n上下文：\n${source}` }]);
     const parsed = parseJsonObject(content); const ids = Array.isArray(parsed.citationIds) ? parsed.citationIds.map(String) : [];
     return { answer: typeof parsed.answer === 'string' ? parsed.answer : '无法从当前视频确定。', citations: context.filter((segment) => ids.includes(segment.id)) };
+  });
+  ipcMain.handle('ai-video-reader:rename-project', (_event, projectId: string, name: string) => {
+    const normalized = name.trim(); if (!normalized) throw new Error('项目名称不能为空');
+    const projects = load(); const project = projects.find((item) => item.id === projectId); if (!project) throw new Error('视频项目不存在');
+    project.name = normalized.slice(0, 120); project.updatedAt = Date.now(); save(projects); if (project.segments.length) indexVideoProject(project); return hydrate(project);
+  });
+  ipcMain.handle('ai-video-reader:relink-video', async (_event, projectId: string) => {
+    const picked = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: '视频', extensions: ['mp4', 'mkv', 'mov', 'webm', 'm4v', 'avi'] }] });
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    const projects = load(); const project = projects.find((item) => item.id === projectId); if (!project) throw new Error('视频项目不存在');
+    const sourcePath = picked.filePaths[0]; const stat = fs.statSync(sourcePath); let mediaInfo: Partial<VideoReaderProject> = {};
+    try { mediaInfo = await probeMedia(sourcePath); } catch { /* relinking still succeeds */ }
+    Object.assign(project, mediaInfo, { sourcePath, sourceSize: stat.size, sourceMtime: stat.mtimeMs, updatedAt: Date.now() }); save(projects); return hydrate(project);
+  });
+  ipcMain.handle('ai-video-reader:cache-info', (_event, projectId: string) => directoryStats(projectCacheDirectory(projectId)));
+  ipcMain.handle('ai-video-reader:clear-cache', (_event, projectId: string) => {
+    if (activeTranscriptions.has(projectId)) throw new Error('转写进行中，不能清理缓存');
+    const directory = projectCacheDirectory(projectId); if (!fs.existsSync(directory)) return false;
+    fs.rmSync(directory, { recursive: true, force: true }); return true;
   });
 }

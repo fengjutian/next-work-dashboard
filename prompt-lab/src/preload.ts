@@ -604,6 +604,10 @@ const electronAPI: ElectronAPI = {
     analyze: (projectId: string, config: { baseUrl: string; apiKey: string; model: string }) => ipcRenderer.invoke('ai-video-reader:analyze', projectId, config),
     search: (query: string, projectId?: string) => ipcRenderer.invoke('ai-video-reader:search', query, projectId),
     ask: (projectId: string, question: string, config: { baseUrl: string; apiKey: string; model: string }) => ipcRenderer.invoke('ai-video-reader:ask', projectId, question, config),
+    renameProject: (projectId: string, name: string) => ipcRenderer.invoke('ai-video-reader:rename-project', projectId, name),
+    relinkVideo: (projectId: string) => ipcRenderer.invoke('ai-video-reader:relink-video', projectId),
+    cacheInfo: (projectId: string) => ipcRenderer.invoke('ai-video-reader:cache-info', projectId),
+    clearCache: (projectId: string) => ipcRenderer.invoke('ai-video-reader:clear-cache', projectId),
   },
 };
 

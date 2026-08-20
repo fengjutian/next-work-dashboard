@@ -65,4 +65,8 @@ export interface VideoReaderApi {
   analyze(projectId: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoReaderProject>;
   search(query: string, projectId?: string): Promise<VideoSearchResult[]>;
   ask(projectId: string, question: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoAnswer>;
+  renameProject(projectId: string, name: string): Promise<VideoReaderProject>;
+  relinkVideo(projectId: string): Promise<VideoReaderProject | null>;
+  cacheInfo(projectId: string): Promise<{ bytes: number; files: number }>;
+  clearCache(projectId: string): Promise<boolean>;
 }
