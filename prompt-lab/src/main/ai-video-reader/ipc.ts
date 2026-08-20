@@ -473,36 +473,68 @@ async function transcribeAudio(
   signal: AbortSignal,
 ) {
   const endpoint = `${config.baseUrl.replace(/\/$/, "")}/audio/transcriptions`;
-  const form = new FormData();
-  form.append(
-    "file",
-    new Blob([fs.readFileSync(audioPath)], { type: "audio/wav" }),
-    "audio.wav",
-  );
-  form.append("model", config.model);
-  if (config.provider !== "siliconflow") {
-    form.append("response_format", "verbose_json");
-    form.append("timestamp_granularities[]", "segment");
-    if (config.language?.trim())
-      form.append("language", config.language.trim());
-  }
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${config.apiKey}` },
-    body: form,
-    signal,
-  });
-  const body = await response.text();
-  if (!response.ok)
-    throw new Error(
-      `ASR 请求失败（${response.status}）：${body.slice(0, 600)}`,
+  const audio = fs.readFileSync(audioPath);
+  const request = async (model: string) => {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([audio], { type: "audio/wav" }),
+      "audio.wav",
     );
-  const parsed = JSON.parse(body) as {
+    form.append("model", model);
+    if (config.provider !== "siliconflow") {
+      form.append("response_format", "verbose_json");
+      form.append("timestamp_granularities[]", "segment");
+      if (config.language?.trim())
+        form.append("language", config.language.trim());
+    }
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      body: form,
+      signal,
+    });
+    const body = await response.text();
+    if (!response.ok) {
+      const traceId =
+        response.headers.get("x-siliconcloud-trace-id") ||
+        response.headers.get("x-request-id");
+      const detail = body.trim().slice(0, 600) || "服务端未返回错误详情";
+      throw new Error(
+        `ASR 请求失败（HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}，模型 ${model}）${traceId ? `，Trace ID: ${traceId}` : ""}：${detail}`,
+      );
+    }
+    try {
+      return JSON.parse(body) as {
+        text?: string;
+        language?: string;
+        duration?: number;
+        segments?: Array<{ start: number; end: number; text: string }>;
+      };
+    } catch {
+      throw new Error(
+        `ASR 返回格式无效（模型 ${model}）：${body.trim().slice(0, 300) || "响应为空"}`,
+      );
+    }
+  };
+
+  let parsed: {
     text?: string;
     language?: string;
     duration?: number;
     segments?: Array<{ start: number; end: number; text: string }>;
   };
+  try {
+    parsed = await request(config.model);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const canFallback =
+      config.provider === "siliconflow" &&
+      config.model === "TeleAI/TeleSpeechASR" &&
+      !/HTTP (401|403|429)\b/.test(message);
+    if (!canFallback) throw error;
+    parsed = await request("FunAudioLLM/SenseVoiceSmall");
+  }
   if (parsed.segments?.length) return parsed;
   if (config.provider === "siliconflow" && parsed.text?.trim()) {
     const duration = wavDurationSeconds(audioPath);
