@@ -444,11 +444,10 @@ function approximateSegments(
 ): Array<{ start: number; end: number; text: string }> {
   const normalized = normalizeSiliconFlowText(text);
   if (!normalized) return [];
-  const sentences =
-    normalized
-      .match(/[^。！？!?]+[。！？!?]?/g)
-      ?.map((item) => item.trim())
-      .filter(Boolean) || [normalized];
+  const sentences = normalized
+    .match(/[^。！？!?]+[。！？!?]?/g)
+    ?.map((item) => item.trim())
+    .filter(Boolean) || [normalized];
   const parts: string[] = [];
   for (const sentence of sentences) {
     if (sentence.length <= 180) parts.push(sentence);

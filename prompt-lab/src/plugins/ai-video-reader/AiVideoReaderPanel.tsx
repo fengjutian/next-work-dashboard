@@ -727,8 +727,14 @@ export function AiVideoReaderPanel() {
             {asrProvider === "siliconflow" ? (
               <Select
                 options={[
-                  { value: "TeleAI/TeleSpeechASR", label: "TeleSpeechASR（中英会议推荐）" },
-                  { value: "FunAudioLLM/SenseVoiceSmall", label: "SenseVoiceSmall（快速）" },
+                  {
+                    value: "TeleAI/TeleSpeechASR",
+                    label: "TeleSpeechASR（中英会议推荐）",
+                  },
+                  {
+                    value: "FunAudioLLM/SenseVoiceSmall",
+                    label: "SenseVoiceSmall（快速）",
+                  },
                 ]}
               />
             ) : (
