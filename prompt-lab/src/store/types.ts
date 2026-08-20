@@ -139,13 +139,15 @@ export const DEFAULT_SITES: SiteConfig[] = [
   },
 ];
 
+export type AiApiProvider = 'deepseek' | 'qwen' | 'minimax' | 'custom';
+
 export interface AiApiConfig {
-  provider: 'deepseek' | 'qwen' | 'custom';
+  provider: AiApiProvider;
   qwenPlan?: 'payg' | 'token-plan';
   apiKey: string;
   model: string;
   baseUrl: string;
-  providerApiKeys?: Partial<Record<'deepseek' | 'qwen' | 'custom', string>>;
+  providerApiKeys?: Partial<Record<AiApiProvider, string>>;
 }
 
 export interface LlmCacheConfig {

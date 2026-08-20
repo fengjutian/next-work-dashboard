@@ -78,7 +78,7 @@ export function createOpenAIProvider(config: OpenAIConfig): LLMProvider {
   const normalizedBase = baseUrl.replace(/\/$/, '');
   let providerHost = '';
   try { providerHost = new URL(normalizedBase).hostname; } catch { /* fetch will report the invalid URL */ }
-  const chatProxy = config.chatProxy ?? (typeof window !== 'undefined' && /(?:dashscope\.aliyuncs\.com|token-plan\.cn-beijing\.maas\.aliyuncs\.com)$/i.test(providerHost)
+  const chatProxy = config.chatProxy ?? (typeof window !== 'undefined' && /(?:dashscope\.aliyuncs\.com|token-plan\.cn-beijing\.maas\.aliyuncs\.com|api\.minimaxi\.com)$/i.test(providerHost)
     ? window.electronAPI?.llmChat
     : undefined);
 

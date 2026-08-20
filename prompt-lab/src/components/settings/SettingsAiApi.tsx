@@ -11,6 +11,7 @@ import { clearLlmMemoryCaches, getLlmCacheMetrics, getSemanticShadowMetrics, res
 const PROVIDERS = {
   deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', models: [{ value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }] },
   qwen: { label: '千问（DashScope）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', models: [{ value: 'qwen3.8-max-preview', label: 'Qwen 3.8 Max Preview' }, { value: 'qwen3.7-plus', label: 'Qwen 3.7 Plus' }, { value: 'qwen3.7-flash', label: 'Qwen 3.7 Flash' }, { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（千问平台）' }, { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash（千问平台）' }] },
+  minimax: { label: 'MiniMax', baseUrl: 'https://api.minimaxi.com/v1', model: 'MiniMax-M3', models: [{ value: 'MiniMax-M3', label: 'MiniMax M3' }, { value: 'MiniMax-M2.7', label: 'MiniMax M2.7' }, { value: 'MiniMax-M2.7-highspeed', label: 'MiniMax M2.7 Highspeed' }, { value: 'MiniMax-M2.5', label: 'MiniMax M2.5' }, { value: 'MiniMax-M2.5-highspeed', label: 'MiniMax M2.5 Highspeed' }, { value: 'MiniMax-M2.1', label: 'MiniMax M2.1' }, { value: 'MiniMax-M2.1-highspeed', label: 'MiniMax M2.1 Highspeed' }, { value: 'MiniMax-M2', label: 'MiniMax M2' }] },
   custom: { label: '自定义 OpenAI 兼容', baseUrl: '', model: '', models: [] },
 } as const;
 const QWEN_URLS = {
@@ -64,8 +65,15 @@ export const SettingsAiApi: React.FC = () => {
   const changeQwenPlan = (qwenPlan: 'payg' | 'token-plan') => setAiApi({ qwenPlan, baseUrl: QWEN_URLS[qwenPlan] });
   const changeApiKey = (value: string) => {
     const apiKey = value.trim();
-    const detectedPlan = aiApi.provider === 'qwen' && apiKey.startsWith('sk-sp-') ? 'token-plan' : aiApi.qwenPlan;
-    setAiApi({ apiKey, qwenPlan: detectedPlan, baseUrl: detectedPlan ? QWEN_URLS[detectedPlan] : aiApi.baseUrl, providerApiKeys: { ...(aiApi.providerApiKeys ?? {}), [aiApi.provider]: apiKey } });
+    const detectedPlan = aiApi.provider === 'qwen'
+      ? (apiKey.startsWith('sk-sp-') ? 'token-plan' : (aiApi.qwenPlan ?? 'payg'))
+      : aiApi.qwenPlan;
+    setAiApi({
+      apiKey,
+      qwenPlan: detectedPlan,
+      baseUrl: aiApi.provider === 'qwen' ? QWEN_URLS[detectedPlan ?? 'payg'] : aiApi.baseUrl,
+      providerApiKeys: { ...(aiApi.providerApiKeys ?? {}), [aiApi.provider]: apiKey },
+    });
   };
 
   const handleTest = async () => {
@@ -78,7 +86,7 @@ export const SettingsAiApi: React.FC = () => {
     setTestMessage('');
     try {
       const base = aiApi.baseUrl.replace(/\/+$/, '');
-      const proxyResult = aiApi.provider === 'qwen' ? await window.electronAPI.llmChat({ baseUrl: base, apiKey: aiApi.apiKey, body: { model: aiApi.model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1, stream: false } }) : null;
+      const proxyResult = aiApi.provider === 'qwen' || aiApi.provider === 'minimax' ? await window.electronAPI.llmChat({ baseUrl: base, apiKey: aiApi.apiKey, body: { model: aiApi.model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1, stream: false } }) : null;
       const res = proxyResult ? null : await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${aiApi.apiKey}` } });
       if (proxyResult?.ok || res?.ok) {
         setTestStatus('ok');

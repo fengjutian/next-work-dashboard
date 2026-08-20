@@ -336,11 +336,13 @@ export const useStore = create<AppState>((set, get) => ({
       const raw = dbGetSetting('aiApi');
       if (raw) {
         const saved = JSON.parse(raw);
-        const provider = saved.provider === 'qwen' || saved.provider === 'custom' ? saved.provider : 'deepseek';
+        const provider = saved.provider === 'qwen' || saved.provider === 'minimax' || saved.provider === 'custom' ? saved.provider : 'deepseek';
         const qwenPlan = provider === 'qwen' && String(saved.apiKey ?? '').trim().startsWith('sk-sp-') ? 'token-plan' : (saved.qwenPlan ?? 'payg');
         const baseUrl = provider === 'qwen' && qwenPlan === 'token-plan'
           ? 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
-          : saved.baseUrl;
+          : provider === 'minimax'
+            ? 'https://api.minimaxi.com/v1'
+            : saved.baseUrl;
         set({ aiApi: { ...get().aiApi, ...saved, provider, qwenPlan, baseUrl } });
       }
     } catch (err) {
