@@ -667,7 +667,7 @@ export function AiVideoReaderPanel() {
       >
         <p className="mb-4 text-sm text-muted-foreground">
           {asrProvider === "siliconflow"
-            ? "硅基流动返回全文；应用会按 10 分钟音频分片生成粗粒度时间轴。"
+            ? "硅基流动返回全文；应用会按 60 秒短分片识别、清理情绪标签并生成近似时间轴。中英混合会议建议优先尝试 TeleSpeechASR。"
             : "OpenAI-compatible 模式要求服务支持 verbose_json 分段时间戳。"}
         </p>
         <Form
@@ -701,7 +701,7 @@ export function AiVideoReaderPanel() {
                   provider === "siliconflow"
                     ? {
                         baseUrl: "https://api.siliconflow.cn/v1",
-                        model: "FunAudioLLM/SenseVoiceSmall",
+                        model: "TeleAI/TeleSpeechASR",
                         language: undefined,
                       }
                     : {
@@ -724,7 +724,16 @@ export function AiVideoReaderPanel() {
             <Input.Password autoComplete="off" />
           </Form.Item>
           <Form.Item name="model" label="模型" rules={[{ required: true }]}>
-            <Input placeholder="whisper-1" />
+            {asrProvider === "siliconflow" ? (
+              <Select
+                options={[
+                  { value: "TeleAI/TeleSpeechASR", label: "TeleSpeechASR（中英会议推荐）" },
+                  { value: "FunAudioLLM/SenseVoiceSmall", label: "SenseVoiceSmall（快速）" },
+                ]}
+              />
+            ) : (
+              <Input placeholder="whisper-1" />
+            )}
           </Form.Item>
           <Form.Item
             name="language"

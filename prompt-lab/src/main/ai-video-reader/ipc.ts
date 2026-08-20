@@ -43,6 +43,7 @@ interface TranscriptionCheckpoint {
   sourceMtime: number;
   model: string;
   provider: string;
+  segmentSeconds: number;
   chunks: Record<string, ChunkResult>;
 }
 
@@ -371,6 +372,7 @@ function extractAudioChunks(
   projectId: string,
   sourcePath: string,
   outputPattern: string,
+  segmentSeconds: number,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const binary = findMediaBinary("ffmpeg");
@@ -399,7 +401,7 @@ function extractAudioChunks(
         "-f",
         "segment",
         "-segment_time",
-        "600",
+        String(segmentSeconds),
         "-reset_timestamps",
         "1",
         outputPattern,
@@ -424,6 +426,46 @@ function extractAudioChunks(
 
 function wavDurationSeconds(audioPath: string): number {
   return Math.max(0.01, (fs.statSync(audioPath).size - 44) / 32_000);
+}
+
+function normalizeSiliconFlowText(input: string): string {
+  return input
+    .replace(/<\|[^|>]+\|>/g, " ")
+    .replace(/\p{Extended_Pictographic}/gu, " ")
+    .replace(/([。！？!?.,，])\1+/g, "$1")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s*\n\s*/g, " ")
+    .trim();
+}
+
+function approximateSegments(
+  text: string,
+  duration: number,
+): Array<{ start: number; end: number; text: string }> {
+  const normalized = normalizeSiliconFlowText(text);
+  if (!normalized) return [];
+  const sentences =
+    normalized
+      .match(/[^。！？!?]+[。！？!?]?/g)
+      ?.map((item) => item.trim())
+      .filter(Boolean) || [normalized];
+  const parts: string[] = [];
+  for (const sentence of sentences) {
+    if (sentence.length <= 180) parts.push(sentence);
+    else
+      for (let offset = 0; offset < sentence.length; offset += 180)
+        parts.push(sentence.slice(offset, offset + 180));
+  }
+  const totalCharacters = parts.reduce((sum, part) => sum + part.length, 0);
+  let cursor = 0;
+  return parts.map((part, index) => {
+    const start = cursor;
+    cursor =
+      index === parts.length - 1
+        ? duration
+        : cursor + (duration * part.length) / totalCharacters;
+    return { start, end: cursor, text: part };
+  });
 }
 
 async function transcribeAudio(
@@ -468,7 +510,7 @@ async function transcribeAudio(
     return {
       ...parsed,
       duration,
-      segments: [{ start: 0, end: duration, text: parsed.text.trim() }],
+      segments: approximateSegments(parsed.text, duration),
     };
   }
   throw new Error(
@@ -793,8 +835,10 @@ export function setupAiVideoReaderIPC(): void {
         sourceMtime: project.sourceMtime,
         model: config.model,
         provider: config.provider || "openai-compatible",
+        segmentSeconds: config.provider === "siliconflow" ? 60 : 600,
         chunks: {},
       };
+      let reuseCheckpoint = false;
       try {
         const stored = JSON.parse(
           fs.readFileSync(checkpointPath, "utf8"),
@@ -802,9 +846,12 @@ export function setupAiVideoReaderIPC(): void {
         if (
           stored.sourceMtime === project.sourceMtime &&
           stored.model === config.model &&
-          stored.provider === (config.provider || "openai-compatible")
-        )
+          stored.provider === (config.provider || "openai-compatible") &&
+          stored.segmentSeconds === checkpoint.segmentSeconds
+        ) {
           checkpoint = stored;
+          reuseCheckpoint = true;
+        }
       } catch {
         /* no reusable checkpoint */
       }
@@ -828,15 +875,26 @@ export function setupAiVideoReaderIPC(): void {
           .readdirSync(workDirectory)
           .filter((file) => /^chunk-\d+\.wav$/.test(file))
           .sort();
+        if (!reuseCheckpoint && chunks.length) {
+          for (const file of chunks)
+            fs.rmSync(path.join(workDirectory, file), { force: true });
+          chunks = [];
+        }
         if (!chunks.length) {
           checkpoint = {
             sourceMtime: project.sourceMtime,
             model: config.model,
             provider: config.provider || "openai-compatible",
+            segmentSeconds: config.provider === "siliconflow" ? 60 : 600,
             chunks: {},
           };
           sendProgress(_event.sender, "extracting", 5, "正在提取并切分音频");
-          await extractAudioChunks(projectId, project.sourcePath, chunkPattern);
+          await extractAudioChunks(
+            projectId,
+            project.sourcePath,
+            chunkPattern,
+            checkpoint.segmentSeconds,
+          );
           chunks = fs
             .readdirSync(workDirectory)
             .filter((file) => /^chunk-\d+\.wav$/.test(file))
