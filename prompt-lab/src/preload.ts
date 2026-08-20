@@ -439,6 +439,8 @@ const electronAPI: ElectronAPI = {
       content: string,
       options?: { expectedModifiedAt?: number; force?: boolean },
     ) => ipcRenderer.invoke('workspace:writeBinaryFile', rootPath, relativePath, content, options),
+    readBinaryFile: (rootPath: string, relativePath: string) =>
+      ipcRenderer.invoke('workspace:readBinaryFile', rootPath, relativePath),
   },
   knowledge: {
     scanWorkspace: (rootPath: string) => ipcRenderer.invoke('knowledge:scanWorkspace', rootPath),

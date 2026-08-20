@@ -1072,6 +1072,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [activeFile, setActiveFile] = useState("");
   const [editorMode, setEditorMode] = useState<"edit" | "preview">("edit");
   const [documentContent, setDocumentContent] = useState("");
+  const [documentUndo, setDocumentUndo] = useState<{
+    content: string;
+    label: string;
+  } | null>(null);
+  const [previewImageUrls, setPreviewImageUrls] = useState<Record<string, string>>({});
   const [savedContent, setSavedContent] = useState("");
   const [modifiedAt, setModifiedAt] = useState<number>();
   const [documentLoading, setDocumentLoading] = useState(false);
@@ -1114,6 +1119,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [imageOpen, setImageOpen] = useState(false);
   const [minimaxApiKey, setMinimaxApiKey] = useState("");
   const [imagePrompt, setImagePrompt] = useState("");
+  const [imagePromptLoading, setImagePromptLoading] = useState(false);
   const [imageAspectRatio, setImageAspectRatio] = useState("16:9");
   const [imageDataUrl, setImageDataUrl] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
@@ -5321,6 +5327,58 @@ export const OutlineScaffolderPanel: React.FC = () => {
       }
     } finally {
       if (requestId === aiRequestRef.current) setAiLoading(false);
+    }
+  };
+
+  const generateImagePromptFromArticle = async () => {
+    if (!activeFile || imagePromptLoading) return;
+    if (!aiApi.apiKey?.trim() || !aiApi.model?.trim()) {
+      setImageError("请先在设置中配置文本模型，用于分析文章并生成插图提示词。");
+      return;
+    }
+    setImagePromptLoading(true);
+    setImageError("");
+    try {
+      const chapterName =
+        activeFile.split("/").pop()?.replace(/\.md$/i, "") ?? activeFile;
+      const provider = createOpenAIProvider({
+        apiKey: aiApi.apiKey,
+        baseUrl: aiApi.baseUrl,
+      });
+      const messages: ChatMessage[] = [
+        {
+          role: "system",
+          content:
+            "你是出版插图艺术指导。阅读章节后提炼一个最能代表本章主题、适合单幅插图的具体画面。输出一段中文图像生成提示词，包含主体、动作或关系、环境、构图、光线、色彩和艺术风格；尊重文章年代与事实边界，不添加文章没有的人物或历史元素；禁止画面文字、水印、标志、界面和分镜。只输出提示词，不解释，不加标题或引号，控制在 180—350 字。",
+        },
+        {
+          role: "user",
+          content: `书名：${projectTitle}\n章节：${chapterName}\n画幅：${imageAspectRatio}\n\n章节正文：\n${documentContent.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, "").slice(0, 12000)}`,
+        },
+      ];
+      let result = "";
+      for await (const chunk of provider.chat(messages, {
+        model: aiApi.model,
+        temperature: 0.55,
+        maxTokens: 800,
+        stream: true,
+      }))
+        result += chunk.delta || "";
+      const prompt = result
+        .trim()
+        .replace(/^```(?:text|markdown)?\s*/i, "")
+        .replace(/```$/i, "")
+        .replace(/^(?:提示词|插图提示词)[：:]\s*/i, "")
+        .replace(/^[“"]|[”"]$/g, "")
+        .trim();
+      if (!prompt) throw new Error("文本模型没有返回插图提示词。");
+      setImagePrompt(prompt.slice(0, 1000));
+    } catch (error) {
+      setImageError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setImagePromptLoading(false);
     }
   };
 
@@ -12356,6 +12414,21 @@ export const OutlineScaffolderPanel: React.FC = () => {
                     className="mt-1 h-28 w-full resize-none rounded-md border border-input bg-background p-2 text-sm"
                   />
                 </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  disabled={imagePromptLoading || !documentContent.trim()}
+                  onClick={generateImagePromptFromArticle}
+                >
+                  {imagePromptLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 h-4 w-4" />
+                  )}
+                  依据本文生成插图提示词
+                </Button>
                 <Button
                   className="w-full"
                   disabled={

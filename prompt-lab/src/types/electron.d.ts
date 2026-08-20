@@ -378,6 +378,7 @@ export interface ElectronAPI {
     unwatch: () => Promise<void>;
     onFileChanged: (callback: (event: WorkspaceFileChange) => void) => () => void;
     writeBinaryFile: (rootPath: string, relativePath: string, content: string, options?: { expectedModifiedAt?: number; force?: boolean }) => Promise<WorkspaceResult<{ size: number; modifiedAt: number }>>;
+    readBinaryFile: (rootPath: string, relativePath: string) => Promise<WorkspaceResult<{ content: string }>>;
   };
   knowledge: {
     scanWorkspace: (rootPath: string) => Promise<WorkspaceResult<import('../core/knowledge').KnowledgeIndex & {

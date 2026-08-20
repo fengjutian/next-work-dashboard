@@ -2043,6 +2043,20 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:readBinaryFile', async (
+    _event,
+    rootPath: string,
+    relativePath: string,
+  ) => {
+    try {
+      const target = resolveWorkspacePath(rootPath, relativePath);
+      const buffer = fs.readFileSync(target);
+      return { success: true, data: { content: buffer.toString('base64') } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle('workspace:listTasks', async (_event, rootPath: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);
