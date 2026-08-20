@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
+import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
@@ -51,6 +51,12 @@ describe('outline scaffolder', () => {
     expect(isChapterArticle('docs/404.md', '---\nchapter: true\n---\n# 页面未找到')).toBe(false);
     expect(isChapterArticle('docs/about.md', '# 关于')).toBe(false);
     expect(isChapterArticle('docs/custom.md', '---\nchapter: false\n---\n# 附录')).toBe(false);
+  });
+
+  it('removes an outer markdown fence from generated articles', () => {
+    expect(normalizeGeneratedMarkdown('```markdown\n---\nchapter: true\n---\n# 正文\n```'))
+      .toBe('---\nchapter: true\n---\n# 正文');
+    expect(normalizeGeneratedMarkdown('# 正文')).toBe('# 正文');
   });
 
   it('creates a compact reversible text diff', () => {

@@ -23,6 +23,7 @@ import {
   createChapterDocuments,
   createReadme,
   isChapterArticle,
+  normalizeGeneratedMarkdown,
   parseOutline,
   sortChapterPaths,
   type ChapterWorkflowState,
@@ -984,6 +985,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     total: 0,
     current: "",
   });
+  const [selectedBatchFiles, setSelectedBatchFiles] = useState<string[]>([]);
   const batchStopRef = useRef(false);
   const batchAbortRef = useRef<AbortController | null>(null);
   const batchRunRef = useRef(0);
@@ -3545,7 +3547,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
     }
   };
 
-  const runBatchGeneration = async (mode: "generate" | "rewrite") => {
+  const runBatchGeneration = async (
+    mode: "generate" | "rewrite" | "selected",
+  ) => {
     if (!target || batchGenerating) return;
     if (!aiApi.apiKey?.trim()) {
       notice.error({ message: "请先配置助写模型", placement: "bottomRight" });
@@ -3568,6 +3572,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     const candidates =
       mode === "rewrite"
         ? chapterFiles
+        : mode === "selected"
+          ? chapterFiles.filter((path) => selectedBatchFiles.includes(path))
         : chapterFiles.filter((path) =>
             ["pending", "error"].includes(
               chapterStatuses[path]?.state ?? "pending",
@@ -3576,14 +3582,20 @@ export const OutlineScaffolderPanel: React.FC = () => {
     if (!candidates.length) {
       notice.info({
         message:
-          mode === "rewrite" ? "没有可重写的章节" : "没有待生成或失败的章节",
+          mode === "selected"
+            ? "请先勾选需要重新生成的章节"
+            : mode === "rewrite"
+              ? "没有可重写的章节"
+              : "没有待生成或失败的章节",
         placement: "bottomRight",
       });
       return;
     }
     if (
       !window.confirm(
-        mode === "rewrite"
+        mode === "selected"
+          ? `将重新生成并覆盖选中的 ${candidates.length} 个章节，其他文档不会改动。是否继续？`
+          : mode === "rewrite"
           ? `将串行重写 ${candidates.length} 个章节，并覆盖这些章节的现有正文。此操作可能产生较多模型调用费用，是否继续？`
           : `将串行生成 ${candidates.length} 个章节。已有正文不会被覆盖，是否继续？`,
       )
@@ -3664,7 +3676,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `你是“${projectTitle}”的历史类图书作者兼事实编辑。${mode === "rewrite" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为事实、结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
+            content: `你是“${projectTitle}”的历史类图书作者兼事实编辑。${mode !== "generate" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为事实、结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
 
 每一节必须回答一个明确问题，并包含：至少两个可辨认的事实或材料锚点、制度或行动如何运作的中间机制，以及该材料能够支持到什么程度。对同一问题存在不同解释时，交代争议边界。区分同时代材料、后世记载与现代研究，不能把后世概括直接当作当时事实。
 
@@ -3695,7 +3707,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
           }));
           break;
         }
-        if (!result.trim()) throw new Error("模型未返回正文");
+        result = normalizeGeneratedMarkdown(result);
+        if (!result) throw new Error("模型未返回正文");
         const written = await window.electronAPI.workspace.writeTextFile(
           target.path,
           path,
@@ -3744,10 +3757,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         ? mode === "rewrite"
           ? "批量重写已停止"
           : "批量生成已停止"
-        : mode === "rewrite"
+        : mode === "selected"
+          ? "所选章节重新生成结束"
+          : mode === "rewrite"
           ? "批量重写结束"
           : "批量生成结束",
-      description: `已处理 ${completed}/${candidates.length} 章；${mode === "rewrite" ? "重写" : "生成"}结果进入“草稿待确认”状态。`,
+      description: `已处理 ${completed}/${candidates.length} 章；${mode === "generate" ? "生成" : "重写"}结果进入“草稿待确认”状态。`,
       placement: "bottomRight",
     });
   };
@@ -4448,6 +4463,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setResearchPlans({});
     setSourceResearchQueries([]);
     setSourceResearchResults([]);
+    setSelectedBatchFiles([]);
     // A saved project may intentionally be restored from its local history
     // when its manifest is unavailable. Only raw folder imports need blank
     // project metadata as their safe baseline.
@@ -11012,6 +11028,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
                       <RefreshCw className="mr-2 h-4 w-4" />
                       批量重写全部章节
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      disabled={
+                        !aiApi.apiKey?.trim() || !selectedBatchFiles.length
+                      }
+                      onClick={() => void runBatchGeneration("selected")}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      重新生成所选章节（{selectedBatchFiles.length}）
+                    </Button>
                   </div>
                 )}
               </div>
@@ -11032,6 +11060,25 @@ export const OutlineScaffolderPanel: React.FC = () => {
                       className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${activeFile === path ? "bg-primary/10 text-primary" : "hover:bg-muted"}`}
                       title={status.error || statusMeta.label}
                     >
+                      {!/^(?:404|readme|index|about|license|changelog)\.md$/i.test(
+                        path.split("/").pop() ?? path,
+                      ) && (
+                        <input
+                          type="checkbox"
+                          checked={selectedBatchFiles.includes(path)}
+                          aria-label={`选择 ${path}`}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setSelectedBatchFiles((current) =>
+                              checked
+                                ? [...new Set([...current, path])]
+                                : current.filter((item) => item !== path),
+                            );
+                          }}
+                          className="h-3.5 w-3.5 shrink-0 accent-primary"
+                        />
+                      )}
                       <FileText className="h-4 w-4 shrink-0" />
                       <span
                         className={`h-2 w-2 shrink-0 rounded-full ${statusMeta.dot}`}

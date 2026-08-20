@@ -45,6 +45,12 @@ export function isChapterArticle(path: string, content: string): boolean {
   return /(?:^|\/)\d+-第[一二三四五六七八九十百千万零〇两\d]+章(?:\s|[^/])*\.md$/i.test(path.replace(/\\/g, '/'));
 }
 
+export function normalizeGeneratedMarkdown(value: string): string {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/^```(?:markdown|md)?\s*\r?\n([\s\S]*?)\r?\n```$/i);
+  return (fenced?.[1] ?? trimmed).trim();
+}
+
 export function sortChapterPaths(paths: string[]): string[] {
   return [...new Set(paths)].sort((left, right) => {
     const leftName = left.split('/').pop() ?? left;
