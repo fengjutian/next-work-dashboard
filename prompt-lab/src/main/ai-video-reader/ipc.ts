@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from 'electron';
+import { app, dialog, ipcMain, type WebContents } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -7,6 +7,9 @@ import type { VideoReaderProject } from '../../core/ai-video-reader/types';
 import { exportTranscript, parseTranscript } from '../../core/ai-video-reader/transcript';
 
 const projectFile = () => path.join(app.getPath('userData'), 'ai-video-reader', 'projects.json');
+const activeTranscriptions = new Map<string, { controller: AbortController; child?: ReturnType<typeof spawn> }>();
+interface ChunkResult { duration: number; language?: string; segments: Array<{ start: number; end: number; text: string }> }
+interface TranscriptionCheckpoint { sourceMtime: number; model: string; chunks: Record<string, ChunkResult> }
 
 function load(): VideoReaderProject[] {
   try { return JSON.parse(fs.readFileSync(projectFile(), 'utf8')) as VideoReaderProject[]; } catch { return []; }
@@ -49,11 +52,13 @@ async function probeMedia(sourcePath: string): Promise<Partial<VideoReaderProjec
   return { durationMs: Math.round(Number(result.format?.duration ?? 0) * 1000), width: video?.width, height: video?.height, videoCodec: video?.codec_name, audioCodec: audio?.codec_name };
 }
 
-function extractAudio(sourcePath: string, outputPath: string): Promise<void> {
+function extractAudioChunks(projectId: string, sourcePath: string, outputPattern: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const binary = findMediaBinary('ffmpeg');
     if (!binary) { reject(new Error('未找到 FFmpeg。请安装到系统 PATH，或放入 resources/ffmpeg/<platform>/')); return; }
-    const child = spawn(binary, ['-y', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', outputPath], { windowsHide: true });
+    const task = activeTranscriptions.get(projectId);
+    const child = spawn(binary, ['-y', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'segment', '-segment_time', '600', '-reset_timestamps', '1', outputPattern], { windowsHide: true });
+    if (task) task.child = child;
     let diagnostics = '';
     child.stderr.on('data', (chunk) => { diagnostics = `${diagnostics}${String(chunk)}`.slice(-4000); });
     child.on('error', (error) => reject(new Error(`无法启动 FFmpeg：${error.message}`)));
@@ -61,7 +66,7 @@ function extractAudio(sourcePath: string, outputPath: string): Promise<void> {
   });
 }
 
-async function transcribeAudio(audioPath: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }) {
+async function transcribeAudio(audioPath: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }, signal: AbortSignal) {
   const endpoint = `${config.baseUrl.replace(/\/$/, '')}/audio/transcriptions`;
   const form = new FormData();
   form.append('file', new Blob([fs.readFileSync(audioPath)], { type: 'audio/wav' }), 'audio.wav');
@@ -69,12 +74,27 @@ async function transcribeAudio(audioPath: string, config: { baseUrl: string; api
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'segment');
   if (config.language?.trim()) form.append('language', config.language.trim());
-  const response = await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form });
+  const response = await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form, signal });
   const body = await response.text();
   if (!response.ok) throw new Error(`ASR 请求失败（${response.status}）：${body.slice(0, 600)}`);
   const parsed = JSON.parse(body) as { language?: string; duration?: number; segments?: Array<{ start: number; end: number; text: string }> };
   if (!parsed.segments?.length) throw new Error('ASR Provider 未返回 segment timestamps；请确认支持 verbose_json');
   return parsed;
+}
+
+async function transcribeWithRetry(audioPath: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }, signal: AbortSignal): Promise<ChunkResult> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const result = await transcribeAudio(audioPath, config, signal);
+      return { duration: result.duration ?? 600, language: result.language, segments: result.segments ?? [] };
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  throw lastError;
 }
 
 export function setupAiVideoReaderIPC(): void {
@@ -120,20 +140,57 @@ export function setupAiVideoReaderIPC(): void {
     if (!project) throw new Error('视频项目不存在');
     project.status = 'transcribing'; project.updatedAt = Date.now(); save(projects);
     const workDirectory = path.join(app.getPath('userData'), 'ai-video-reader', 'cache', project.id);
-    const audioPath = path.join(workDirectory, 'audio.wav');
+    const chunkPattern = path.join(workDirectory, 'chunk-%05d.wav');
+    const checkpointPath = path.join(workDirectory, 'checkpoint.json');
     fs.mkdirSync(workDirectory, { recursive: true });
+    let checkpoint: TranscriptionCheckpoint = { sourceMtime: project.sourceMtime, model: config.model, chunks: {} };
     try {
-      await extractAudio(project.sourcePath, audioPath);
-      const result = await transcribeAudio(audioPath, config);
-      project.language = result.language;
-      project.durationMs = Math.round((result.duration ?? 0) * 1000);
-      const timestampedSegments = result.segments ?? [];
-      project.segments = timestampedSegments.map((segment, index) => ({ id: `segment-${index + 1}`, index, startMs: Math.round(segment.start * 1000), endMs: Math.round(segment.end * 1000), text: segment.text.trim() }));
-      project.status = 'complete'; project.updatedAt = Date.now(); save(projects); return hydrate(project);
+      const stored = JSON.parse(fs.readFileSync(checkpointPath, 'utf8')) as TranscriptionCheckpoint;
+      if (stored.sourceMtime === project.sourceMtime && stored.model === config.model) checkpoint = stored;
+    } catch { /* no reusable checkpoint */ }
+    const controller = new AbortController(); activeTranscriptions.set(projectId, { controller });
+    const sendProgress = (target: WebContents, stage: 'extracting' | 'transcribing' | 'saving', progress: number, detail: string) => target.send('ai-video-reader:task-progress', { projectId, stage, progress, detail });
+    let completed = false;
+    try {
+      let chunks = fs.readdirSync(workDirectory).filter((file) => /^chunk-\d+\.wav$/.test(file)).sort();
+      if (!chunks.length) {
+        checkpoint = { sourceMtime: project.sourceMtime, model: config.model, chunks: {} };
+        sendProgress(_event.sender, 'extracting', 5, '正在提取并切分音频');
+        await extractAudioChunks(projectId, project.sourcePath, chunkPattern);
+        chunks = fs.readdirSync(workDirectory).filter((file) => /^chunk-\d+\.wav$/.test(file)).sort();
+      } else {
+        sendProgress(_event.sender, 'extracting', 8, `发现断点，复用 ${chunks.length} 个音频分片`);
+      }
+      if (controller.signal.aborted) throw new Error('转写已取消');
+      if (!chunks.length) throw new Error('FFmpeg 没有生成音频分片');
+      const merged: Array<{ start: number; end: number; text: string }> = []; let offsetSeconds = 0;
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+        if (controller.signal.aborted) throw new Error('转写已取消');
+        const cached = checkpoint.chunks[chunks[chunkIndex]];
+        sendProgress(_event.sender, 'transcribing', 10 + Math.round(chunkIndex / chunks.length * 85), cached ? `复用第 ${chunkIndex + 1}/${chunks.length} 片结果` : `正在转写第 ${chunkIndex + 1}/${chunks.length} 片`);
+        const chunkPath = path.join(workDirectory, chunks[chunkIndex]);
+        const result = cached ?? await transcribeWithRetry(chunkPath, config, controller.signal);
+        if (!cached) { checkpoint.chunks[chunks[chunkIndex]] = result; fs.writeFileSync(checkpointPath, JSON.stringify(checkpoint), 'utf8'); }
+        project.language ??= result.language;
+        for (const segment of result.segments ?? []) merged.push({ start: segment.start + offsetSeconds, end: segment.end + offsetSeconds, text: segment.text });
+        offsetSeconds += result.duration ?? 600;
+      }
+      sendProgress(_event.sender, 'saving', 98, '正在保存时间轴');
+      project.durationMs ||= Math.round(offsetSeconds * 1000);
+      project.segments = merged.map((segment, index) => ({ id: `segment-${index + 1}`, index, startMs: Math.round(segment.start * 1000), endMs: Math.round(segment.end * 1000), text: segment.text.trim() }));
+      project.status = 'complete'; project.updatedAt = Date.now(); save(projects); completed = true; return hydrate(project);
     } catch (error) {
-      project.status = 'error'; project.updatedAt = Date.now(); save(projects); throw error;
+      project.status = controller.signal.aborted ? 'cancelled' : 'error'; project.updatedAt = Date.now(); save(projects); throw error;
     } finally {
-      try { fs.unlinkSync(audioPath); } catch { /* cache may not have been created */ }
+      activeTranscriptions.delete(projectId);
+      if (completed) {
+        for (const file of fs.readdirSync(workDirectory)) if (/^chunk-\d+\.wav$/.test(file)) { try { fs.unlinkSync(path.join(workDirectory, file)); } catch { /* best effort */ } }
+        try { fs.unlinkSync(checkpointPath); } catch { /* best effort */ }
+      }
     }
+  });
+  ipcMain.handle('ai-video-reader:cancel-transcription', (_event, projectId: string) => {
+    const task = activeTranscriptions.get(projectId); if (!task) return false;
+    task.controller.abort(); task.child?.kill(); return true;
   });
 }

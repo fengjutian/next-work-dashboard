@@ -1,4 +1,4 @@
-export type VideoProjectStatus = 'ready' | 'transcribing' | 'complete' | 'error';
+export type VideoProjectStatus = 'ready' | 'transcribing' | 'complete' | 'error' | 'cancelled';
 
 export interface TranscriptSegment {
   id: string;
@@ -42,6 +42,13 @@ export interface TranscriptImportResult {
   language?: string;
 }
 
+export interface VideoReaderTaskProgress {
+  projectId: string;
+  stage: 'extracting' | 'transcribing' | 'saving';
+  progress: number;
+  detail: string;
+}
+
 export interface VideoReaderApi {
   runtimeStatus(): Promise<{ ffmpeg: { available: boolean; path?: string; version?: string }; ffprobe: { available: boolean; path?: string } }>;
   listProjects(): Promise<VideoReaderProject[]>;
@@ -50,4 +57,6 @@ export interface VideoReaderApi {
   deleteProject(projectId: string): Promise<boolean>;
   exportTranscript(projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json'): Promise<string | null>;
   transcribe(projectId: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }): Promise<VideoReaderProject>;
+  cancelTranscription(projectId: string): Promise<boolean>;
+  onTaskProgress(handler: (progress: VideoReaderTaskProgress) => void): () => void;
 }
