@@ -3658,17 +3658,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           completed += 1;
           continue;
         }
-        const previousPath = managedFiles[managedFiles.indexOf(path) - 1];
         const nextPath = managedFiles[managedFiles.indexOf(path) + 1];
-        let previousEnding = "";
-        if (mode === "generate" && previousPath) {
-          const previous = await window.electronAPI.workspace.readTextFile(
-            target.path,
-            previousPath,
-          );
-          if (previous.success && previous.data)
-            previousEnding = previous.data.content.slice(-1200);
-        }
         const chapterEvidence = evidenceRecords.filter(
           (item) => item.chapter === path,
         );
@@ -3680,20 +3670,27 @@ export const OutlineScaffolderPanel: React.FC = () => {
             )
             .join("\n") ||
           "无已登记材料。此时只能写范围较窄的分析性草稿；涉及具体数字、引文、争议事件或强因果判断时必须标记待核实。";
+        const chapterScope = `${chapterName}\n${skeleton}`;
+        const relevantKnowledgeEntries = knowledgeEntries.filter((item) =>
+          [item.name, item.canonical, ...item.aliases.split(/[、,，;；\s]+/)]
+            .map((term) => term.trim())
+            .filter((term) => term.length >= 2)
+            .some((term) => chapterScope.includes(term)),
+        );
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `你是“${projectTitle}”的历史类图书作者兼事实编辑。${mode !== "generate" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为事实、结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
+            content: `你是“${projectTitle}”的非虚构图书作者兼事实编辑。${mode !== "generate" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
 
-每一节必须回答一个明确问题，并包含：至少两个可辨认的事实或材料锚点、制度或行动如何运作的中间机制，以及该材料能够支持到什么程度。对同一问题存在不同解释时，交代争议边界。区分同时代材料、后世记载与现代研究，不能把后世概括直接当作当时事实。
+每一节必须回答一个明确问题，并包含：具体事实、案例、研究材料或可观察现象，以及相关机制如何运作。对同一问题存在不同解释时，交代争议边界。案例必须服务于当前章节主题；章节骨架没有要求历史案例时，不得自行引入朝代、帝王、战争或历史人物。
 
 禁止用“彻底、唯一、必然、完全、从根本上、极度、绝对、致命”等词代替论证；确有必要使用时，必须紧邻给出能够支持该强度的材料。禁止“宏伟蓝图之下、时代洪流、思想火种、致命暗伤、深深裂痕”等模板化升华。避免把复杂群体写成单一心理，不得笼统声称“百姓都……”“知识分子普遍……”。
 
-不得编造史料、引文、卷次、页码、数字、学者观点或人物心理。只把标为“已核实”的材料当作证据；检索线索只能提出核查方向。没有足够材料时，宁可缩小结论并插入“<!-- 待核实：所需材料 -->”，也不要补写成确定事实。当前章节标题和 chapter-writing-brief 是内容边界；不得引入其他项目、其他书稿或与本章无关的历史主题。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释；不要复述上一章或提前写完下一章。直接输出完整 Markdown。`,
+不得编造资料、引文、页码、数字、研究观点或人物心理。只把标为“已核实”的材料当作证据；检索线索只能提出核查方向。没有足够材料时，宁可缩小结论并插入“<!-- 待核实：所需材料 -->”，也不要补写成确定事实。当前章节标题和 chapter-writing-brief 是内容边界；不得引入其他项目、其他书稿或与本章无关的历史主题。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释；不要复述上一章或提前写完下一章。直接输出完整 Markdown。`,
           },
           {
             role: "user",
-            content: `全书需求：${bookRequirement || "未单独填写"}\n全书知识库（标准写法优先）：\n${knowledgeEntries.map((item) => `- ${item.kind}｜${item.name}｜标准：${item.canonical || item.name}｜别名：${item.aliases}｜${item.notes}`).join("\n") || "暂无"}\n当前章节：${chapterName}\n上一章结尾（仅用于衔接，不得复述）：${previousEnding || "无"}\n下一章：${nextPath?.split("/").pop()?.replace(/\.md$/i, "") || "无"}\n\n本章证据台账：\n${evidenceContext}\n\n章节骨架：\n${skeleton}`,
+            content: `全书需求：${mode === "generate" ? bookRequirement || "未单独填写" : "本次重新生成以当前章节标题和 chapter-writing-brief 为准，不继承旧正文中的主题"}\n与本章直接相关的知识条目：\n${relevantKnowledgeEntries.map((item) => `- ${item.kind}｜${item.name}｜标准：${item.canonical || item.name}｜别名：${item.aliases}｜${item.notes}`).join("\n") || "暂无；不得使用其他知识条目"}\n当前章节：${chapterName}\n下一章：${nextPath?.split("/").pop()?.replace(/\.md$/i, "") || "无"}\n\n本章证据台账：\n${evidenceContext}\n\n章节骨架：\n${skeleton}`,
           },
         ];
         let result = "";
@@ -3716,6 +3713,17 @@ export const OutlineScaffolderPanel: React.FC = () => {
         }
         result = normalizeGeneratedMarkdown(result);
         if (!result) throw new Error("模型未返回正文");
+        const qinHanTerms =
+          /秦汉|秦朝|汉朝|秦末|汉初|秦帝国|汉帝国|秦始皇|汉高祖|刘邦|项羽|赵高|陈胜|吴广|大泽乡/;
+        const allowedTopicContext = `${bookRequirement}\n${skeleton}\n${evidenceContext}`;
+        if (
+          qinHanTerms.test(result) &&
+          !qinHanTerms.test(allowedTopicContext)
+        ) {
+          throw new Error(
+            "检测到当前章节上下文未要求的秦汉内容，已阻止覆盖；请重新生成。",
+          );
+        }
         const written = await window.electronAPI.workspace.writeTextFile(
           target.path,
           path,
