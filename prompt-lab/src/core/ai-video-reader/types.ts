@@ -16,6 +16,9 @@ export interface VideoChapter {
   endMs: number;
 }
 
+export interface VideoSearchResult extends TranscriptSegment { projectId: string; projectName: string }
+export interface VideoAnswer { answer: string; citations: TranscriptSegment[] }
+
 export interface VideoReaderProject {
   id: string;
   name: string;
@@ -60,4 +63,6 @@ export interface VideoReaderApi {
   cancelTranscription(projectId: string): Promise<boolean>;
   onTaskProgress(handler: (progress: VideoReaderTaskProgress) => void): () => void;
   analyze(projectId: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoReaderProject>;
+  search(query: string, projectId?: string): Promise<VideoSearchResult[]>;
+  ask(projectId: string, question: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoAnswer>;
 }

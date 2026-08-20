@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import type { TranscriptSegment, VideoChapter, VideoReaderProject } from '../../core/ai-video-reader/types';
 import { exportTranscript, parseTranscript } from '../../core/ai-video-reader/transcript';
+import { indexVideoProject, projectContext, removeVideoProject, searchVideoSegments } from './database';
 
 const projectFile = () => path.join(app.getPath('userData'), 'ai-video-reader', 'projects.json');
 const activeTranscriptions = new Map<string, { controller: AbortController; child?: ReturnType<typeof spawn> }>();
@@ -124,7 +125,10 @@ export function setupAiVideoReaderIPC(): void {
     if (ffmpeg) { try { const result = await runBinary(ffmpeg, ['-version']); version = result.stdout.split(/\r?\n/)[0]; } catch { /* reported as unavailable below */ } }
     return { ffmpeg: { available: Boolean(ffmpeg && version), path: ffmpeg ?? undefined, version }, ffprobe: { available: Boolean(ffprobe), path: ffprobe ?? undefined } };
   });
-  ipcMain.handle('ai-video-reader:list-projects', () => load().map(hydrate));
+  ipcMain.handle('ai-video-reader:list-projects', () => {
+    const projects = load(); for (const project of projects) if (project.segments.length) indexVideoProject(project);
+    return projects.map(hydrate);
+  });
   ipcMain.handle('ai-video-reader:import-video', async () => {
     const picked = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: '视频', extensions: ['mp4', 'mkv', 'mov', 'webm', 'm4v', 'avi'] }] });
     if (picked.canceled || !picked.filePaths[0]) return null;
@@ -146,9 +150,9 @@ export function setupAiVideoReaderIPC(): void {
     const transcriptPath = picked.filePaths[0];
     const result = parseTranscript(fs.readFileSync(transcriptPath, 'utf8'), path.extname(transcriptPath));
     project.segments = result.segments; project.language = result.language; project.status = 'complete'; project.updatedAt = Date.now();
-    save(projects); return hydrate(project);
+    save(projects); indexVideoProject(project); return hydrate(project);
   });
-  ipcMain.handle('ai-video-reader:delete-project', (_event, projectId: string) => { const projects = load(); const next = projects.filter((item) => item.id !== projectId); save(next); return next.length !== projects.length; });
+  ipcMain.handle('ai-video-reader:delete-project', (_event, projectId: string) => { const projects = load(); const next = projects.filter((item) => item.id !== projectId); save(next); removeVideoProject(projectId); return next.length !== projects.length; });
   ipcMain.handle('ai-video-reader:export-transcript', async (_event, projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json') => {
     const project = load().find((item) => item.id === projectId); if (!project) throw new Error('视频项目不存在');
     const picked = await dialog.showSaveDialog({ defaultPath: `${project.name}.${format}` }); if (picked.canceled || !picked.filePath) return null;
@@ -198,7 +202,7 @@ export function setupAiVideoReaderIPC(): void {
       sendProgress(_event.sender, 'saving', 98, '正在保存时间轴');
       project.durationMs ||= Math.round(offsetSeconds * 1000);
       project.segments = merged.map((segment, index) => ({ id: `segment-${index + 1}`, index, startMs: Math.round(segment.start * 1000), endMs: Math.round(segment.end * 1000), text: segment.text.trim() }));
-      project.status = 'complete'; project.updatedAt = Date.now(); save(projects); completed = true; return hydrate(project);
+      project.status = 'complete'; project.updatedAt = Date.now(); save(projects); indexVideoProject(project); completed = true; return hydrate(project);
     } catch (error) {
       project.status = controller.signal.aborted ? 'cancelled' : 'error'; project.updatedAt = Date.now(); save(projects); throw error;
     } finally {
@@ -217,6 +221,7 @@ export function setupAiVideoReaderIPC(): void {
     if (!config.baseUrl || !config.apiKey || !config.model) throw new Error('请完整填写 LLM 配置');
     const projects = load(); const project = projects.find((item) => item.id === projectId);
     if (!project?.segments.length) throw new Error('请先生成或导入 Transcript');
+    const timelineEnd = project.durationMs || project.segments.at(-1)?.endMs || 0;
     const chunks = transcriptChunks(project.segments); const summaries: string[] = []; const chapters: VideoChapter[] = [];
     for (let index = 0; index < chunks.length; index += 1) {
       event.sender.send('ai-video-reader:task-progress', { projectId, stage: 'analyzing', progress: Math.round(index / chunks.length * 80), detail: `正在理解第 ${index + 1}/${chunks.length} 块` });
@@ -225,7 +230,7 @@ export function setupAiVideoReaderIPC(): void {
       const parsed = parseJsonObject(content); if (typeof parsed.summary === 'string') summaries.push(parsed.summary);
       if (Array.isArray(parsed.chapters)) for (const item of parsed.chapters as Array<Record<string, unknown>>) {
         const startMs = Number(item.startMs); const endMs = Number(item.endMs); const title = String(item.title ?? '').trim();
-        if (title && Number.isFinite(startMs) && Number.isFinite(endMs) && startMs >= 0 && endMs > startMs && endMs <= project.durationMs + 1000) chapters.push({ id: `chapter-${chapters.length + 1}`, title, startMs, endMs });
+        if (title && Number.isFinite(startMs) && Number.isFinite(endMs) && startMs >= 0 && endMs > startMs && endMs <= timelineEnd + 1000) chapters.push({ id: `chapter-${chapters.length + 1}`, title, startMs, endMs });
       }
     }
     event.sender.send('ai-video-reader:task-progress', { projectId, stage: 'analyzing', progress: 85, detail: '正在合并全局摘要' });
@@ -233,5 +238,15 @@ export function setupAiVideoReaderIPC(): void {
     const finalResult = parseJsonObject(reduced); project.summary = typeof finalResult.summary === 'string' ? finalResult.summary : summaries.join('\n\n');
     project.chapters = chapters.sort((a, b) => a.startMs - b.startMs); project.updatedAt = Date.now(); save(projects);
     event.sender.send('ai-video-reader:task-progress', { projectId, stage: 'saving', progress: 100, detail: '分析完成' }); return hydrate(project);
+  });
+  ipcMain.handle('ai-video-reader:search', (_event, query: string, projectId?: string) => searchVideoSegments(query, projectId));
+  ipcMain.handle('ai-video-reader:ask', async (_event, projectId: string, question: string, config: { baseUrl: string; apiKey: string; model: string }) => {
+    if (!question.trim()) throw new Error('问题不能为空');
+    const project = load().find((item) => item.id === projectId); if (!project?.segments.length) throw new Error('请先生成 Transcript');
+    indexVideoProject(project); const context = projectContext(project, question);
+    const source = context.map((segment) => `[${segment.id}] ${segment.startMs}-${segment.endMs}: ${segment.text}`).join('\n');
+    const content = await chatCompletion(config, [{ role: 'system', content: '你只能依据提供的视频片段回答。输出 JSON：{"answer":"回答","citationIds":["segment-id"]}。citationIds 只能使用上下文方括号中的 ID。如果上下文不足，明确说明无法从当前视频确定。' }, { role: 'user', content: `问题：${question}\n\n上下文：\n${source}` }]);
+    const parsed = parseJsonObject(content); const ids = Array.isArray(parsed.citationIds) ? parsed.citationIds.map(String) : [];
+    return { answer: typeof parsed.answer === 'string' ? parsed.answer : '无法从当前视频确定。', citations: context.filter((segment) => ids.includes(segment.id)) };
   });
 }
