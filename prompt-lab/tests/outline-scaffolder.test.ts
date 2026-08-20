@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
+import { buildRegenerationSkeleton, calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
@@ -57,6 +57,14 @@ describe('outline scaffolder', () => {
     expect(normalizeGeneratedMarkdown('```markdown\n---\nchapter: true\n---\n# 正文\n```'))
       .toBe('---\nchapter: true\n---\n# 正文');
     expect(normalizeGeneratedMarkdown('# 正文')).toBe('# 正文');
+  });
+
+  it('rebuilds a chapter skeleton without retaining stale prose', () => {
+    const skeleton = buildRegenerationSkeleton('---\nchapter: true\n---\n<!-- chapter-writing-brief\n目标：责任\n-->\n# 第七十章 责任\n秦汉旧正文\n## 选择负责\n更多旧正文');
+    expect(skeleton).toContain('目标：责任');
+    expect(skeleton).toContain('## 选择负责');
+    expect(skeleton).not.toContain('秦汉旧正文');
+    expect(skeleton).not.toContain('更多旧正文');
   });
 
   it('creates a compact reversible text diff', () => {

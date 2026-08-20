@@ -18,6 +18,7 @@ import { createOpenAIProvider, type ChatMessage } from "@/core/llm";
 import { useStore } from "@/store/store";
 import {
   calculateClaimCoverage,
+  buildRegenerationSkeleton,
   chapterStateAfterSave,
   compactTextDiff,
   createChapterDocuments,
@@ -3566,8 +3567,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
           : null;
       }),
     );
-    const chapterFiles = inspectedFiles.filter(
-      (path): path is string => Boolean(path),
+    const chapterFiles = sortChapterPaths(
+      inspectedFiles.filter((path): path is string => Boolean(path)),
     );
     const candidates =
       mode === "rewrite"
@@ -3636,7 +3637,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
         );
         if (!read.success || !read.data)
           throw new Error(read.error || "读取章节失败");
-        const skeleton = read.data.content;
+        const generatedScaffold = documents.find(
+          (document) => document.path === path,
+        )?.content;
+        const skeleton =
+          mode === "generate"
+            ? read.data.content
+            : generatedScaffold || buildRegenerationSkeleton(read.data.content);
         const prose = skeleton
           .replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, "")
           .replace(/<!--[\s\S]*?-->/g, "")
@@ -3654,7 +3661,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         const previousPath = managedFiles[managedFiles.indexOf(path) - 1];
         const nextPath = managedFiles[managedFiles.indexOf(path) + 1];
         let previousEnding = "";
-        if (previousPath) {
+        if (mode === "generate" && previousPath) {
           const previous = await window.electronAPI.workspace.readTextFile(
             target.path,
             previousPath,
@@ -3682,7 +3689,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
 
 禁止用“彻底、唯一、必然、完全、从根本上、极度、绝对、致命”等词代替论证；确有必要使用时，必须紧邻给出能够支持该强度的材料。禁止“宏伟蓝图之下、时代洪流、思想火种、致命暗伤、深深裂痕”等模板化升华。避免把复杂群体写成单一心理，不得笼统声称“百姓都……”“知识分子普遍……”。
 
-不得编造史料、引文、卷次、页码、数字、学者观点或人物心理。只把标为“已核实”的材料当作证据；检索线索只能提出核查方向。没有足够材料时，宁可缩小结论并插入“<!-- 待核实：所需材料 -->”，也不要补写成确定事实。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释；不要复述上一章或提前写完下一章。直接输出完整 Markdown。`,
+不得编造史料、引文、卷次、页码、数字、学者观点或人物心理。只把标为“已核实”的材料当作证据；检索线索只能提出核查方向。没有足够材料时，宁可缩小结论并插入“<!-- 待核实：所需材料 -->”，也不要补写成确定事实。当前章节标题和 chapter-writing-brief 是内容边界；不得引入其他项目、其他书稿或与本章无关的历史主题。保留 YAML、一级标题、chapter-writing-brief、既有小标题、链接和图片，替换占位注释；不要复述上一章或提前写完下一章。直接输出完整 Markdown。`,
           },
           {
             role: "user",
@@ -4517,9 +4524,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       const matched = allMarkdown.filter(
         (path) => !prefix || path.startsWith(prefix),
       );
-      const paths = (matched.length ? matched : allMarkdown).sort((a, b) =>
-        a.localeCompare(b, undefined, { numeric: true }),
-      );
+      const paths = sortChapterPaths(matched.length ? matched : allMarkdown);
       let diskProject: Partial<SavedProject> | undefined;
       const diskManifest = await window.electronAPI.workspace.readTextFile(
         folder.path,
@@ -4742,7 +4747,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
       setPagesRepositoryName(openedProject.pages?.repositoryName ?? "my-book");
       setPagesCustomDomain(openedProject.pages?.customDomain ?? "");
       setPagesAccentColor(openedProject.pages?.accentColor ?? "#6d285f");
-      setManagedFiles(openedProject.files);
+      setManagedFiles(sortChapterPaths(openedProject.files));
       setView("documents");
       setActiveFile("");
       setDocumentContent("");

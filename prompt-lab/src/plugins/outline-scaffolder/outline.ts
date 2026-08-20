@@ -51,6 +51,16 @@ export function normalizeGeneratedMarkdown(value: string): string {
   return (fenced?.[1] ?? trimmed).trim();
 }
 
+export function buildRegenerationSkeleton(content: string): string {
+  const frontmatter = content.match(/^---\s*\r?\n[\s\S]*?\r?\n---/)?.[0] ?? '';
+  const brief = content.match(/<!--\s*chapter-writing-brief[\s\S]*?-->/i)?.[0] ?? '';
+  const headings = content.match(/^#{1,6}\s+.+$/gm) ?? [];
+  return [frontmatter, brief, ...headings.map((heading) => `${heading}\n\n<!-- 在这里添加内容 -->`)]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+}
+
 export function sortChapterPaths(paths: string[]): string[] {
   return [...new Set(paths)].sort((left, right) => {
     const leftName = left.split('/').pop() ?? left;
