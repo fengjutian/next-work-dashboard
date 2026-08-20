@@ -40,18 +40,38 @@ function directoryStats(directory: string): { bytes: number; files: number } {
   return { bytes, files };
 }
 
+const mediaRuntimeConfigFile = () => path.join(app.getPath('userData'), 'ai-video-reader', 'runtime.json');
+
+function configuredMediaDirectory(): string | undefined {
+  try {
+    const value = (JSON.parse(fs.readFileSync(mediaRuntimeConfigFile(), 'utf8')) as { directory?: unknown }).directory;
+    return typeof value === 'string' && path.isAbsolute(value) ? value : undefined;
+  } catch { return undefined; }
+}
+
+function mediaBinaryCandidates(executable: string, platformDirectory: string): string[] {
+  const configured = configuredMediaDirectory();
+  const resourceRoots = [process.resourcesPath, app.getAppPath()];
+  const candidates = resourceRoots.flatMap((root) => [
+    path.join(root, 'ffmpeg', platformDirectory, executable),
+    path.join(root, 'ffmpeg', process.platform === 'win32' ? `win-${process.arch}` : `${platformDirectory}-${process.arch}`, executable),
+    path.join(root, 'ffmpeg', 'bin', executable),
+    path.join(root, 'ffmpeg', executable),
+  ]);
+  if (configured) candidates.unshift(path.join(configured, executable), path.join(configured, 'bin', executable));
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData) candidates.push(path.join(localAppData, 'Programs', 'ffmpeg', 'bin', executable));
+    candidates.push(path.join(process.env.ProgramFiles || 'C:\\Program Files', 'ffmpeg', 'bin', executable));
+  }
+  for (const directory of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(directory, executable));
+  return [...new Set(candidates)];
+}
+
 function findMediaBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
   const executable = process.platform === 'win32' ? `${name}.exe` : name;
   const platformDirectory = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
-  const bundled = path.join(process.resourcesPath, 'ffmpeg', platformDirectory, executable);
-  const development = path.join(app.getAppPath(), 'resources', 'ffmpeg', platformDirectory, executable);
-  if (fs.existsSync(bundled)) return bundled;
-  if (fs.existsSync(development)) return development;
-  for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
-    const candidate = path.join(directory, executable);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
+  return mediaBinaryCandidates(executable, platformDirectory).find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 function runBinary(binary: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -141,6 +161,22 @@ export function setupAiVideoReaderIPC(): void {
     let version: string | undefined;
     if (ffmpeg) { try { const result = await runBinary(ffmpeg, ['-version']); version = result.stdout.split(/\r?\n/)[0]; } catch { /* reported as unavailable below */ } }
     return { ffmpeg: { available: Boolean(ffmpeg && version), path: ffmpeg ?? undefined, version }, ffprobe: { available: Boolean(ffprobe), path: ffprobe ?? undefined } };
+  });
+  ipcMain.handle('ai-video-reader:select-ffmpeg', async () => {
+    const picked = await dialog.showOpenDialog({
+      title: '选择 FFmpeg 所在目录',
+      properties: ['openDirectory'],
+      message: '请选择同时包含 ffmpeg 和 ffprobe 的目录（也可以选择它们的上级目录）',
+    });
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    const directory = picked.filePaths[0];
+    const executable = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    const direct = path.join(directory, executable);
+    const nested = path.join(directory, 'bin', executable);
+    if (!fs.existsSync(direct) && !fs.existsSync(nested)) throw new Error('所选目录中未找到 ffmpeg；请选择包含 ffmpeg 的目录或其上级目录');
+    fs.mkdirSync(path.dirname(mediaRuntimeConfigFile()), { recursive: true });
+    fs.writeFileSync(mediaRuntimeConfigFile(), JSON.stringify({ directory }, null, 2), 'utf8');
+    return directory;
   });
   ipcMain.handle('ai-video-reader:list-projects', () => {
     const projects = load(); for (const project of projects) if (project.segments.length) indexVideoProject(project);

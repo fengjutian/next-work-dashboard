@@ -33,6 +33,16 @@ export function AiVideoReaderPanel() {
   const selected = projects.find((item) => item.id === selectedId);
   const visibleSegments = useMemo(() => selected?.segments.filter((item) => item.text.toLowerCase().includes(query.trim().toLowerCase())) ?? [], [selected, query]);
   const refresh = async (prefer?: string) => { const result = await window.electronAPI.aiVideoReader.listProjects(); setProjects(result); setSelectedId(prefer ?? selectedId ?? result[0]?.id); setLoading(false); };
+  const selectFfmpeg = async () => {
+    try {
+      const directory = await window.electronAPI.aiVideoReader.selectFfmpeg();
+      if (!directory) return;
+      const status = await window.electronAPI.aiVideoReader.runtimeStatus();
+      setRuntime(status);
+      if (status.ffmpeg.available) message.success('FFmpeg 已就绪');
+      else message.error('FFmpeg 无法启动，请确认所选文件与当前系统架构匹配');
+    } catch (error) { message.error(error instanceof Error ? error.message : '定位 FFmpeg 失败'); }
+  };
   useEffect(() => {
     void window.electronAPI.aiVideoReader.listProjects().then((result) => {
       setProjects(result); setSelectedId(result[0]?.id); setLoading(false);
@@ -100,7 +110,10 @@ export function AiVideoReaderPanel() {
   return <div className="flex h-full min-h-0 bg-slate-950 text-slate-100">
     <aside className="flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-900/70">
       <div className="flex items-center justify-between border-b border-slate-800 p-3"><b>AI 视频阅读器</b><Button size="small" type="primary" onClick={importVideo}>导入</Button></div>
-      <div className={`mx-2 mt-2 rounded-md px-2 py-1 text-xs ${runtime?.ffmpeg.available ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`} title={runtime?.ffmpeg.version}>{runtime?.ffmpeg.available ? `FFmpeg 就绪${runtime.ffprobe.available ? ' · ffprobe 就绪' : ''}` : '未检测到 FFmpeg，AI 转写不可用'}</div>
+      <div className={`mx-2 mt-2 flex items-center gap-2 rounded-md px-2 py-1 text-xs ${runtime?.ffmpeg.available ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`} title={runtime?.ffmpeg.version}>
+        <span className="min-w-0 flex-1">{runtime?.ffmpeg.available ? `FFmpeg 就绪${runtime.ffprobe.available ? ' · ffprobe 就绪' : ' · ffprobe 未找到'}` : '未检测到 FFmpeg，AI 转写不可用'}</span>
+        {!runtime?.ffmpeg.available ? <Button size="small" type="link" className="h-auto p-0 text-amber-300" onClick={() => void selectFfmpeg()}>定位</Button> : null}
+      </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">{projects.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="导入视频开始阅读" /> : projects.map((project) => <button key={project.id} onClick={() => setSelectedId(project.id)} className={`mb-1 w-full rounded-lg px-3 py-2 text-left ${project.id === selectedId ? 'bg-blue-600' : 'hover:bg-slate-800'}`}><div className="truncate text-sm font-medium">{project.name}</div><div className="mt-1 text-xs opacity-60">{project.segments.length ? `${project.segments.length} 个片段` : '等待转写'}</div></button>)}</div>
     </aside>
     {!selected ? <main className="flex flex-1 items-center justify-center"><Empty description="请选择或导入视频" /></main> : <main className="flex min-w-0 flex-1 flex-col">

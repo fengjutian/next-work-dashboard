@@ -101,7 +101,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
       ...(process.env.NWD_BUNDLE_NET_PROBE === '1' && fs.existsSync(netProbeResource) ? [netProbeResource] : []),
       ...(process.env.NWD_BUNDLE_VOICE_ENGINE === '1' && fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),
-      ...(process.env.NWD_BUNDLE_FFMPEG === '1' && fs.existsSync(ffmpegResource) ? [ffmpegResource] : []),
+      ...(fs.existsSync(ffmpegResource) && fs.readdirSync(ffmpegResource, { recursive: true }).some((entry) => /ffmpeg(?:\.exe)?$/i.test(String(entry))) ? [ffmpegResource] : []),
     ],
     asar: {
       unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**',

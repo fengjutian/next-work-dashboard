@@ -12,5 +12,6 @@ resources/ffmpeg/
   linux/ffprobe
 ```
 
-Set `NWD_BUNDLE_FFMPEG=1` when running `npm run package` or `npm run make`.
+When either binary is present, Electron Forge includes this directory automatically
+for `npm run package` and `npm run make`.
 Keep the matching FFmpeg license and source-offer materials with release artifacts.

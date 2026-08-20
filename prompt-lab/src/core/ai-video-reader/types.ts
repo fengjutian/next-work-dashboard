@@ -54,6 +54,7 @@ export interface VideoReaderTaskProgress {
 
 export interface VideoReaderApi {
   runtimeStatus(): Promise<{ ffmpeg: { available: boolean; path?: string; version?: string }; ffprobe: { available: boolean; path?: string } }>;
+  selectFfmpeg(): Promise<string | null>;
   listProjects(): Promise<VideoReaderProject[]>;
   importVideo(): Promise<VideoReaderProject | null>;
   importTranscript(projectId: string): Promise<VideoReaderProject | null>;
