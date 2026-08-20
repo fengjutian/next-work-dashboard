@@ -525,6 +525,28 @@ const CHAPTER_STATUS_META: Record<
   error: { label: "生成失败", dot: "bg-destructive" },
 };
 
+type BatchPromptPresetId = "general" | "psychology" | "history" | "custom";
+const BATCH_PROMPT_PRESETS: Record<
+  Exclude<BatchPromptPresetId, "custom">,
+  { label: string; prompt: string }
+> = {
+  general: {
+    label: "通用非虚构",
+    prompt:
+      "你是非虚构图书作者兼事实编辑。围绕当前章节标题和写作简报展开，只使用与本章直接相关的材料，不引入其他项目或无关历史案例。",
+  },
+  psychology: {
+    label: "心理 / 成长",
+    prompt:
+      "你是心理与个人成长类图书作者。使用清晰的心理机制、可观察行为和贴近日常的案例展开；不做临床诊断，不虚构研究，不自行引入朝代、帝王或战争案例。",
+  },
+  history: {
+    label: "历史写作",
+    prompt:
+      "你是历史类图书作者兼事实编辑。区分同时代材料、后世记载与现代研究，说明证据边界，不把推测写成史实。",
+  },
+};
+
 const EMPTY_CHAPTER_BRIEF: ChapterWritingBrief = {
   goal: "",
   targetWords: 2500,
@@ -987,6 +1009,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
     current: "",
   });
   const [selectedBatchFiles, setSelectedBatchFiles] = useState<string[]>([]);
+  const [batchPromptPresetId, setBatchPromptPresetId] =
+    useState<BatchPromptPresetId>("general");
+  const [batchWritingPrompt, setBatchWritingPrompt] = useState(
+    BATCH_PROMPT_PRESETS.general.prompt,
+  );
+  const [showBatchPromptEditor, setShowBatchPromptEditor] = useState(false);
   const batchStopRef = useRef(false);
   const batchAbortRef = useRef<AbortController | null>(null);
   const batchRunRef = useRef(0);
@@ -3677,12 +3705,18 @@ export const OutlineScaffolderPanel: React.FC = () => {
             .filter((term) => term.length >= 2)
             .some((term) => chapterScope.includes(term)),
         );
+        const allowsHistoricalExamples =
+          batchPromptPresetId === "history" ||
+          (batchPromptPresetId === "custom" &&
+            /允许历史案例|历史写作|秦汉/.test(batchWritingPrompt));
+        const domainPrompt =
+          batchWritingPrompt.trim() || BATCH_PROMPT_PRESETS.general.prompt;
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `你是“${projectTitle}”的非虚构图书作者兼事实编辑。${mode !== "generate" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
+            content: `书名：“${projectTitle}”。\n\n用户选择的写作提示词：\n${domainPrompt}\n\n${mode !== "generate" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
 
-每一节必须回答一个明确问题，并包含：具体事实、案例、研究材料或可观察现象，以及相关机制如何运作。对同一问题存在不同解释时，交代争议边界。案例必须服务于当前章节主题；章节骨架没有要求历史案例时，不得自行引入朝代、帝王、战争或历史人物。
+每一节必须回答一个明确问题，并包含：具体事实、案例、研究材料或可观察现象，以及相关机制如何运作。对同一问题存在不同解释时，交代争议边界。案例必须服务于当前章节主题。${allowsHistoricalExamples ? "历史案例必须有材料依据并说明与本章论点的直接关系。" : "章节骨架没有要求历史案例时，不得自行引入朝代、帝王、战争或历史人物。"}
 
 禁止用“彻底、唯一、必然、完全、从根本上、极度、绝对、致命”等词代替论证；确有必要使用时，必须紧邻给出能够支持该强度的材料。禁止“宏伟蓝图之下、时代洪流、思想火种、致命暗伤、深深裂痕”等模板化升华。避免把复杂群体写成单一心理，不得笼统声称“百姓都……”“知识分子普遍……”。
 
@@ -3717,6 +3751,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           /秦汉|秦朝|汉朝|秦末|汉初|秦帝国|汉帝国|秦始皇|汉高祖|刘邦|项羽|赵高|陈胜|吴广|大泽乡/;
         const allowedTopicContext = `${bookRequirement}\n${skeleton}\n${evidenceContext}`;
         if (
+          !allowsHistoricalExamples &&
           qinHanTerms.test(result) &&
           !qinHanTerms.test(allowedTopicContext)
         ) {
@@ -4479,6 +4514,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
     setSourceResearchQueries([]);
     setSourceResearchResults([]);
     setSelectedBatchFiles([]);
+    setBatchPromptPresetId("general");
+    setBatchWritingPrompt(BATCH_PROMPT_PRESETS.general.prompt);
     // A saved project may intentionally be restored from its local history
     // when its manifest is unavailable. Only raw folder imports need blank
     // project metadata as their safe baseline.
@@ -6679,13 +6716,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         Object.fromEntries(
           paths.map((path) => [
             path,
-            chapterStatuses[path] ?? {
-              state: "pending",
-              updatedAt: Date.now(),
-            },
+            { state: "pending", updatedAt: Date.now() },
           ]),
         );
       setChapterStatuses(initialStatuses);
+      setKnowledgeEntries([]);
+      setEvidenceRecords([]);
       const manifest =
         JSON.stringify(
           {
@@ -6696,8 +6732,8 @@ export const OutlineScaffolderPanel: React.FC = () => {
             source,
             chapterBriefs,
             chapterStatuses: initialStatuses,
-            knowledgeEntries,
-            evidenceRecords,
+            knowledgeEntries: [],
+            evidenceRecords: [],
             qualityReports,
             editorialAudits,
             finalReadConfirmed,
@@ -6783,7 +6819,11 @@ export const OutlineScaffolderPanel: React.FC = () => {
       } else if (!manifestResult.success) throw new Error(manifestResult.error);
       setManagedFiles(paths);
       setView("documents");
-      rememberProject(target, paths, { chapterStatuses: initialStatuses });
+      rememberProject(target, paths, {
+        chapterStatuses: initialStatuses,
+        knowledgeEntries: [],
+        evidenceRecords: [],
+      });
       if (paths.length) await openDocument(paths[0], target, false);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -10495,6 +10535,20 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
+                      disabled={!knowledgeEntries.length}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `确定清空当前项目的 ${knowledgeEntries.length} 条知识记录吗？`,
+                          )
+                        )
+                          setKnowledgeEntries([]);
+                      }}
+                    >
+                      清空知识库
+                    </Button>
+                    <Button
+                      variant="outline"
                       disabled={knowledgeLoading || !target}
                       onClick={extractBookKnowledge}
                     >
@@ -11015,6 +11069,41 @@ export const OutlineScaffolderPanel: React.FC = () => {
                   </>
                 ) : (
                   <div className="space-y-2">
+                    <label className="block text-xs">
+                      <span className="mb-1 block text-muted-foreground">
+                        写作提示词预设
+                      </span>
+                      <select
+                        className="h-8 w-full rounded-md border border-input bg-background px-2"
+                        value={batchPromptPresetId}
+                        onChange={(event) => {
+                          const preset = event.target.value as BatchPromptPresetId;
+                          setBatchPromptPresetId(preset);
+                          if (preset !== "custom")
+                            setBatchWritingPrompt(
+                              BATCH_PROMPT_PRESETS[preset].prompt,
+                            );
+                        }}
+                      >
+                        {Object.entries(BATCH_PROMPT_PRESETS).map(
+                          ([id, preset]) => (
+                            <option key={id} value={id}>
+                              {preset.label}
+                            </option>
+                          ),
+                        )}
+                        <option value="custom">自定义</option>
+                      </select>
+                    </label>
+                    <textarea
+                      className="min-h-24 w-full resize-y rounded-md border border-input bg-background p-2 text-xs"
+                      value={batchWritingPrompt}
+                      onChange={(event) => {
+                        setBatchWritingPrompt(event.target.value);
+                        setBatchPromptPresetId("custom");
+                      }}
+                      placeholder="填写生成和重新生成章节时使用的领域、文风和禁写要求"
+                    />
                     <Button
                       size="sm"
                       className="w-full"
