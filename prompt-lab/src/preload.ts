@@ -592,6 +592,7 @@ const electronAPI: ElectronAPI = {
   aiVideoReader: {
     runtimeStatus: () => ipcRenderer.invoke('ai-video-reader:runtime-status'),
     selectFfmpeg: () => ipcRenderer.invoke('ai-video-reader:select-ffmpeg'),
+    preparePlayback: (projectId: string) => ipcRenderer.invoke('ai-video-reader:prepare-playback', projectId),
     listProjects: () => ipcRenderer.invoke('ai-video-reader:list-projects'),
     importVideo: () => ipcRenderer.invoke('ai-video-reader:import-video'),
     importTranscript: (projectId: string) => ipcRenderer.invoke('ai-video-reader:import-transcript', projectId),

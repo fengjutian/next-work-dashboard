@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, type WebContents } from 'electron';
+import { app, dialog, ipcMain, net, protocol, type WebContents } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,7 +21,49 @@ function save(projects: VideoReaderProject[]): void {
   fs.writeFileSync(projectFile(), JSON.stringify(projects, null, 2), 'utf8');
 }
 function hydrate(project: VideoReaderProject): VideoReaderProject {
-  return { ...project, mediaUrl: pathToFileURL(project.sourcePath).href };
+  return { ...project, mediaUrl: `nwd-media://video/${encodeURIComponent(project.id)}` };
+}
+
+function registerMediaProtocol(): void {
+  protocol.handle('nwd-media', async (request) => {
+    const url = new URL(request.url);
+    if (url.hostname !== 'video') return new Response('Not found', { status: 404 });
+    const projectId = decodeURIComponent(url.pathname.replace(/^\//, ''));
+    const project = load().find((item) => item.id === projectId);
+    if (!project || !fs.existsSync(project.sourcePath)) return new Response('Video file not found', { status: 404 });
+    const playbackProxy = path.join(projectCacheDirectory(project.id), 'playback.mp4');
+    const proxyIsCurrent = fs.existsSync(playbackProxy) && fs.statSync(playbackProxy).mtimeMs >= project.sourceMtime;
+    const sourcePath = proxyIsCurrent ? playbackProxy : project.sourcePath;
+    return net.fetch(pathToFileURL(sourcePath).href, { headers: request.headers });
+  });
+}
+
+function createPlaybackProxy(project: VideoReaderProject): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const binary = findMediaBinary('ffmpeg');
+    if (!binary) { reject(new Error('未找到 FFmpeg，无法生成兼容播放版本')); return; }
+    const directory = projectCacheDirectory(project.id);
+    const outputPath = path.join(directory, 'playback.mp4');
+    fs.mkdirSync(directory, { recursive: true });
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).mtimeMs >= project.sourceMtime) { resolve(outputPath); return; }
+    const temporaryPath = path.join(directory, 'playback.tmp.mp4');
+    const child = spawn(binary, [
+      '-y', '-i', project.sourcePath,
+      '-map', '0:v:0', '-map', '0:a?',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+      '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k',
+      '-movflags', '+faststart', temporaryPath,
+    ], { windowsHide: true });
+    let diagnostics = '';
+    child.stderr.on('data', (chunk) => { diagnostics = `${diagnostics}${String(chunk)}`.slice(-4000); });
+    child.on('error', (error) => reject(new Error(`无法启动 FFmpeg：${error.message}`)));
+    child.on('close', (code) => {
+      if (code !== 0 || !fs.existsSync(temporaryPath)) { reject(new Error(`兼容转码失败（${code}）：${diagnostics}`)); return; }
+      if (fs.existsSync(outputPath)) fs.rmSync(outputPath, { force: true });
+      fs.renameSync(temporaryPath, outputPath);
+      resolve(outputPath);
+    });
+  });
 }
 
 function projectCacheDirectory(projectId: string): string {
@@ -42,23 +84,32 @@ function directoryStats(directory: string): { bytes: number; files: number } {
 
 const mediaRuntimeConfigFile = () => path.join(app.getPath('userData'), 'ai-video-reader', 'runtime.json');
 
-function configuredMediaDirectory(): string | undefined {
+function configuredMediaPaths(): { ffmpegPath?: string; ffprobePath?: string; directory?: string } {
   try {
-    const value = (JSON.parse(fs.readFileSync(mediaRuntimeConfigFile(), 'utf8')) as { directory?: unknown }).directory;
-    return typeof value === 'string' && path.isAbsolute(value) ? value : undefined;
-  } catch { return undefined; }
+    const value = JSON.parse(fs.readFileSync(mediaRuntimeConfigFile(), 'utf8')) as Record<string, unknown>;
+    return {
+      ffmpegPath: typeof value.ffmpegPath === 'string' && path.isAbsolute(value.ffmpegPath) ? value.ffmpegPath : undefined,
+      ffprobePath: typeof value.ffprobePath === 'string' && path.isAbsolute(value.ffprobePath) ? value.ffprobePath : undefined,
+      directory: typeof value.directory === 'string' && path.isAbsolute(value.directory) ? value.directory : undefined,
+    };
+  } catch { return {}; }
 }
 
-function mediaBinaryCandidates(executable: string, platformDirectory: string): string[] {
-  const configured = configuredMediaDirectory();
-  const resourceRoots = [process.resourcesPath, app.getAppPath()];
-  const candidates = resourceRoots.flatMap((root) => [
-    path.join(root, 'ffmpeg', platformDirectory, executable),
-    path.join(root, 'ffmpeg', process.platform === 'win32' ? `win-${process.arch}` : `${platformDirectory}-${process.arch}`, executable),
-    path.join(root, 'ffmpeg', 'bin', executable),
-    path.join(root, 'ffmpeg', executable),
+function mediaBinaryCandidates(name: 'ffmpeg' | 'ffprobe', executable: string, platformDirectory: string): string[] {
+  const configured = configuredMediaPaths();
+  const ffmpegRoots = [
+    path.join(process.resourcesPath, 'ffmpeg'),
+    path.join(app.getAppPath(), 'resources', 'ffmpeg'),
+  ];
+  const candidates = ffmpegRoots.flatMap((root) => [
+    path.join(root, process.platform === 'win32' ? `win-${process.arch}` : `${platformDirectory}-${process.arch}`, executable),
+    path.join(root, platformDirectory, executable),
+    path.join(root, 'bin', executable),
+    path.join(root, executable),
   ]);
-  if (configured) candidates.unshift(path.join(configured, executable), path.join(configured, 'bin', executable));
+  const explicitPath = name === 'ffmpeg' ? configured.ffmpegPath : configured.ffprobePath;
+  if (explicitPath) candidates.unshift(explicitPath);
+  if (configured.directory) candidates.unshift(path.join(configured.directory, executable), path.join(configured.directory, 'bin', executable));
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA;
     if (localAppData) candidates.push(path.join(localAppData, 'Programs', 'ffmpeg', 'bin', executable));
@@ -71,7 +122,7 @@ function mediaBinaryCandidates(executable: string, platformDirectory: string): s
 function findMediaBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
   const executable = process.platform === 'win32' ? `${name}.exe` : name;
   const platformDirectory = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
-  return mediaBinaryCandidates(executable, platformDirectory).find((candidate) => fs.existsSync(candidate)) ?? null;
+  return mediaBinaryCandidates(name, executable, platformDirectory).find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 function runBinary(binary: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
@@ -156,6 +207,7 @@ async function chatCompletion(config: { baseUrl: string; apiKey: string; model: 
 }
 
 export function setupAiVideoReaderIPC(): void {
+  registerMediaProtocol();
   ipcMain.handle('ai-video-reader:runtime-status', async () => {
     const ffmpeg = findMediaBinary('ffmpeg'); const ffprobe = findMediaBinary('ffprobe');
     let version: string | undefined;
@@ -164,19 +216,27 @@ export function setupAiVideoReaderIPC(): void {
   });
   ipcMain.handle('ai-video-reader:select-ffmpeg', async () => {
     const picked = await dialog.showOpenDialog({
-      title: '选择 FFmpeg 所在目录',
-      properties: ['openDirectory'],
-      message: '请选择同时包含 ffmpeg 和 ffprobe 的目录（也可以选择它们的上级目录）',
+      title: '选择 FFmpeg 可执行文件',
+      properties: ['openFile'],
+      filters: process.platform === 'win32' ? [{ name: 'FFmpeg', extensions: ['exe'] }] : [{ name: 'FFmpeg', extensions: ['*'] }],
+      message: '请选择 ffmpeg 可执行文件，应用会自动查找同目录的 ffprobe',
     });
     if (picked.canceled || !picked.filePaths[0]) return null;
-    const directory = picked.filePaths[0];
-    const executable = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-    const direct = path.join(directory, executable);
-    const nested = path.join(directory, 'bin', executable);
-    if (!fs.existsSync(direct) && !fs.existsSync(nested)) throw new Error('所选目录中未找到 ffmpeg；请选择包含 ffmpeg 的目录或其上级目录');
+    const ffmpegPath = picked.filePaths[0];
+    const expectedName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+    if (path.basename(ffmpegPath).toLowerCase() !== expectedName) throw new Error(`请选择 ${expectedName}，不要选择压缩包、文件夹或 ffprobe`);
+    try { await runBinary(ffmpegPath, ['-version']); } catch (error) { throw new Error(`所选 FFmpeg 无法启动：${error instanceof Error ? error.message : String(error)}`); }
+    const directory = path.dirname(ffmpegPath);
+    const ffprobePath = path.join(directory, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
     fs.mkdirSync(path.dirname(mediaRuntimeConfigFile()), { recursive: true });
-    fs.writeFileSync(mediaRuntimeConfigFile(), JSON.stringify({ directory }, null, 2), 'utf8');
-    return directory;
+    fs.writeFileSync(mediaRuntimeConfigFile(), JSON.stringify({ ffmpegPath, ffprobePath: fs.existsSync(ffprobePath) ? ffprobePath : undefined }, null, 2), 'utf8');
+    return ffmpegPath;
+  });
+  ipcMain.handle('ai-video-reader:prepare-playback', async (_event, projectId: string) => {
+    const project = load().find((item) => item.id === projectId);
+    if (!project) throw new Error('视频项目不存在');
+    await createPlaybackProxy(project);
+    return `${hydrate(project).mediaUrl}?proxy=${Date.now()}`;
   });
   ipcMain.handle('ai-video-reader:list-projects', () => {
     const projects = load(); for (const project of projects) if (project.segments.length) indexVideoProject(project);

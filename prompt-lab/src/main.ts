@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, protocol, session } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -77,6 +77,9 @@ function configureWindowsJumpList(): void {
 }
 
 configureUserDataPath();
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'nwd-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 if (started) {
   app.quit();
