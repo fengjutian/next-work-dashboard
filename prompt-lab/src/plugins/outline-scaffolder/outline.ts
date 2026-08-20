@@ -34,6 +34,17 @@ export function chapterStateAfterSave(state: ChapterWorkflowState): ChapterWorkf
   return state;
 }
 
+const SPECIAL_MARKDOWN_NAMES = /^(?:404|readme|index|about|license|changelog|contributing|code_of_conduct)\.md$/i;
+
+export function isChapterArticle(path: string, content: string): boolean {
+  const name = path.replace(/\\/g, '/').split('/').pop() ?? path;
+  if (!name.toLowerCase().endsWith('.md') || SPECIAL_MARKDOWN_NAMES.test(name)) return false;
+  const frontmatter = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s|$)/)?.[1] ?? '';
+  if (/^chapter\s*:\s*(?:true|yes|1)\s*$/im.test(frontmatter)) return true;
+  if (/^chapter\s*:/im.test(frontmatter)) return false;
+  return /(?:^|\/)\d+-第[一二三四五六七八九十百千万零〇两\d]+章(?:\s|[^/])*\.md$/i.test(path.replace(/\\/g, '/'));
+}
+
 export function sortChapterPaths(paths: string[]): string[] {
   return [...new Set(paths)].sort((left, right) => {
     const leftName = left.split('/').pop() ?? left;

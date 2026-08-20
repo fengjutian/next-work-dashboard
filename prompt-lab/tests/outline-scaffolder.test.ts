@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
+import { calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
@@ -43,6 +43,14 @@ describe('outline scaffolder', () => {
   it('sorts and deduplicates discovered chapter files by numeric prefix', () => {
     expect(sortChapterPaths(['docs/28-尾声.md', 'docs/02-开端.md', 'docs/12-转折.md', 'docs/02-开端.md']))
       .toEqual(['docs/02-开端.md', 'docs/12-转折.md', 'docs/28-尾声.md']);
+  });
+
+  it('distinguishes chapter articles from special markdown documents', () => {
+    expect(isChapterArticle('docs/21-第二十一章 开始.md', '# 第二十一章 开始')).toBe(true);
+    expect(isChapterArticle('docs/01-1.1 准备.md', '---\nchapter: true\n---\n# 准备')).toBe(true);
+    expect(isChapterArticle('docs/404.md', '---\nchapter: true\n---\n# 页面未找到')).toBe(false);
+    expect(isChapterArticle('docs/about.md', '# 关于')).toBe(false);
+    expect(isChapterArticle('docs/custom.md', '---\nchapter: false\n---\n# 附录')).toBe(false);
   });
 
   it('creates a compact reversible text diff', () => {

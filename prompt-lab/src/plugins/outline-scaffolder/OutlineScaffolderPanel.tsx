@@ -9,6 +9,7 @@ import {
   FolderOpen,
   GitBranch,
   Loader2,
+  RefreshCw,
   Save,
   Sparkles,
 } from "@/components/icons";
@@ -21,6 +22,7 @@ import {
   compactTextDiff,
   createChapterDocuments,
   createReadme,
+  isChapterArticle,
   parseOutline,
   sortChapterPaths,
   type ChapterWorkflowState,
@@ -983,6 +985,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
     current: "",
   });
   const batchStopRef = useRef(false);
+  const batchAbortRef = useRef<AbortController | null>(null);
+  const batchRunRef = useRef(0);
+  const batchCurrentRef = useRef<{
+    path: string;
+    status: ChapterGenerationStatus;
+  } | null>(null);
   const [projectTitle, setProjectTitle] = useState("未命名书籍");
   const [subfolder, setSubfolder] = useState("我的文档");
   const [splitMode, setSplitMode] = useState<SplitMode>("chapter");
@@ -1073,6 +1081,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
   const [pagesCustomDomain, setPagesCustomDomain] = useState("");
   const [pagesAccentColor, setPagesAccentColor] = useState("#6d285f");
   const aiRequestRef = useRef(0);
+  const activeFileRef = useRef("");
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const nodes = useMemo(() => parseOutline(source), [source]);
   const baseDocuments = useMemo(
@@ -1105,6 +1114,9 @@ export const OutlineScaffolderPanel: React.FC = () => {
     () => countArticleWords(documentContent),
     [documentContent],
   );
+  useEffect(() => {
+    activeFileRef.current = activeFile;
+  }, [activeFile]);
   const generatorStage = nodes.length
     ? target
       ? 3
@@ -3533,29 +3545,54 @@ export const OutlineScaffolderPanel: React.FC = () => {
     }
   };
 
-  const runBatchGeneration = async () => {
+  const runBatchGeneration = async (mode: "generate" | "rewrite") => {
     if (!target || batchGenerating) return;
     if (!aiApi.apiKey?.trim()) {
       notice.error({ message: "请先配置助写模型", placement: "bottomRight" });
       return;
     }
-    const candidates = managedFiles.filter((path) =>
-      ["pending", "error"].includes(chapterStatuses[path]?.state ?? "pending"),
+    const inspectedFiles = await Promise.all(
+      managedFiles.map(async (path) => {
+        const read = await window.electronAPI.workspace.readTextFile(
+          target.path,
+          path,
+        );
+        return read.success && read.data && isChapterArticle(path, read.data.content)
+          ? path
+          : null;
+      }),
     );
+    const chapterFiles = inspectedFiles.filter(
+      (path): path is string => Boolean(path),
+    );
+    const candidates =
+      mode === "rewrite"
+        ? chapterFiles
+        : chapterFiles.filter((path) =>
+            ["pending", "error"].includes(
+              chapterStatuses[path]?.state ?? "pending",
+            ),
+          );
     if (!candidates.length) {
       notice.info({
-        message: "没有待生成或失败的章节",
+        message:
+          mode === "rewrite" ? "没有可重写的章节" : "没有待生成或失败的章节",
         placement: "bottomRight",
       });
       return;
     }
     if (
       !window.confirm(
-        `将串行生成 ${candidates.length} 个章节。已有正文不会被覆盖，是否继续？`,
+        mode === "rewrite"
+          ? `将串行重写 ${candidates.length} 个章节，并覆盖这些章节的现有正文。此操作可能产生较多模型调用费用，是否继续？`
+          : `将串行生成 ${candidates.length} 个章节。已有正文不会被覆盖，是否继续？`,
       )
     )
       return;
     batchStopRef.current = false;
+    const runId = ++batchRunRef.current;
+    const controller = new AbortController();
+    batchAbortRef.current = controller;
     setBatchGenerating(true);
     setBatchProgress({ completed: 0, total: candidates.length, current: "" });
     const provider = createOpenAIProvider({
@@ -3564,8 +3601,13 @@ export const OutlineScaffolderPanel: React.FC = () => {
     });
     let completed = 0;
     for (let index = 0; index < candidates.length; index += 1) {
-      if (batchStopRef.current) break;
+      if (batchStopRef.current || runId !== batchRunRef.current) break;
       const path = candidates[index];
+      const previousStatus = chapterStatuses[path] ?? {
+        state: "pending" as const,
+        updatedAt: 0,
+      };
+      batchCurrentRef.current = { path, status: previousStatus };
       const chapterName =
         path.split("/").pop()?.replace(/\.md$/i, "").replace(/^\d+-/, "") ??
         path;
@@ -3589,6 +3631,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
           .replace(/^#+\s+.*$/gm, "")
           .trim();
         if (
+          mode === "generate" &&
           countArticleWords(prose) > 150 &&
           !skeleton.includes("<!-- 在这里添加内容 -->")
         ) {
@@ -3621,7 +3664,7 @@ export const OutlineScaffolderPanel: React.FC = () => {
         const messages: ChatMessage[] = [
           {
             role: "system",
-            content: `你是“${projectTitle}”的历史类图书作者兼事实编辑。根据章节骨架和 chapter-writing-brief 完成本章，但不能把通识概述扩写成看似深刻的散文。
+            content: `你是“${projectTitle}”的历史类图书作者兼事实编辑。${mode === "rewrite" ? "完整重写本章现有正文；保留 YAML、一级标题、chapter-writing-brief、链接、图片和合理的小标题层级，重新组织正文，不得只做少量同义词替换。现有内容仅作为事实、结构与待核实标记的参考，不沿用其中的错误。" : "根据章节骨架和 chapter-writing-brief 完成本章。"}不能把通识概述扩写成看似深刻的散文。
 
 每一节必须回答一个明确问题，并包含：至少两个可辨认的事实或材料锚点、制度或行动如何运作的中间机制，以及该材料能够支持到什么程度。对同一问题存在不同解释时，交代争议边界。区分同时代材料、后世记载与现代研究，不能把后世概括直接当作当时事实。
 
@@ -3640,12 +3683,16 @@ export const OutlineScaffolderPanel: React.FC = () => {
           temperature: 0.55,
           maxTokens: 8_192,
           stream: true,
+          signal: controller.signal,
         })) {
-          if (batchStopRef.current) break;
+          if (batchStopRef.current || runId !== batchRunRef.current) break;
           result += chunk.delta || "";
         }
-        if (batchStopRef.current) {
-          setChapterStatus(path, "pending");
+        if (batchStopRef.current || runId !== batchRunRef.current) {
+          setChapterStatuses((current) => ({
+            ...current,
+            [path]: previousStatus,
+          }));
           break;
         }
         if (!result.trim()) throw new Error("模型未返回正文");
@@ -3663,12 +3710,19 @@ export const OutlineScaffolderPanel: React.FC = () => {
           throw new Error(written.error || "写入章节失败");
         setChapterStatus(path, "draft");
         completed += 1;
-        if (activeFile === path) {
+        if (activeFileRef.current === path) {
           setDocumentContent(`${result.trimEnd()}\n`);
           setSavedContent(`${result.trimEnd()}\n`);
           setModifiedAt(written.data.modifiedAt);
         }
       } catch (error) {
+        if (runId !== batchRunRef.current || controller.signal.aborted) {
+          setChapterStatuses((current) => ({
+            ...current,
+            [path]: previousStatus,
+          }));
+          break;
+        }
         setChapterStatus(
           path,
           "error",
@@ -3681,13 +3735,39 @@ export const OutlineScaffolderPanel: React.FC = () => {
         current: chapterName,
       });
     }
+    if (runId !== batchRunRef.current) return;
+    batchAbortRef.current = null;
     setBatchGenerating(false);
     setBatchProgress((current) => ({ ...current, completed, current: "" }));
     notice.info({
-      message: batchStopRef.current ? "批量生成已停止" : "批量生成结束",
-      description: `已处理 ${completed}/${candidates.length} 章；生成结果进入“草稿待确认”状态。`,
+      message: batchStopRef.current
+        ? mode === "rewrite"
+          ? "批量重写已停止"
+          : "批量生成已停止"
+        : mode === "rewrite"
+          ? "批量重写结束"
+          : "批量生成结束",
+      description: `已处理 ${completed}/${candidates.length} 章；${mode === "rewrite" ? "重写" : "生成"}结果进入“草稿待确认”状态。`,
       placement: "bottomRight",
     });
+  };
+
+  const stopBatchGenerationImmediately = () => {
+    batchStopRef.current = true;
+    batchRunRef.current += 1;
+    batchAbortRef.current?.abort();
+    batchAbortRef.current = null;
+    const current = batchCurrentRef.current;
+    if (current) {
+      setChapterStatuses((statuses) => ({
+        ...statuses,
+        [current.path]: current.status,
+      }));
+    }
+    batchCurrentRef.current = null;
+    setBatchGenerating(false);
+    setBatchProgress((progress) => ({ ...progress, current: "" }));
+    notice.info({ message: "批处理已立即终止", placement: "bottomRight" });
   };
 
   useEffect(() => {
@@ -4225,6 +4305,12 @@ export const OutlineScaffolderPanel: React.FC = () => {
         !window.confirm("当前文档尚未保存，确定切换吗？"))
     )
       return;
+    // A response started for the previous document must never be allowed to
+    // populate this editor after navigation completes.
+    aiRequestRef.current += 1;
+    setAiLoading(false);
+    setAiResult("");
+    setAiError("");
     setDocumentLoading(true);
     try {
       const result = await window.electronAPI.workspace.readTextFile(
@@ -4344,6 +4430,36 @@ export const OutlineScaffolderPanel: React.FC = () => {
     confirmDiscard = true,
   ) => {
     if (!folder) return;
+    // Treat every folder load as a project boundary. A folder without a valid
+    // manifest must not inherit writing instructions, sources, or knowledge
+    // from the project that happened to be open before it.
+    aiRequestRef.current += 1;
+    batchStopRef.current = true;
+    batchRunRef.current += 1;
+    batchAbortRef.current?.abort();
+    batchAbortRef.current = null;
+    batchCurrentRef.current = null;
+    setBatchGenerating(false);
+    setAiLoading(false);
+    setAiResult("");
+    setAiError("");
+    setAiInstruction("");
+    setAiSources("");
+    setResearchPlans({});
+    setSourceResearchQueries([]);
+    setSourceResearchResults([]);
+    // A saved project may intentionally be restored from its local history
+    // when its manifest is unavailable. Only raw folder imports need blank
+    // project metadata as their safe baseline.
+    if (shouldRemember) {
+      setProjectTitle(folder.name);
+      setSource("");
+      setBookRequirement("");
+      setChapterBriefs({});
+      setChapterStatuses({});
+      setKnowledgeEntries([]);
+      setEvidenceRecords([]);
+    }
     setDocumentLoading(true);
     try {
       const result = await window.electronAPI.workspace.listFiles(folder.path);
@@ -10861,32 +10977,42 @@ export const OutlineScaffolderPanel: React.FC = () => {
                     </div>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="destructive"
                       className="w-full"
-                      onClick={() => {
-                        batchStopRef.current = true;
-                      }}
+                      onClick={stopBatchGenerationImmediately}
                     >
-                      完成当前请求后停止
+                      立即终止
                     </Button>
                   </>
                 ) : (
-                  <Button
-                    size="sm"
-                    className="w-full"
-                    disabled={
-                      !aiApi.apiKey?.trim() ||
-                      !managedFiles.some((path) =>
-                        ["pending", "error"].includes(
-                          chapterStatuses[path]?.state ?? "pending",
-                        ),
-                      )
-                    }
-                    onClick={runBatchGeneration}
-                  >
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    生成待写作章节
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      disabled={
+                        !aiApi.apiKey?.trim() ||
+                        !managedFiles.some((path) =>
+                          ["pending", "error"].includes(
+                            chapterStatuses[path]?.state ?? "pending",
+                          ),
+                        )
+                      }
+                      onClick={() => void runBatchGeneration("generate")}
+                    >
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      生成待写作章节
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      disabled={!aiApi.apiKey?.trim()}
+                      onClick={() => void runBatchGeneration("rewrite")}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      批量重写全部章节
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
