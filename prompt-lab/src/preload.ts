@@ -586,6 +586,14 @@ const electronAPI: ElectronAPI = {
 
   // Security Audit（security-audit 插件）
   securityAudit: securityAuditBridge,
+
+  aiVideoReader: {
+    listProjects: () => ipcRenderer.invoke('ai-video-reader:list-projects'),
+    importVideo: () => ipcRenderer.invoke('ai-video-reader:import-video'),
+    importTranscript: (projectId: string) => ipcRenderer.invoke('ai-video-reader:import-transcript', projectId),
+    deleteProject: (projectId: string) => ipcRenderer.invoke('ai-video-reader:delete-project', projectId),
+    exportTranscript: (projectId: string, format: 'srt' | 'vtt' | 'txt' | 'md' | 'json') => ipcRenderer.invoke('ai-video-reader:export-transcript', projectId, format),
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

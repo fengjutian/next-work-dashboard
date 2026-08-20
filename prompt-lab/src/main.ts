@@ -20,6 +20,7 @@ import { setupWorkBrowserIPC } from './main/work-browser';
 import { setupSecurityAuditIPC } from './main/security-audit';
 import { setupWebsiteRegistryIPC } from './main/website-registry';
 import { setupCodeVisualizerIPC } from './main/code-visualizer';
+import { setupAiVideoReaderIPC } from './main/ai-video-reader';
 import { resolveUserDataPath } from './main/user-data-path';
 import { registerPluginRuntimeHook } from './main/plugin-runtime-hooks';
 
@@ -135,6 +136,7 @@ if (started) {
     setupIPC(webviewPreloadPath);
     setupSecurityAuditIPC();
     setupCodeVisualizerIPC();
+    setupAiVideoReaderIPC();
     openMainWindow();
     setupDiskSpaceIPC();
     setupNetProbeIPC();

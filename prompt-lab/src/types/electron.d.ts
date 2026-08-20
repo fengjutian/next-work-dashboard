@@ -132,6 +132,7 @@ export interface MarketplaceCatalog {
 }
 
 export interface ElectronAPI {
+  aiVideoReader: import('../core/ai-video-reader/types').VideoReaderApi;
   outlineProjects: {
     load: () => Promise<ChapterProjectRecord[]>;
     save: (projects: ChapterProjectRecord[]) => Promise<{ success: boolean; error?: string }>;

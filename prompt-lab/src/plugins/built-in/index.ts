@@ -51,6 +51,7 @@ const diskSpace = preloadable(() => import('../disk-space').then((m) => ({ defau
 const networkObservatory = preloadable(() => import('../network-observatory').then((m) => ({ default: m.NetworkObservatoryPanel })));
 const lyricStudio = preloadable(() => import('../lyric-studio').then((m) => ({ default: m.LyricStudioPanel })));
 const videoPlayer = preloadable(() => import('../video-player').then((m) => ({ default: m.VideoPlayerPanel })));
+const aiVideoReader = preloadable(() => import('../ai-video-reader').then((m) => ({ default: m.AiVideoReaderPanel })));
 const mycast = preloadable(() => import('../mycast').then((m) => ({ default: m.MyCastPanel })));
 const phone = preloadable(() => import('../phone').then((m) => ({ default: m.PhonePanel })));
 const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ default: m.VoiceInputPanel })));
@@ -90,6 +91,7 @@ const DiskSpacePanel = diskSpace.component;
 const NetworkObservatoryPanel = networkObservatory.component;
 const LyricStudioPanel = lyricStudio.component;
 const VideoPlayerPanel = videoPlayer.component;
+const AiVideoReaderPanel = aiVideoReader.component;
 const MyCastPanel = mycast.component;
 const PhonePanel = phone.component;
 const VoiceInputPanel = voiceInput.component;
@@ -628,6 +630,22 @@ const builtInPlugins: Plugin[] = [
     },
   },
   {
+    id: 'ai-video-reader',
+    name: 'AI 视频阅读器',
+    icon: Video,
+    component: AiVideoReaderPanel,
+    enabled: false,
+    order: 26.5,
+    keepAlive: true,
+    contributions: {
+      commands: [{ id: 'ai-video-reader.import', title: '导入视频', category: 'AI 视频阅读器' }],
+      views: [{ id: 'ai-video-reader.main', title: 'AI 视频阅读器', component: AiVideoReaderPanel, location: 'main' }],
+    },
+    activate: (context) => context.commands.register('ai-video-reader.import', () => {
+      window.dispatchEvent(new CustomEvent('ai-video-reader:command', { detail: { command: 'import' } }));
+    }),
+  },
+  {
     id: 'mycast',
     name: 'MyCast',
     icon: Phone,
@@ -819,6 +837,7 @@ export function registerBuiltInPlugins(): void {
     'network-observatory': networkObservatory.preload,
     'lyric-studio': lyricStudio.preload,
     'video-player': videoPlayer.preload,
+    'ai-video-reader': aiVideoReader.preload,
     mycast: mycast.preload,
     'voice-input': voiceInput.preload,
     'zodiac-perspectives': zodiacPerspectives.preload,

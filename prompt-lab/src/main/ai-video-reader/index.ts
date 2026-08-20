@@ -1,0 +1,1 @@
+export { setupAiVideoReaderIPC } from './ipc';
