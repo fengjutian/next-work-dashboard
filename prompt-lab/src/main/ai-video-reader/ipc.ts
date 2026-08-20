@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import type { TranscriptSegment, VideoChapter, VideoReaderProject } from '../../core/ai-video-reader/types';
 import { exportTranscript, parseTranscript } from '../../core/ai-video-reader/transcript';
+import { normalizeSegments } from '../../core/ai-video-reader/editing';
 import { indexVideoProject, projectContext, removeVideoProject, searchVideoSegments } from './database';
 
 const projectFile = () => path.join(app.getPath('userData'), 'ai-video-reader', 'projects.json');
@@ -283,5 +284,9 @@ export function setupAiVideoReaderIPC(): void {
     if (activeTranscriptions.has(projectId)) throw new Error('转写进行中，不能清理缓存');
     const directory = projectCacheDirectory(projectId); if (!fs.existsSync(directory)) return false;
     fs.rmSync(directory, { recursive: true, force: true }); return true;
+  });
+  ipcMain.handle('ai-video-reader:save-transcript', (_event, projectId: string, segments: TranscriptSegment[]) => {
+    const projects = load(); const project = projects.find((item) => item.id === projectId); if (!project) throw new Error('视频项目不存在');
+    project.segments = normalizeSegments(segments); project.updatedAt = Date.now(); save(projects); indexVideoProject(project); return hydrate(project);
   });
 }

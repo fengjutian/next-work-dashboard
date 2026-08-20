@@ -69,4 +69,5 @@ export interface VideoReaderApi {
   relinkVideo(projectId: string): Promise<VideoReaderProject | null>;
   cacheInfo(projectId: string): Promise<{ bytes: number; files: number }>;
   clearCache(projectId: string): Promise<boolean>;
+  saveTranscript(projectId: string, segments: TranscriptSegment[]): Promise<VideoReaderProject>;
 }

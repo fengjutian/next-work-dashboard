@@ -608,6 +608,7 @@ const electronAPI: ElectronAPI = {
     relinkVideo: (projectId: string) => ipcRenderer.invoke('ai-video-reader:relink-video', projectId),
     cacheInfo: (projectId: string) => ipcRenderer.invoke('ai-video-reader:cache-info', projectId),
     clearCache: (projectId: string) => ipcRenderer.invoke('ai-video-reader:clear-cache', projectId),
+    saveTranscript: (projectId: string, segments: import('./core/ai-video-reader/types').TranscriptSegment[]) => ipcRenderer.invoke('ai-video-reader:save-transcript', projectId, segments),
   },
 };
 
