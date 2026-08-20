@@ -213,4 +213,25 @@ export function setupAiVideoReaderIPC(): void {
     const task = activeTranscriptions.get(projectId); if (!task) return false;
     task.controller.abort(); task.child?.kill(); return true;
   });
+  ipcMain.handle('ai-video-reader:analyze', async (event, projectId: string, config: { baseUrl: string; apiKey: string; model: string }) => {
+    if (!config.baseUrl || !config.apiKey || !config.model) throw new Error('请完整填写 LLM 配置');
+    const projects = load(); const project = projects.find((item) => item.id === projectId);
+    if (!project?.segments.length) throw new Error('请先生成或导入 Transcript');
+    const chunks = transcriptChunks(project.segments); const summaries: string[] = []; const chapters: VideoChapter[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      event.sender.send('ai-video-reader:task-progress', { projectId, stage: 'analyzing', progress: Math.round(index / chunks.length * 80), detail: `正在理解第 ${index + 1}/${chunks.length} 块` });
+      const source = chunks[index].map((segment) => `[${segment.startMs}-${segment.endMs}] ${segment.text}`).join('\n');
+      const content = await chatCompletion(config, [{ role: 'system', content: '你是视频内容分析器。仅依据转写内容回答，输出 JSON：{"summary":"本块摘要","chapters":[{"title":"章节标题","startMs":整数,"endMs":整数}]}。时间必须来自输入。' }, { role: 'user', content: source }]);
+      const parsed = parseJsonObject(content); if (typeof parsed.summary === 'string') summaries.push(parsed.summary);
+      if (Array.isArray(parsed.chapters)) for (const item of parsed.chapters as Array<Record<string, unknown>>) {
+        const startMs = Number(item.startMs); const endMs = Number(item.endMs); const title = String(item.title ?? '').trim();
+        if (title && Number.isFinite(startMs) && Number.isFinite(endMs) && startMs >= 0 && endMs > startMs && endMs <= project.durationMs + 1000) chapters.push({ id: `chapter-${chapters.length + 1}`, title, startMs, endMs });
+      }
+    }
+    event.sender.send('ai-video-reader:task-progress', { projectId, stage: 'analyzing', progress: 85, detail: '正在合并全局摘要' });
+    const reduced = await chatCompletion(config, [{ role: 'system', content: '将分块摘要合并为结构清晰、忠于原文的中文视频摘要。输出 JSON：{"summary":"..."}。不要添加原文没有的信息。' }, { role: 'user', content: summaries.join('\n\n') }]);
+    const finalResult = parseJsonObject(reduced); project.summary = typeof finalResult.summary === 'string' ? finalResult.summary : summaries.join('\n\n');
+    project.chapters = chapters.sort((a, b) => a.startMs - b.startMs); project.updatedAt = Date.now(); save(projects);
+    event.sender.send('ai-video-reader:task-progress', { projectId, stage: 'saving', progress: 100, detail: '分析完成' }); return hydrate(project);
+  });
 }
