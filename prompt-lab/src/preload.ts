@@ -601,6 +601,7 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('ai-video-reader:task-progress', handler);
       return () => ipcRenderer.removeListener('ai-video-reader:task-progress', handler);
     },
+    analyze: (projectId: string, config: { baseUrl: string; apiKey: string; model: string }) => ipcRenderer.invoke('ai-video-reader:analyze', projectId, config),
   },
 };
 

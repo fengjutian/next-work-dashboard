@@ -44,7 +44,7 @@ export interface TranscriptImportResult {
 
 export interface VideoReaderTaskProgress {
   projectId: string;
-  stage: 'extracting' | 'transcribing' | 'saving';
+  stage: 'extracting' | 'transcribing' | 'analyzing' | 'saving';
   progress: number;
   detail: string;
 }
@@ -59,4 +59,5 @@ export interface VideoReaderApi {
   transcribe(projectId: string, config: { baseUrl: string; apiKey: string; model: string; language?: string }): Promise<VideoReaderProject>;
   cancelTranscription(projectId: string): Promise<boolean>;
   onTaskProgress(handler: (progress: VideoReaderTaskProgress) => void): () => void;
+  analyze(projectId: string, config: { baseUrl: string; apiKey: string; model: string }): Promise<VideoReaderProject>;
 }

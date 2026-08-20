@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
-import type { VideoReaderProject } from '../../core/ai-video-reader/types';
+import type { TranscriptSegment, VideoChapter, VideoReaderProject } from '../../core/ai-video-reader/types';
 import { exportTranscript, parseTranscript } from '../../core/ai-video-reader/transcript';
 
 const projectFile = () => path.join(app.getPath('userData'), 'ai-video-reader', 'projects.json');
@@ -95,6 +95,26 @@ async function transcribeWithRetry(audioPath: string, config: { baseUrl: string;
     }
   }
   throw lastError;
+}
+
+function transcriptChunks(segments: TranscriptSegment[], maxCharacters = 10000): TranscriptSegment[][] {
+  const chunks: TranscriptSegment[][] = []; let current: TranscriptSegment[] = []; let size = 0;
+  for (const segment of segments) {
+    if (current.length && size + segment.text.length > maxCharacters) { chunks.push(current); current = []; size = 0; }
+    current.push(segment); size += segment.text.length;
+  }
+  if (current.length) chunks.push(current); return chunks;
+}
+
+function parseJsonObject(content: string): Record<string, unknown> {
+  return JSON.parse(content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()) as Record<string, unknown>;
+}
+
+async function chatCompletion(config: { baseUrl: string; apiKey: string; model: string }, messages: Array<{ role: 'system' | 'user'; content: string }>): Promise<string> {
+  const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: config.model, messages, temperature: 0.2, response_format: { type: 'json_object' } }) });
+  const text = await response.text(); if (!response.ok) throw new Error(`LLM 请求失败（${response.status}）：${text.slice(0, 600)}`);
+  const result = JSON.parse(text) as { choices?: Array<{ message?: { content?: string } }> }; const content = result.choices?.[0]?.message?.content;
+  if (!content) throw new Error('LLM 没有返回内容'); return content;
 }
 
 export function setupAiVideoReaderIPC(): void {
