@@ -12387,49 +12387,22 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
               </div>
             </aside>
           )}
-          {gitOpen && (
-            <aside className="flex min-h-0 flex-col border-l border-border bg-card">
-              <div className="border-b border-border p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-semibold">
-                    <GitBranch className="h-4 w-4 text-primary" />
-                    保存到 Git 仓库
-                  </div>
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    网站主题色
-                    <input
-                      type="color"
-                      value={pagesAccentColor}
-                      onChange={(event) =>
-                        setPagesAccentColor(event.target.value)
-                      }
-                      className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0"
-                    />
-                  </label>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  只提交当前文章项目，不包含仓库中的其他改动。
-                </p>
-              </div>
-              <div className="max-h-[58vh] space-y-3 overflow-auto border-b border-border p-4">
-                <label className="block text-xs text-muted-foreground">
-                  提交说明
-                  <input
-                    value={gitMessage}
-                    onChange={(event) => setGitMessage(event.target.value)}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
-                  />
-                </label>
-                {gitRepository === false && (
-                  <Button
-                    className="w-full"
-                    disabled={gitLoading}
-                    onClick={initializeGit}
-                  >
-                    <GitBranch className="mr-2 h-4 w-4" />
-                    初始化为 Git 仓库
-                  </Button>
-                )}
+          {gitOpen && <GitPanel
+            accentColor={pagesAccentColor} setAccentColor={setPagesAccentColor}
+            message={gitMessage} setMessage={setGitMessage} repository={gitRepository}
+            loading={gitLoading} changes={gitChanges} error={gitError}
+            initialize={initializeGit} refresh={refreshGit} commit={commitToGit}
+            remoteUrl={gitRemoteUrl} setRemoteUrl={setGitRemoteUrl} remoteName={gitRemoteName}
+            setRemoteName={setGitRemoteName} branch={gitBranch} setBranch={setGitBranch} publish={publishToRemote}
+            pagesOpen={pagesOpen} setPagesOpen={setPagesOpen} pagesTitle={pagesTitle} setPagesTitle={setPagesTitle}
+            pagesDescription={pagesDescription} setPagesDescription={setPagesDescription} pagesAuthor={pagesAuthor}
+            setPagesAuthor={setPagesAuthor} pagesLanguage={pagesLanguage} setPagesLanguage={setPagesLanguage}
+            pagesRepositoryName={pagesRepositoryName} setPagesRepositoryName={setPagesRepositoryName}
+            pagesCustomDomain={pagesCustomDomain} setPagesCustomDomain={setPagesCustomDomain}
+            managedFilesCount={managedFiles.length} configurePages={configureGitHubPages}
+            gateTargetsCount={gateFixTargets.length} gateIssues={publishGateIssues}
+            canOverride={publishCanOverride} openGateFix={openAiGateFix}
+          />}
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
