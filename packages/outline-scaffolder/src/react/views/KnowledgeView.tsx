@@ -1,0 +1,14 @@
+import React from "react";
+import { Loader2, Sparkles } from "lucide-react";
+import { Button } from "../Button";
+
+export type KnowledgeKind = "person" | "event" | "place" | "term" | "date";
+export interface KnowledgeItemView { id: string; kind: KnowledgeKind; name: string; canonical: string; aliases: string; notes: string }
+export interface KnowledgeViewProps { entries: KnowledgeItemView[]; setEntries(updater: (current: KnowledgeItemView[]) => KnowledgeItemView[]): void; loading: boolean; canExtract: boolean; extract(): void }
+
+export function KnowledgeView(p: KnowledgeViewProps) {
+  const patch = (id: string, value: Partial<KnowledgeItemView>) => p.setEntries((items) => items.map((item) => item.id === id ? { ...item, ...value } : item));
+  return <div className="mx-auto max-w-5xl space-y-4"><div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold">全书知识库</h2><p className="text-sm text-muted-foreground">统一人物、事件、地点、时间和术语的标准写法。</p></div><div className="flex gap-2"><Button variant="outline" disabled={!p.entries.length} onClick={() => { if (globalThis.confirm(`确定清空 ${p.entries.length} 条知识记录吗？`)) p.setEntries(() => []); }}>清空知识库</Button><Button variant="outline" disabled={p.loading || !p.canExtract} onClick={p.extract}>{p.loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}AI 从全书抽取</Button><Button onClick={() => p.setEntries((items) => [...items, { id: `${Date.now()}`, kind: "person", name: "", canonical: "", aliases: "", notes: "" }])}>新增条目</Button></div></div>
+    {p.entries.length ? p.entries.map((item) => <div key={item.id} className="grid gap-3 rounded-xl border border-border bg-card p-4 shadow-sm lg:grid-cols-[120px_1fr_1fr_1.3fr_auto]"><select value={item.kind} onChange={(event) => patch(item.id, { kind: event.target.value as KnowledgeKind })} className="rounded-md border border-input bg-background px-2 py-2 text-sm"><option value="person">人物</option><option value="event">事件</option><option value="place">地点</option><option value="term">术语</option><option value="date">时间</option></select>{(["name", "canonical", "aliases"] as const).map((field) => <input key={field} value={item[field]} onChange={(event) => patch(item.id, { [field]: event.target.value })} placeholder={field === "name" ? "条目名称" : field === "canonical" ? "标准写法" : "别名，以顿号分隔"} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />)}<Button size="sm" variant="ghost" onClick={() => p.setEntries((items) => items.filter((entry) => entry.id !== item.id))}>删除</Button><textarea value={item.notes} onChange={(event) => patch(item.id, { notes: event.target.value })} placeholder="事实说明、时间范围、人物关系或使用规则" className="h-16 resize-none rounded-md border border-input bg-background p-2 text-sm lg:col-span-5" /></div>) : <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">暂无知识条目，可让 AI 从全书提取后逐条确认。</div>}
+  </div>;
+}
