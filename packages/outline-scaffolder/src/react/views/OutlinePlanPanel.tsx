@@ -1,0 +1,21 @@
+import React from "react";
+import { Check, FileText, Loader2 } from "lucide-react";
+import type { OutlineNode } from "../../core/outline";
+import { Button } from "../Button";
+import { EditableOutlineTree } from "../components/EditableOutlineTree";
+
+interface ChapterBrief { goal: string; targetWords: number; keyQuestions: string; requiredSources: string; avoidTopics: string }
+interface ChapterDocument { path: string; title: string }
+const EMPTY_BRIEF: ChapterBrief = { goal: "", targetWords: 2500, keyQuestions: "", requiredSources: "", avoidTopics: "" };
+
+export interface OutlinePlanPanelProps {
+  nodes: OutlineNode[]; warnings: string[];
+  renameNode: (id: string, title: string) => void; deleteNode: (id: string) => void; moveNode: (id: string, direction: -1 | 1) => void;
+  documents: ChapterDocument[]; briefs: Record<string, ChapterBrief>; updateBrief: (path: string, patch: Partial<ChapterBrief>) => void;
+  showBriefs: boolean; toggleBriefs: () => void;
+  canGenerate: boolean; creating: boolean; generate: () => void; documentCount: number;
+}
+
+export function OutlinePlanPanel(p: OutlinePlanPanelProps) {
+  return <><section className="min-h-[230px] flex-1 overflow-auto rounded-xl border border-border bg-card p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-semibold">第三步：修改并确认目录</h2><p className="mt-1 text-xs text-muted-foreground">悬停条目可修改或删除；删除父级会同时删除其下级。</p></div>{p.nodes.length > 0 && <Check className="h-4 w-4 text-emerald-500" />}</div>{p.warnings.length > 0 && <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">{p.warnings.map((warning) => <div key={warning}>• {warning}</div>)}</div>}{p.nodes.length ? <EditableOutlineTree nodes={p.nodes} onRename={p.renameNode} onDelete={p.deleteNode} onMove={p.moveNode} /> : <p className="text-sm text-muted-foreground">填写需求生成目录，或在左侧手动输入目录。</p>}{p.documents.length > 0 && <div className="mt-4 border-t border-border pt-3"><button type="button" className="flex w-full items-center justify-between text-left text-sm font-semibold" onClick={p.toggleBriefs}><span>单章写作卡片 <span className="ml-1 text-xs font-normal text-muted-foreground">{p.documents.filter((document) => p.briefs[document.path]).length}/{p.documents.length}</span></span><span className="text-xs text-muted-foreground">{p.showBriefs ? "收起" : "展开"}</span></button>{p.showBriefs && <div className="mt-3 max-h-[460px] space-y-3 overflow-auto pr-1">{p.documents.map((document) => { const brief = { ...EMPTY_BRIEF, ...p.briefs[document.path] }; return <div key={document.path} className="rounded-lg border border-border p-3"><div className="mb-2 truncate text-sm font-medium" title={document.title}>{document.title}</div><div className="grid grid-cols-[1fr_90px] gap-2"><input value={brief.goal} onChange={(event) => p.updateBrief(document.path, { goal: event.target.value })} placeholder="本章写作目标" className="rounded-md border border-input bg-background px-2 py-1.5 text-xs" /><input type="number" min={100} step={100} value={brief.targetWords} onChange={(event) => p.updateBrief(document.path, { targetWords: Math.max(100, Number(event.target.value) || 2500) })} title="目标字数" className="rounded-md border border-input bg-background px-2 py-1.5 text-xs" /></div><textarea value={brief.keyQuestions} onChange={(event) => p.updateBrief(document.path, { keyQuestions: event.target.value })} placeholder="核心问题：本章必须回答什么？" className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs" /><textarea value={brief.requiredSources} onChange={(event) => p.updateBrief(document.path, { requiredSources: event.target.value })} placeholder="必用史料：书名、篇章、论文或材料编号" className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs" /><textarea value={brief.avoidTopics} onChange={(event) => p.updateBrief(document.path, { avoidTopics: event.target.value })} placeholder="避免重复：哪些内容已由其他章节负责？" className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs" /></div>; })}</div>}</div>}</section><Button size="lg" disabled={!p.canGenerate || p.creating} onClick={p.generate}>{p.creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}第四步：生成 {p.documentCount} 个章节文档</Button></>;
+}

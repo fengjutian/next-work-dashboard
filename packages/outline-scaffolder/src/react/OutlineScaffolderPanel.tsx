@@ -1,18 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { notification } from "antd";
-import {
-  BookOpen,
-  Check,
-  FileText,
-  FolderOpen,
-  GitBranch,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
 import { Button } from "./Button";
 import { createOpenAIProvider, type ChatMessage } from "../core/llm";
 import type { OutlineScaffolderAdapter } from "./adapter";
-import { EditableOutlineTree } from "./components/EditableOutlineTree";
 import { ManagementNavigation, type AdvancedSection, type ManagementTab } from "./views/ManagementNavigation";
 import { GitPanel } from "./views/GitPanel";
 import { ImagePanel } from "./views/ImagePanel";
@@ -36,6 +26,10 @@ import { EditorialView } from "./views/EditorialView";
 import { DocumentSidebar } from "./views/DocumentSidebar";
 import { DocumentEditorContent } from "./views/DocumentEditorContent";
 import { DocumentEditorHeader } from "./views/DocumentEditorHeader";
+import { AppNavigation } from "./views/AppNavigation";
+import { OutlineInputPanel } from "./views/OutlineInputPanel";
+import { OutputSettingsPanel } from "./views/OutputSettingsPanel";
+import { OutlinePlanPanel } from "./views/OutlinePlanPanel";
 import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
@@ -6899,137 +6893,18 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
       {holder}
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <BookOpen className="h-5 w-5" />
-            章节文档生成器
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            描述需求，生成并调整目录，再批量创建 Markdown 文档。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {activeProject && (
-            <div
-              className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-700"
-              title={activeProject.rootPath}
-            >
-              项目已保存
-            </div>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setProjectListOpen(true)}
-          >
-            项目目录
-          </Button>
-          <Button
-            size="sm"
-            variant={view === "generator" ? "default" : "ghost"}
-            onClick={() => switchView("generator")}
-          >
-            生成器
-          </Button>
-          <Button
-            size="sm"
-            variant={view === "documents" ? "default" : "ghost"}
-            onClick={() => switchView("documents")}
-          >
-            文档工作区
-          </Button>
-          <Button
-            size="sm"
-            variant={view === "management" ? "default" : "ghost"}
-            disabled={!managedFiles.length}
-            onClick={() => switchView("management")}
-          >
-            全书管理
-          </Button>
-          <div className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
-            {documents.length} 个文档
-          </div>
-        </div>
-      </header>
-      {projectListOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setProjectListOpen(false);
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-label="项目目录"
-            className="flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div>
-                <h2 className="text-sm font-semibold">项目目录</h2>
-                <p className="text-xs text-muted-foreground">
-                  {recentProjects.length} 个项目
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setProjectListOpen(false)}
-              >
-                关闭
-              </Button>
-            </div>
-            <div className="min-h-0 overflow-auto p-2">
-              {recentProjects.length ? (
-                recentProjects.map((project) => (
-                  <div
-                    key={project.id}
-                    className={`mb-1 flex items-center gap-2 rounded-lg px-3 py-2 ${activeProject?.id === project.id ? "bg-primary/10" : "hover:bg-muted"}`}
-                  >
-                    <BookOpen className="h-4 w-4 shrink-0 text-primary" />
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => {
-                        setProjectListOpen(false);
-                        void openSavedProject(project);
-                      }}
-                    >
-                      <span className="block truncate text-sm font-medium">
-                        {project.name}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {project.rootPath}
-                        {project.subfolder ? ` / ${project.subfolder}` : ""} · {project.files.length} 个文档
-                      </span>
-                    </button>
-                    {activeProject?.id === project.id && (
-                      <span className="text-[10px] text-emerald-700">当前</span>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="px-2 text-xs"
-                      onClick={() => {
-                        if (window.confirm(`从目录移除“${project.name}”？不会删除文件。`))
-                          removeSavedProject(project.id);
-                      }}
-                    >
-                      移除
-                    </Button>
-                  </div>
-                ))
-              ) : (
-                <div className="py-12 text-center text-sm text-muted-foreground">
-                  暂无项目记录
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
-      )}
+      <AppNavigation
+        view={view}
+        switchView={switchView}
+        activeProject={activeProject}
+        managedFileCount={managedFiles.length}
+        documentCount={documents.length}
+        projectListOpen={projectListOpen}
+        setProjectListOpen={setProjectListOpen}
+        recentProjects={recentProjects}
+        openProject={(id) => { const project = recentProjects.find((item) => item.id === id); if (project) void openSavedProject(project); }}
+        removeProject={removeSavedProject}
+      />
       {view === "generator" ? (
         <div className="grid min-h-0 flex-1 auto-rows-max content-start grid-cols-1 gap-4 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
           <nav
@@ -7064,389 +6939,40 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
               },
             )}
           </nav>
-          <section className="flex min-h-[620px] flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-            <div>
-              <label className="mb-2 block text-sm font-semibold">
-                第一步：写作需求
-              </label>
-              <textarea
-                value={bookRequirement}
-                onChange={(event) => setBookRequirement(event.target.value)}
-                className="h-36 w-full resize-y rounded-lg border border-input bg-background p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                placeholder="说明主题、目标读者、内容范围、时间跨度、预计章数、写作风格和必须覆盖的问题。例如：面向普通读者，系统讲述秦末到汉初的政权更替，约 25 章，兼顾制度、战争与人物选择。"
-              />
-              <Button
-                className="mt-2 w-full"
-                disabled={!bookRequirement.trim() || outlineGenerating}
-                onClick={generateOutlineFromRequirement}
-              >
-                {outlineGenerating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-4 w-4" />
-                )}
-                AI 生成目录初稿
-              </Button>
-              {outlineError && (
-                <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
-                  {outlineError}
-                </div>
-              )}
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="mb-2 flex items-center justify-between">
-                <label className="text-sm font-semibold">
-                  第二步：目录 Markdown
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    className="text-xs text-primary hover:underline"
-                    onClick={() => saveOutlineVersion()}
-                  >
-                    保存版本
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:text-destructive"
-                    onClick={() => {
-                      if (window.confirm("清空当前目录吗？")) {
-                        saveOutlineVersion("清空前");
-                        setSource("");
-                      }
-                    }}
-                  >
-                    清空目录
-                  </button>
-                </div>
-              </div>
-              <textarea
-                value={source}
-                onChange={(event) => setSource(event.target.value)}
-                spellCheck={false}
-                className="min-h-[300px] flex-1 resize-none rounded-lg border border-input bg-background p-3 font-mono text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                placeholder="AI 生成后可继续直接编辑；也支持手动粘贴 Markdown 目录"
-              />
-              {outlineVersions.length > 0 && (
-                <div className="mt-2 rounded-md border border-border p-2">
-                  <div className="mb-1 text-xs font-medium">目录历史</div>
-                  <div className="flex gap-2 overflow-x-auto">
-                    {outlineVersions.map((version) => (
-                      <button
-                        type="button"
-                        key={`${version.createdAt}-${version.label}`}
-                        className="shrink-0 rounded bg-muted px-2 py-1 text-xs hover:bg-primary/10 hover:text-primary"
-                        title={new Date(version.createdAt).toLocaleString()}
-                        onClick={() => {
-                          saveOutlineVersion("恢复前");
-                          setSource(version.source);
-                        }}
-                      >
-                        {version.label} ·{" "}
-                        {new Date(version.createdAt).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <p className="mt-2 text-xs text-muted-foreground">
-                目录仅是草稿。可直接编辑文本，也可在右侧目录树逐项修改、排序或删除。
-              </p>
-            </div>
-          </section>
+          <OutlineInputPanel
+            requirement={bookRequirement}
+            setRequirement={setBookRequirement}
+            generating={outlineGenerating}
+            generateOutline={generateOutlineFromRequirement}
+            error={outlineError}
+            source={source}
+            setSource={setSource}
+            versions={outlineVersions}
+            saveVersion={saveOutlineVersion}
+          />
           <div className="flex min-h-0 flex-col gap-5">
-            <section className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="mb-3 text-sm font-semibold">输出设置</h2>
-              <div className="space-y-3">
-                <label className="block text-xs text-muted-foreground">
-                  书名
-                  <input
-                    value={projectTitle}
-                    onChange={(event) => setProjectTitle(event.target.value)}
-                    placeholder="例如：秦末起义与汉王朝的建立"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </label>
-                <label className="block text-xs text-muted-foreground">
-                  子目录（可选）
-                  <input
-                    value={subfolder}
-                    onChange={(event) => setSubfolder(event.target.value)}
-                    placeholder="例如 docs"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </label>
-                <label className="block text-xs text-muted-foreground">
-                  拆分方式
-                  <select
-                    value={splitMode}
-                    onChange={(event) =>
-                      setSplitMode(event.target.value as SplitMode)
-                    }
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
-                  >
-                    <option value="chapter">每章一个文件</option>
-                    <option value="section">每节一个文件</option>
-                    <option value="single">合并为单个文件</option>
-                  </select>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={organizeByPart}
-                    disabled={splitMode === "single"}
-                    onChange={(event) =>
-                      setOrganizeByPart(event.target.checked)
-                    }
-                  />
-                  按“篇”创建文件夹
-                </label>
-                <button
-                  type="button"
-                  className="text-left text-xs text-primary hover:underline"
-                  onClick={() => setShowTemplate((value) => !value)}
-                >
-                  {showTemplate ? "收起章节模板" : "编辑章节模板"}
-                </button>
-                {showTemplate && (
-                  <>
-                    <textarea
-                      value={template}
-                      onChange={(event) => setTemplate(event.target.value)}
-                      className="h-36 w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      变量：{"{{title}}"}、{"{{headings}}"}、{"{{placeholder}}"}
-                    </p>
-                  </>
-                )}
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={chooseFolder}
-                >
-                  <FolderOpen className="mr-2 h-4 w-4" />
-                  {target ? target.path : "选择普通输出目录"}
-                </Button>
-                <Button
-                  variant={outputIsGitRepository ? "secondary" : "outline"}
-                  className="w-full justify-start"
-                  onClick={chooseGitOutput}
-                >
-                  <GitBranch className="mr-2 h-4 w-4" />
-                  {outputIsGitRepository
-                    ? "已指定 Git 仓库"
-                    : "指定 Git 仓库作为输出目录"}
-                </Button>
-                {target && outputIsGitRepository === true && (
-                  <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-700">
-                    文章将直接生成到该仓库的“{subfolder.trim() || "根目录"}
-                    ”目录中。
-                  </div>
-                )}
-                {target && outputIsGitRepository === false && (
-                  <Button
-                    className="w-full"
-                    disabled={gitLoading}
-                    onClick={initializeGit}
-                  >
-                    <GitBranch className="mr-2 h-4 w-4" />
-                    初始化当前目录为 Git 仓库
-                  </Button>
-                )}
-                {target && (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => loadExistingDocuments()}
-                  >
-                    <BookOpen className="mr-2 h-4 w-4" />
-                    加载已有文档并保存为项目
-                  </Button>
-                )}
-                {target && (
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    disabled={checking}
-                    onClick={checkExisting}
-                  >
-                    {checking ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Check className="mr-2 h-4 w-4" />
-                    )}
-                    检查文件冲突
-                  </Button>
-                )}
-                {conflicts.length > 0 && (
-                  <div className="max-h-24 overflow-auto rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
-                    发现 {conflicts.length} 个同名文件：
-                    {conflicts.slice(0, 3).join("、")}
-                    {conflicts.length > 3 ? "…" : ""}
-                  </div>
-                )}
-                {target && !checking && conflicts.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    生成前会再次检查；已有文件不会被覆盖。
-                  </p>
-                )}
-              </div>
-            </section>
-            <section className="min-h-[230px] flex-1 overflow-auto rounded-xl border border-border bg-card p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold">
-                    第三步：修改并确认目录
-                  </h2>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    悬停条目可修改或删除；删除父级会同时删除其下级。
-                  </p>
-                </div>
-                {nodes.length > 0 && (
-                  <Check className="h-4 w-4 text-emerald-500" />
-                )}
-              </div>
-              {outlineWarnings.length > 0 && (
-                <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700">
-                  {outlineWarnings.map((warning) => (
-                    <div key={warning}>• {warning}</div>
-                  ))}
-                </div>
-              )}
-              {nodes.length ? (
-                <EditableOutlineTree
-                  nodes={nodes}
-                  onRename={renameOutlineNode}
-                  onDelete={deleteOutlineNode}
-                  onMove={moveOutlineNode}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  填写需求生成目录，或在左侧手动输入目录。
-                </p>
-              )}
-              {baseDocuments.length > 0 && (
-                <div className="mt-4 border-t border-border pt-3">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between text-left text-sm font-semibold"
-                    onClick={() => setShowChapterBriefs((value) => !value)}
-                  >
-                    <span>
-                      单章写作卡片{" "}
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        {
-                          baseDocuments.filter(
-                            (document) => chapterBriefs[document.path],
-                          ).length
-                        }
-                        /{baseDocuments.length}
-                      </span>
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {showChapterBriefs ? "收起" : "展开"}
-                    </span>
-                  </button>
-                  {showChapterBriefs && (
-                    <div className="mt-3 max-h-[460px] space-y-3 overflow-auto pr-1">
-                      {baseDocuments.map((document) => {
-                        const brief = {
-                          ...EMPTY_CHAPTER_BRIEF,
-                          ...chapterBriefs[document.path],
-                        };
-                        return (
-                          <div
-                            key={document.path}
-                            className="rounded-lg border border-border p-3"
-                          >
-                            <div
-                              className="mb-2 truncate text-sm font-medium"
-                              title={document.title}
-                            >
-                              {document.title}
-                            </div>
-                            <div className="grid grid-cols-[1fr_90px] gap-2">
-                              <input
-                                value={brief.goal}
-                                onChange={(event) =>
-                                  updateChapterBrief(document.path, {
-                                    goal: event.target.value,
-                                  })
-                                }
-                                placeholder="本章写作目标"
-                                className="rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                              />
-                              <input
-                                type="number"
-                                min={100}
-                                step={100}
-                                value={brief.targetWords}
-                                onChange={(event) =>
-                                  updateChapterBrief(document.path, {
-                                    targetWords: Math.max(
-                                      100,
-                                      Number(event.target.value) || 2500,
-                                    ),
-                                  })
-                                }
-                                title="目标字数"
-                                className="rounded-md border border-input bg-background px-2 py-1.5 text-xs"
-                              />
-                            </div>
-                            <textarea
-                              value={brief.keyQuestions}
-                              onChange={(event) =>
-                                updateChapterBrief(document.path, {
-                                  keyQuestions: event.target.value,
-                                })
-                              }
-                              placeholder="核心问题：本章必须回答什么？"
-                              className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs"
-                            />
-                            <textarea
-                              value={brief.requiredSources}
-                              onChange={(event) =>
-                                updateChapterBrief(document.path, {
-                                  requiredSources: event.target.value,
-                                })
-                              }
-                              placeholder="必用史料：书名、篇章、论文或材料编号"
-                              className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs"
-                            />
-                            <textarea
-                              value={brief.avoidTopics}
-                              onChange={(event) =>
-                                updateChapterBrief(document.path, {
-                                  avoidTopics: event.target.value,
-                                })
-                              }
-                              placeholder="避免重复：哪些内容已由其他章节负责？"
-                              className="mt-2 h-14 w-full resize-none rounded-md border border-input bg-background p-2 text-xs"
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-            <Button
-              size="lg"
-              disabled={!target || documents.length === 0 || creating}
-              onClick={generate}
-            >
-              {creating ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <FileText className="mr-2 h-4 w-4" />
-              )}
-              第四步：生成 {documents.length || 0} 个章节文档
-            </Button>
+            <OutputSettingsPanel
+              projectTitle={projectTitle} setProjectTitle={setProjectTitle}
+              subfolder={subfolder} setSubfolder={setSubfolder}
+              splitMode={splitMode} setSplitMode={setSplitMode}
+              organizeByPart={organizeByPart} setOrganizeByPart={setOrganizeByPart}
+              showTemplate={showTemplate} toggleTemplate={() => setShowTemplate((value) => !value)}
+              template={template} setTemplate={setTemplate}
+              targetPath={target?.path} outputIsGitRepository={outputIsGitRepository}
+              chooseFolder={chooseFolder} chooseGitOutput={chooseGitOutput}
+              gitLoading={gitLoading} initializeGit={initializeGit}
+              loadDocuments={() => loadExistingDocuments()}
+              checking={checking} checkExisting={checkExisting}
+              conflicts={conflicts}
+            />
+            <OutlinePlanPanel
+              nodes={nodes} warnings={outlineWarnings}
+              renameNode={renameOutlineNode} deleteNode={deleteOutlineNode} moveNode={moveOutlineNode}
+              documents={baseDocuments} briefs={chapterBriefs} updateBrief={updateChapterBrief}
+              showBriefs={showChapterBriefs} toggleBriefs={() => setShowChapterBriefs((value) => !value)}
+              canGenerate={Boolean(target) && documents.length > 0}
+              creating={creating} generate={generate} documentCount={documents.length}
+            />
           </div>
         </div>
       ) : view === "management" ? (
@@ -7706,7 +7232,8 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
               runQuality={() => passQualityGate(activeFile)}
               qualityReport={activeQualityReport}
               locateQualityIssue={locateFirstQualityIssue}
-            />            <DocumentEditorContent
+            />
+            <DocumentEditorContent
               activeFile={activeFile}
               editorMode={editorMode}
               pendingPatch={pendingEditorialPatch}
@@ -7725,7 +7252,8 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
               undoLabel={documentUndo?.label}
               undoDocument={() => { if (!documentUndo) return; setDocumentContent(documentUndo.content); notice.info({ message: `已撤销：${documentUndo.label}`, placement: "bottomRight" }); setDocumentUndo(null); }}
               articleWordCount={articleWordCount}
-            />          </main>
+            />
+          </main>
           {aiOpen && <AiWritingPanel
             model={aiApi.model} hasApiKey={Boolean(aiApi.apiKey?.trim())} mode={aiMode} setMode={setAiMode}
             instruction={aiInstruction} setInstruction={setAiInstruction} sources={aiSources} setSources={setAiSources}
