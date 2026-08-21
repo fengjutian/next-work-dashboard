@@ -27,6 +27,36 @@ import { Trash2 } from "@/components/icons";
 const time = (ms: number) =>
   `${String(Math.floor(ms / 60000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 
+type AsrFormValues = {
+  provider: VideoReaderAsrProvider;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language?: string;
+};
+
+const ASR_CONFIG_STORAGE_KEY = "ai-video-reader.asr-config";
+const DEFAULT_ASR_CONFIG: AsrFormValues = {
+  provider: "openai-compatible",
+  baseUrl: "https://api.openai.com/v1",
+  apiKey: "",
+  model: "whisper-1",
+  language: "zh",
+};
+
+function loadAsrConfig(): AsrFormValues {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(ASR_CONFIG_STORAGE_KEY) || "null",
+    ) as Partial<AsrFormValues> | null;
+    return saved
+      ? { ...DEFAULT_ASR_CONFIG, ...saved }
+      : DEFAULT_ASR_CONFIG;
+  } catch {
+    return DEFAULT_ASR_CONFIG;
+  }
+}
+
 export function AiVideoReaderPanel() {
   const [projects, setProjects] = useState<VideoReaderProject[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -54,13 +84,8 @@ export function AiVideoReaderPanel() {
     ffprobe: { available: boolean };
   }>();
   const [taskProgress, setTaskProgress] = useState<VideoReaderTaskProgress>();
-  const [asrForm] = Form.useForm<{
-    provider: VideoReaderAsrProvider;
-    baseUrl: string;
-    apiKey: string;
-    model: string;
-    language?: string;
-  }>();
+  const [asrForm] = Form.useForm<AsrFormValues>();
+  const initialAsrConfig = useMemo(loadAsrConfig, []);
   const asrProvider = Form.useWatch("provider", asrForm);
   const [analysisForm] = Form.useForm<{
     baseUrl: string;
@@ -172,14 +197,15 @@ export function AiVideoReaderPanel() {
   const transcribe = async () => {
     if (!selected) return;
     const config = await asrForm.validateFields();
+    localStorage.setItem(ASR_CONFIG_STORAGE_KEY, JSON.stringify(config));
     setTranscribing(true);
+    setAsrOpen(false);
     try {
       const project = await window.electronAPI.aiVideoReader.transcribe(
         selected.id,
         config,
       );
       await refresh(project.id);
-      setAsrOpen(false);
       message.success(`转写完成，共 ${project.segments.length} 个片段`);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "转写失败");
@@ -673,12 +699,7 @@ export function AiVideoReaderPanel() {
         <Form
           form={asrForm}
           layout="vertical"
-          initialValues={{
-            provider: "openai-compatible",
-            baseUrl: "https://api.openai.com/v1",
-            model: "whisper-1",
-            language: "zh",
-          }}
+          initialValues={initialAsrConfig}
         >
           <Form.Item
             name="provider"
