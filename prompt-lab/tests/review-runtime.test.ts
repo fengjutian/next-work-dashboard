@@ -6,7 +6,7 @@ import {
   ReviewResultCache,
   scheduleRetry,
   stableContentKey,
-} from "../../packages/outline-scaffolder/src/core/review-runtime";
+} from "@next-work/outline-scaffolder/core";
 
 describe("large manuscript review runtime", () => {
   it("processes 1,000 chapters without changing order", async () => {

@@ -4,7 +4,7 @@ import {
   createReleaseCandidate,
   createRestorePlan,
   validateBackup,
-} from "../../packages/outline-scaffolder/src/core/delivery";
+} from "@next-work/outline-scaffolder/core";
 
 describe("delivery workflow", () => {
   it("validates checksums and creates a selective restore plan", () => {

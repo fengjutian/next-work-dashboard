@@ -18,7 +18,7 @@ import { useStore } from "@/store/store";
 import {
   OutlineScaffolderProvider,
   type OutlineScaffolderAdapter,
-} from "../../../../packages/outline-scaffolder/src/react";
+} from "@next-work/outline-scaffolder/react";
 import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
@@ -33,20 +33,20 @@ import {
   type ChapterWorkflowState,
   type OutlineNode,
   type SplitMode,
-} from "../../../../packages/outline-scaffolder/src/core/outline";
+} from "@next-work/outline-scaffolder/core";
 import {
   createDocxBase64,
   createEpubBase64,
   createPdfBase64,
   type PublicationBook,
-} from "../../../../packages/outline-scaffolder/src/core/publication-export";
-import { migrateOutlineProject } from "../../../../packages/outline-scaffolder/src/core/project-migrations";
-import { checksumText, createReleaseCandidate } from "../../../../packages/outline-scaffolder/src/core/delivery";
+} from "@next-work/outline-scaffolder/core";
+import { migrateOutlineProject } from "@next-work/outline-scaffolder/core";
+import { checksumText, createReleaseCandidate } from "@next-work/outline-scaffolder/core";
 import {
   scheduleRetry,
   stableContentKey,
   type RetryJob,
-} from "../../../../packages/outline-scaffolder/src/core/review-runtime";
+} from "@next-work/outline-scaffolder/core";
 import {
   EDITORIAL_PRESETS,
   assessNarrative,
@@ -108,7 +108,7 @@ import {
   type SupportStrength,
   type TimelineEvent,
   type VersionComparison,
-} from "../../../../packages/outline-scaffolder/src/core/editorial-analysis";
+} from "@next-work/outline-scaffolder/core";
 
 const DEFAULT_TEMPLATE = `# {{title}}
 

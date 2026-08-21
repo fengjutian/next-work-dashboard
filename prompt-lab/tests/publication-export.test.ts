@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   createDocxBase64,
   createEpubBase64,
-} from "../../packages/outline-scaffolder/src/core/publication-export";
+} from "@next-work/outline-scaffolder/core";
 import {
   migrateOutlineProject,
   OUTLINE_PROJECT_SCHEMA_VERSION,
-} from "../../packages/outline-scaffolder/src/core/project-migrations";
+} from "@next-work/outline-scaffolder/core";
 
 const book = {
   title: "秦汉兴亡",
