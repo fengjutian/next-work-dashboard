@@ -3,6 +3,7 @@ import { notification } from "antd";
 import { Button } from "./Button";
 import { createOpenAIProvider, type ChatMessage } from "../core/llm";
 import type { OutlineScaffolderAdapter } from "./adapter";
+import { DEFAULT_TEMPLATE, RECENT_PROJECTS_KEY, appendSourceReferences, countArticleWords, insertBeforeSourceReferences, isValidApiKey, normalizeApiKey, normalizeForComparison, removeRepeatedContinuation } from "../core/panel-utils";
 import { ManagementNavigation, type AdvancedSection, type ManagementTab } from "./views/ManagementNavigation";
 import { GitPanel } from "./views/GitPanel";
 import { ImagePanel } from "./views/ImagePanel";
@@ -30,6 +31,7 @@ import { AppNavigation } from "./views/AppNavigation";
 import { OutlineInputPanel } from "./views/OutlineInputPanel";
 import { OutputSettingsPanel } from "./views/OutputSettingsPanel";
 import { OutlinePlanPanel } from "./views/OutlinePlanPanel";
+import { GeneratorProgress } from "./views/GeneratorProgress";
 import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
@@ -121,91 +123,6 @@ import {
   type VersionComparison,
 } from "../core/editorial-analysis";
 
-const DEFAULT_TEMPLATE = `# {{title}}
-
-{{placeholder}}
-
-{{headings}}`;
-
-const RECENT_PROJECTS_KEY = "outline-scaffolder.recent-projects.v1";
-const normalizeApiKey = (value: string) =>
-  value
-    .trim()
-    .replace(/^Bearer\s+/i, "")
-    .replace(/^["']|["']$/g, "")
-    .trim();
-const isValidApiKey = (value: string) =>
-  /^[\x21-\x7E]+$/.test(normalizeApiKey(value));
-const countArticleWords = (markdown: string) => {
-  const text = markdown
-    .replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n|$)/, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/https?:\/\/\S+/g, "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/[*_~`>|]/g, " ");
-  const cjkCount = (
-    text.match(/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/g) ?? []
-  ).length;
-  const latinAndNumberCount = (
-    text.match(/[A-Za-z0-9]+(?:[.'’-][A-Za-z0-9]+)*/g) ?? []
-  ).length;
-  return cjkCount + latinAndNumberCount;
-};
-const appendSourceReferences = (markdown: string, sources: string) => {
-  if (
-    !sources.trim() ||
-    /^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m.test(markdown)
-  )
-    return markdown.trimEnd();
-  const references = new Map<string, string>();
-  for (const match of sources.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g)) {
-    const title = match[1].trim();
-    const url = match[2].trim();
-    if (title && url && !references.has(url)) references.set(url, title);
-  }
-  if (!references.size) return markdown.trimEnd();
-  const items = [...references]
-    .map(
-      ([url, title], index) =>
-        `${index + 1}. [${title}](${url})${sources.includes("搜索摘要（仅作线索") ? "（检索线索，引用前需核对原文）" : ""}`,
-    )
-    .join("\n");
-  return `${markdown.trimEnd()}\n\n## 史料与参考资料\n\n${items}`;
-};
-const normalizeForComparison = (value: string) =>
-  value
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/[\s*_~`>，。！？；：、“”‘’（）()]+/g, "")
-    .replaceAll("[", "")
-    .replaceAll("]", "")
-    .toLowerCase();
-const removeRepeatedContinuation = (existing: string, generated: string) => {
-  const existingNormalized = normalizeForComparison(existing);
-  const blocks = generated
-    .replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*/i, "")
-    .trim()
-    .split(/\n\s*\n/);
-  const uniqueBlocks = blocks.filter((block) => {
-    const normalized = normalizeForComparison(block);
-    if (!normalized) return false;
-    if (/^##?史料与参考资料/.test(block.trim())) return false;
-    return normalized.length < 12 || !existingNormalized.includes(normalized);
-  });
-  return uniqueBlocks.join("\n\n").trim();
-};
-const insertBeforeSourceReferences = (existing: string, addition: string) => {
-  const marker = existing.search(
-    /^##\s+(史料与参考资料|参考资料|参考文献)\s*$/m,
-  );
-  if (marker < 0) return `${existing.trimEnd()}\n\n${addition.trim()}\n`;
-  const body = existing.slice(0, marker).trimEnd();
-  const references = existing.slice(marker).trimStart();
-  return `${body}\n\n${addition.trim()}\n\n${references.trimEnd()}\n`;
-};
 const parseReviewSuggestions = (report: string): ReviewSuggestion[] => {
   const marker = /(?:^|\n)\s*(?:[-*+]\s*|\d+[.)、]\s*)?(?:\*\*)?位置(?:\*\*)?[：:]\s*([^\n]+)/g;
   const matches = [...report.matchAll(marker)];
@@ -6907,38 +6824,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       />
       {view === "generator" ? (
         <div className="grid min-h-0 flex-1 auto-rows-max content-start grid-cols-1 gap-4 overflow-auto p-6 lg:grid-cols-[minmax(380px,1.15fr)_minmax(300px,.85fr)]">
-          <nav
-            aria-label="文档生成进度"
-            className="grid h-fit grid-cols-4 overflow-hidden rounded-xl border border-border bg-card shadow-sm lg:col-span-2"
-          >
-            {["填写需求", "生成目录", "修改确认", "生成文档"].map(
-              (step, index) => {
-                const completed = index < generatorStage;
-                const active = index === generatorStage;
-                return (
-                  <div
-                    key={step}
-                    aria-current={active ? "step" : undefined}
-                    className={`relative flex min-h-16 items-center justify-center gap-3 px-4 py-3 ${index ? "border-l border-border" : ""} ${active ? "bg-primary/[0.08]" : ""}`}
-                  >
-                    <span
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold ${completed ? "border-emerald-500 bg-emerald-500 text-white" : active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted text-muted-foreground"}`}
-                    >
-                      {completed ? "✓" : index + 1}
-                    </span>
-                    <span
-                      className={`text-sm ${active ? "font-semibold text-primary" : completed ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                    >
-                      {step}
-                    </span>
-                    {active && (
-                      <span className="absolute inset-x-0 bottom-0 h-0.5 bg-primary" />
-                    )}
-                  </div>
-                );
-              },
-            )}
-          </nav>
+          <GeneratorProgress stage={generatorStage} />
           <OutlineInputPanel
             requirement={bookRequirement}
             setRequirement={setBookRequirement}
