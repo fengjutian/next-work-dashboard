@@ -6,9 +6,21 @@ export default defineConfig({
     format: 'es',
   },
   resolve: {
+    // Local/file-linked UI packages may have their own development copy of
+    // React. Always resolve hooks against the renderer's React instance.
+    dedupe: ['react', 'react-dom'],
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
+  },
+  optimizeDeps: {
+    // Keep the linked package out of esbuild's dependency bundle so React
+    // deduplication also applies while developing through a `file:` junction.
+    exclude: [
+      '@next-work/outline-scaffolder',
+      '@next-work/outline-scaffolder/react',
+      '@next-work/outline-scaffolder/core',
+    ],
   },
   build: {
     target: 'esnext',
