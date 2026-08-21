@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { notification } from "antd";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   BookOpen,
   Check,
@@ -9,13 +7,11 @@ import {
   FolderOpen,
   GitBranch,
   Loader2,
-  Save,
   Sparkles,
 } from "lucide-react";
 import { Button } from "./Button";
 import { createOpenAIProvider, type ChatMessage } from "../core/llm";
 import type { OutlineScaffolderAdapter } from "./adapter";
-import { EditorialDiff } from "./components/EditorialDiff";
 import { EditableOutlineTree } from "./components/EditableOutlineTree";
 import { ManagementNavigation, type AdvancedSection, type ManagementTab } from "./views/ManagementNavigation";
 import { GitPanel } from "./views/GitPanel";
@@ -38,6 +34,8 @@ import { WorldView } from "./views/WorldView";
 import { EvidenceAuditView } from "./views/EvidenceAuditView";
 import { EditorialView } from "./views/EditorialView";
 import { DocumentSidebar } from "./views/DocumentSidebar";
+import { DocumentEditorContent } from "./views/DocumentEditorContent";
+import { DocumentEditorHeader } from "./views/DocumentEditorHeader";
 import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
@@ -7682,370 +7680,52 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
             setSelectedFiles={setSelectedBatchFiles}
             runBatch={(mode) => void runBatchGeneration(mode)}
             openDocument={(path) => void openDocument(path)}
-          />          <main className="flex min-h-0 min-w-0 flex-col">
-            <div className="flex h-12 items-center justify-between border-b border-border px-4">
-              <div className="min-w-0">
-                <span className="block truncate text-sm font-medium">
-                  {activeFile || "未选择文档"}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={gitOpen ? "default" : "ghost"}
-                  disabled={!target}
-                  onClick={() => {
-                    toggleGit();
-                    setReviewOpen(false);
-                    setImageOpen(false);
-                  }}
-                >
-                  {" "}
-                  <GitBranch className="mr-2 h-4 w-4" />
-                  Git
-                </Button>
-                <Button
-                  size="sm"
-                  variant={aiOpen ? "default" : "ghost"}
-                  disabled={!activeFile}
-                  onClick={() => {
-                    setAiOpen((value) => !value);
-                    setReviewOpen(false);
-                    setImageOpen(false);
-                    setGitOpen(false);
-                  }}
-                >
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  助写
-                </Button>
-                <Button
-                  size="sm"
-                  variant={reviewOpen ? "default" : "ghost"}
-                  disabled={!activeFile}
-                  onClick={() => {
-                    setReviewOpen((value) => !value);
-                    setAiOpen(false);
-                    setImageOpen(false);
-                    setGitOpen(false);
-                    setAiResult("");
-                    setAiError("");
-                  }}
-                >
-                  <Check className="mr-2 h-4 w-4" />
-                  审校
-                </Button>
-                <Button
-                  size="sm"
-                  variant={imageOpen ? "default" : "ghost"}
-                  disabled={!activeFile}
-                  onClick={() => {
-                    setImageOpen((value) => !value);
-                    setAiOpen(false);
-                    setReviewOpen(false);
-                    setGitOpen(false);
-                    setImageError("");
-                  }}
-                >
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  插图
-                </Button>
-                <Button
-                  size="sm"
-                  variant={editorMode === "edit" ? "secondary" : "ghost"}
-                  onClick={() => setEditorMode("edit")}
-                >
-                  编辑
-                </Button>
-                <Button
-                  size="sm"
-                  variant={editorMode === "preview" ? "secondary" : "ghost"}
-                  onClick={() => setEditorMode("preview")}
-                >
-                  预览
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={!dirty || saving || !activeFile}
-                  onClick={saveDocument}
-                >
-                  {saving ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="mr-2 h-4 w-4" />
-                  )}
-                  保存
-                </Button>
-              </div>
-            </div>
-            {activeFile && (
-              <>
-                <div className="flex items-center gap-3 border-b border-border bg-primary/[0.04] px-4 py-2.5">
-                  <span
-                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${CHAPTER_STATUS_META[activeChapterState].dot}`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-semibold">
-                      {CHAPTER_STATUS_META[activeChapterState].label}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {activeChapterState === "pending" ||
-                      activeChapterState === "error"
-                        ? "使用助写生成正文，或直接编辑后保存。"
-                        : activeChapterState === "draft"
-                          ? "阅读草稿并保存修改，确认后进入独立审校。"
-                          : activeChapterState === "review"
-                            ? "运行审校，逐条决定哪些意见需要落实。"
-                            : activeChapterState === "revising"
-                              ? "应用已采纳意见，确认修改后进入质量检查。"
-                              : activeChapterState === "quality"
-                                ? "运行检查后在这里处理具体问题；通过后自动完成。"
-                                : activeChapterState === "complete"
-                                  ? "本章已完成；继续编辑会保留完成状态。"
-                                  : "正在生成正文。"}
-                    </div>
-                  </div>
-                  {(activeChapterState === "pending" ||
-                    activeChapterState === "error") && (
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setAiMode("generate");
-                        setAiOpen(true);
-                        setReviewOpen(false);
-                        setImageOpen(false);
-                        setGitOpen(false);
-                      }}
-                    >
-                      生成本章
-                    </Button>
-                  )}
-                  {activeChapterState === "draft" && (
-                    <Button
-                      size="sm"
-                      disabled={dirty}
-                      onClick={confirmCurrentDraft}
-                    >
-                      确认草稿并审校
-                    </Button>
-                  )}
-                  {activeChapterState === "review" && (
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setReviewOpen(true);
-                        setAiOpen(false);
-                        setImageOpen(false);
-                        setGitOpen(false);
-                      }}
-                    >
-                      开始审校
-                    </Button>
-                  )}
-                  {activeChapterState === "revising" &&
-                    (dirty ? (
-                      <Button
-                        size="sm"
-                        disabled={saving}
-                        onClick={saveDocument}
-                      >
-                        {saving && (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        )}
-                        保存修改
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={enterQualityCheck}>
-                        进入质量检查
-                      </Button>
-                    ))}
-                  {activeChapterState === "quality" && (
-                    <Button
-                      size="sm"
-                      disabled={dirty}
-                      onClick={() => passQualityGate(activeFile)}
-                    >
-                      {dirty
-                        ? "请先保存"
-                        : activeQualityReport?.blockers.length
-                          ? "重新检查"
-                          : "运行质量检查"}
-                    </Button>
-                  )}
-                </div>
-                {activeChapterState === "quality" &&
-                  activeQualityReport &&
-                  !dirty && (
-                    <div
-                      className={`border-b px-4 py-3 ${activeQualityReport.blockers.length ? "border-destructive/30 bg-destructive/[0.06]" : "border-emerald-500/30 bg-emerald-500/[0.06]"}`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div
-                            className={`text-xs font-semibold ${activeQualityReport.blockers.length ? "text-destructive" : "text-emerald-700"}`}
-                          >
-                            {activeQualityReport.blockers.length
-                              ? `需要处理 ${activeQualityReport.blockers.length} 项`
-                              : "质量检查已通过"}
-                          </div>
-                          {activeQualityReport.blockers.map((item) => (
-                            <div
-                              key={item}
-                              className="mt-1 text-xs text-destructive"
-                            >
-                              • {item}
-                            </div>
-                          ))}
-                          {activeQualityReport.warnings.map((item) => (
-                            <div
-                              key={item}
-                              className="mt-1 text-xs text-amber-700"
-                            >
-                              提示：{item}
-                            </div>
-                          ))}
-                        </div>
-                        {activeQualityReport.blockers.some(
-                          (item) =>
-                            item.includes("待核实") || item.includes("占位符"),
-                        ) && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={locateFirstQualityIssue}
-                          >
-                            定位正文标记
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-              </>
-            )}
-            {pendingEditorialPatch &&
-              activeFile === pendingEditorialPatch.path && (
-                <div className="border-b border-border bg-card p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-semibold">审校建议 Diff</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        建议已载入编辑器，保存后正式应用；继续编辑前可撤销。
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={undoPendingEditorialPatch}
-                    >
-                      撤销载入
-                    </Button>
-                  </div>
-                  <EditorialDiff
-                    original={pendingEditorialPatch.original}
-                    replacement={pendingEditorialPatch.replacement}
-                  />
-                </div>
-              )}
-            {editorMode === "edit" &&
-              activeFile &&
-              evidenceRecords.length > 0 && (
-                <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    证据绑定
-                  </span>
-                  <select
-                    value={selectedEvidenceId}
-                    onChange={(event) =>
-                      setSelectedEvidenceId(event.target.value)
-                    }
-                    className="min-w-0 max-w-sm flex-1 rounded border border-input bg-background px-2 py-1 text-xs"
-                  >
-                    <option value="">选择史料</option>
-                    {evidenceRecords.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.status === "verified" ? "✓ " : ""}
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!selectedEvidenceId}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={bindEvidenceToSelection}
-                  >
-                    绑定到选中文字
-                  </Button>
-                  <span className="truncate text-xs text-muted-foreground">
-                    先在正文中选择一个完整观点或句子
-                  </span>
-                </div>
-              )}
-            <div className="min-h-0 flex-1 overflow-auto">
-              {documentLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : !activeFile ? (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  从左侧选择一个文档
-                </div>
-              ) : editorMode === "edit" ? (
-                <textarea
-                  ref={editorRef}
-                  value={documentContent}
-                  readOnly={finalReadConfirmed}
-                  onChange={(event) => setDocumentContent(event.target.value)}
-                  spellCheck={false}
-                  className={`h-full min-h-[500px] w-full resize-none border-0 bg-background p-6 font-mono text-sm leading-7 outline-none ${finalReadConfirmed ? "cursor-not-allowed opacity-80" : ""}`}
-                />
-              ) : (
-                <article className="prose prose-sm mx-auto max-w-4xl p-8 dark:prose-invert">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      img: ({ src, alt, ...props }) => (
-                        <img
-                          {...props}
-                          src={previewImageUrls[src || ""] || src}
-                          alt={alt || "章节插图"}
-                        />
-                      ),
-                    }}
-                  >
-                    {documentContent}
-                  </ReactMarkdown>
-                </article>
-              )}
-            </div>
-            {activeFile && (
-              <div className="flex h-8 items-center justify-between border-t border-border px-4 text-xs text-muted-foreground">
-                <div className="flex items-center gap-3">
-                  <span>{dirty ? "有未保存的修改" : "所有修改已保存"}</span>
-                  {documentUndo && dirty && (
-                    <button
-                      type="button"
-                      className="text-primary hover:underline"
-                      onClick={() => {
-                        setDocumentContent(documentUndo.content);
-                        notice.info({
-                          message: `已撤销：${documentUndo.label}`,
-                          placement: "bottomRight",
-                        });
-                        setDocumentUndo(null);
-                      }}
-                    >
-                      撤销上次新增
-                    </button>
-                  )}
-                </div>
-                <span title="字数已排除 YAML 头信息、Markdown 标记、链接地址和注释">
-                  文章 {articleWordCount.toLocaleString()} 字 · 原始{" "}
-                  {documentContent.length.toLocaleString()} 字符
-                </span>
-              </div>
-            )}
-          </main>
+          />
+          <main className="flex min-h-0 min-w-0 flex-col">
+            <DocumentEditorHeader
+              activeFile={activeFile}
+              hasTarget={Boolean(target)}
+              activePanel={gitOpen ? "git" : aiOpen ? "ai" : reviewOpen ? "review" : imageOpen ? "image" : null}
+              togglePanel={(panel) => {
+                if (panel === "git") { toggleGit(); setReviewOpen(false); setImageOpen(false); return; }
+                if (panel === "ai") { setAiOpen((value) => !value); setReviewOpen(false); setImageOpen(false); setGitOpen(false); return; }
+                if (panel === "review") { setReviewOpen((value) => !value); setAiOpen(false); setImageOpen(false); setGitOpen(false); setAiResult(""); setAiError(""); return; }
+                setImageOpen((value) => !value); setAiOpen(false); setReviewOpen(false); setGitOpen(false); setImageError("");
+              }}
+              editorMode={editorMode}
+              setEditorMode={setEditorMode}
+              dirty={dirty}
+              saving={saving}
+              save={saveDocument}
+              chapterState={activeChapterState}
+              statusMeta={CHAPTER_STATUS_META}
+              generateChapter={() => { setAiMode("generate"); setAiOpen(true); setReviewOpen(false); setImageOpen(false); setGitOpen(false); }}
+              confirmDraft={confirmCurrentDraft}
+              beginReview={() => { setReviewOpen(true); setAiOpen(false); setImageOpen(false); setGitOpen(false); }}
+              enterQuality={enterQualityCheck}
+              runQuality={() => passQualityGate(activeFile)}
+              qualityReport={activeQualityReport}
+              locateQualityIssue={locateFirstQualityIssue}
+            />            <DocumentEditorContent
+              activeFile={activeFile}
+              editorMode={editorMode}
+              pendingPatch={pendingEditorialPatch}
+              undoPendingPatch={undoPendingEditorialPatch}
+              evidenceRecords={evidenceRecords}
+              selectedEvidenceId={selectedEvidenceId}
+              setSelectedEvidenceId={setSelectedEvidenceId}
+              bindEvidence={bindEvidenceToSelection}
+              documentLoading={documentLoading}
+              editorRef={editorRef}
+              content={documentContent}
+              setContent={setDocumentContent}
+              readOnly={finalReadConfirmed}
+              previewImageUrls={previewImageUrls}
+              dirty={dirty}
+              undoLabel={documentUndo?.label}
+              undoDocument={() => { if (!documentUndo) return; setDocumentContent(documentUndo.content); notice.info({ message: `已撤销：${documentUndo.label}`, placement: "bottomRight" }); setDocumentUndo(null); }}
+              articleWordCount={articleWordCount}
+            />          </main>
           {aiOpen && <AiWritingPanel
             model={aiApi.model} hasApiKey={Boolean(aiApi.apiKey?.trim())} mode={aiMode} setMode={setAiMode}
             instruction={aiInstruction} setInstruction={setAiInstruction} sources={aiSources} setSources={setAiSources}
