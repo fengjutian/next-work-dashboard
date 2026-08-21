@@ -10,17 +10,10 @@ export default defineConfig({
     // React. Always resolve hooks against the renderer's React instance.
     dedupe: ['react', 'react-dom'],
     alias: {
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
       '@': path.resolve(__dirname, 'src'),
     },
-  },
-  optimizeDeps: {
-    // Keep the linked package out of esbuild's dependency bundle so React
-    // deduplication also applies while developing through a `file:` junction.
-    exclude: [
-      '@next-work/outline-scaffolder',
-      '@next-work/outline-scaffolder/react',
-      '@next-work/outline-scaffolder/core',
-    ],
   },
   build: {
     target: 'esnext',
