@@ -16,6 +16,10 @@ import { Button } from "@/components/ui/button";
 import { createOpenAIProvider, type ChatMessage } from "@/core/llm";
 import { useStore } from "@/store/store";
 import {
+  OutlineScaffolderProvider,
+  type OutlineScaffolderAdapter,
+} from "../../../../packages/outline-scaffolder/src/react";
+import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
   chapterStateAfterSave,
@@ -29,20 +33,20 @@ import {
   type ChapterWorkflowState,
   type OutlineNode,
   type SplitMode,
-} from "./outline";
+} from "../../../../packages/outline-scaffolder/src/core/outline";
 import {
   createDocxBase64,
   createEpubBase64,
   createPdfBase64,
   type PublicationBook,
-} from "./publication-export";
-import { migrateOutlineProject } from "./project-migrations";
-import { checksumText, createReleaseCandidate } from "./delivery";
+} from "../../../../packages/outline-scaffolder/src/core/publication-export";
+import { migrateOutlineProject } from "../../../../packages/outline-scaffolder/src/core/project-migrations";
+import { checksumText, createReleaseCandidate } from "../../../../packages/outline-scaffolder/src/core/delivery";
 import {
   scheduleRetry,
   stableContentKey,
   type RetryJob,
-} from "./review-runtime";
+} from "../../../../packages/outline-scaffolder/src/core/review-runtime";
 import {
   EDITORIAL_PRESETS,
   assessNarrative,
@@ -104,7 +108,7 @@ import {
   type SupportStrength,
   type TimelineEvent,
   type VersionComparison,
-} from "./editorial-analysis";
+} from "../../../../packages/outline-scaffolder/src/core/editorial-analysis";
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -849,7 +853,7 @@ function EditableOutlineTree({
   );
 }
 
-export const OutlineScaffolderPanel: React.FC = () => {
+const OutlineScaffolderContent: React.FC = () => {
   const aiApi = useStore((state) => state.aiApi);
   const [antdNotice, holder] = notification.useNotification();
   const notice = useMemo(() => {
@@ -12822,5 +12826,37 @@ export const OutlineScaffolderPanel: React.FC = () => {
         </div>
       )}
     </div>
+  );
+};
+
+function createPromptLabAdapter(): OutlineScaffolderAdapter {
+  const workspace = window.electronAPI.workspace;
+  return {
+    files: {
+      openFolder: () => workspace.openFolder(),
+      readText: (root, path) => workspace.readTextFile(root, path),
+      writeText: (root, path, content) => workspace.writeTextFile(root, path, content),
+      readBinary: (root, path) => workspace.readBinaryFile(root, path),
+      writeBinary: (root, path, contentBase64) =>
+        workspace.writeBinaryFile(root, path, contentBase64),
+      listFiles: (root) => workspace.listFiles(root),
+      listDirectory: (root, path) => workspace.listDirectory(root, path),
+      createDirectory: (root, path) => workspace.createDirectory(root, path),
+      mutate: (root, mutations) =>
+        workspace.mutateFiles(
+          root,
+          mutations as Parameters<typeof workspace.mutateFiles>[1],
+        ),
+      reauthorize: (root) => workspace.reauthorize(root),
+    },
+  };
+}
+
+export const OutlineScaffolderPanel: React.FC = () => {
+  const adapter = useMemo(createPromptLabAdapter, []);
+  return (
+    <OutlineScaffolderProvider adapter={adapter}>
+      <OutlineScaffolderContent />
+    </OutlineScaffolderProvider>
   );
 };

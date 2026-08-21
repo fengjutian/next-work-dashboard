@@ -6,7 +6,7 @@ import {
   ReviewResultCache,
   scheduleRetry,
   stableContentKey,
-} from "../src/plugins/outline-scaffolder/review-runtime";
+} from "../../packages/outline-scaffolder/src/core/review-runtime";
 
 describe("large manuscript review runtime", () => {
   it("processes 1,000 chapters without changing order", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRegenerationSkeleton, calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../src/plugins/outline-scaffolder/outline';
+import { buildRegenerationSkeleton, calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../../packages/outline-scaffolder/src/core/outline';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {
