@@ -856,7 +856,6 @@ export interface OutlineScaffolderPanelProps {
 export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ adapter }) => {
   const aiApi = adapter.aiConfig;
   const window = useMemo(() => ({
-    electronAPI: adapter.api,
     confirm: globalThis.confirm.bind(globalThis),
     prompt: globalThis.prompt.bind(globalThis),
     setTimeout: globalThis.setTimeout.bind(globalThis),
@@ -1222,7 +1221,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     void Promise.all(
       [...new Set(sources)].map(async (source) => {
         const relativePath = resolveRelative(source);
-        const result = await window.electronAPI.workspace.readBinaryFile(
+        const result = await adapter.api.workspace.readBinaryFile(
           target.path,
           relativePath,
         );
@@ -1282,7 +1281,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
 
   useEffect(() => {
     let active = true;
-    window.electronAPI.outlineProjects
+    adapter.api.outlineProjects
       .load()
       .then((stored) => {
         if (!active) return;
@@ -1634,7 +1633,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       let auditContent = "";
       const key = meta.scope === "book" ? "__book__" : path;
       if (meta.scope === "chapter") {
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           path,
         );
@@ -1745,7 +1744,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         const issues = await runBookAudit();
         warnings.push(...issues.slice(0, 100));
       } else {
-        const listing = await window.electronAPI.workspace.listFiles(
+        const listing = await adapter.api.workspace.listFiles(
           target.path,
         );
         if (!listing.success)
@@ -1772,7 +1771,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           (item) =>
             item.toLowerCase().endsWith(".md") && !/README\.md$/i.test(item),
         )) {
-          const read = await window.electronAPI.workspace.readTextFile(
+          const read = await adapter.api.workspace.readTextFile(
             target.path,
             chapter,
           );
@@ -1858,7 +1857,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     setEditorialAiLoading(true);
     const executionStartedAt = Date.now();
     try {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         path,
       );
@@ -2177,7 +2176,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       });
       return;
     }
-    const read = await window.electronAPI.workspace.readTextFile(
+    const read = await adapter.api.workspace.readTextFile(
       target.path,
       path,
     );
@@ -2299,7 +2298,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       for (const path of managedFiles) {
         if (!path.toLowerCase().endsWith(".md") || /README\.md$/i.test(path))
           continue;
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           path,
         );
@@ -2356,7 +2355,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         (path) =>
           path.toLowerCase().endsWith(".md") && !/README\.md$/i.test(path),
       )) {
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           chapter,
         );
@@ -2534,7 +2533,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         (item) => !/README\.md$/i.test(item),
       )) {
         if (total >= 60_000) break;
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           path,
         );
@@ -2819,7 +2818,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     );
   const loadVersionFiles = async () => {
     if (!target) return;
-    const listing = await window.electronAPI.workspace.listFiles(target.path);
+    const listing = await adapter.api.workspace.listFiles(target.path);
     if (!listing.success || !listing.data) return;
     const paths = listing.data
       .map((item) => item.path.replace(/\\/g, "/"))
@@ -2846,8 +2845,8 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
   const runVersionComparison = async () => {
     if (!target || !leftVersion || !rightVersion) return;
     const [left, right] = await Promise.all([
-      window.electronAPI.workspace.readTextFile(target.path, leftVersion),
-      window.electronAPI.workspace.readTextFile(target.path, rightVersion),
+      adapter.api.workspace.readTextFile(target.path, leftVersion),
+      adapter.api.workspace.readTextFile(target.path, rightVersion),
     ]);
     if (!left.success || !left.data || !right.success || !right.data) {
       notice.error({ message: "版本读取失败", placement: "bottomRight" });
@@ -2917,7 +2916,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     const root = activeProject?.subfolder
       ? `${activeProject.subfolder}/publication`
       : "publication";
-    const directory = await window.electronAPI.workspace.createDirectory(
+    const directory = await adapter.api.workspace.createDirectory(
       target.path,
       root,
     );
@@ -2948,13 +2947,13 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       },
       { path: `${root}/CHANGELOG.md`, content: audit },
     ]) {
-      const existing = await window.electronAPI.workspace.readTextFile(
+      const existing = await adapter.api.workspace.readTextFile(
         target.path,
         file.path,
       );
       const result =
         existing.success && existing.data
-          ? await window.electronAPI.workspace.writeTextFile(
+          ? await adapter.api.workspace.writeTextFile(
               target.path,
               file.path,
               file.content,
@@ -2964,7 +2963,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                 expectedModifiedAt: existing.data.modifiedAt,
               },
             )
-          : await window.electronAPI.workspace.mutateFiles(target.path, [
+          : await adapter.api.workspace.mutateFiles(target.path, [
               {
                 kind: "create",
                 path: file.path,
@@ -3013,7 +3012,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     const chapter = issue.chapters[0];
     const excerpt = issue.excerpts[0];
     if (!target || !chapter) return;
-    const read = await window.electronAPI.workspace.readTextFile(
+    const read = await adapter.api.workspace.readTextFile(
       target.path,
       chapter,
     );
@@ -3044,7 +3043,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       });
       return;
     }
-    const read = await window.electronAPI.workspace.readTextFile(
+    const read = await adapter.api.workspace.readTextFile(
       target.path,
       leftVersion,
     );
@@ -3073,7 +3072,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     for (const path of managedFiles.filter((item) =>
       item.toLowerCase().endsWith(".md"),
     )) {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         path,
       );
@@ -3121,7 +3120,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       });
       return;
     }
-    const read = await window.electronAPI.workspace.readTextFile(
+    const read = await adapter.api.workspace.readTextFile(
       target.path,
       previous,
     );
@@ -3159,7 +3158,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       (item) =>
         item.toLowerCase().endsWith(".md") && !/README\.md$/i.test(item),
     )) {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         chapter,
       );
@@ -3171,7 +3170,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     const root = activeProject?.subfolder
       ? `${activeProject.subfolder}/appendices`
       : "appendices";
-    await window.electronAPI.workspace.createDirectory(target.path, root);
+    await adapter.api.workspace.createDirectory(target.path, root);
     const files = [
       {
         path: `${root}/INDEX.md`,
@@ -3193,12 +3192,12 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       },
     ];
     for (const file of files) {
-      const existing = await window.electronAPI.workspace.readTextFile(
+      const existing = await adapter.api.workspace.readTextFile(
         target.path,
         file.path,
       );
       if (existing.success && existing.data)
-        await window.electronAPI.workspace.writeTextFile(
+        await adapter.api.workspace.writeTextFile(
           target.path,
           file.path,
           file.content,
@@ -3209,7 +3208,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           },
         );
       else
-        await window.electronAPI.workspace.mutateFiles(target.path, [
+        await adapter.api.workspace.mutateFiles(target.path, [
           {
             kind: "create",
             path: file.path,
@@ -3231,17 +3230,17 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     const root = activeProject?.subfolder
       ? `${activeProject.subfolder}/backups/${createdAt}`
       : `backups/${createdAt}`;
-    await window.electronAPI.workspace.createDirectory(
+    await adapter.api.workspace.createDirectory(
       target.path,
       activeProject?.subfolder
         ? `${activeProject.subfolder}/backups`
         : "backups",
     );
-    await window.electronAPI.workspace.createDirectory(target.path, root);
+    await adapter.api.workspace.createDirectory(target.path, root);
     const manifestPath = activeProject?.subfolder
       ? `${activeProject.subfolder}/.chapter-project.json`
       : ".chapter-project.json";
-    const manifest = await window.electronAPI.workspace.readTextFile(
+    const manifest = await adapter.api.workspace.readTextFile(
       target.path,
       manifestPath,
     );
@@ -3264,7 +3263,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     for (const path of managedFiles.filter((item) =>
       item.toLowerCase().endsWith(".md"),
     )) {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         path,
       );
@@ -3290,11 +3289,11 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       encoding: "utf8",
       lineEnding: "LF",
     });
-    await window.electronAPI.workspace.createDirectory(
+    await adapter.api.workspace.createDirectory(
       target.path,
       `${root}/documents`,
     );
-    const result = await window.electronAPI.workspace.mutateFiles(
+    const result = await adapter.api.workspace.mutateFiles(
       target.path,
       operations,
     );
@@ -3325,7 +3324,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       ? manifestPath
       : `${manifestPath.replace(/\/$/, "")}/BACKUP-MANIFEST.json`;
     try {
-      const readManifest = await window.electronAPI.workspace.readTextFile(
+      const readManifest = await adapter.api.workspace.readTextFile(
         target.path,
         resolved,
       );
@@ -3337,7 +3336,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       };
       const entries = await Promise.all(
         (parsed.sourceMap ?? []).map(async (mapping) => {
-          const backup = await window.electronAPI.workspace.readTextFile(
+          const backup = await adapter.api.workspace.readTextFile(
             target.path,
             mapping.backupPath,
           );
@@ -3348,7 +3347,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           )?.checksum;
           if (expected && checksumText(backup.data.content) !== expected)
             throw new Error(`备份校验失败：${mapping.sourcePath}`);
-          const current = await window.electronAPI.workspace.readTextFile(
+          const current = await adapter.api.workspace.readTextFile(
             target.path,
             mapping.sourcePath,
           );
@@ -3375,7 +3374,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         return;
       for (const entry of changed) {
         if (entry.current.success && entry.current.data)
-          await window.electronAPI.workspace.writeTextFile(
+          await adapter.api.workspace.writeTextFile(
             target.path,
             entry.sourcePath,
             entry.content,
@@ -3386,7 +3385,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
             },
           );
         else
-          await window.electronAPI.workspace.mutateFiles(target.path, [
+          await adapter.api.workspace.mutateFiles(target.path, [
             {
               kind: "create",
               path: entry.sourcePath,
@@ -3458,7 +3457,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           item.toLowerCase().endsWith(".md") && !/README\.md$/i.test(item),
       ),
     )) {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         path,
       );
@@ -3493,15 +3492,15 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     const root = activeProject?.subfolder
       ? `${activeProject.subfolder}/publication`
       : "publication";
-    await window.electronAPI.workspace.createDirectory(target.path, root);
+    await adapter.api.workspace.createDirectory(target.path, root);
     const path = `${root}/print-${version.replace(/[^a-zA-Z0-9._-]/g, "-")}.html`;
-    const existing = await window.electronAPI.workspace.readTextFile(
+    const existing = await adapter.api.workspace.readTextFile(
       target.path,
       path,
     );
     const result =
       existing.success && existing.data
-        ? await window.electronAPI.workspace.writeTextFile(
+        ? await adapter.api.workspace.writeTextFile(
             target.path,
             path,
             html,
@@ -3511,7 +3510,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
               expectedModifiedAt: existing.data.modifiedAt,
             },
           )
-        : await window.electronAPI.workspace.mutateFiles(target.path, [
+        : await adapter.api.workspace.mutateFiles(target.path, [
             {
               kind: "create",
               path,
@@ -3544,7 +3543,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           item.toLowerCase().endsWith(".md") && !/README\.md$/i.test(item),
       ),
     )) {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         path,
       );
@@ -3583,7 +3582,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const root = activeProject?.subfolder
         ? `${activeProject.subfolder}/publication`
         : "publication";
-      await window.electronAPI.workspace.createDirectory(target.path, root);
+      await adapter.api.workspace.createDirectory(target.path, root);
       const safe =
         projectTitle.replace(/[<>:"/\\|?*]/g, "-").slice(0, 60) || "manuscript";
       const [docx, epub, pdf] = await Promise.all([
@@ -3596,7 +3595,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         ["epub", epub],
         ["pdf", pdf],
       ] as const) {
-        const result = await window.electronAPI.workspace.writeBinaryFile(
+        const result = await adapter.api.workspace.writeBinaryFile(
           target.path,
           `${root}/${safe}.${extension}`,
           content,
@@ -3637,7 +3636,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     if (!gitRemoteUrl.trim() || deploymentChecking) return;
     setDeploymentChecking(true);
     try {
-      const result = await window.electronAPI.outlineGithub.pagesStatus(
+      const result = await adapter.api.outlineGithub.pagesStatus(
         gitRemoteUrl.trim(),
       );
       if (!result.success || !result.data)
@@ -3686,7 +3685,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     }
     const inspectedFiles = await Promise.all(
       managedFiles.map(async (path) => {
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           path,
         );
@@ -3759,7 +3758,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       });
       setChapterStatus(path, "generating");
       try {
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           path,
         );
@@ -3859,7 +3858,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
             "检测到当前章节上下文未要求的秦汉内容，已阻止覆盖；请重新生成。",
           );
         }
-        const written = await window.electronAPI.workspace.writeTextFile(
+        const written = await adapter.api.workspace.writeTextFile(
           target.path,
           path,
           `${result.trimEnd()}\n`,
@@ -3937,8 +3936,8 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
 
   useEffect(() => {
     Promise.all([
-      window.electronAPI.outlineSecrets.load("review"),
-      window.electronAPI.outlineSecrets.load("minimax"),
+      adapter.api.outlineSecrets.load("review"),
+      adapter.api.outlineSecrets.load("minimax"),
     ])
       .then(([review, minimax]) => {
         if (review.success && review.value) setReviewApiKey(review.value);
@@ -3954,7 +3953,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     } catch {
       /* Documents remain on disk. */
     }
-    window.electronAPI.outlineProjects
+    adapter.api.outlineProjects
       .save(recentProjects)
       .catch(() => undefined);
   }, [projectHistoryReady, recentProjects]);
@@ -4272,13 +4271,13 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         : ".chapter-project.json";
       const manifest = `${JSON.stringify({ schemaVersion: 9, version: 9, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses, knowledgeEntries, evidenceRecords, qualityReports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, timelineEvents, bookAnalysisIssues, semanticDuplicates, controversies, professionalRulePacks, roleApprovals, evidenceGaps, narrativeAssessments, factLocks, citationStyle, contentClassifications, sceneEvidenceCards, changeLog, personRelations, personPresences, placeMappings, historicalTermRules, numericClaims, pacingAssessments, characterArcs, editorialTasks, qualitySnapshots, qualityBaselineId, bookIndex, releaseRecords, editorialPresetId, commentThreads, aiExecutionLogs, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: /^https?:\/\/[^/@]+@/i.test(gitRemoteUrl) ? "" : gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       try {
-        const existing = await window.electronAPI.workspace.readTextFile(
+        const existing = await adapter.api.workspace.readTextFile(
           target.path,
           manifestPath,
         );
         const result =
           existing.success && existing.data
-            ? await window.electronAPI.workspace.writeTextFile(
+            ? await adapter.api.workspace.writeTextFile(
                 target.path,
                 manifestPath,
                 manifest,
@@ -4288,7 +4287,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                   expectedModifiedAt: existing.data.modifiedAt,
                 },
               )
-            : await window.electronAPI.workspace.mutateFiles(target.path, [
+            : await adapter.api.workspace.mutateFiles(target.path, [
                 {
                   kind: "create",
                   path: manifestPath,
@@ -4382,7 +4381,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
               item.toLowerCase().endsWith(".md") && !/README\.md$/i.test(item),
           ),
         )) {
-          const read = await window.electronAPI.workspace.readTextFile(
+          const read = await adapter.api.workspace.readTextFile(
             target.path,
             path,
           );
@@ -4397,7 +4396,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         const historyRoot = activeProject?.subfolder
           ? `${activeProject.subfolder}/.history`
           : ".history";
-        const directory = await window.electronAPI.workspace.createDirectory(
+        const directory = await adapter.api.workspace.createDirectory(
           target.path,
           historyRoot,
         );
@@ -4408,7 +4407,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           throw new Error(directory.error);
         const createdAt = Date.now();
         const snapshotPath = `${historyRoot}/final-${createdAt}.md`;
-        const created = await window.electronAPI.workspace.mutateFiles(
+        const created = await adapter.api.workspace.mutateFiles(
           target.path,
           [
             {
@@ -4480,7 +4479,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     setAiError("");
     setDocumentLoading(true);
     try {
-      const result = await window.electronAPI.workspace.readTextFile(
+      const result = await adapter.api.workspace.readTextFile(
         folder.path,
         path,
       );
@@ -4634,7 +4633,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     }
     setDocumentLoading(true);
     try {
-      const result = await window.electronAPI.workspace.listFiles(folder.path);
+      const result = await adapter.api.workspace.listFiles(folder.path);
       if (!result.success) throw new Error(result.error);
       const requestedPrefix = projectFolder.trim()
         ? `${projectFolder.trim().replace(/\\/g, "/")}/`
@@ -4675,7 +4674,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       );
       const paths = sortChapterPaths(matched.length ? matched : allMarkdown);
       let diskProject: Partial<SavedProject> | undefined;
-      const diskManifest = await window.electronAPI.workspace.readTextFile(
+      const diskManifest = await adapter.api.workspace.readTextFile(
         folder.path,
         prefix ? `${prefix}.chapter-project.json` : ".chapter-project.json",
       );
@@ -4774,7 +4773,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     if (dirty && !window.confirm("当前文档尚未保存，确定打开其他项目吗？"))
       return;
     try {
-      const authorized = await window.electronAPI.workspace.reauthorize(
+      const authorized = await adapter.api.workspace.reauthorize(
         project.rootPath,
       );
       if (!authorized.success) throw new Error("目录授权失败");
@@ -4782,7 +4781,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const manifestPath = project.subfolder
         ? `${project.subfolder}/.chapter-project.json`
         : ".chapter-project.json";
-      const manifestResult = await window.electronAPI.workspace.readTextFile(
+      const manifestResult = await adapter.api.workspace.readTextFile(
         project.rootPath,
         manifestPath,
       );
@@ -4958,7 +4957,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           ? `${activeProject.subfolder}/.history`
           : ".history";
         const historyDirectory =
-          await window.electronAPI.workspace.createDirectory(
+          await adapter.api.workspace.createDirectory(
             target.path,
             historyRoot,
           );
@@ -4970,7 +4969,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         const snapshotName = activeFile
           .replace(/[/\\<>:"|?*]/g, "-")
           .replace(/\.md$/i, "");
-        const snapshot = await window.electronAPI.workspace.mutateFiles(
+        const snapshot = await adapter.api.workspace.mutateFiles(
           target.path,
           [
             {
@@ -4984,7 +4983,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         );
         if (!snapshot.success) throw new Error(snapshot.error);
       }
-      const result = await window.electronAPI.workspace.writeTextFile(
+      const result = await adapter.api.workspace.writeTextFile(
         target.path,
         activeFile,
         documentContent,
@@ -5361,7 +5360,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const provider = createOpenAIProvider({
         apiKey: normalizeApiKey(reviewApiKey),
         baseUrl: reviewBaseUrl.trim(),
-        chatProxy: window.electronAPI.llmChat,
+        chatProxy: adapter.api.llmChat,
       });
       let result = "";
       for await (const chunk of provider.chat(messages, {
@@ -5467,7 +5466,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     try {
       const chapterName =
         activeFile.split("/").pop()?.replace(/\.md$/i, "") ?? activeFile;
-      const result = await window.electronAPI.generateImage({
+      const result = await adapter.api.generateImage({
         provider: "minimax",
         baseUrl: reviewBaseUrl.includes("minimaxi.com")
           ? "https://api.minimaxi.com/v1"
@@ -5506,7 +5505,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       });
       return;
     }
-    const result = await window.electronAPI.outlineSecrets.save(
+    const result = await adapter.api.outlineSecrets.save(
       kind,
       normalizeApiKey(value),
     );
@@ -5525,7 +5524,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
   };
 
   const clearApiKey = async (kind: "review" | "minimax") => {
-    const result = await window.electronAPI.outlineSecrets.save(kind, "");
+    const result = await adapter.api.outlineSecrets.save(kind, "");
     if (kind === "review") setReviewApiKey("");
     else setMinimaxApiKey("");
     if (result.success)
@@ -5646,7 +5645,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const provider = createOpenAIProvider({
         apiKey: normalizeApiKey(reviewApiKey),
         baseUrl: reviewBaseUrl.trim(),
-        chatProxy: window.electronAPI.llmChat,
+        chatProxy: adapter.api.llmChat,
       });
       const messages: ChatMessage[] = [
         {
@@ -5755,7 +5754,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           const planner = createOpenAIProvider({
             apiKey: normalizeApiKey(reviewApiKey),
             baseUrl: reviewBaseUrl.trim(),
-            chatProxy: window.electronAPI.llmChat,
+            chatProxy: adapter.api.llmChat,
           });
           const planningMessages: ChatMessage[] = [
             {
@@ -5793,7 +5792,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const [workSearches, historicalSearch] = await Promise.all([
         Promise.allSettled(
           queries.map((text) =>
-            window.electronAPI.workBrowser.search.run({
+            adapter.api.workBrowser.search.run({
               text,
               locale: "zh-CN",
               perPage: 6,
@@ -5801,7 +5800,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
             }),
           ),
         ),
-        window.electronAPI.outlineResearch.search(queries).catch((error) => ({
+        adapter.api.outlineResearch.search(queries).catch((error) => ({
           results: [],
           providers: [
             {
@@ -5944,7 +5943,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         : "assets/images";
       const parts = assetFolder.split("/");
       for (let index = 1; index <= parts.length; index += 1) {
-        const created = await window.electronAPI.workspace.createDirectory(
+        const created = await adapter.api.workspace.createDirectory(
           target.path,
           parts.slice(0, index).join("/"),
         );
@@ -5962,7 +5961,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           .slice(0, 48) || "chapter";
       const imagePath = `${assetFolder}/${stem}-${Date.now()}.jpg`;
       const base64 = imageDataUrl.replace(/^data:image\/[^;]+;base64,/, "");
-      const written = await window.electronAPI.workspace.writeBinaryFile(
+      const written = await adapter.api.workspace.writeBinaryFile(
         target.path,
         imagePath,
         base64,
@@ -6002,7 +6001,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
 
   const getProjectGitChanges = async (projectFiles = managedFiles) => {
     if (!target) return [];
-    const result = await window.electronAPI.workspace.gitStatus(target.path);
+    const result = await adapter.api.workspace.gitStatus(target.path);
     if (!result.success) throw new Error(result.error);
     setGitRepository(true);
     setOutputIsGitRepository(true);
@@ -6069,7 +6068,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     setGitError("");
     try {
       setGitChanges(await getProjectGitChanges());
-      const overview = await window.electronAPI.workspace.gitOperation<{
+      const overview = await adapter.api.workspace.gitOperation<{
         branch: string;
         remotes: string[];
       }>(target.path, "overview");
@@ -6104,7 +6103,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     setGitLoading(true);
     setGitError("");
     try {
-      const result = await window.electronAPI.workspace.gitInit(target.path);
+      const result = await adapter.api.workspace.gitInit(target.path);
       if (!result.success) throw new Error(result.error);
       setGitRepository(true);
       setOutputIsGitRepository(true);
@@ -6138,12 +6137,12 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     setGitError("");
     try {
       const paths = gitChanges.map((change) => change.path);
-      const staged = await window.electronAPI.workspace.gitStage(
+      const staged = await adapter.api.workspace.gitStage(
         target.path,
         paths,
       );
       if (!staged.success) throw new Error(staged.error);
-      const committed = await window.electronAPI.workspace.gitCommit(
+      const committed = await adapter.api.workspace.gitCommit(
         target.path,
         gitMessage.trim(),
         paths,
@@ -6181,7 +6180,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     };
     const fixTargets: GateFixTarget[] = [];
     for (const path of chapterFiles) {
-      const read = await window.electronAPI.workspace.readTextFile(
+      const read = await adapter.api.workspace.readTextFile(
         target.path,
         path,
       );
@@ -6213,7 +6212,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     setChapterStatuses(nextStatuses);
     setGateFixTargets(fixTargets);
     gateFixTargetsRef.current = fixTargets;
-    const listing = await window.electronAPI.workspace.listFiles(target.path);
+    const listing = await adapter.api.workspace.listFiles(target.path);
     if (listing.success) {
       const paths = new Set(
         (listing.data ?? [])
@@ -6241,14 +6240,14 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const manifestPath = activeProject?.subfolder
         ? `${activeProject.subfolder}/.chapter-project.json`
         : ".chapter-project.json";
-      const existing = await window.electronAPI.workspace.readTextFile(
+      const existing = await adapter.api.workspace.readTextFile(
         target.path,
         manifestPath,
       );
       const manifest = `${JSON.stringify({ schemaVersion: 9, version: 9, name: projectTitle, requirement: bookRequirement, source, chapterBriefs, chapterStatuses: nextStatuses, knowledgeEntries, evidenceRecords, qualityReports: reports, editorialAudits, finalReadConfirmed, claims, finalSnapshot, timelineEvents, bookAnalysisIssues, semanticDuplicates, controversies, professionalRulePacks, roleApprovals, evidenceGaps, narrativeAssessments, factLocks, citationStyle, contentClassifications, sceneEvidenceCards, changeLog, personRelations, personPresences, placeMappings, historicalTermRules, numericClaims, pacingAssessments, characterArcs, editorialTasks, qualitySnapshots, qualityBaselineId, bookIndex, releaseRecords, editorialPresetId, commentThreads, aiExecutionLogs, deploymentStatus, splitMode, organizeByPart, template, files: managedFiles, git: { remoteUrl: gitRemoteUrl, remoteName: gitRemoteName, branch: gitBranch }, pages: { title: pagesTitle, description: pagesDescription, author: pagesAuthor, language: pagesLanguage, repositoryName: pagesRepositoryName, customDomain: pagesCustomDomain, accentColor: pagesAccentColor }, updatedAt: Date.now() }, null, 2)}\n`;
       const synced =
         existing.success && existing.data
-          ? await window.electronAPI.workspace.writeTextFile(
+          ? await adapter.api.workspace.writeTextFile(
               target.path,
               manifestPath,
               manifest,
@@ -6271,7 +6270,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     if (!targetIssue || !target) return;
     gateRepairActiveRef.current = true;
     await openDocument(targetIssue.path, target, true);
-    const read = await window.electronAPI.workspace.readTextFile(
+    const read = await adapter.api.workspace.readTextFile(
       target.path,
       targetIssue.path,
     );
@@ -6430,7 +6429,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
     });
     try {
       if (gitRepository !== true) {
-        const initialized = await window.electronAPI.workspace.gitInit(
+        const initialized = await adapter.api.workspace.gitInit(
           target.path,
         );
         if (!initialized.success) throw new Error(initialized.error);
@@ -6440,19 +6439,19 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const changes = await getProjectGitChanges(publishFiles);
       if (changes.length) {
         const paths = changes.map((change) => change.path);
-        const staged = await window.electronAPI.workspace.gitStage(
+        const staged = await adapter.api.workspace.gitStage(
           target.path,
           paths,
         );
         if (!staged.success) throw new Error(staged.error);
-        const committed = await window.electronAPI.workspace.gitCommit(
+        const committed = await adapter.api.workspace.gitCommit(
           target.path,
           gitMessage.trim() || "docs: publish generated articles",
           paths,
         );
         if (!committed.success) throw new Error(committed.error);
       }
-      const overview = await window.electronAPI.workspace.gitOperation<{
+      const overview = await adapter.api.workspace.gitOperation<{
         branch: string;
         remotes: string[];
       }>(target.path, "overview");
@@ -6463,7 +6462,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           line.startsWith(remotePrefix),
         ) ?? [];
       if (!remoteLines.length) {
-        const added = await window.electronAPI.workspace.gitOperation(
+        const added = await adapter.api.workspace.gitOperation(
           target.path,
           "addRemote",
           { name: gitRemoteName.trim(), url: gitRemoteUrl.trim() },
@@ -6478,14 +6477,14 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       }
       const currentBranch = overview.data?.branch;
       if (currentBranch && currentBranch !== gitBranch.trim()) {
-        const renamed = await window.electronAPI.workspace.gitOperation(
+        const renamed = await adapter.api.workspace.gitOperation(
           target.path,
           "renameBranch",
           { from: currentBranch, to: gitBranch.trim() },
         );
         if (!renamed.success) throw new Error(renamed.error);
       }
-      const pushed = await window.electronAPI.workspace.gitOperation(
+      const pushed = await adapter.api.workspace.gitOperation(
         target.path,
         "push",
         { remote: gitRemoteName.trim(), setUpstream: true },
@@ -6525,12 +6524,12 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
 
   const upsertWorkspaceFile = async (path: string, content: string) => {
     if (!target) throw new Error("请先选择 Git 仓库");
-    const existing = await window.electronAPI.workspace.readTextFile(
+    const existing = await adapter.api.workspace.readTextFile(
       target.path,
       path,
     );
     if (existing.success && existing.data) {
-      const updated = await window.electronAPI.workspace.writeTextFile(
+      const updated = await adapter.api.workspace.writeTextFile(
         target.path,
         path,
         content,
@@ -6543,7 +6542,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       if (!updated.success) throw new Error(updated.error);
       return;
     }
-    const created = await window.electronAPI.workspace.mutateFiles(
+    const created = await adapter.api.workspace.mutateFiles(
       target.path,
       [{ kind: "create", path, content, encoding: "utf8", lineEnding: "LF" }],
     );
@@ -6573,7 +6572,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         pagesTitle.trim() && pagesTitle.trim() !== "我的文档"
           ? pagesTitle.trim()
           : pagesDescription.trim().replace(/在线阅读$/, "") || projectTitle;
-      const listing = await window.electronAPI.workspace.listFiles(target.path);
+      const listing = await adapter.api.workspace.listFiles(target.path);
       if (!listing.success)
         throw new Error(listing.error || "无法扫描项目章节");
       const folderPrefix = siteFolder ? `${siteFolder}/` : "";
@@ -6599,7 +6598,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       const chapterIndex: Array<{ order: number; title: string; url: string }> =
         [];
       for (const [order, file] of chapterFiles.entries()) {
-        const read = await window.electronAPI.workspace.readTextFile(
+        const read = await adapter.api.workspace.readTextFile(
           target.path,
           file,
         );
@@ -6621,7 +6620,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           .replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n+/, "")
           .replace(/^#\s+.*\r?\n+/, "");
         const content = `---\nlayout: article\ntitle: ${JSON.stringify(title)}\nchapter: true\norder: ${order + 1}\n---\n\n${body}`;
-        const updated = await window.electronAPI.workspace.writeTextFile(
+        const updated = await adapter.api.workspace.writeTextFile(
           target.path,
           file,
           content,
@@ -6682,7 +6681,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         inSite("assets"),
         inSite("assets/css"),
       ]) {
-        const created = await window.electronAPI.workspace.createDirectory(
+        const created = await adapter.api.workspace.createDirectory(
           target.path,
           directory,
         );
@@ -6710,7 +6709,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         css + collapseCss + togglePositionCss,
       );
       for (const directory of [".github", ".github/workflows"]) {
-        const created = await window.electronAPI.workspace.createDirectory(
+        const created = await adapter.api.workspace.createDirectory(
           target.path,
           directory,
         );
@@ -6747,7 +6746,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
   };
 
   const chooseFolder = async () => {
-    const folder = await window.electronAPI.workspace.openFolder();
+    const folder = await adapter.api.workspace.openFolder();
     if (folder) {
       setTarget(folder);
       setOutputIsGitRepository(null);
@@ -6755,13 +6754,13 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
   };
 
   const chooseGitOutput = async () => {
-    const folder = await window.electronAPI.workspace.openFolder();
+    const folder = await adapter.api.workspace.openFolder();
     if (!folder) return;
     setTarget(folder);
     setGitLoading(true);
     setGitError("");
     try {
-      const status = await window.electronAPI.workspace.gitStatus(folder.path);
+      const status = await adapter.api.workspace.gitStatus(folder.path);
       if (!status.success) throw new Error(status.error);
       setOutputIsGitRepository(true);
       setGitRepository(true);
@@ -6798,7 +6797,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       }
       const found: string[] = [];
       for (const [directory, names] of byDirectory) {
-        const result = await window.electronAPI.workspace.listDirectory(
+        const result = await adapter.api.workspace.listDirectory(
           target.path,
           directory,
         );
@@ -6827,7 +6826,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       }
     }
     for (const directory of directories) {
-      const result = await window.electronAPI.workspace.createDirectory(
+      const result = await adapter.api.workspace.createDirectory(
         target.path,
         directory,
       );
@@ -6847,7 +6846,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
       if (existing.length) throw new Error(`ALREADY_EXISTS:${existing[0]}`);
       await ensureDirectories();
       for (let index = 0; index < files.length; index += 200) {
-        const result = await window.electronAPI.workspace.mutateFiles(
+        const result = await adapter.api.workspace.mutateFiles(
           target.path,
           files.slice(index, index + 200).map((file) => ({
             kind: "create" as const,
@@ -6953,7 +6952,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
           null,
           2,
         ) + "\n";
-      const manifestResult = await window.electronAPI.workspace.mutateFiles(
+      const manifestResult = await adapter.api.workspace.mutateFiles(
         target.path,
         [
           {
@@ -6969,7 +6968,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         !manifestResult.success &&
         String(manifestResult.error).includes("ALREADY_EXISTS")
       ) {
-        const updated = await window.electronAPI.workspace.writeTextFile(
+        const updated = await adapter.api.workspace.writeTextFile(
           target.path,
           manifestPath,
           manifest,
@@ -10895,7 +10894,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                               className="block max-w-full truncate text-primary hover:underline"
                               title={item.title}
                               onClick={() =>
-                                window.electronAPI.shell.openExternal(item.url)
+                                adapter.api.shell.openExternal(item.url)
                               }
                             >
                               {item.title}
@@ -11122,7 +11121,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                         type="button"
                         className="w-fit text-primary hover:underline"
                         onClick={() =>
-                          window.electronAPI.shell.openExternal(
+                          adapter.api.shell.openExternal(
                             deploymentStatus.url!,
                           )
                         }
@@ -11135,7 +11134,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                         type="button"
                         className="w-fit text-primary hover:underline"
                         onClick={() =>
-                          window.electronAPI.shell.openExternal(pagesRunUrl)
+                          adapter.api.shell.openExternal(pagesRunUrl)
                         }
                       >
                         查看 GitHub Actions 构建详情
@@ -11978,7 +11977,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
-                                window.electronAPI.shell.openExternal(item.url);
+                                adapter.api.shell.openExternal(item.url);
                               }}
                             >
                               打开原文 · {item.domain}
@@ -12389,7 +12388,7 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
                   variant="outline"
                   disabled={!aiResult || aiLoading}
                   onClick={() => {
-                    window.electronAPI.copyText(aiResult);
+                    adapter.api.copyText(aiResult);
                     notice.success({
                       message: "审校报告已复制",
                       placement: "bottomRight",
