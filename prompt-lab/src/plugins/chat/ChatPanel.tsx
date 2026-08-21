@@ -202,6 +202,8 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   const senderRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notifApi, contextHolder] = notification.useNotification();
+  const notifApiRef = useRef(notifApi);
+  notifApiRef.current = notifApi;
 
   // 附件上传处理
   const handleFiles = useCallback((files: FileList | null) => {
@@ -765,9 +767,9 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   // ── 错误通知 ──
   useEffect(() => {
     if (error) {
-      notifApi.error({ message: '请求失败', description: error, placement: 'bottomRight', duration: 5 });
+      notifApiRef.current.error({ message: '请求失败', description: error, placement: 'bottomRight', duration: 5 });
     }
-  }, [error, notifApi]);
+  }, [error]);
 
   useEffect(() => {
     if (!active) return;
@@ -1086,16 +1088,17 @@ export const ChatPanel: React.FC<{ scene?: ChatScene; active?: boolean }> = ({ s
   };
 
   const showSysPrompt = !activeRole && (sysPromptOpen || (!!systemPrompt && messages.length === 0));
+  const providerTheme = useMemo(() => ({
+    algorithm: isDark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm,
+    token: {
+      colorPrimary: 'hsl(var(--primary))',
+      colorPrimaryHover: 'hsl(var(--primary-hover))',
+      colorPrimaryActive: 'hsl(var(--primary-hover))',
+    },
+  }), [isDark]);
 
   return (
-    <ConfigProvider theme={{
-      algorithm: isDark ? antTheme.darkAlgorithm : antTheme.defaultAlgorithm,
-      token: {
-        colorPrimary: 'hsl(var(--primary))',
-        colorPrimaryHover: 'hsl(var(--primary-hover))',
-        colorPrimaryActive: 'hsl(var(--primary-hover))',
-      },
-    }}>
+    <ConfigProvider theme={providerTheme}>
       <XProvider>
         {contextHolder}
         <div className="flex-1 flex h-full bg-card">
