@@ -15,6 +15,10 @@ import {
 import { Button } from "./Button";
 import { createOpenAIProvider, type ChatMessage } from "../core/llm";
 import type { OutlineScaffolderAdapter } from "./adapter";
+import { EditorialDiff } from "./components/EditorialDiff";
+import { EditableOutlineTree } from "./components/EditableOutlineTree";
+import { ManagementNavigation, type AdvancedSection, type ManagementTab } from "./views/ManagementNavigation";
+import { GitPanel } from "./views/GitPanel";
 import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
@@ -615,28 +619,6 @@ const EDITORIAL_AI_FOCUS: Record<
 };
 const editorialSignature = (content: string) =>
   `${content.length}:${content.slice(0, 160)}:${content.slice(-160)}`;
-const EditorialDiff: React.FC<{ original: string; replacement: string }> = ({
-  original,
-  replacement,
-}) => {
-  const diff = compactTextDiff(original, replacement);
-  return (
-    <div className="mt-2 grid gap-2 text-[11px] md:grid-cols-2">
-      <div className="rounded border border-red-500/20 bg-red-500/[0.06] p-2">
-        <div className="mb-1 font-medium text-red-700">原文</div>
-        {diff.prefix}
-        <del className="bg-red-500/20">{diff.removed}</del>
-        {diff.suffix}
-      </div>
-      <div className="rounded border border-emerald-500/20 bg-emerald-500/[0.06] p-2">
-        <div className="mb-1 font-medium text-emerald-700">建议稿</div>
-        {diff.prefix}
-        <ins className="bg-emerald-500/20 no-underline">{diff.added}</ins>
-        {diff.suffix}
-      </div>
-    </div>
-  );
-};
 const buildEditorialIssues = (
   stage: EditorialStageId,
   content: string,
@@ -757,97 +739,6 @@ const serializeOutline = (nodes: OutlineNode[]): string =>
         `${"#".repeat(Math.min(6, Math.max(1, node.level)))} ${node.title}${node.children.length ? `\n${serializeOutline(node.children)}` : ""}`,
     )
     .join("\n");
-
-function EditableOutlineTree({
-  nodes,
-  onRename,
-  onDelete,
-  onMove,
-}: {
-  nodes: OutlineNode[];
-  onRename: (id: string, title: string) => void;
-  onDelete: (id: string) => void;
-  onMove: (id: string, direction: -1 | 1) => void;
-}) {
-  const [editingId, setEditingId] = useState("");
-  const [draft, setDraft] = useState("");
-  return (
-    <ul className="space-y-1">
-      {nodes.map((node) => (
-        <li key={node.id}>
-          <div className="group flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted/60">
-            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            {editingId === node.id ? (
-              <input
-                autoFocus
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && draft.trim()) {
-                    onRename(node.id, draft.trim());
-                    setEditingId("");
-                  }
-                  if (event.key === "Escape") setEditingId("");
-                }}
-                onBlur={() => {
-                  if (draft.trim()) onRename(node.id, draft.trim());
-                  setEditingId("");
-                }}
-                className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 text-sm"
-              />
-            ) : (
-              <span className="min-w-0 flex-1 truncate">{node.title}</span>
-            )}
-            <button
-              type="button"
-              title="上移"
-              className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100"
-              onClick={() => onMove(node.id, -1)}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              title="下移"
-              className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100"
-              onClick={() => onMove(node.id, 1)}
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                setEditingId(node.id);
-                setDraft(node.title);
-              }}
-            >
-              修改
-            </button>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-              onClick={() => onDelete(node.id)}
-            >
-              删除
-            </button>
-          </div>
-          {node.children.length > 0 && (
-            <div className="ml-5 border-l border-border pl-2">
-              <EditableOutlineTree
-                nodes={node.children}
-                onRename={onRename}
-                onDelete={onDelete}
-                onMove={onMove}
-              />
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export interface OutlineScaffolderPanelProps {
   adapter: OutlineScaffolderAdapter;
@@ -1016,25 +907,8 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
   const [gateFixTargets, setGateFixTargets] = useState<GateFixTarget[]>([]);
   const gateFixTargetsRef = useRef<GateFixTarget[]>([]);
   const gateRepairActiveRef = useRef(false);
-  const [managementTab, setManagementTab] = useState<
-    | "overview"
-    | "knowledge"
-    | "evidence"
-    | "editorial"
-    | "advanced"
-    | "quality"
-    | "publish"
-  >("overview");
-  const [advancedSection, setAdvancedSection] = useState<
-    | "dashboard"
-    | "analysis"
-    | "sources"
-    | "world"
-    | "drafting"
-    | "visualization"
-    | "collaboration"
-    | "delivery"
-  >("dashboard");
+  const [managementTab, setManagementTab] = useState<ManagementTab>("overview");
+  const [advancedSection, setAdvancedSection] = useState<AdvancedSection>("dashboard");
   const [auditLoading, setAuditLoading] = useState(false);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [manifestSyncState, setManifestSyncState] = useState<
@@ -7560,68 +7434,8 @@ export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ 
         </div>
       ) : view === "management" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-border bg-card px-6 py-3">
-            {(
-              [
-                ["overview", "规划看板"],
-                ["knowledge", "全书知识库"],
-                ["evidence", "史料证据台账"],
-                ["editorial", "审校流水线"],
-                ["advanced", "高级审校"],
-                ["quality", "一致性与门禁"],
-                ["publish", "发布状态"],
-              ] as const
-            ).map(([id, label]) => (
-              <Button
-                key={id}
-                size="sm"
-                variant={managementTab === id ? "default" : "ghost"}
-                onClick={() => setManagementTab(id)}
-              >
-                {label}
-              </Button>
-            ))}
-            <Button
-              size="sm"
-              variant="outline"
-              className="ml-auto"
-              disabled={auditLoading || !target}
-              onClick={runBookAudit}
-            >
-              {auditLoading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Check className="mr-2 h-4 w-4" />
-              )}
-              运行全书检查
-            </Button>
-          </div>
+          <ManagementNavigation tab={managementTab} advancedSection={advancedSection} auditLoading={auditLoading} auditDisabled={!target} onTabChange={setManagementTab} onAdvancedSectionChange={setAdvancedSection} onRunAudit={runBookAudit} />
           <div className="min-h-0 flex-1 overflow-auto p-6">
-            {managementTab === "advanced" && (
-              <nav className="mx-auto mb-5 flex max-w-7xl flex-wrap gap-2 rounded-xl border border-border bg-card p-2">
-                {(
-                  [
-                    ["dashboard", "总览"],
-                    ["analysis", "全书分析"],
-                    ["sources", "史料与引用"],
-                    ["world", "人物·地名·年代"],
-                    ["drafting", "智能成稿"],
-                    ["visualization", "图谱与自动化"],
-                    ["collaboration", "协作签核"],
-                    ["delivery", "交付发布"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <Button
-                    key={id}
-                    size="sm"
-                    variant={advancedSection === id ? "default" : "ghost"}
-                    onClick={() => setAdvancedSection(id)}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </nav>
-            )}
             {managementTab === "advanced" && advancedSection === "delivery" && (
               <div className="mx-auto mb-5 max-w-7xl space-y-5">
                 <section className="rounded-xl border border-border bg-card p-4">
