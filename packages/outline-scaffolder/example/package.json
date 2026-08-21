@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "dependencies": {
+    "@next-work/outline-scaffolder": "file:..",
+    "@vitejs/plugin-react": "latest",
+    "vite": "^5.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {}
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRegenerationSkeleton, calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '@next-work/outline-scaffolder/core';
+import { buildRegenerationSkeleton, calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../src/core';
 
 describe('outline scaffolder', () => {
   it('parses markdown and creates one document per chapter', () => {

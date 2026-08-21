@@ -5,7 +5,33 @@ export interface FileMutation {
   operation?: "write" | "delete";
 }
 
+export interface OutlineAiConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  provider?: string;
+  qwenPlan?: string;
+}
+
+/** Host capabilities consumed by the full editor. Concrete hosts can narrow these methods. */
+export interface OutlineScaffolderHostApi {
+  workspace: Record<string, (...args: any[]) => any> & {
+    gitOperation<T = unknown>(...args: any[]): Promise<{ success: boolean; data?: T; error?: string }>;
+  };
+  outlineProjects: Record<string, (...args: any[]) => any>;
+  outlineSecrets: Record<string, (...args: any[]) => any>;
+  outlineResearch: Record<string, (...args: any[]) => any>;
+  outlineGithub: Record<string, (...args: any[]) => any>;
+  workBrowser: any;
+  shell: Record<string, (...args: any[]) => any>;
+  llmChat: (...args: any[]) => any;
+  generateImage: (...args: any[]) => any;
+  copyText: (...args: any[]) => any;
+}
+
 export interface OutlineScaffolderAdapter {
+  api: OutlineScaffolderHostApi;
+  aiConfig: OutlineAiConfig;
   files: {
     openFolder(): Promise<unknown>;
     readText(root: string, path: string): Promise<unknown>;

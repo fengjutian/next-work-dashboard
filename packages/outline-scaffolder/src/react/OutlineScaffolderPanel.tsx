@@ -11,14 +11,10 @@ import {
   Loader2,
   Save,
   Sparkles,
-} from "@/components/icons";
-import { Button } from "@/components/ui/button";
-import { createOpenAIProvider, type ChatMessage } from "@/core/llm";
-import { useStore } from "@/store/store";
-import {
-  OutlineScaffolderProvider,
-  type OutlineScaffolderAdapter,
-} from "@next-work/outline-scaffolder/react";
+} from "lucide-react";
+import { Button } from "./Button";
+import { createOpenAIProvider, type ChatMessage } from "../core/llm";
+import type { OutlineScaffolderAdapter } from "./adapter";
 import {
   calculateClaimCoverage,
   buildRegenerationSkeleton,
@@ -33,20 +29,20 @@ import {
   type ChapterWorkflowState,
   type OutlineNode,
   type SplitMode,
-} from "@next-work/outline-scaffolder/core";
+} from "../core/outline";
 import {
   createDocxBase64,
   createEpubBase64,
   createPdfBase64,
   type PublicationBook,
-} from "@next-work/outline-scaffolder/core";
-import { migrateOutlineProject } from "@next-work/outline-scaffolder/core";
-import { checksumText, createReleaseCandidate } from "@next-work/outline-scaffolder/core";
+} from "../core/publication-export";
+import { migrateOutlineProject } from "../core/project-migrations";
+import { checksumText, createReleaseCandidate } from "../core/delivery";
 import {
   scheduleRetry,
   stableContentKey,
   type RetryJob,
-} from "@next-work/outline-scaffolder/core";
+} from "../core/review-runtime";
 import {
   EDITORIAL_PRESETS,
   assessNarrative,
@@ -108,7 +104,7 @@ import {
   type SupportStrength,
   type TimelineEvent,
   type VersionComparison,
-} from "@next-work/outline-scaffolder/core";
+} from "../core/editorial-analysis";
 
 const DEFAULT_TEMPLATE = `# {{title}}
 
@@ -853,8 +849,20 @@ function EditableOutlineTree({
   );
 }
 
-const OutlineScaffolderContent: React.FC = () => {
-  const aiApi = useStore((state) => state.aiApi);
+export interface OutlineScaffolderPanelProps {
+  adapter: OutlineScaffolderAdapter;
+}
+
+export const OutlineScaffolderPanel: React.FC<OutlineScaffolderPanelProps> = ({ adapter }) => {
+  const aiApi = adapter.aiConfig;
+  const window = useMemo(() => ({
+    electronAPI: adapter.api,
+    confirm: globalThis.confirm.bind(globalThis),
+    prompt: globalThis.prompt.bind(globalThis),
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    requestAnimationFrame: globalThis.requestAnimationFrame.bind(globalThis),
+  }), [adapter]);
   const [antdNotice, holder] = notification.useNotification();
   const notice = useMemo(() => {
     type NoticeConfig = Omit<
@@ -12826,37 +12834,5 @@ const OutlineScaffolderContent: React.FC = () => {
         </div>
       )}
     </div>
-  );
-};
-
-function createPromptLabAdapter(): OutlineScaffolderAdapter {
-  const workspace = window.electronAPI.workspace;
-  return {
-    files: {
-      openFolder: () => workspace.openFolder(),
-      readText: (root, path) => workspace.readTextFile(root, path),
-      writeText: (root, path, content) => workspace.writeTextFile(root, path, content),
-      readBinary: (root, path) => workspace.readBinaryFile(root, path),
-      writeBinary: (root, path, contentBase64) =>
-        workspace.writeBinaryFile(root, path, contentBase64),
-      listFiles: (root) => workspace.listFiles(root),
-      listDirectory: (root, path) => workspace.listDirectory(root, path),
-      createDirectory: (root, path) => workspace.createDirectory(root, path),
-      mutate: (root, mutations) =>
-        workspace.mutateFiles(
-          root,
-          mutations as Parameters<typeof workspace.mutateFiles>[1],
-        ),
-      reauthorize: (root) => workspace.reauthorize(root),
-    },
-  };
-}
-
-export const OutlineScaffolderPanel: React.FC = () => {
-  const adapter = useMemo(createPromptLabAdapter, []);
-  return (
-    <OutlineScaffolderProvider adapter={adapter}>
-      <OutlineScaffolderContent />
-    </OutlineScaffolderProvider>
   );
 };
