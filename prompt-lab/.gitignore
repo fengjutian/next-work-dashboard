@@ -105,3 +105,6 @@ resources/rag-worker/
 analysis/
 *.report.json
 *.report.html
+
+# Scratch / one-off debug artifacts (see AGENTS.md)
+_artifacts/

@@ -1,8 +1,0 @@
-const CHANNEL_ARG = `(?:['"]([^'"]+)['"]|([A-Z_][A-Z0-9_]*\\.[A-Z_][A-Z0-9_]*))`;
-const source = `pause: () => ipcRenderer.invoke("video-player:open"),`;
-const re = new RegExp(`ipcRenderer\\.invoke\\(\\s*${CHANNEL_ARG}`, 'g');
-for (const m of source.matchAll(re)) {
-  console.log('m[0]:', m[0]);
-  console.log('m[1]:', JSON.stringify(m[1]));
-  console.log('m[2]:', JSON.stringify(m[2]));
-}

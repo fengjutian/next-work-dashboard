@@ -1,6 +1,0 @@
-import fs from 'node:fs';
-const source = fs.readFileSync('src/plugins/video-player/backend/video-service.ts', 'utf8');
-const re = /webContents\.send\(\s*(?:['"`]([^'"`]+)['"`]|[A-Z_][A-Z0-9_]*\.[A-Z_][A-Z0-9_]*)/g;
-for (const m of source.matchAll(re)) {
-  console.log('m[1]:', JSON.stringify(m[1]), 'm[2]:', JSON.stringify(m[2]));
-}
