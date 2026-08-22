@@ -15,7 +15,7 @@ import type { WorkspaceId } from '../types';
 export interface ToolContext {
   workspaceId: WorkspaceId | null;
   search: { run: (input: any) => Promise<{ results: any[]; summary: string | null }> };
-  rag: { run: (input: any) => Promise<{ systemPrompt: string; citations: any[]; chunks: any[] }> };
+  rag: { run: (input: any) => Promise<{ systemPrompt: string; userPrompt: string; citations: any[]; chunks: any[] }> };
   document: {
     save: (input: { workspaceId: WorkspaceId; url: string; title?: string; html?: string }) => Promise<{ documentId: string; wordCount: number }>;
   };
@@ -147,6 +147,11 @@ export interface AgentConfig {
 export interface AgentRunRequest {
   userMessage: string;
   systemPrompt?: string;
+  /** Pre-built user-role payload (e.g. RAG retrieved chunks wrapped in
+   *  <retrieved> tags). When provided, it is prepended to `userMessage`
+   *  in the first user-role turn so chunk content is sent in the user
+   *  channel rather than embedded in the system prompt. */
+  userContext?: string;
   config: AgentConfig;
   toolContext: ToolContext;
   /** 自定义 tool 注册（叠加在 BUILTIN_TOOLS 上） */
@@ -179,9 +184,12 @@ export async function runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
     },
   }));
 
+  const initialUserContent = req.userContext
+    ? `${req.userContext}\n\n---\n\n${req.userMessage}`
+    : req.userMessage;
   const messages: any[] = [
     ...(req.systemPrompt ? [{ role: 'system', content: req.systemPrompt }] : []),
-    { role: 'user', content: req.userMessage },
+    { role: 'user', content: initialUserContent },
   ];
 
   const toolCalls: AgentRunResult['toolCalls'] = [];
@@ -209,6 +217,14 @@ export async function runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
             continue;
           }
           const args = safeParseJson(fn.arguments);
+          if (args === undefined || args === null || (typeof args === 'object' && args !== null && 'invalid' in (args as Record<string, unknown>))) {
+            // LLM produced malformed JSON; do NOT execute with empty
+            // args — that could persist a corrupt annotation, write a
+            // file at an undefined path, etc.
+            messages.push({ role: 'tool', tool_call_id: call.id, content: `error: tool "${fn.name}" arguments are not valid JSON` });
+            toolCalls.push({ tool: tool.name, args, result: { error: 'invalid_json_args' }, iteration: i });
+            continue;
+          }
           // 限流
           if (tool.rateLimit && !checkRateLimit(tool.name, tool.rateLimit)) {
             messages.push({ role: 'tool', tool_call_id: call.id, content: 'error: rate limit exceeded' });
@@ -273,7 +289,11 @@ async function chatCompletion(config: AgentConfig, messages: any[], tools: any[]
 }
 
 function safeParseJson(s: string): any {
-  try { return JSON.parse(s); } catch { return {}; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return { invalid: true };
+  }
 }
 
 export { BUILTIN_TOOLS };

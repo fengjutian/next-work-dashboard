@@ -104,7 +104,10 @@ const config: ForgeConfig = {
       ...(fs.existsSync(ffmpegResource) && fs.readdirSync(ffmpegResource, { recursive: true }).some((entry) => /ffmpeg(?:\.exe)?$/i.test(String(entry))) ? [ffmpegResource] : []),
     ],
     asar: {
-      unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**',
+      // The work-browser webview cleaner runs inside an <webview> whose
+      // preload attribute can't read files from inside app.asar. Keep the
+      // bundle accessible at the resolved path used by `cleaner.ts`.
+      unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**\n**/.vite/build/webview-cleaner-preload.js\n**/.vite/build/webview-preload.js',
     },
     download: {
       mirrorOptions: {

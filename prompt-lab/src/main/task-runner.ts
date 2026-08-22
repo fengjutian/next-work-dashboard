@@ -65,7 +65,10 @@ export class WorkspaceTaskRunner {
 
   private spawnTask(runId: string, task: WorkspaceTaskDefinition, cwd: string, env: Record<string, string>, startedAt: number, emit: (event: TaskRunEvent) => void): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn(task.command, { cwd, env, shell: true, windowsHide: true });
+      // Use pre-parsed argv with shell:false. `task.command` is display-only
+      // and may contain shell metacharacters that must NOT be interpreted.
+      const [cmd, ...args] = task.argv;
+      const child = spawn(cmd, args, { cwd, env, shell: false, windowsHide: true });
       this.children.get(runId)?.add(child);
       const output = (chunk: unknown) => emit({ runId, task: task.name, state: 'output', output: String(chunk), startedAt });
       child.stdout?.on('data', output);

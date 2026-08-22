@@ -43,6 +43,11 @@ export interface SavePageResult {
 
 async function fetchHtml(rawUrl: string, signal: AbortSignal, redirectCount = 0): Promise<string> {
   const url = await assertPublicRemoteUrl(rawUrl);
+  // Defense in depth against DNS rebinding: re-verify the resolved
+  // addresses immediately before issuing the request. The race window
+  // is microseconds, but a misbehaving resolver can return public IPs
+  // for the initial check and private IPs for the actual connect.
+  await assertHostnameStillPublic(url.hostname);
   const res = await fetch(url, {
     signal,
     redirect: 'manual',
@@ -68,6 +73,45 @@ async function fetchHtml(rawUrl: string, signal: AbortSignal, redirectCount = 0)
   const bytes = new Uint8Array(await res.arrayBuffer());
   if (bytes.byteLength > MAX_HTML_BYTES) throw new Error('PAGE_TOO_LARGE');
   return new TextDecoder().decode(bytes);
+}
+
+async function assertHostnameStillPublic(hostname: string): Promise<void> {
+  const { isIP } = await import('node:net');
+  if (isIP(hostname)) {
+    // assertPublicRemoteUrl already passed; no further check needed.
+    return;
+  }
+  const { lookup } = await import('node:dns/promises');
+  let addrs: Array<{ address: string; family: number }>;
+  try {
+    addrs = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error('URL_HOST_LOOKUP_FAILED');
+  }
+  if (!addrs.length) throw new Error('URL_HOST_LOOKUP_FAILED');
+  // We can't import the security module's isPrivateAddress without a
+  // cycle, so duplicate the rules here. Keep in sync with
+  // core/work-browser/security/url-policy.ts.
+  for (const { address } of addrs) {
+    if (isPrivateAddressLoose(address)) throw new Error('PRIVATE_NETWORK_URL_BLOCKED');
+  }
+}
+
+function isPrivateAddressLoose(host: string): boolean {
+  const { isIP } = require('node:net') as typeof import('node:net');
+  const version = isIP(host);
+  if (version === 4) {
+    const [a, b] = host.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+      || a >= 224;
+  }
+  if (version === 6) {
+    const n = host.toLowerCase();
+    return n === '::' || n === '::1' || n.startsWith('fc') || n.startsWith('fd')
+      || /^fe[89ab]/.test(n) || n.startsWith('ff');
+  }
+  return false;
 }
 
 function yamlScalar(value: string): string {

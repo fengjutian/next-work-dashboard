@@ -1,6 +1,9 @@
 export interface WorkspaceTaskDefinition {
   name: string;
+  /** Display-only full command line (preserved for UI rendering). */
   command: string;
+  /** Structured argv passed to `child_process.spawn` with `shell: false`. */
+  argv: string[];
   detail: string;
   dependsOn: string[];
   dependsOrder: 'sequence' | 'parallel';
@@ -15,10 +18,18 @@ interface RawTask { label?: string; type?: string; command?: string; args?: Arra
 export function parseWorkspaceTasks(config: { tasks?: RawTask[] }): WorkspaceTaskDefinition[] {
   return (config.tasks ?? []).flatMap((task) => {
     if (!task.label || !task.command) return [];
+    const args = (task.args ?? []).map((arg) => String(arg));
+    // Reject null bytes early — they would be silently truncated on
+    // Windows and could be used to smuggle extra argv.
+    if (args.some((arg) => arg.includes('\0'))) {
+      throw new Error(`TASK_INVALID_ARGS:${task.label}`);
+    }
+    const argv = [String(task.command), ...args];
     const quote = (value: string | number) => /\s|["']/.test(String(value)) ? JSON.stringify(String(value)) : String(value);
     return [{
       name: task.label,
-      command: [task.command, ...(task.args ?? []).map(quote)].join(' '),
+      command: argv.map((value) => quote(value)).join(' '),
+      argv,
       detail: task.type ?? 'shell',
       dependsOn: task.dependsOn ? (Array.isArray(task.dependsOn) ? task.dependsOn : [task.dependsOn]) : [],
       dependsOrder: task.dependsOrder ?? 'parallel',

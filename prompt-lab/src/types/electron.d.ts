@@ -1014,6 +1014,7 @@ export interface WorkspaceSearchResult {
 export interface WorkspaceTask {
   name: string;
   command: string;
+  argv: string[];
   detail: string;
   dependsOn: string[];
   dependsOrder: 'sequence' | 'parallel';

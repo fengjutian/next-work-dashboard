@@ -1,0 +1,46 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+const root = 'D:/github/next-work-dashboard/prompt-lab';
+const CHANNEL_ARG = `(?:['"]([^'"]+)['"]|([A-Z_][A-Z0-9_]*\\.[A-Z_][A-Z0-9_]*))`;
+
+function filesUnder(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return filesUnder(target);
+    return /\.(ts|tsx)$/.test(entry.name) ? [target] : [];
+  });
+}
+
+const sourceFiles = filesUnder(path.join(root, 'src'));
+let invocations = 0;
+let invocationsResolved = 0;
+let invocationsNull = 0;
+
+for (const file of sourceFiles) {
+  const source = fs.readFileSync(file, 'utf8');
+  const re = new RegExp(`ipcRenderer\\.invoke\\(\\s*${CHANNEL_ARG}`, 'g');
+  for (const m of source.matchAll(re)) {
+    invocations++;
+    const captured = m[1] || m[2];
+    if (captured === 'video-player:open') {
+      console.log('FOUND video-player:open. m[1]=', JSON.stringify(m[1]), 'm[2]=', JSON.stringify(m[2]));
+    }
+    // Test resolveChannel inline
+    if (captured) {
+      const literal = captured.match(/^['"`]([^'"`]+)['"`]$/);
+      if (literal) {
+        invocationsResolved++;
+        if (captured === 'video-player:open') console.log('  resolved via literal to:', literal[1]);
+      } else {
+        invocationsNull++;
+        if (captured === 'video-player:open') console.log('  NOT resolved, captured:', JSON.stringify(captured));
+      }
+    } else {
+      invocationsNull++;
+      if (m[0]?.includes('video-player:open')) console.log('  NULL captured for match:', m[0].slice(0, 100));
+    }
+  }
+}
+
+console.log('total invocations:', invocations, 'resolved:', invocationsResolved, 'null:', invocationsNull);

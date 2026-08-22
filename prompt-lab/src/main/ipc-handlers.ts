@@ -91,7 +91,7 @@ function loadWorkspaceTaskDefinitions(root: string): WorkspaceTaskDefinition[] {
   const packagePath = path.join(root, 'package.json');
   if (fs.existsSync(packagePath)) {
     const parsed = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as { scripts?: Record<string, string> };
-    for (const [name, command] of Object.entries(parsed.scripts ?? {})) tasks.push({ name: `npm: ${name}`, command: `npm run ${name}`, detail: command, dependsOn: [], dependsOrder: 'sequence', isBackground: false, problemMatcher: name === 'lint' ? '$eslint-stylish' : undefined });
+    for (const [name, command] of Object.entries(parsed.scripts ?? {})) tasks.push({ name: `npm: ${name}`, command: `npm run ${name}`, argv: ['npm', 'run', name], detail: command, dependsOn: [], dependsOrder: 'sequence', isBackground: false, problemMatcher: name === 'lint' ? '$eslint-stylish' : undefined });
   }
   const tasksPath = path.join(root, '.vscode', 'tasks.json');
   if (fs.existsSync(tasksPath)) tasks.push(...parseWorkspaceTasks(JSON.parse(fs.readFileSync(tasksPath, 'utf8')) as Parameters<typeof parseWorkspaceTasks>[0]));

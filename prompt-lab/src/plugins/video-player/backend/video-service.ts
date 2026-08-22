@@ -471,6 +471,21 @@ export class VideoPlayerService {
     await this.client.command(['stop']);
   }
 
+  /**
+   * Full shutdown: stop playback, close the detached video window if
+   * any, and disconnect the mpv IPC client. Safe to call when nothing
+   * is playing.
+   */
+  async close(): Promise<void> {
+    if (this.client) {
+      try { await this.stop(); } catch { /* ignore — we still want to release the socket */ }
+      try { this.client.close(); } catch { /* already closed */ }
+    }
+    if (this.videoWindow && !this.videoWindow.isDestroyed()) {
+      this.videoWindow.close();
+    }
+  }
+
   async seek(seconds: number, mode: 'absolute' | 'relative' = 'absolute'): Promise<void> {
     await this.ensureMpv();
     if (!this.client) return;
@@ -971,6 +986,7 @@ export function setupVideoPlayerIPC(): void {
   ipcMain.handle(VIDEO_IPC.PAUSE, () => videoPlayerService.pause());
   ipcMain.handle(VIDEO_IPC.TOGGLE, () => videoPlayerService.toggle());
   ipcMain.handle(VIDEO_IPC.STOP, () => videoPlayerService.stop());
+  ipcMain.handle(VIDEO_IPC.CLOSE, () => videoPlayerService.close());
   ipcMain.handle(VIDEO_IPC.SEEK, (_e, seconds: number, mode?: 'absolute' | 'relative') =>
     videoPlayerService.seek(seconds, mode || 'absolute'),
   );

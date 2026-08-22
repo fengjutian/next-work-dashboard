@@ -18,18 +18,17 @@ export interface EmbeddingResult {
   took: number;
 }
 
-let pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
-let currentModel: string = DEFAULT_MODEL_ID;
+// Per-model cache. A `Map<modelId, Promise<pipeline>>` keeps concurrent
+// calls with different model IDs from racing on a single shared promise
+// (the previous implementation overwrote `currentModel` while another
+// call was awaiting initialization, returning the wrong pipeline).
+const pipelineCache = new Map<string, Promise<FeatureExtractionPipeline>>();
+let envConfigured = false;
 
-async function getPipeline(modelId: string = DEFAULT_MODEL_ID): Promise<FeatureExtractionPipeline> {
-  if (pipelinePromise && currentModel === modelId) {
-    return await pipelinePromise;
-  }
-  currentModel = modelId;
-  // 动态 import 避免启动期阻塞
+async function configureEnvOnce(): Promise<void> {
+  if (envConfigured) return;
+  envConfigured = true;
   const transformers = await import('@huggingface/transformers') as any;
-  const { pipeline } = transformers;
-  // 配置本地模型缓存（Electron userData 目录）
   if (!transformers.env?.cacheDir) {
     try {
       const { app } = await import('electron');
@@ -37,8 +36,19 @@ async function getPipeline(modelId: string = DEFAULT_MODEL_ID): Promise<FeatureE
       transformers.env.allowLocalModels = true;
     } catch { /* 在非 Electron 环境（如 vitest）跑时跳过 */ }
   }
-  pipelinePromise = pipeline('feature-extraction', modelId, { dtype: 'q8' });
-  return await pipelinePromise;
+}
+
+async function getPipeline(modelId: string = DEFAULT_MODEL_ID): Promise<FeatureExtractionPipeline> {
+  const cached = pipelineCache.get(modelId);
+  if (cached) return await cached;
+  const promise = (async () => {
+    await configureEnvOnce();
+    const transformers = await import('@huggingface/transformers') as any;
+    const { pipeline } = transformers;
+    return await pipeline('feature-extraction', modelId, { dtype: 'q8' });
+  })();
+  pipelineCache.set(modelId, promise);
+  return await promise;
 }
 
 /**
@@ -77,6 +87,6 @@ export async function embedBatch(texts: string[], modelId: string = DEFAULT_MODE
 
 /** 单元测试用：重置 pipeline 缓存（mock 时不需要等懒加载） */
 export function _resetEmbedderForTests(): void {
-  pipelinePromise = null;
-  currentModel = DEFAULT_MODEL_ID;
+  pipelineCache.clear();
+  envConfigured = false;
 }

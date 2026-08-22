@@ -1,0 +1,10 @@
+// Test the actual regex from the script
+const PUSH_ARG = `(?:['"\`]([^'"\`]+)['"\`]|[A-Z_][A-Z0-9_]*\\.[A-Z_][A-Z0-9_]*)`;
+const re = new RegExp(`webContents\\.send\\(\\s*${PUSH_ARG}`, 'g');
+const source = "window.webContents.send(VIDEO_IPC.EVENT, event);";
+console.log('regex:', re.source);
+for (const m of source.matchAll(re)) {
+  console.log('m[0]:', m[0]);
+  console.log('m[1]:', JSON.stringify(m[1]));
+  console.log('m[2]:', JSON.stringify(m[2]));
+}

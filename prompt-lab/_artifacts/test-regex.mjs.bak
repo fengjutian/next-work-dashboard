@@ -1,0 +1,4 @@
+const s = '"video-player:open"';
+const m = s.match(/^['"`]([^'"`]+)['"`]$/);
+console.log('match:', m);
+console.log('s[0..3]:', s.slice(0, 5));

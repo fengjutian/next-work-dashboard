@@ -1,0 +1,13 @@
+// Test 1: simpler regex
+const r1 = /['"]([^'"]+)['"]/;
+const s1 = '"video-player:open"';
+console.log('r1 match:', s1.match(r1));
+// Expected: m[1] = "video-player:open" (no quotes)
+
+// Test 2: with non-capturing outer
+const r2 = /(?:['"]([^'"]+)['"]|([A-Z_][A-Z0-9_]*\.[A-Z_][A-Z0-9_]*))/;
+console.log('r2 match:', s1.match(r2));
+
+// Test 3: with backslash escaping
+const r3 = new RegExp(`(?:['"]([^'"]+)['"]|([A-Z_][A-Z0-9_]*\\.[A-Z_][A-Z0-9_]*))`);
+console.log('r3 match:', s1.match(r3));

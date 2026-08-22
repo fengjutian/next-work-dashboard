@@ -1,6 +1,7 @@
 /**
  * WorkspaceStore — workspaces / tabs / notes / tasks / ai_conversations / search_history CRUD
  */
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type {
   Workspace, WorkspaceId, Tab, TabId, TabStatus,
@@ -8,6 +9,31 @@ import type {
   AIConversation, ConversationId, AIMessage, AIContext, SearchHistoryEntry,
 } from '../../core/work-browser/types';
 import { newId, now } from '../../core/work-browser/types';
+
+/**
+ * Resolve and validate a user-supplied workspace `storagePath`. Empty
+ * input is allowed (the caller falls back to `app.getPath('userData')`).
+ * Otherwise the path must be absolute. We reject inputs that explicitly
+ * contain `..` segments so a user typing something like
+ * `~/docs/../etc` is stopped before `path.resolve` silently rewrites
+ * it.
+ */
+export function normalizeStoragePath(input: string | undefined | null): string {
+  if (!input) return '';
+  const trimmed = String(input).trim();
+  if (!trimmed) return '';
+  // Reject explicit `..` before resolution so the call is safe and the
+  // intent is auditable in logs.
+  const inputSegments = trimmed.split(/[\\/]+/);
+  if (inputSegments.includes('..')) {
+    throw new Error('INVALID_STORAGE_PATH: contains ..');
+  }
+  const resolved = path.resolve(trimmed);
+  if (!path.isAbsolute(resolved)) {
+    throw new Error('INVALID_STORAGE_PATH: not absolute');
+  }
+  return resolved;
+}
 
 export class WorkspaceStore {
   constructor(private db: Database.Database) {}
@@ -28,13 +54,14 @@ export class WorkspaceStore {
 
   createWorkspace(input: { name: string; description?: string; icon?: string; color?: string; storagePath?: string; privacyMode?: 'normal' | 'local-only' }): Workspace {
     const t = now();
+    const storagePath = normalizeStoragePath(input.storagePath);
     const ws: Workspace = {
       id: newId<WorkspaceId>(),
       name: input.name,
       description: input.description || '',
       icon: input.icon || '🌊',
       color: input.color || '#2563eb',
-      storagePath: input.storagePath || '',
+      storagePath,
       privacyMode: input.privacyMode || 'normal',
       createdAt: t,
       updatedAt: t,
@@ -50,7 +77,11 @@ export class WorkspaceStore {
   updateWorkspace(id: WorkspaceId, patch: Partial<Workspace>): void {
     const cur = this.getWorkspace(id);
     if (!cur) return;
-    const merged = { ...cur, ...patch, id: cur.id, updatedAt: now() };
+    const next = { ...patch };
+    if (Object.prototype.hasOwnProperty.call(next, 'storagePath')) {
+      next.storagePath = normalizeStoragePath(next.storagePath as string | undefined);
+    }
+    const merged = { ...cur, ...next, id: cur.id, updatedAt: now() };
     this.db.prepare(`UPDATE workspaces SET name=?, description=?, icon=?, color=?, storage_path=?, privacy_mode=?, updated_at=?, archived_at=? WHERE id=?`)
       .run(merged.name, merged.description, merged.icon, merged.color, merged.storagePath, merged.privacyMode, merged.updatedAt, merged.archivedAt, id);
   }

@@ -6,7 +6,7 @@
  * 规则：所有 channel 必须在 preload/work-browser.ts 中 ipcRenderer.invoke 对应。
  * scripts/check-ipc-contract.mjs 会自动校验。
  */
-import { ipcMain, dialog } from 'electron';
+import { app, ipcMain, dialog } from 'electron';
 import { getDatabase } from './database';
 import { WorkspaceStore } from './workspace-store';
 import { DocumentStore } from './document-store';
@@ -165,6 +165,7 @@ export function setupWorkBrowserIPC(): void {
             const bundle = await search.runRag({ query: inp.query, workspaceId: inp.workspaceId, topK: inp.topK });
             return {
               systemPrompt: bundle.systemPrompt,
+              userPrompt: bundle.userPrompt,
               citations: bundle.citations,
               chunks: bundle.chunks,
             };
@@ -229,6 +230,7 @@ export function setupWorkBrowserIPC(): void {
             const bundle = await search.runRag({ query: inp.query, workspaceId: inp.workspaceId, topK: inp.topK, scope: inp.scope });
             return {
               systemPrompt: bundle.systemPrompt,
+              userPrompt: bundle.userPrompt,
               citations: bundle.citations,
               chunks: bundle.chunks.map((c) => ({
                 documentId: c.documentId, content: c.content, sectionTitle: c.sectionTitle, page: c.page, fusedScore: c.fusedScore,
@@ -263,10 +265,11 @@ export function setupWorkBrowserIPC(): void {
               wordCount: params.markdown.split(/\s+/).filter(Boolean).length,
               summary: params.markdown.slice(0, 240),
             });
-            const contentPath = `${ws.storagePath || `app://userData/work-browser-documents/${params.workspaceId}`}/documents/${id.id}.md`;
-            const rawPath = `${ws.storagePath || `app://userData/work-browser-documents/${params.workspaceId}`}/raw/${id.id}-${t}.md`;
             const fs = await import('node:fs/promises');
             const path = await import('node:path');
+            const storageRoot = ws.storagePath || path.join(app.getPath('userData'), 'work-browser-documents', params.workspaceId);
+            const contentPath = path.join(storageRoot, 'documents', `${id.id}.md`);
+            const rawPath = path.join(storageRoot, 'raw', `${id.id}-${t}.md`);
             await fs.mkdir(path.dirname(contentPath), { recursive: true });
             await fs.writeFile(contentPath, params.markdown, 'utf8');
             await fs.mkdir(path.dirname(rawPath), { recursive: true });
@@ -276,7 +279,7 @@ export function setupWorkBrowserIPC(): void {
             return contentPath;
           } catch (e) {
             console.error('[work-browser] research save failed:', e);
-            return undefined;
+            throw e;
           }
         },
       },
@@ -338,6 +341,7 @@ export function setupWorkBrowserIPC(): void {
           });
           return {
             systemPrompt: bundle.systemPrompt,
+            userPrompt: bundle.userPrompt,
             citations: bundle.citations,
             chunks: bundle.chunks.map((c) => ({
               documentId: c.documentId,
@@ -531,6 +535,7 @@ export function setupWorkBrowserIPC(): void {
     });
     return {
       systemPrompt: bundle.systemPrompt,
+      userPrompt: bundle.userPrompt,
       citations: bundle.citations,
       chunks: bundle.chunks,
       context: bundle.context,

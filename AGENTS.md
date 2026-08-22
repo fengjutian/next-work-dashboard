@@ -90,7 +90,19 @@ npx vitest run tests/work-browser/  # 32 / 32 必须全过
 
 ## 已知全局遗留（不是 bug，按项目节奏处理）
 
-- `src/components/icons.tsx` 引用了 lucide-react 1.25 没有的 icon（Mic / AudioLines / AudioWaveform / CircleStop）—— typecheck 报 4 个错
-- `src/components/CommandPalette.tsx:142` 有 duplicate case label —— lint 报 1 个错
+- ~~`src/components/icons.tsx` 引用了 lucide-react 1.25 没有的 icon~~ — 2026-08-22 验证：当前装的恰好是 `lucide-react@1.25.0`，`AudioLines/AudioWaveform/CircleStop/Mic` 均已存在，`tsc` 0 error
+- ~~`src/components/CommandPalette.tsx:142` 有 duplicate case label~~ — 2026-08-22 验证：文件已重构成 if/else，`eslint` 不报
 
-不影响 Phase 3.5 work-browser 上线。
+> 2026-08-22 同步：以上两条 stale 描述已移除。
+> tests/work-browser/ 实际 106 pass + 9 skip（不是文档里的"32/32"）。
+>
+> ## 修改 Work Browser 的"必跑"验证
+
+```bash
+cd prompt-lab
+npm run check:ipc   # 必须通过 — 2026-08-22 重写：解析 IPC 常量、识别 push 事件，零 false positive
+npm run typecheck   # work-browser 域 0 error
+npm run lint        # work-browser 域 0 error
+npx vitest run tests/work-browser/  # 106 pass + 9 skip（含新增的 storage-path 边界测试）
+```
+

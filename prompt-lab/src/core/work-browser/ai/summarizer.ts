@@ -32,8 +32,23 @@ export async function loadAIConfig(getter: (key: string) => Promise<string | nul
     baseUrl: baseUrl || DEFAULT_BASE_URL,
     apiKey: apiKey || '',
     model: model || DEFAULT_MODEL,
-    local: (baseUrl || '').includes('localhost') || (baseUrl || '').includes('127.0.0.1'),
+    local: isLocalBaseUrl(baseUrl),
   };
+}
+
+/**
+ * Detect a "local" AI endpoint (Ollama / vLLM / llama.cpp) by URL host.
+ * Uses parsed host instead of substring match so that e.g.
+ * `https://attacker.com/?u=localhost` is not mistaken for localhost.
+ */
+function isLocalBaseUrl(baseUrl: string | null | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0';
+  } catch {
+    return false;
+  }
 }
 
 const SYSTEM_PROMPT = `你是 Work Browser 的搜索摘要助手。基于给定来源列表生成中文摘要，要求：
