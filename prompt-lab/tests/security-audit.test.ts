@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { analyzeTypeScriptProject, applyInlineSuppressions, buildScanCoverage, builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, parseDependencyLock, parseNpmLock, redactSecrets } from '../src/core/security-audit';
+import { analyzeTypeScriptProject, applyInlineSuppressions, assessScanCoverage, buildScanCoverage, builtinRuleScanner, classifySecret, enumerateTextFiles, findingsToSarif, mergeWithBaseline, parseDependencyLock, parseNpmLock, redactSecrets, scanGitHistoryAggregated } from '../src/core/security-audit';
 import { redactScannerOutput, resolveTrustedScannerExecutable, runScannerProcess } from '../src/main/security-audit/external-process';
-import { parseGitleaksOutput, parseOsvOutput, parseSemgrepOutput, parseTrivyOutput, readLimitedJsonReport } from '../src/main/security-audit/external-scanners';
+import { parseBanditOutput, parseGitleaksOutput, parseOsvOutput, parseSemgrepOutput, parseTrivyOutput, readLimitedJsonReport } from '../src/main/security-audit/external-scanners';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -16,6 +17,7 @@ const fixtureContext = { projectDir: 'D:/fixture-project', files: [], signal: ne
 describe('security audit core', () => {
   it('redacts credentials from evidence', () => {
     expect(redactSecrets('api_key = "super-secret-value"')).not.toContain('super-secret-value');
+    expect(redactSecrets('key = AKIAABCDEFGHIJKLMNOP')).not.toContain('AKIAABCDEFGHIJKLMNOP');
     expect(redactScannerOutput('token=github_pat_abcdefghijklmnop')).not.toContain('abcdefghijklmnop');
   });
 
@@ -146,5 +148,34 @@ describe('security audit core', () => {
     const root = temporaryRoot(); const file = 'auth.ts'; fs.writeFileSync(path.join(root, file), "crypto.createHash('md5'); jwt.verify(token, key);");
     const result = analyzeTypeScriptProject({ projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     expect(result.findings.map((item) => item.ruleId)).toEqual(expect.arrayContaining(['crypto.weak-hash', 'auth.jwt-algorithm-not-pinned']));
+  });
+
+  it('filters placeholder and test secrets while dynamically grading real candidates', async () => {
+    expect(classifySecret('api_key', 'your-api-key', 'src/config.ts')).toBeNull();
+    expect(classifySecret('api_key', 'ghp_abcdefghijklmnopqrstuvwxyz1234567890', 'tests/config.ts')).toBeNull();
+    expect(classifySecret('api_key', 'ghp_abcdefghijklmnopqrstuvwxyz1234567890', 'src/config.ts')).toMatchObject({ kind: 'github', severity: 'P1', confidence: 'high' });
+    const root = temporaryRoot(); fs.mkdirSync(path.join(root, 'tests')); fs.writeFileSync(path.join(root, 'config.ts'), 'const api_key = "your-api-key";'); fs.writeFileSync(path.join(root, 'tests', 'fixture.ts'), 'const api_key = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";');
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: ['config.ts', 'tests/fixture.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    expect(findings.filter((item) => item.category === 'secret')).toEqual([]);
+    fs.writeFileSync(path.join(root, 'real.py'), 'SECRET_KEY: str = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";');
+    const real = await builtinRuleScanner.scan({ projectDir: root, files: ['real.py'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    expect(real[0]).toMatchObject({ severity: 'P1', confidence: 'high', secretDetails: { currentExists: true, historyExists: false } });
+  });
+
+  it('aggregates the same Git secret across commits and locations', async () => {
+    const root = temporaryRoot(); const secret = 'ghp_abcdefghijklmnopqrstuvwxyz1234567890';
+    execFileSync('git', ['init'], { cwd: root }); execFileSync('git', ['config', 'user.email', 'security-audit@example.invalid'], { cwd: root }); execFileSync('git', ['config', 'user.name', 'Security Audit Test'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'config.py'), `api_key = "${secret}"\n`); execFileSync('git', ['add', 'config.py'], { cwd: root }); execFileSync('git', ['commit', '-m', 'first'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'settings.py'), `access_token = "${secret}"\n`); execFileSync('git', ['add', 'settings.py'], { cwd: root }); execFileSync('git', ['commit', '-m', 'second'], { cwd: root });
+    const findings = await scanGitHistoryAggregated({ projectDir: root, files: ['config.py', 'settings.py'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    expect(findings).toHaveLength(1); expect(findings[0]).toMatchObject({ severity: 'P1', secretDetails: { currentExists: true, historyExists: true, occurrences: 2 } });
+    const cached = await scanGitHistoryAggregated({ projectDir: root, files: ['config.py', 'settings.py'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    expect(cached[0].secretDetails?.occurrences).toBe(2);
+  });
+
+  it('parses Bandit AST findings and reports partial language coverage', () => {
+    expect(parseBanditOutput({ results: [{ test_id: 'B602', test_name: 'subprocess_popen_with_shell_equals_true', issue_severity: 'HIGH', issue_text: 'shell=True', filename: 'app.py', line_number: 8, code: 'subprocess.Popen(cmd, shell=True)' }] }, fixtureContext)[0]).toMatchObject({ scannerId: 'bandit', ruleId: 'B602', severity: 'P1' });
+    const coverage = { ...buildScanCoverage(temporaryRoot(), [], 'full'), languages: { Python: 10, TypeScript: 2 }, discoveredFiles: 12, scannedFiles: 12 };
+    expect(assessScanCoverage(coverage, [{ scannerId: 'semantic-analysis', name: 'TS', status: 'succeeded', startedAt: 0, completedAt: 1, durationMs: 1, findingsCount: 0 }])).toMatchObject({ capability: 'partial', unanalyzedLanguages: ['Python'] });
   });
 });

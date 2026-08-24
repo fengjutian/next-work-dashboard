@@ -4,7 +4,7 @@ import type { FindingCategory, ScanContext, SecurityFinding, SecurityScanner, Se
 import { findingId, fingerprint, redactSecrets } from './security';
 import { semanticScanner } from './semantic-scanner';
 import { gitHistoryScanner, lockfileScanner, osvLockfileScanner } from './supply-chain-scanners';
-import { extractSecretCandidate, isLikelyTestPath, secretDigest } from './secret-analysis';
+import { classifySecret, extractSecretCandidate, isLikelyTestPath, secretDigest } from './secret-analysis';
 
 interface Rule { id: string; title: string; pattern: RegExp; category: FindingCategory; severity: SecuritySeverity; description: string; recommendation: string; cwe?: string; files?: RegExp }
 
@@ -29,7 +29,7 @@ function scanRules(context: ScanContext): SecurityFinding[] {
     if (content.includes('\0')) continue;
     const lines = content.split(/\r?\n/);
     lines.forEach((line, index) => {
-      const candidate = extractSecretCandidate(line, file); if (!candidate) return; const location = { file, line: index + 1 }; const digest = secretDigest(candidate.value); const key = fingerprint('builtin-rules', 'secret.generic-api-key', file, `${candidate.variableName}:${digest}`); const excerpt = redactSecrets(line.trim()).slice(0, 500);
+      let candidate = extractSecretCandidate(line, file); if (!candidate) { const provider = /\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b/.exec(line)?.[0]; if (provider) candidate = classifySecret('token', provider, file); } if (!candidate) return; const location = { file, line: index + 1 }; const digest = secretDigest(candidate.value); const key = fingerprint('builtin-rules', 'secret.generic-api-key', file, `${candidate.variableName}:${digest}`); const excerpt = redactSecrets(line.trim()).slice(0, 500);
       findings.push({ id: findingId(key), fingerprint: key, scannerId: 'builtin-rules', ruleId: 'secret.generic-api-key', category: 'secret', severity: candidate.severity, confidence: candidate.confidence, confidenceRationale: candidate.rationale, status: 'open', title: `${candidate.variableName} 疑似包含硬编码${candidate.kind === 'password' ? '密码' : candidate.kind === 'token' ? '令牌' : '密钥'}`, description: `当前代码中的变量 ${candidate.variableName} 包含疑似凭据值；扫描器已脱敏，未保存原始内容。`, location, evidence: [{ kind: 'code', excerpt, location }], secretDetails: { kind: candidate.kind, variableName: candidate.variableName, currentExists: true, historyExists: false, occurrences: 1, locations: [location], valueFingerprint: digest }, recommendation: '将凭据迁移到环境变量或密钥管理服务；如该值真实有效，请立即轮换。', cwe: 'CWE-798', firstSeenAt: now, lastSeenAt: now });
     });
     for (const rule of RULES) {

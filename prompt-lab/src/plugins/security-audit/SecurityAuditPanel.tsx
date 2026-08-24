@@ -12,7 +12,7 @@ import { COMMAND_EVENT, type CommandEventDetail, type Finding, type ScanProgress
 
 type SeverityColor = 'red' | 'orange' | 'blue' | 'green';
 type ScannerInfo = import('../../core/security-audit').ScannerStatus;
-const SCANNER_SELECTION_KEY = 'security-audit:selected-scanners:v1';
+const SCANNER_SELECTION_KEY = 'security-audit:selected-scanners:v2';
 
 function securityAuditErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -335,7 +335,7 @@ export function SecurityAuditPanel(): JSX.Element {
           <input type="checkbox" checked={selectedScanners.includes(scanner.id)} disabled={!scanner.ready || scanner.builtIn || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setSelectedScanners((current) => event.target.checked ? [...current, scanner.id] : current.filter((id) => id !== scanner.id))} />
           {scanner.name}{scanner.builtIn ? '（内置）' : scanner.ready ? '' : scanner.installed ? '（未就绪）' : '（未安装）'}
         </label>)}
-        <label className="flex shrink-0 items-center gap-1 rounded border border-orange-300 bg-orange-50 px-2 py-1 text-orange-800"><input type="checkbox" checked={networkAllowed} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setNetworkAllowed(event.target.checked)} />允许扫描器联网（OSV/Trivy）</label>
+        <label className="flex shrink-0 items-center gap-1 rounded border border-orange-300 bg-orange-50 px-2 py-1 text-orange-800"><input type="checkbox" checked={networkAllowed} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setNetworkAllowed(event.target.checked)} />允许扫描器联网（OSV/Trivy/Semgrep 自动规则）</label>
         <label className="flex shrink-0 items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-red-800" title="仅对支持的供应商执行只读验证；凭据不会保存或发送给 AI"><input type="checkbox" checked={verifySecrets} disabled={!networkAllowed || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setVerifySecrets(event.target.checked)} />验证密钥有效性</label>
         <Button className="ml-auto shrink-0" loading={scannerDetectionRunning} onClick={() => loadScanners(true)}>重新检测</Button>
       </div>}
@@ -354,7 +354,7 @@ export function SecurityAuditPanel(): JSX.Element {
         {Object.entries(lastScan.coverage.languages).map(([name, count]) => <Tag key={name}>{name} {count}</Tag>)}
         {lastScan.coverage.frameworks.map((name) => <Tag key={name} color="purple">{name}</Tag>)}
       </div>}
-      {lastScan?.coverage && lastScan.coverage.capability !== 'full' && <div className="shrink-0 border-b border-border px-5 py-2"><Alert type="warning" message="本次结果不代表完整安全审计" description={lastScan.coverage.capabilitySummary} /></div>}
+      {lastScan?.coverage && lastScan.coverage.capability !== 'full' && <div className="shrink-0 border-b border-border px-5 py-2"><Alert type="warning" message="本次结果不代表完整安全审计" description={lastScan.coverage.capabilitySummary ?? '这是旧版扫描记录，未保存语言语义覆盖信息；建议重新扫描。'} /></div>}
       {baselineComparison && <div className="flex shrink-0 items-center gap-2 border-b border-border bg-blue-50 px-5 py-2 text-xs text-blue-900"><strong>{baselineComparison.baseline.name}</strong><Tag color="red">新增 {baselineComparison.newFindings.length}</Tag><Tag color="green">修复 {baselineComparison.fixedFindings.length}</Tag><Tag>未变化 {baselineComparison.unchangedCount}</Tag><Button className="ml-auto" onClick={() => setBaselineComparison(null)}>关闭</Button></div>}
 
       {/* Progress */}

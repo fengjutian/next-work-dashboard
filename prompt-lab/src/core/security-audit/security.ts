@@ -19,7 +19,8 @@ export function findingId(fingerprintValue: string): string { return `finding-${
 export function redactSecrets(value: string): string {
   return value
     .replace(/(api[_-]?key|token|secret|password)(\s*[:=]\s*)["']?[^\s"']+/gi, '$1$2[REDACTED]')
-    .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]');
+    .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED AWS ACCESS KEY]');
 }
 
 function safeRelative(root: string, candidate: string): string | null {

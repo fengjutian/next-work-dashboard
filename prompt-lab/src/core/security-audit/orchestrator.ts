@@ -1,5 +1,6 @@
 import type { ScannerRunResult, ScanContext, ScanProgress, SecurityFinding, SecurityScanner } from './types';
 import { applyInlineSuppressions } from './security';
+import { correlateSecretFindings } from './secret-analysis';
 
 export class SecurityScanOrchestrator {
   constructor(private readonly scanners: SecurityScanner[]) {}
@@ -38,7 +39,7 @@ export class SecurityScanOrchestrator {
         context.emit({ phase: 'scanning', percent: Math.round(((index + 1) / Math.max(enabled.length, 1)) * 80), message: `${scanner.name} 不可用，已跳过：${error instanceof Error ? error.message : '未知错误'}`, findingsCount: findings.length });
       }
     }
-    const unique = new Map(findings.map((finding) => [finding.fingerprint, finding]));
+    const unique = new Map(correlateSecretFindings(findings).map((finding) => [finding.fingerprint, finding]));
     return { findings: applyInlineSuppressions(context.projectDir, [...unique.values()]), scannerRuns };
   }
 }

@@ -85,7 +85,7 @@ export const banditScanner = externalScanner('bandit', 'Bandit Python AST 扫描
 
 export function parseGitleaksOutput(json: JsonObject, context: ScanContext): SecurityFinding[] {
   const items = Array.isArray(json) ? json as unknown as JsonObject[] : Array.isArray(json.findings) ? json.findings as JsonObject[] : [];
-  return items.map((item) => makeFinding('gitleaks', String(item.RuleID ?? item.ruleId ?? 'gitleaks.secret'), 'secret', 'critical', String(item.Description ?? 'Gitleaks 检测到密钥'), '扫描器确认文件中存在疑似凭据。', context.projectDir, item.File, item.StartLine, item.Match, '立即轮换凭据并从版本历史清除。'));
+  return items.map((item) => makeFinding('gitleaks', String(item.RuleID ?? item.ruleId ?? 'gitleaks.secret'), 'secret', 'high', String(item.Description ?? 'Gitleaks 检测到密钥'), '扫描器确认文件中存在疑似凭据，但尚未验证凭据当前是否有效。', context.projectDir, item.File, item.StartLine, item.Match, '确认凭据有效性；如真实有效，请立即轮换并从版本历史清除。'));
 }
 
 export const gitleaksScanner: SecurityScanner = {
@@ -128,7 +128,7 @@ export function parseTrivyOutput(json: JsonObject, context: ScanContext): Securi
       const cause = (misconfiguration.CauseMetadata ?? {}) as JsonObject;
       findings.push(makeFinding('trivy', String(misconfiguration.ID ?? 'trivy.misconfiguration'), 'iac', misconfiguration.Severity, String(misconfiguration.Title ?? 'IaC 配置风险'), String(misconfiguration.Description ?? 'Trivy 检测到基础设施配置风险。'), context.projectDir, target, cause.StartLine, misconfiguration.Message, String(misconfiguration.Resolution ?? '按最小权限原则修复配置。')));
     }
-    for (const secret of (Array.isArray(result.Secrets) ? result.Secrets as JsonObject[] : [])) findings.push(makeFinding('trivy', String(secret.RuleID ?? 'trivy.secret'), 'secret', secret.Severity ?? 'critical', String(secret.Title ?? 'Trivy 检测到密钥'), 'Trivy 在项目文件中检测到疑似凭据。', context.projectDir, target, secret.StartLine, secret.Match, '立即轮换凭据，并从代码与版本历史中移除。'));
+    for (const secret of (Array.isArray(result.Secrets) ? result.Secrets as JsonObject[] : [])) findings.push(makeFinding('trivy', String(secret.RuleID ?? 'trivy.secret'), 'secret', secret.Severity ?? 'high', String(secret.Title ?? 'Trivy 检测到密钥'), 'Trivy 在项目文件中检测到疑似凭据，但尚未验证凭据当前是否有效。', context.projectDir, target, secret.StartLine, secret.Match, '确认凭据有效性；如真实有效，请立即轮换并从代码与版本历史中移除。'));
   }
   return findings;
 }
@@ -140,7 +140,8 @@ export async function listExternalScannerAvailability(projectDir: string | undef
     const installed = await inspectScannerCommand(scanner.id as ExternalScannerCommand, force);
     let ready = installed.available;
     let reason = installed.error;
-    const requiresNetwork = scanner.id === 'osv-scanner' || scanner.id === 'trivy';
+    const hasSemgrepConfig = Boolean(projectDir && (fs.existsSync(path.join(projectDir, '.semgrep.yml')) || fs.existsSync(path.join(projectDir, '.semgrep.yaml'))));
+    const requiresNetwork = scanner.id === 'osv-scanner' || scanner.id === 'trivy' || (scanner.id === 'semgrep' && !hasSemgrepConfig);
     if (ready && scanner.id === 'semgrep' && (!projectDir || (!fs.existsSync(path.join(projectDir, '.semgrep.yml')) && !fs.existsSync(path.join(projectDir, '.semgrep.yaml')))) && networkPolicy !== 'allow') { ready = false; reason = '项目未提供 Semgrep 配置；允许联网后可使用官方自动规则集'; }
     if (ready && scanner.id === 'osv-scanner' && networkPolicy !== 'allow') { ready = false; reason = '网络策略为拒绝；请显式允许 OSV 查询或配置受管离线数据库'; }
     if (ready && scanner.id === 'trivy' && networkPolicy !== 'allow') {

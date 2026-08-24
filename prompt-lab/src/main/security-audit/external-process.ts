@@ -58,6 +58,7 @@ export function redactScannerOutput(value: string): string {
   return value
     .replace(/(api[_-]?key|token|secret|password)(\s*[:=]\s*)["']?[^\s"']+/gi, '$1$2[REDACTED]')
     .replace(/\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED AWS ACCESS KEY]')
     .replace(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]');
 }
 
@@ -79,6 +80,11 @@ export function runScannerProcess(command: ExternalScannerCommand, args: string[
         TEMP: process.env.TEMP,
         TMP: process.env.TMP,
         HOME: process.env.HOME,
+        HTTPS_PROXY: process.env.HTTPS_PROXY,
+        HTTP_PROXY: process.env.HTTP_PROXY,
+        NO_PROXY: process.env.NO_PROXY,
+        SSL_CERT_FILE: process.env.SSL_CERT_FILE,
+        REQUESTS_CA_BUNDLE: process.env.REQUESTS_CA_BUNDLE,
         NO_COLOR: '1',
         CI: 'true',
       },
