@@ -103,11 +103,12 @@ describe('security audit core', () => {
   it('tracks taint through variables and cross-file function calls', () => {
     const root = temporaryRoot(); fs.mkdirSync(path.join(root, 'src'));
     fs.writeFileSync(path.join(root, 'src', 'shell.ts'), "import { exec } from 'node:child_process'; export function run(value: string) { exec(value); }");
-    fs.writeFileSync(path.join(root, 'src', 'route.ts'), "import { run } from './shell'; export function route(req: any) { const command = req.query.command; run(command); }");
-    const result = analyzeTypeScriptProject({ projectDir: root, files: ['src/shell.ts', 'src/route.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    fs.writeFileSync(path.join(root, 'src', 'wrapper.ts'), "import { run } from './shell'; export function dispatch(value: string) { run(value); }");
+    fs.writeFileSync(path.join(root, 'src', 'route.ts'), "import { dispatch } from './wrapper'; function identity(value: string) { return value; } export function route(req: any) { const command = req.query.command; const returned = identity(command); dispatch(returned); }");
+    const result = analyzeTypeScriptProject({ projectDir: root, files: ['src/shell.ts', 'src/wrapper.ts', 'src/route.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     const finding = result.findings.find((item) => item.ruleId === 'taint.command-injection');
     expect(finding?.confidence).toBe('high');
-    expect(finding?.trace?.map((step) => step.kind)).toEqual(['source', 'propagation', 'call', 'sink']);
+    expect(finding?.trace?.map((step) => step.kind)).toEqual(['source', 'propagation', 'call', 'call', 'sink']);
   });
 
   it('detects Express authorization gaps and framework coverage', () => {
@@ -139,5 +140,11 @@ describe('security audit core', () => {
     expect(parseDependencyLock('yarn.lock', 'left-pad@^1.0.0:\n  version "1.3.0"\n')).toContainEqual({ name: 'left-pad', version: '1.3.0', source: 'yarn.lock' });
     expect(parseDependencyLock('pnpm-lock.yaml', 'packages:\n  /lodash/4.17.21:\n')).toContainEqual({ name: 'lodash', version: '4.17.21', source: 'pnpm-lock.yaml' });
     expect(parseDependencyLock('requirements.txt', 'django==5.0.1\n')).toContainEqual({ name: 'django', version: '5.0.1', source: 'requirements.txt' });
+  });
+
+  it('detects weak crypto and unpinned JWT verification through AST rules', () => {
+    const root = temporaryRoot(); const file = 'auth.ts'; fs.writeFileSync(path.join(root, file), "crypto.createHash('md5'); jwt.verify(token, key);");
+    const result = analyzeTypeScriptProject({ projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    expect(result.findings.map((item) => item.ruleId)).toEqual(expect.arrayContaining(['crypto.weak-hash', 'auth.jwt-algorithm-not-pinned']));
   });
 });

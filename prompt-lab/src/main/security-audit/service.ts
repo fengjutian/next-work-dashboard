@@ -107,7 +107,7 @@ export function listScans(projectDir: string): ScanRecord[] { return load().scan
 export async function listScanners(projectDir?: string, networkPolicy: 'deny' | 'allow' = 'deny', force = false): Promise<import('../../core/security-audit').ScannerStatus[]> {
   const external = await listExternalScannerAvailability(projectDir, networkPolicy, force);
   return [
-    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, installed: true, ready: true, builtIn: true, version: '内置', checkedAt: Date.now() })),
+    ...builtinScanners.map((scanner) => ({ id: scanner.id, name: scanner.name, installed: true, ready: scanner.id !== 'osv-lockfile' || networkPolicy === 'allow', builtIn: true, version: '内置', checkedAt: Date.now(), requiresNetwork: scanner.id === 'osv-lockfile', reason: scanner.id === 'osv-lockfile' && networkPolicy !== 'allow' ? '需显式允许联网查询 OSV' : undefined })),
     ...external.map((scanner) => ({ ...scanner, builtIn: false })),
   ];
 }

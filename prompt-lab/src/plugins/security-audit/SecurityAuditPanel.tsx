@@ -486,6 +486,7 @@ export function SecurityAuditPanel(): JSX.Element {
                 {activeFinding.location.file}:{activeFinding.location.line}
                 {activeFinding.location.column !== undefined && `:${activeFinding.location.column}`}
               </div>
+              {scannedDir && <Button className="mt-2" onClick={() => { void window.electronAPI.codeVisualizer.source.openExternal(scannedDir, activeFinding.location.file, activeFinding.location.line); }}>在编辑器中打开</Button>}
             </div>
             <div>
               <div className="mb-1 text-xs text-muted-foreground">描述</div>
@@ -495,6 +496,7 @@ export function SecurityAuditPanel(): JSX.Element {
               <div className="mb-1 text-xs text-muted-foreground">修复建议</div>
               <div className="text-sm leading-relaxed">{activeFinding.recommendation}</div>
             </div>
+            {activeFinding.evidence && activeFinding.evidence.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">证据</div>{activeFinding.evidence.map((item, index) => <pre key={`${item.kind}:${index}`} className="overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs"><Tag>{item.kind}</Tag>{' '}{item.excerpt}</pre>)}</div>}
             {activeFinding.ruleId && (
               <div>
                 <div className="mb-1 text-xs text-muted-foreground">规则</div>

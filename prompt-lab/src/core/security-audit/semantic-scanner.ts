@@ -34,6 +34,11 @@ const sourceLabel = (node: ts.Expression): string | undefined => {
   if (ts.isCallExpression(node) && /^(?:process\.env|searchParams\.get|URLSearchParams)$/.test(propertyPath(node.expression))) return `External input: ${textOf(node)}`;
   return undefined;
 };
+const sourceInside = (node: ts.Expression): { node: ts.Expression; label: string } | undefined => {
+  const direct = sourceLabel(node); if (direct) return { node, label: direct }; let found: { node: ts.Expression; label: string } | undefined;
+  ts.forEachChild(node, (child) => { if (!found && ts.isExpression(child)) found = sourceInside(child); }); return found;
+};
+const inheritedFlow = (node: ts.Expression, tainted: Map<string, Flow>): Flow | undefined => { const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(node); return names.map((name) => tainted.get(name)).find(Boolean); };
 const isSanitized = (node: ts.Expression): boolean => ts.isCallExpression(node) && /^(?:DOMPurify\.sanitize|sanitizeHtml|validator\.escape|encodeURIComponent|path\.basename|[A-Za-z_$][\w$]*Schema\.(?:parse|safeParse))$/.test(propertyPath(node.expression));
 
 const sinks: SinkRule[] = [
@@ -110,23 +115,22 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         if (isSanitized(node.initializer)) { tainted.delete(node.name.text); }
         else {
-        const direct = sourceLabel(node.initializer); const inherited = ts.isIdentifier(node.initializer) ? tainted.get(node.initializer.text) : undefined;
-        if (direct) tainted.set(node.name.text, { expression: node.initializer, source: node.initializer, sourceLabel: direct, path: [{ kind: 'source', label: direct, location: locationOf(source, node.initializer) }, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] });
+        const direct = sourceInside(node.initializer); const inherited = inheritedFlow(node.initializer, tainted);
+        if (direct) tainted.set(node.name.text, { expression: node.initializer, source: direct.node, sourceLabel: direct.label, path: [{ kind: 'source', label: direct.label, location: locationOf(source, direct.node) }, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] });
         else if (inherited) tainted.set(node.name.text, { ...inherited, expression: node.initializer, path: [...inherited.path, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] });
         }
       }
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) { const direct = sourceLabel(node.right); const inherited = ts.isIdentifier(node.right) ? tainted.get(node.right.text) : undefined; if (direct) tainted.set(node.left.text, { expression: node.right, source: node.right, sourceLabel: direct, path: [{ kind: 'source', label: direct, location: locationOf(source, node.right) }] }); else if (inherited) tainted.set(node.left.text, inherited); }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) { const direct = sourceInside(node.right); const inherited = inheritedFlow(node.right, tainted); if (direct) tainted.set(node.left.text, { expression: node.right, source: direct.node, sourceLabel: direct.label, path: [{ kind: 'source', label: direct.label, location: locationOf(source, direct.node) }] }); else if (inherited) tainted.set(node.left.text, inherited); }
       if (ts.isCallExpression(node)) for (const rule of sinks) {
         const argument = rule.match(node); if (!argument || isSanitized(argument)) continue;
-        const direct = sourceLabel(argument); const identifiers: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) identifiers.push(child.text); ts.forEachChild(child, collect); }; collect(argument);
-        const inherited = identifiers.map((name) => tainted.get(name)).find(Boolean); const flow = direct ? { expression: argument, source: argument, sourceLabel: direct, path: [{ kind: 'source' as const, label: direct, location: locationOf(source, argument) }] } : inherited;
+        const direct = sourceInside(argument); const inherited = inheritedFlow(argument, tainted); const flow = direct ? { expression: argument, source: direct.node, sourceLabel: direct.label, path: [{ kind: 'source' as const, label: direct.label, location: locationOf(source, direct.node) }] } : inherited;
         if (flow) { if (currentFunction) flow.path.push({ kind: 'call', label: currentFunction, location: locationOf(source, node) }); findings.push(makeFinding(rule, source, node, flow, direct ? 'high' : 'medium')); }
       }
       if (ts.isCallExpression(node)) {
         const resolved = resolveFunction(source, node.expression); const callee = resolved?.name; const summaries = resolved ? functionSinks.get(functionKey(resolved.file, resolved.name)) : undefined;
         for (const summary of summaries ?? []) {
-          const argument = node.arguments[summary.parameterIndex]; if (!argument) continue; const direct = sourceLabel(argument); const identifiers: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) identifiers.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const inherited = identifiers.map((name) => tainted.get(name)).find(Boolean);
-          const flow = direct ? { expression: argument, source: argument, sourceLabel: direct, path: [{ kind: 'source' as const, label: direct, location: locationOf(source, argument) }] } : inherited;
+          const argument = node.arguments[summary.parameterIndex]; if (!argument) continue; const direct = sourceInside(argument); const inherited = inheritedFlow(argument, tainted);
+          const flow = direct ? { expression: argument, source: direct.node, sourceLabel: direct.label, path: [{ kind: 'source' as const, label: direct.label, location: locationOf(source, direct.node) }] } : inherited;
           if (flow) { const callStep = { kind: 'call' as const, label: `${callee}()`, location: locationOf(source, node) }; findings.push(makeFinding(summary.rule, summary.source, summary.sink, { ...flow, path: [...flow.path, callStep, ...summary.callPath] }, 'high')); }
         }
       }
