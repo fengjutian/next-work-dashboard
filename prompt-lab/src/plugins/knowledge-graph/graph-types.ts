@@ -14,6 +14,16 @@ export interface GraphNode {
   sourcePath?: string;
   aliases?: string[];
   canonicalName?: string;
+  metrics?: GraphNodeMetrics;
+}
+
+export interface GraphNodeMetrics {
+  churn?: number;
+  lastModifiedAt?: number;
+  blastRadius?: number;
+  inDegree?: number;
+  outDegree?: number;
+  authors?: Array<{ name: string; commits: number }>;
 }
 
 export interface GraphEdge {
@@ -30,6 +40,7 @@ export interface GraphEdge {
   evidence?: GraphEvidence[];
   extractionModel?: string;
   extractedAt?: number;
+  resolution?: 'exact' | 'heuristic' | 'unresolved';
 }
 
 export interface GraphEvidence {
@@ -45,6 +56,34 @@ export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   documents?: GraphDocumentSnapshot[];
+}
+
+export type ImpactDirection = 'upstream' | 'downstream' | 'both';
+export interface GraphPath { nodeIds: string[]; edgeIndexes: number[] }
+export interface ImpactAnalysis {
+  centerId: string;
+  direction: ImpactDirection;
+  direct: GraphNode[];
+  transitive: GraphNode[];
+  paths: GraphPath[];
+  depthByNode: Record<string, number>;
+  cycles: string[][];
+  score: number;
+}
+export interface GraphFinding {
+  id: string;
+  kind: 'cycle' | 'orphan' | 'hub' | 'high-coupling' | 'stale-evidence' | 'unsupported-claim' | 'schema-violation';
+  severity: 'info' | 'warning' | 'error';
+  nodeIds: string[];
+  edgeIndexes?: number[];
+  explanation: string;
+  suggestedAction?: string;
+}
+export interface GraphHealthReport { score: number; grade: 'A' | 'B' | 'C' | 'D' | 'F'; findings: GraphFinding[] }
+export interface GraphSnapshot { id: string; createdAt: number; label?: string; graph: GraphData }
+export interface GraphDiff {
+  addedNodeIds: string[]; removedNodeIds: string[]; changedNodeIds: string[];
+  addedEdges: GraphEdge[]; removedEdges: GraphEdge[]; affectedNodeIds: string[];
 }
 
 export interface GraphDocumentSnapshot {
