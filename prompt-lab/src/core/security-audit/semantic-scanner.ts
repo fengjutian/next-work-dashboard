@@ -100,6 +100,13 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
   const findings: SecurityFinding[] = [];
   for (const { source } of files) {
     const visit = (node: ts.Node, currentFunction: string | undefined, tainted: Map<string, Flow>): void => {
+      if (ts.isCallExpression(node)) {
+        const callName = propertyPath(node.expression); const first = node.arguments[0]; const literal = first && ts.isStringLiteralLike(first) ? first.text.toLowerCase() : '';
+        const reportStatic = (rule: SinkRule, rationale: string): void => { const label = rationale; findings.push(makeFinding(rule, source, node, { expression: node, source: node, sourceLabel: label, path: [{ kind: 'source', label, location: locationOf(source, node) }] }, 'high')); };
+        if (/^(?:crypto\.)?createHash$/.test(callName) && ['md5', 'sha1'].includes(literal)) reportStatic({ id: 'crypto.weak-hash', category: 'sast', severity: 'P2', title: `Weak cryptographic hash: ${literal.toUpperCase()}`, cwe: 'CWE-328', recommendation: 'Use SHA-256 or stronger; use Argon2id, scrypt or bcrypt for passwords.', match: () => undefined }, `Static AST match for createHash('${literal}')`);
+        if (/^(?:jwt\.)?verify$/.test(callName) && (node.arguments.length < 3 || !/algorithms\s*:/.test(node.arguments[2]?.getText() ?? ''))) reportStatic({ id: 'auth.jwt-algorithm-not-pinned', category: 'sast', severity: 'P1', title: 'JWT verification does not pin allowed algorithms', cwe: 'CWE-347', recommendation: 'Pass an explicit allowlist of accepted JWT algorithms and validate issuer and audience.', match: () => undefined }, 'JWT verify call without an explicit algorithms allowlist');
+        if (callName === 'cors' && (!first || literal === '*')) reportStatic({ id: 'config.permissive-cors', category: 'config', severity: 'P2', title: 'Permissive CORS configuration', cwe: 'CWE-942', recommendation: 'Allow only trusted origins and avoid credentials with wildcard origins.', match: () => undefined }, 'CORS middleware has no restricted origin configuration');
+      }
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         if (isSanitized(node.initializer)) { tainted.delete(node.name.text); }
         else {

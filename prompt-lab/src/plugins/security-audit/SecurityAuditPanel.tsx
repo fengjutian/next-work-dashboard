@@ -147,6 +147,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [scannerRuns, setScannerRuns] = useState<import('../../core/security-audit').ScannerRunResult[]>([]);
   const [lastScan, setLastScan] = useState<import('../../core/security-audit').ScanRecord | null>(null);
   const [baselines, setBaselines] = useState<import('../../core/security-audit').SecurityBaseline[]>([]);
+  const [baselineComparison, setBaselineComparison] = useState<import('../../core/security-audit').BaselineComparison | null>(null);
 
   const loadScanners = useCallback((force = false) => {
     setScannerDetectionRunning(true);
@@ -259,6 +260,7 @@ export function SecurityAuditPanel(): JSX.Element {
     void window.electronAPI.securityAudit.baselines.create({ projectDir: scannedDir, name, gitRef: baselineRef || 'HEAD', scanId: lastScan?.id }).then((item) => { setBaselines((current) => [item, ...current.filter((entry) => entry.id !== item.id)]); message.success('基线已创建'); }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
   }, [baselineRef, lastScan?.id, scannedDir]);
   const deleteSelectedBaseline = useCallback(() => { const item = baselines.find((entry) => entry.gitRef === baselineRef); if (!scannedDir || !item || !window.confirm(`删除基线“${item.name}”？`)) return; void window.electronAPI.securityAudit.baselines.remove({ projectDir: scannedDir, id: item.id }).then(() => { setBaselines((current) => current.filter((entry) => entry.id !== item.id)); setBaselineRef('HEAD'); }); }, [baselineRef, baselines, scannedDir]);
+  const compareSelectedBaseline = useCallback(() => { const item = baselines.find((entry) => entry.gitRef === baselineRef); if (!scannedDir || !item) return; void window.electronAPI.securityAudit.baselines.compare({ projectDir: scannedDir, id: item.id }).then(setBaselineComparison).catch((error: unknown) => message.warning(securityAuditErrorMessage(error))); }, [baselineRef, baselines, scannedDir]);
 
   useEffect(() => {
     if (!commandScanRequested) return;
@@ -308,6 +310,7 @@ export function SecurityAuditPanel(): JSX.Element {
           {scanMode === 'incremental' && <select aria-label="扫描基线" className="h-8 w-36 rounded border border-border bg-background px-2 text-xs" value={baselineRef} onChange={(event) => setBaselineRef(event.target.value)} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}><option value="HEAD">HEAD</option>{baselines.map((item) => <option key={item.id} value={item.gitRef}>{item.name} · {item.gitRef}</option>)}</select>}
           {scannedDir && <Button onClick={addBaseline}>保存基线</Button>}
           {scanMode === 'incremental' && baselines.some((item) => item.gitRef === baselineRef) && <Button onClick={deleteSelectedBaseline}>删除基线</Button>}
+          {scanMode === 'incremental' && baselines.some((item) => item.gitRef === baselineRef) && <Button onClick={compareSelectedBaseline}>对比基线</Button>}
           {(progress.phase === 'scanning' || progress.phase === 'triaging') && jobId && <Button onClick={() => { void window.electronAPI.securityAudit.scan.cancel(jobId); }}>取消</Button>}
           {scannedDir && findings && <Button onClick={() => { void window.electronAPI.securityAudit.report.exportSarif(scannedDir).then((result) => { if (result.ok) message.success(`SARIF 已导出：${result.filePath}`); }); }}>导出 SARIF</Button>}
           <Button icon={<Play size={14} />} type="primary" onClick={runScan} loading={progress.phase === 'scanning' || progress.phase === 'triaging'}>
@@ -340,6 +343,7 @@ export function SecurityAuditPanel(): JSX.Element {
         {Object.entries(lastScan.coverage.languages).map(([name, count]) => <Tag key={name}>{name} {count}</Tag>)}
         {lastScan.coverage.frameworks.map((name) => <Tag key={name} color="purple">{name}</Tag>)}
       </div>}
+      {baselineComparison && <div className="flex shrink-0 items-center gap-2 border-b border-border bg-blue-50 px-5 py-2 text-xs text-blue-900"><strong>{baselineComparison.baseline.name}</strong><Tag color="red">新增 {baselineComparison.newFindings.length}</Tag><Tag color="green">修复 {baselineComparison.fixedFindings.length}</Tag><Tag>未变化 {baselineComparison.unchangedCount}</Tag><Button className="ml-auto" onClick={() => setBaselineComparison(null)}>关闭</Button></div>}
 
       {/* Progress */}
       {progress.phase !== 'idle' && (
