@@ -23,6 +23,11 @@ import type {
   RssRuleAction,
   RssSubscription,
 } from "./types";
+import {
+  RECOMMENDED_FEEDS,
+  unsubscribedRecommendations,
+  type RecommendedFeed,
+} from "./recommended-feeds";
 
 interface RssState {
   subscriptions: RssSubscription[];
@@ -185,6 +190,8 @@ export const RssReaderPanel: React.FC = () => {
   );
   const [rules, setRules] = useState<RssKeywordRule[]>([]);
   const [searchMatches, setSearchMatches] = useState<Set<string> | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [importProgress, setImportProgress] = useState("");
   useEffect(() => {
     void window.electronAPI.rss.setRefreshMinutes(refreshMinutes);
     void window.electronAPI.rss.setRetentionDays(retentionDays);
@@ -300,6 +307,31 @@ export const RssReaderPanel: React.FC = () => {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "添加订阅失败");
     } finally {
+      setBusy(false);
+    }
+  };
+  const addRecommendedFeeds = async (feeds: RecommendedFeed[]) => {
+    if (!feeds.length) return;
+    setBusy(true);
+    setError("");
+    let next = state;
+    const failures: string[] = [];
+    try {
+      for (let index = 0; index < feeds.length; index += 1) {
+        const feed = feeds[index];
+        setImportProgress(`${index + 1}/${feeds.length} · ${feed.title}`);
+        try {
+          next = await fetchOne(feed.url, next, feed.category);
+          save(next, setState);
+        } catch {
+          failures.push(feed.title);
+        }
+      }
+      if (failures.length)
+        setError(`已添加 ${feeds.length - failures.length} 个，${failures.join("、")} 添加失败`);
+      else setCatalogOpen(false);
+    } finally {
+      setImportProgress("");
       setBusy(false);
     }
   };
@@ -534,6 +566,66 @@ export const RssReaderPanel: React.FC = () => {
               />
             </Button>
           </div>
+        </div>
+        <div className="border-b">
+          <button
+            className="w-full px-3 py-2 text-left hover:bg-muted/40"
+            onClick={() => setCatalogOpen((open) => !open)}
+          >
+            <span className="flex items-center justify-between text-xs font-medium">
+              <span>发现优质订阅</span>
+              <span className="text-primary">{catalogOpen ? "收起" : "浏览"}</span>
+            </span>
+            <span className="mt-0.5 block text-[10px] text-muted-foreground">
+              来自 Tidings RSS 已验证精选源
+            </span>
+          </button>
+          {catalogOpen && (() => {
+            const available = unsubscribedRecommendations(
+              state.subscriptions.flatMap((feed) => [feed.feedUrl, feed.sourceUrl]),
+            );
+            return (
+              <div className="max-h-64 overflow-auto border-t bg-muted/20 px-2 py-2">
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <span className="text-[10px] text-muted-foreground">
+                    {available.length} 个可添加
+                  </span>
+                  <button
+                    className="text-[11px] text-primary disabled:opacity-50"
+                    disabled={busy || !available.length}
+                    onClick={() => void addRecommendedFeeds(available)}
+                  >
+                    全部添加
+                  </button>
+                </div>
+                {importProgress && (
+                  <div className="mb-2 truncate rounded bg-primary/10 px-2 py-1 text-[10px] text-primary">
+                    正在添加 {importProgress}
+                  </div>
+                )}
+                {RECOMMENDED_FEEDS.map((feed) => {
+                  const added = !available.includes(feed);
+                  return (
+                    <div key={feed.url} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs">{feed.title}</div>
+                        <div className="truncate text-[9px] text-muted-foreground">
+                          {feed.category} · {feed.language}
+                        </div>
+                      </div>
+                      <button
+                        className="shrink-0 text-[10px] text-primary disabled:text-muted-foreground"
+                        disabled={busy || added}
+                        onClick={() => void addRecommendedFeeds([feed])}
+                      >
+                        {added ? "已添加" : "+ 添加"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
         {currentSubscription && (
           <div className="px-3 py-2 border-b bg-muted/30">
