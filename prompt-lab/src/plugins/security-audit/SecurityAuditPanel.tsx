@@ -41,7 +41,7 @@ const EVIDENCE_KIND_LABEL: Record<string, string> = { code: '代码', tool: '扫
 const FINDING_STATUS_LABEL: Record<string, string> = { open: '待处理', confirmed: '已确认', 'false-positive': '误报', accepted: '已接受风险', fixed: '已修复' };
 const SCANNER_STATUS_LABEL: Record<string, string> = { succeeded: '成功', failed: '失败', skipped: '已跳过', cancelled: '已取消' };
 function localizeFinding(finding: Finding): Finding {
-  if (finding.ruleId !== 'secret.git-history') return finding;
+  if (finding.ruleId !== 'secret.git-history' || finding.secretDetails) return finding;
   const commit = /(?:commit|提交)\s+([a-f0-9]{7,40})/i.exec(`${finding.description} ${finding.evidence?.map((item) => item.excerpt).join(' ') ?? ''}`)?.[1] ?? '未知提交';
   return { ...finding, title: 'Git 历史中发现疑似密钥', description: `提交 ${commit} 中曾加入疑似凭据。扫描器已对密钥脱敏，且不会持久化原始值。`, recommendation: '立即撤销并轮换该凭据，然后按照经过审批的历史重写流程从 Git 历史中移除。', confidenceRationale: finding.secretVerification?.status === 'valid' ? '密钥供应商已确认该脱敏凭据当前仍然有效。' : '该值符合凭据结构并出现在 Git 提交历史中，但尚未确认当前是否有效。', evidence: finding.evidence?.map((item) => ({ ...item, excerpt: `提交 ${commit} 中存在疑似密钥材料` })) };
 }
@@ -315,7 +315,7 @@ export function SecurityAuditPanel(): JSX.Element {
           </Button>
           <select className="h-8 rounded border border-border bg-background px-2 text-xs" value={scanMode} onChange={(event) => setScanMode(event.target.value as 'full' | 'incremental')} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}>
             <option value="incremental">增量扫描</option>
-            <option value="full">完整扫描</option>
+            <option value="full">全文件扫描</option>
           </select>
           {scanMode === 'incremental' && <select aria-label="扫描基线" className="h-8 w-36 rounded border border-border bg-background px-2 text-xs" value={baselineRef} onChange={(event) => setBaselineRef(event.target.value)} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}><option value="HEAD">HEAD</option>{baselines.map((item) => <option key={item.id} value={item.gitRef}>{item.name} · {item.gitRef}</option>)}</select>}
           {scannedDir && <Button onClick={addBaseline}>保存基线</Button>}
@@ -349,10 +349,12 @@ export function SecurityAuditPanel(): JSX.Element {
         <span className="font-medium">扫描覆盖</span>
         <Tag color={lastScan.coverage.skippedFiles ? 'orange' : 'green'}>{lastScan.coverage.scannedFiles}/{lastScan.coverage.discoveredFiles} 文件</Tag>
         <Tag>{(lastScan.coverage.scannedBytes / 1024).toFixed(1)} KB</Tag>
-        <Tag color={lastScan.coverage.mode === 'full' ? 'green' : 'blue'}>{lastScan.coverage.mode === 'full' ? '完整扫描' : `增量 · ${lastScan.coverage.baselineRef ?? 'HEAD'}`}</Tag>
+        <Tag color={lastScan.coverage.mode === 'full' ? 'green' : 'blue'}>{lastScan.coverage.mode === 'full' ? '全文件范围' : `增量范围 · ${lastScan.coverage.baselineRef ?? 'HEAD'}`}</Tag>
+        <Tag color={lastScan.coverage.capability === 'full' ? 'green' : lastScan.coverage.capability === 'partial' ? 'orange' : 'red'}>{lastScan.coverage.capability === 'full' ? '能力覆盖完整' : lastScan.coverage.capability === 'partial' ? '能力覆盖部分' : '能力覆盖有限'}</Tag>
         {Object.entries(lastScan.coverage.languages).map(([name, count]) => <Tag key={name}>{name} {count}</Tag>)}
         {lastScan.coverage.frameworks.map((name) => <Tag key={name} color="purple">{name}</Tag>)}
       </div>}
+      {lastScan?.coverage && lastScan.coverage.capability !== 'full' && <div className="shrink-0 border-b border-border px-5 py-2"><Alert type="warning" message="本次结果不代表完整安全审计" description={lastScan.coverage.capabilitySummary} /></div>}
       {baselineComparison && <div className="flex shrink-0 items-center gap-2 border-b border-border bg-blue-50 px-5 py-2 text-xs text-blue-900"><strong>{baselineComparison.baseline.name}</strong><Tag color="red">新增 {baselineComparison.newFindings.length}</Tag><Tag color="green">修复 {baselineComparison.fixedFindings.length}</Tag><Tag>未变化 {baselineComparison.unchangedCount}</Tag><Button className="ml-auto" onClick={() => setBaselineComparison(null)}>关闭</Button></div>}
 
       {/* Progress */}
@@ -445,6 +447,7 @@ export function SecurityAuditPanel(): JSX.Element {
                           {f.ruleId && <span className="ml-2 rounded bg-muted px-1 text-[10px]">{f.ruleId}</span>}
                           {f.confidence && <span className="ml-2">置信度 {CONFIDENCE_LABEL[f.confidence]}</span>}
                           {f.status && f.status !== 'open' && <span className="ml-2">· {FINDING_STATUS_LABEL[f.status] ?? f.status}</span>}
+                          {f.secretDetails && <span className="ml-2">· 当前{f.secretDetails.currentExists ? '存在' : '不存在'} · 历史{f.secretDetails.historyExists ? '存在' : '不存在'} · 重复 {f.secretDetails.occurrences} 次 · 验证{f.secretVerification?.status === 'valid' ? '有效' : f.secretVerification?.status === 'invalid' ? '无效' : '未确认'}</span>}
                         </div>
                       </div>
                     </div>
@@ -516,6 +519,7 @@ export function SecurityAuditPanel(): JSX.Element {
             {activeFinding.trace && activeFinding.trace.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">数据流 / 调用路径</div><div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">{activeFinding.trace.map((step, index) => <div key={`${step.kind}:${step.location.file}:${step.location.line}:${index}`} className="font-mono text-xs"><Tag color={step.kind === 'source' ? 'blue' : step.kind === 'sink' ? 'red' : 'purple'}>{TRACE_KIND_LABEL[step.kind]}</Tag> {step.label} <span className="text-muted-foreground">— {step.location.file}:{step.location.line}</span></div>)}</div></div>}
             {activeFinding.suppressed && <Alert type="warning" message={FINDING_STATUS_LABEL[activeFinding.status ?? 'open']} description={activeFinding.suppressed.reason} />}
             {activeFinding.secretVerification && <Alert type={activeFinding.secretVerification.status === 'valid' ? 'error' : 'info'} message={`密钥验证：${activeFinding.secretVerification.status}`} description={`${activeFinding.secretVerification.provider} · ${new Date(activeFinding.secretVerification.checkedAt).toLocaleString()}`} />}
+            {activeFinding.secretDetails && <div><div className="mb-1 text-xs text-muted-foreground">密钥状态</div><Space wrap><Tag color={activeFinding.secretDetails.currentExists ? 'red' : 'green'}>当前代码：{activeFinding.secretDetails.currentExists ? '存在' : '不存在'}</Tag><Tag color={activeFinding.secretDetails.historyExists ? 'orange' : 'green'}>Git 历史：{activeFinding.secretDetails.historyExists ? '存在' : '不存在'}</Tag><Tag>重复 {activeFinding.secretDetails.occurrences} 次</Tag><Tag>位置 {activeFinding.secretDetails.locations.length} 个</Tag><Tag>验证：{activeFinding.secretVerification?.status === 'valid' ? '有效' : activeFinding.secretVerification?.status === 'invalid' ? '无效' : '未确认'}</Tag></Space></div>}
             {activeFinding.confidenceRationale && <Alert type="info" message={`置信度：${activeFinding.confidence ? CONFIDENCE_LABEL[activeFinding.confidence] : '未知'}`} description={activeFinding.confidenceRationale} />}
             <Space wrap>
               <Button onClick={() => updateFindingStatus(activeFinding, 'confirmed')}>确认问题</Button>

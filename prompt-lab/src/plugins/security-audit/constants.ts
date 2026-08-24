@@ -53,6 +53,7 @@ export interface Finding {
   trace?: import('../../core/security-audit').FindingTraceStep[];
   suppressed?: { reason: string; at: number };
   secretVerification?: { provider: string; status: 'valid' | 'invalid' | 'unknown'; checkedAt: number };
+  secretDetails?: import('../../core/security-audit').SecretFindingDetails;
   aiReview?: { verdict: string; rationale: string; reviewedAt: number };
 }
 
