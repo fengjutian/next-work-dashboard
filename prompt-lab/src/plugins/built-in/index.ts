@@ -57,6 +57,7 @@ const phone = preloadable(() => import('../phone').then((m) => ({ default: m.Pho
 const voiceInput = preloadable(() => import('../voice-input').then((m) => ({ default: m.VoiceInputPanel })));
 const zodiacPerspectives = preloadable(() => import('../zodiac-perspectives').then((m) => ({ default: m.ZodiacPerspectivesPanel })));
 const thinkingLab = preloadable(() => import('../thinking-lab').then((m) => ({ default: m.ThinkingLabPanel })));
+const productSpec = preloadable(() => import('../product-spec').then((m) => ({ default: m.ProductSpecPanel })));
 const workBrowser = preloadable(() => import('../work-browser').then((m) => ({ default: m.WorkBrowserPanel })));
 const codeVisualizer = preloadable(() => import('../code-visualizer').then((m) => ({ default: m.CodeVisualizerPanel })));
 const websiteRegistry = preloadable(() => import('../website-registry').then((m) => ({ default: m.WebsiteRegistryPanel })));
@@ -97,6 +98,7 @@ const PhonePanel = phone.component;
 const VoiceInputPanel = voiceInput.component;
 const ZodiacPerspectivesPanel = zodiacPerspectives.component;
 const ThinkingLabPanel = thinkingLab.component;
+const ProductSpecPanel = productSpec.component;
 const WorkBrowserPanel = workBrowser.component;
 const CodeVisualizerPanel = codeVisualizer.component;
 const WebsiteRegistryPanel = websiteRegistry.component;
@@ -804,6 +806,18 @@ const builtInPlugins: Plugin[] = [
       ],
     },
   },
+  {
+    id: 'product-spec',
+    name: '产品说明文档',
+    icon: FileText,
+    component: ProductSpecPanel,
+    enabled: false,
+    order: 29,
+    keepAlive: true,
+    contributions: {
+      commands: [{ id: 'product-spec.new', title: '生成产品说明文档', category: '产品说明文档' }],
+    },
+  },
 ];
 
 export function registerBuiltInPlugins(): void {
@@ -842,6 +856,7 @@ export function registerBuiltInPlugins(): void {
     'voice-input': voiceInput.preload,
     'zodiac-perspectives': zodiacPerspectives.preload,
     'thinking-lab': thinkingLab.preload,
+    'product-spec': productSpec.preload,
     'english-lookup': englishLookup.preload,
     calcpath: calcPath.preload,
     'rss-reader': rssReader.preload,
