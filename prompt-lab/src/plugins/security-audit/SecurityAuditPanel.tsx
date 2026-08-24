@@ -142,6 +142,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [networkAllowed, setNetworkAllowed] = useState(false);
   const [scannerRuns, setScannerRuns] = useState<import('../../core/security-audit').ScannerRunResult[]>([]);
   const [lastScan, setLastScan] = useState<import('../../core/security-audit').ScanRecord | null>(null);
+  const [baselines, setBaselines] = useState<import('../../core/security-audit').SecurityBaseline[]>([]);
 
   const loadScanners = useCallback((force = false) => {
     setScannerDetectionRunning(true);
@@ -159,6 +160,8 @@ export function SecurityAuditPanel(): JSX.Element {
   useEffect(() => {
     loadScanners();
   }, [loadScanners]);
+
+  useEffect(() => { if (scannedDir) void window.electronAPI.securityAudit.baselines.list(scannedDir).then(setBaselines); else setBaselines([]); }, [scannedDir]);
 
   useEffect(() => {
     if (scannerStateReady) localStorage.setItem(SCANNER_SELECTION_KEY, JSON.stringify(selectedScanners));
@@ -247,6 +250,11 @@ export function SecurityAuditPanel(): JSX.Element {
     }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
   }, [scannedDir]);
 
+  const addBaseline = useCallback(() => {
+    if (!scannedDir) return; const name = window.prompt('基线名称'); if (!name) return;
+    void window.electronAPI.securityAudit.baselines.create({ projectDir: scannedDir, name, gitRef: baselineRef || 'HEAD', scanId: lastScan?.id }).then((item) => { setBaselines((current) => [item, ...current.filter((entry) => entry.id !== item.id)]); message.success('基线已创建'); }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
+  }, [baselineRef, lastScan?.id, scannedDir]);
+
   useEffect(() => {
     if (!commandScanRequested) return;
     setCommandScanRequested(false);
@@ -285,7 +293,8 @@ export function SecurityAuditPanel(): JSX.Element {
             <option value="incremental">增量扫描</option>
             <option value="full">完整扫描</option>
           </select>
-          {scanMode === 'incremental' && <input aria-label="基线 Git 引用" title="增量扫描基线 Git 引用" className="h-8 w-28 rounded border border-border bg-background px-2 text-xs" value={baselineRef} onChange={(event) => setBaselineRef(event.target.value)} placeholder="HEAD / main" disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} />}
+          {scanMode === 'incremental' && <select aria-label="扫描基线" className="h-8 w-36 rounded border border-border bg-background px-2 text-xs" value={baselineRef} onChange={(event) => setBaselineRef(event.target.value)} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}><option value="HEAD">HEAD</option>{baselines.map((item) => <option key={item.id} value={item.gitRef}>{item.name} · {item.gitRef}</option>)}</select>}
+          {scannedDir && <Button onClick={addBaseline}>保存基线</Button>}
           {(progress.phase === 'scanning' || progress.phase === 'triaging') && jobId && <Button onClick={() => { void window.electronAPI.securityAudit.scan.cancel(jobId); }}>取消</Button>}
           {scannedDir && findings && <Button onClick={() => { void window.electronAPI.securityAudit.report.exportSarif(scannedDir).then((result) => { if (result.ok) message.success(`SARIF 已导出：${result.filePath}`); }); }}>导出 SARIF</Button>}
           <Button icon={<Play size={14} />} type="primary" onClick={runScan} loading={progress.phase === 'scanning' || progress.phase === 'triaging'}>

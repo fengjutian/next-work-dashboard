@@ -1,23 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { app, safeStorage, type WebContents } from 'electron';
+import { safeStorage, type WebContents } from 'electron';
 import { SecurityScanOrchestrator, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
 import { externalScanners, listExternalScannerAvailability } from './external-scanners';
+import { createBaseline, listBaselines, readSecurityAuditData, recordFindingEvent, removeBaseline, writeSecurityAuditData, type StoredSecurityAuditData } from './database';
 
-interface StoredData { version: 1; settings: Record<string, string>; scans: ScanRecord[] }
 const jobs = new Map<string, AbortController>();
 const orchestrator = new SecurityScanOrchestrator([...builtinScanners, ...externalScanners]);
 
-function storageFile(): string { return path.join(app.getPath('userData'), 'security-audit', 'data.json'); }
-function load(): StoredData {
-  try { return JSON.parse(fs.readFileSync(storageFile(), 'utf8')) as StoredData; } catch { return { version: 1, settings: {}, scans: [] }; }
-}
-function save(data: StoredData): void {
-  fs.mkdirSync(path.dirname(storageFile()), { recursive: true });
-  const temporary = `${storageFile()}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(temporary, storageFile());
-}
+function load(): StoredSecurityAuditData { return readSecurityAuditData(); }
+function save(data: StoredSecurityAuditData): void { writeSecurityAuditData(data); }
 
 export function getSetting(key: string): string | null {
   const value = load().settings[key];
@@ -37,7 +27,7 @@ export function setSetting(key: string, value: string): void {
   save(data);
 }
 
-function lastFindings(data: StoredData, projectDir: string): SecurityFinding[] {
+function lastFindings(data: StoredSecurityAuditData, projectDir: string): SecurityFinding[] {
   return data.scans.find((scan) => scan.projectDir === projectDir && scan.status === 'completed')?.findings ?? [];
 }
 
@@ -103,8 +93,9 @@ export function updateFinding(projectDir: string, findingId: string, status: Fin
   if (!finding) throw new Error('FINDING_NOT_FOUND');
   finding.status = status;
   finding.suppressed = status === 'false-positive' || status === 'accepted' ? { reason: String(reason ?? '').trim().slice(0, 1000) || status, at: Date.now() } : undefined;
-  save(data); return finding;
+  save(data); recordFindingEvent(projectDir, findingId, status, reason); return finding;
 }
+export { createBaseline, listBaselines, removeBaseline };
 export function listScans(projectDir: string): ScanRecord[] { return load().scans.filter((scan) => scan.projectDir === projectDir); }
 export async function listScanners(projectDir?: string, networkPolicy: 'deny' | 'allow' = 'deny', force = false): Promise<import('../../core/security-audit').ScannerStatus[]> {
   const external = await listExternalScannerAvailability(projectDir, networkPolicy, force);

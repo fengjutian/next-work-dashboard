@@ -3,7 +3,7 @@ import { FolderOpen, Plus, Search } from '@/components/icons';
 import { useToast } from '@/components/Toast';
 import { useStore } from '@/store';
 import type { ConversationFile } from '@/types/electron';
-import type { ExtractedRelation, ExtractionDocument, GraphNode, GraphData } from './graph-types';
+import type { ExtractedRelation, ExtractionDocument, GraphNode, GraphData, GraphSnapshot, ImpactAnalysis, ImpactDirection } from './graph-types';
 import { GraphCanvas } from './GraphCanvas';
 import { FileSelector } from './FileSelector';
 import { NodePanel } from './NodePanel';
@@ -16,9 +16,8 @@ import { KnowledgeFolderTree } from './KnowledgeFolderTree';
 import { findDuplicateEntities, mergeEntities, stableEntityId } from '@/core/knowledge-graph/entity-normalization';
 import { attachDocumentHashes, deactivateMissingDocuments, reconcileDocuments } from '@/core/knowledge-graph/lifecycle';
 import { hybridGraphSearch, type HybridSearchResult } from '@/core/knowledge-graph/hybrid-search';
-import { analyzeGraphImpact, diffGraphSnapshots, evaluateGraphHealth } from '@/core/knowledge-graph/analysis';
+import { analyzeGraphImpact, diffGraphSnapshots, enrichGraphMetrics, evaluateGraphHealth } from '@/core/knowledge-graph/analysis';
 import { exportGraphContent } from '@/core/knowledge-graph/export';
-import type { GraphSnapshot, ImpactAnalysis, ImpactDirection } from './graph-types';
 import { createOpenAIProvider } from '@/core/llm';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
@@ -228,8 +227,9 @@ export const KnowledgeGraph: React.FC = () => {
   }, []);
 
   const applyCodeGraph = useCallback((graph: GraphData) => {
-    setNodes(graph.nodes);
-    setGraphData(graph);
+    const enriched = enrichGraphMetrics(graph);
+    setNodes(enriched.nodes);
+    setGraphData(enriched);
     setKnowledgeIndex(null);
   }, []);
 

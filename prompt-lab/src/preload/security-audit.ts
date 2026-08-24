@@ -30,6 +30,11 @@ export const securityAuditBridge = {
     update: (input: { projectDir: string; findingId: string; status: import('../core/security-audit').FindingStatus; reason?: string }) => ipcRenderer.invoke('security-audit:findings:update', input),
   },
   scans: { list: (projectDir: string) => ipcRenderer.invoke('security-audit:scans:list', projectDir) },
+  baselines: {
+    list: (projectDir: string) => ipcRenderer.invoke('security-audit:baselines:list', projectDir),
+    create: (input: { projectDir: string; name: string; gitRef: string; scanId?: string }) => ipcRenderer.invoke('security-audit:baselines:create', input),
+    remove: (input: { projectDir: string; id: string }) => ipcRenderer.invoke('security-audit:baselines:remove', input),
+  },
   scanners: { list: (input?: { projectDir?: string; networkPolicy?: 'deny' | 'allow'; force?: boolean }) => ipcRenderer.invoke('security-audit:scanners:list', input) },
   report: { exportSarif: (projectDir: string) => ipcRenderer.invoke('security-audit:report:export-sarif', projectDir) },
 };

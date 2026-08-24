@@ -68,6 +68,12 @@ export function evaluateGraphHealth(graph: GraphData): GraphHealthReport {
   return { score, grade: score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F', findings };
 }
 
+export function enrichGraphMetrics(graph: GraphData): GraphData {
+  const incoming = new Map(graph.nodes.map((node) => [node.id, 0])); const outgoing = new Map(incoming);
+  graph.edges.forEach((edge) => { outgoing.set(edge.source, (outgoing.get(edge.source) ?? 0) + 1); incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1); });
+  return { ...graph, nodes: graph.nodes.map((node) => ({ ...node, metrics: { ...node.metrics, inDegree: incoming.get(node.id) ?? 0, outDegree: outgoing.get(node.id) ?? 0, blastRadius: analyzeGraphImpact(graph, node.id, { maxDepth: 5, acceptedOnly: true }).direct.length + analyzeGraphImpact(graph, node.id, { maxDepth: 5, acceptedOnly: true }).transitive.length } })) };
+}
+
 const edgeKey = (edge: GraphData['edges'][number]) => `${edge.source}\0${edge.target}\0${edge.label ?? ''}\0${edge.kind ?? ''}`;
 export function diffGraphSnapshots(from: GraphSnapshot | GraphData, to: GraphSnapshot | GraphData): GraphDiff {
   const before = 'graph' in from ? from.graph : from; const after = 'graph' in to ? to.graph : to;

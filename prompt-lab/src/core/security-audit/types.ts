@@ -103,3 +103,4 @@ export interface ScanCoverage {
   mode: ScanMode;
   baselineRef?: string;
 }
+export interface SecurityBaseline { id: string; projectDir: string; name: string; gitRef: string; scanId?: string; createdAt: number }

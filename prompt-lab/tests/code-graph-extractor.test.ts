@@ -15,7 +15,16 @@ describe('code graph extractor', () => {
 
   it('only accepts supported source files', () => {
     expect(isSupportedCodePath('src/app.tsx')).toBe(true);
+    expect(isSupportedCodePath('src/service.py')).toBe(true);
+    expect(isSupportedCodePath('src/lib.rs')).toBe(true);
     expect(isSupportedCodePath('README.md')).toBe(false);
+  });
+
+  it('uses the multi-language adapter for declarations and imports', () => {
+    const graph = extractCodeGraph([{ path: 'service.py', content: 'import json\nclass Service:\n  def run(self): pass' }]);
+    expect(graph.nodes.some((node) => node.label === 'Service')).toBe(true);
+    expect(graph.nodes.some((node) => node.label === 'run')).toBe(true);
+    expect(graph.edges.some((edge) => edge.label === '导入')).toBe(true);
   });
 
   it('limits large graphs while keeping valid edges', () => {
