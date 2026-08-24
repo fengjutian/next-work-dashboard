@@ -6,7 +6,7 @@ import { findingId, fingerprint, redactSecrets } from './security';
 import type { FindingCategory, FindingConfidence, FindingTraceStep, ScanContext, SecurityFinding, SecuritySeverity } from './types';
 
 type FunctionInfo = { name: string; file: string; node: ts.FunctionLikeDeclaration; source: ts.SourceFile; calls: string[] };
-type FunctionSink = { parameterIndex: number; rule: SinkRule; sink: ts.CallExpression; source: ts.SourceFile };
+type FunctionSink = { parameterIndex: number; rule: SinkRule; sink: ts.CallExpression; source: ts.SourceFile; callPath: FindingTraceStep[] };
 type Flow = { expression: ts.Expression; source: ts.Node; sourceLabel: string; path: FindingTraceStep[] };
 type SinkRule = { id: string; category: FindingCategory; severity: SecuritySeverity; title: string; cwe: string; recommendation: string; match: (call: ts.CallExpression) => ts.Expression | undefined };
 
@@ -64,19 +64,38 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
     const normalized = file.replace(/\\/g, '/'); return { content, source: cachedSource(normalized, content) };
   });
   const functions = new Map<string, FunctionInfo>();
+  const functionKey = (file: string, name: string) => `${file}#${name}`;
   for (const { source } of files) {
     const visit = (node: ts.Node): void => {
-      if (ts.isFunctionDeclaration(node) && node.name) functions.set(node.name.text, { name: node.name.text, file: source.fileName, node, source, calls: [] });
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) functions.set(node.name.text, { name: node.name.text, file: source.fileName, node: node.initializer, source, calls: [] });
+      if (ts.isFunctionDeclaration(node) && node.name) functions.set(functionKey(source.fileName, node.name.text), { name: node.name.text, file: source.fileName, node, source, calls: [] });
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) functions.set(functionKey(source.fileName, node.name.text), { name: node.name.text, file: source.fileName, node: node.initializer, source, calls: [] });
       ts.forEachChild(node, visit);
     }; visit(source);
   }
-  for (const info of functions.values()) { const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) { const name = propertyPath(node.expression).split('.').at(-1); if (name && functions.has(name)) info.calls.push(name); } ts.forEachChild(node, visit); }; visit(info.node); }
+  const resolveFunction = (source: ts.SourceFile, expression: ts.LeftHandSideExpression): FunctionInfo | undefined => {
+    const localName = propertyPath(expression).split('.').at(-1); if (!localName) return undefined; const local = functions.get(functionKey(source.fileName, localName)); if (local) return local;
+    for (const statement of source.statements) {
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !statement.moduleSpecifier.text.startsWith('.')) continue;
+      const bindings = statement.importClause?.namedBindings; if (!bindings || !ts.isNamedImports(bindings)) continue; const element = bindings.elements.find((item) => item.name.text === localName); if (!element) continue;
+      const imported = element.propertyName?.text ?? element.name.text; const base = path.posix.normalize(path.posix.join(path.posix.dirname(source.fileName), statement.moduleSpecifier.text));
+      for (const candidate of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`, `${base}/index.ts`, `${base}/index.tsx`]) { const match = functions.get(functionKey(candidate, imported)); if (match) return match; }
+    }
+    return undefined;
+  };
+  for (const info of functions.values()) { const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) { const called = resolveFunction(info.source, node.expression); if (called) info.calls.push(`${called.file}#${called.name}`); } ts.forEachChild(node, visit); }; visit(info.node); }
   const functionSinks = new Map<string, FunctionSink[]>();
   for (const info of functions.values()) {
     const parameters = info.node.parameters.map((parameter) => ts.isIdentifier(parameter.name) ? parameter.name.text : ''); const summaries: FunctionSink[] = [];
-    const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) for (const rule of sinks) { const argument = rule.match(node); if (!argument) continue; const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const parameterIndex = parameters.findIndex((name) => names.includes(name)); if (parameterIndex >= 0) summaries.push({ parameterIndex, rule, sink: node, source: info.source }); } ts.forEachChild(node, visit); };
-    visit(info.node); if (summaries.length) functionSinks.set(info.name, summaries);
+    const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) for (const rule of sinks) { const argument = rule.match(node); if (!argument) continue; const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const parameterIndex = parameters.findIndex((name) => names.includes(name)); if (parameterIndex >= 0) summaries.push({ parameterIndex, rule, sink: node, source: info.source, callPath: [] }); } ts.forEachChild(node, visit); };
+    visit(info.node); if (summaries.length) functionSinks.set(functionKey(info.file, info.name), summaries);
+  }
+  for (let pass = 0; pass < functions.size; pass += 1) {
+    let changed = false;
+    for (const info of functions.values()) {
+      const parameters = info.node.parameters.map((parameter) => ts.isIdentifier(parameter.name) ? parameter.name.text : ''); const key = functionKey(info.file, info.name); const summaries = functionSinks.get(key) ?? [];
+      const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) { const called = resolveFunction(info.source, node.expression); for (const nested of called ? functionSinks.get(functionKey(called.file, called.name)) ?? [] : []) { const argument = node.arguments[nested.parameterIndex]; if (!argument) continue; const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const parameterIndex = parameters.findIndex((name) => names.includes(name)); const duplicate = summaries.some((item) => item.parameterIndex === parameterIndex && item.rule.id === nested.rule.id && item.sink === nested.sink); if (parameterIndex >= 0 && !duplicate) { summaries.push({ ...nested, parameterIndex, callPath: [{ kind: 'call', label: `${called?.name ?? 'callee'}()`, location: locationOf(info.source, node) }, ...nested.callPath] }); changed = true; } } } ts.forEachChild(node, visit); }; visit(info.node); if (summaries.length) functionSinks.set(key, summaries);
+    }
+    if (!changed) break;
   }
   const findings: SecurityFinding[] = [];
   for (const { source } of files) {
@@ -97,11 +116,11 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
         if (flow) { if (currentFunction) flow.path.push({ kind: 'call', label: currentFunction, location: locationOf(source, node) }); findings.push(makeFinding(rule, source, node, flow, direct ? 'high' : 'medium')); }
       }
       if (ts.isCallExpression(node)) {
-        const callee = propertyPath(node.expression).split('.').at(-1); const summaries = callee ? functionSinks.get(callee) : undefined;
+        const resolved = resolveFunction(source, node.expression); const callee = resolved?.name; const summaries = resolved ? functionSinks.get(functionKey(resolved.file, resolved.name)) : undefined;
         for (const summary of summaries ?? []) {
           const argument = node.arguments[summary.parameterIndex]; if (!argument) continue; const direct = sourceLabel(argument); const identifiers: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) identifiers.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const inherited = identifiers.map((name) => tainted.get(name)).find(Boolean);
           const flow = direct ? { expression: argument, source: argument, sourceLabel: direct, path: [{ kind: 'source' as const, label: direct, location: locationOf(source, argument) }] } : inherited;
-          if (flow) { const callStep = { kind: 'call' as const, label: `${callee}()`, location: locationOf(source, node) }; findings.push(makeFinding(summary.rule, summary.source, summary.sink, { ...flow, path: [...flow.path, callStep] }, 'high')); }
+          if (flow) { const callStep = { kind: 'call' as const, label: `${callee}()`, location: locationOf(source, node) }; findings.push(makeFinding(summary.rule, summary.source, summary.sink, { ...flow, path: [...flow.path, callStep, ...summary.callPath] }, 'high')); }
         }
       }
       if (ts.isCallExpression(node) && /^(?:app|router)\.(?:get|post|put|patch|delete)$/.test(propertyPath(node.expression))) {
