@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { ScanCoverage, SecurityFinding, ScanMode } from './types';
+import type { ScanCoverage, ScannerRunResult, SecurityFinding, ScanMode } from './types';
 
 const execFileAsync = promisify(execFile);
 export const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'dist', 'build', 'out', 'coverage', '.next', 'target', 'vendor']);
@@ -53,7 +53,20 @@ export function buildScanCoverage(root: string, scannedFiles: string[], mode: Sc
   for (const file of scannedFiles) { const language = names[path.extname(file).toLowerCase()] ?? 'Other'; languages[language] = (languages[language] ?? 0) + 1; try { scannedBytes += fs.statSync(path.join(root, file)).size; } catch { /* file changed during scan */ } }
   const manifests = scannedFiles.map((file) => { try { return fs.readFileSync(path.join(root, file), 'utf8').slice(0, 100_000); } catch { return ''; } }).join('\n');
   const frameworks = [['Express', /["']express["']/], ['React', /["']react["']/], ['Electron IPC', /ipcMain\.|ipcRenderer\.|["']electron["']/], ['Next.js', /["']next["']/]].filter(([, matcher]) => (matcher as RegExp).test(manifests)).map(([name]) => name as string);
-  return { discoveredFiles: discovered.length, scannedFiles: scannedFiles.length, skippedFiles: Math.max(0, discovered.length - scannedFiles.length), scannedBytes, languages, frameworks, mode, baselineRef };
+  return { discoveredFiles: discovered.length, scannedFiles: scannedFiles.length, skippedFiles: Math.max(0, discovered.length - scannedFiles.length), scannedBytes, languages, frameworks, mode, baselineRef, capability: 'limited', capabilitySummary: '正在评估语言和扫描引擎覆盖能力。', analyzedLanguages: [], unanalyzedLanguages: [] };
+}
+
+export function assessScanCoverage(coverage: ScanCoverage, runs: ScannerRunResult[]): ScanCoverage {
+  const succeeded = new Set(runs.filter((run) => run.status === 'succeeded').map((run) => run.scannerId)); const semantic = succeeded.has('semantic-analysis'); const python = succeeded.has('bandit') || succeeded.has('semgrep'); const semgrep = succeeded.has('semgrep');
+  const analyzedLanguages: string[] = []; const unanalyzedLanguages: string[] = [];
+  for (const [language, count] of Object.entries(coverage.languages)) {
+    if (!count || ['JSON', 'YAML', 'Other'].includes(language)) continue;
+    const analyzed = ['TypeScript', 'TypeScript React', 'JavaScript', 'React JSX'].includes(language) ? semantic : language === 'Python' ? python : semgrep;
+    (analyzed ? analyzedLanguages : unanalyzedLanguages).push(language);
+  }
+  const fileScopeComplete = coverage.mode === 'full' && coverage.skippedFiles === 0; const capability = unanalyzedLanguages.length === 0 && fileScopeComplete ? 'full' : analyzedLanguages.length > 0 ? 'partial' : 'limited';
+  const capabilitySummary = `${fileScopeComplete ? '文件范围完整' : coverage.mode === 'incremental' ? '仅扫描增量文件' : `有 ${coverage.skippedFiles} 个文件未扫描`}；${unanalyzedLanguages.length ? `缺少 ${unanalyzedLanguages.join('、')} 语义分析` : '已发现的主要代码语言均有语义扫描器覆盖'}。`;
+  return { ...coverage, capability, capabilitySummary, analyzedLanguages, unanalyzedLanguages };
 }
 
 export async function resolveScanFiles(root: string, mode: ScanMode, baselineRef = 'HEAD'): Promise<string[]> {

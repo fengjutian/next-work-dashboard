@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export type ExternalScannerCommand = 'semgrep' | 'gitleaks' | 'osv-scanner' | 'trivy';
-const ALLOWED_COMMANDS = new Set<ExternalScannerCommand>(['semgrep', 'gitleaks', 'osv-scanner', 'trivy']);
+export type ExternalScannerCommand = 'semgrep' | 'bandit' | 'gitleaks' | 'osv-scanner' | 'trivy';
+const ALLOWED_COMMANDS = new Set<ExternalScannerCommand>(['semgrep', 'bandit', 'gitleaks', 'osv-scanner', 'trivy']);
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 
 export interface ExternalProcessResult { exitCode: number; stdout: string; stderr: string }

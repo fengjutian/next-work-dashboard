@@ -1,5 +1,5 @@
 import { safeStorage, type WebContents } from 'electron';
-import { SecurityScanOrchestrator, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type BaselineComparison, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
+import { SecurityScanOrchestrator, assessScanCoverage, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type BaselineComparison, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
 import { externalScanners, listExternalScannerAvailability } from './external-scanners';
 import { createBaseline, listBaselines, readSecurityAuditData, recordFindingEvent, removeBaseline, writeSecurityAuditData, type StoredSecurityAuditData } from './database';
 import { backgroundSemanticScanner } from './worker-client';
@@ -68,12 +68,13 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
       emit({ phase: 'scanning', percent: 2, message: `已确定 ${files.length} 个扫描文件` });
       const selectedScanners = [...new Set([...builtinScanners.map((scanner) => scanner.id), ...(input.scanners ?? [])])];
       const scanResult = await orchestrator.runDetailed({ projectDir: input.projectDir, files, signal: controller.signal, networkPolicy: input.networkPolicy ?? 'deny', verifySecrets: Boolean(input.verifySecrets), emit }, selectedScanners);
+      const assessedCoverage = assessScanCoverage(coverage, scanResult.scannerRuns);
       let findings = scanResult.findings;
       if (input.aiReview) { emit({ phase: 'triaging', percent: 85, message: '系统默认 AI 正在复核确定性扫描结果', findingsCount: findings.length }); findings = await reviewWithAI(findings, controller.signal, input.aiConfig); }
       const current = load();
       findings = mergeWithBaseline(findings, lastFindings(current, input.projectDir), Date.now(), input.mode === 'incremental' ? new Set(files) : undefined);
       const saved = current.scans.find((scan) => scan.id === jobId);
-      if (saved) Object.assign(saved, { findings, scannerRuns: scanResult.scannerRuns, coverage, status: 'completed', completedAt: Date.now() });
+      if (saved) Object.assign(saved, { findings, scannerRuns: scanResult.scannerRuns, coverage: assessedCoverage, status: 'completed', completedAt: Date.now() });
       save(current);
       emit({ phase: 'completed', percent: 100, message: '扫描完成', findingsCount: findings.filter((item) => item.status !== 'fixed').length });
     } catch (error) {

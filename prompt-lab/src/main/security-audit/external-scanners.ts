@@ -75,7 +75,13 @@ export function parseSemgrepOutput(json: JsonObject, context: ScanContext): Secu
     return makeFinding('semgrep', String(item.check_id ?? 'semgrep.unknown'), 'sast', extra.severity, String(extra.message ?? item.check_id ?? 'Semgrep finding'), String(extra.message ?? 'Semgrep detected a code security issue.'), context.projectDir, item.path, start.line, extra.lines, String(((extra.metadata ?? {}) as JsonObject).fix ?? '根据 Semgrep 规则修复代码。'));
   });
 }
-export const semgrepScanner = externalScanner('semgrep', 'Semgrep SAST', (context) => ['scan', '--json', '--quiet', '--metrics', 'off', '--config', fs.existsSync(path.join(context.projectDir, '.semgrep.yml')) ? '.semgrep.yml' : '.semgrep.yaml', '.'], parseSemgrepOutput, (context) => fs.existsSync(path.join(context.projectDir, '.semgrep.yml')) || fs.existsSync(path.join(context.projectDir, '.semgrep.yaml')));
+export const semgrepScanner = externalScanner('semgrep', 'Semgrep 多语言语义扫描', (context) => ['scan', '--json', '--quiet', '--metrics', 'off', '--config', fs.existsSync(path.join(context.projectDir, '.semgrep.yml')) ? '.semgrep.yml' : fs.existsSync(path.join(context.projectDir, '.semgrep.yaml')) ? '.semgrep.yaml' : 'auto', '.'], parseSemgrepOutput, (context) => fs.existsSync(path.join(context.projectDir, '.semgrep.yml')) || fs.existsSync(path.join(context.projectDir, '.semgrep.yaml')) || context.networkPolicy === 'allow');
+
+export function parseBanditOutput(json: JsonObject, context: ScanContext): SecurityFinding[] {
+  const results = Array.isArray(json.results) ? json.results as JsonObject[] : [];
+  return results.map((item) => makeFinding('bandit', String(item.test_id ?? 'bandit.unknown'), 'sast', item.issue_severity, String(item.test_name ?? 'Python 安全问题'), String(item.issue_text ?? 'Bandit 通过 Python AST 检测到安全问题。'), context.projectDir, item.filename, item.line_number, item.code, `根据 Bandit ${String(item.test_id ?? '')} 规则修复该 Python 代码。`));
+}
+export const banditScanner = externalScanner('bandit', 'Bandit Python AST 扫描', () => ['-r', '.', '-f', 'json', '-q'], parseBanditOutput, (context) => context.files.some((file) => /\.py$/i.test(file)));
 
 export function parseGitleaksOutput(json: JsonObject, context: ScanContext): SecurityFinding[] {
   const items = Array.isArray(json) ? json as unknown as JsonObject[] : Array.isArray(json.findings) ? json.findings as JsonObject[] : [];
@@ -128,14 +134,14 @@ export function parseTrivyOutput(json: JsonObject, context: ScanContext): Securi
 }
 export const trivyScanner = externalScanner('trivy', 'Trivy Vulnerability/IaC Scan', (context) => ['fs', '--format', 'json', '--scanners', 'vuln,misconfig,secret', ...(context.networkPolicy === 'deny' ? ['--skip-db-update', '--skip-check-update'] : []), '.'], parseTrivyOutput);
 
-export const externalScanners: SecurityScanner[] = [semgrepScanner, gitleaksScanner, osvScanner, trivyScanner];
+export const externalScanners: SecurityScanner[] = [semgrepScanner, banditScanner, gitleaksScanner, osvScanner, trivyScanner];
 export async function listExternalScannerAvailability(projectDir: string | undefined, networkPolicy: 'deny' | 'allow', force = false): Promise<Array<{ id: string; name: string; installed: boolean; ready: boolean; version?: string; reason?: string; checkedAt: number; requiresNetwork?: boolean }>> {
   return Promise.all(externalScanners.map(async (scanner) => {
     const installed = await inspectScannerCommand(scanner.id as ExternalScannerCommand, force);
     let ready = installed.available;
     let reason = installed.error;
     const requiresNetwork = scanner.id === 'osv-scanner' || scanner.id === 'trivy';
-    if (ready && scanner.id === 'semgrep' && (!projectDir || (!fs.existsSync(path.join(projectDir, '.semgrep.yml')) && !fs.existsSync(path.join(projectDir, '.semgrep.yaml'))))) { ready = false; reason = '项目缺少 .semgrep.yml 或 .semgrep.yaml'; }
+    if (ready && scanner.id === 'semgrep' && (!projectDir || (!fs.existsSync(path.join(projectDir, '.semgrep.yml')) && !fs.existsSync(path.join(projectDir, '.semgrep.yaml')))) && networkPolicy !== 'allow') { ready = false; reason = '项目未提供 Semgrep 配置；允许联网后可使用官方自动规则集'; }
     if (ready && scanner.id === 'osv-scanner' && networkPolicy !== 'allow') { ready = false; reason = '网络策略为拒绝；请显式允许 OSV 查询或配置受管离线数据库'; }
     if (ready && scanner.id === 'trivy' && networkPolicy !== 'allow') {
       try {
