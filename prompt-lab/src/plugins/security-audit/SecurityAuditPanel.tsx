@@ -131,6 +131,9 @@ export function SecurityAuditPanel(): JSX.Element {
   const [scannedDir, setScannedDir] = useState<string | null>(null);
   const [activeFinding, setActiveFinding] = useState<Finding | null>(null);
   const [severityFilter, setSeverityFilter] = useState<Finding['severity'] | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suppressed' | 'fixed'>('active');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | NonNullable<Finding['category']>>('all');
+  const [findingQuery, setFindingQuery] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<'full' | 'incremental'>('full');
   const [baselineRef, setBaselineRef] = useState('HEAD');
@@ -255,6 +258,7 @@ export function SecurityAuditPanel(): JSX.Element {
     if (!scannedDir) return; const name = window.prompt('基线名称'); if (!name) return;
     void window.electronAPI.securityAudit.baselines.create({ projectDir: scannedDir, name, gitRef: baselineRef || 'HEAD', scanId: lastScan?.id }).then((item) => { setBaselines((current) => [item, ...current.filter((entry) => entry.id !== item.id)]); message.success('基线已创建'); }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
   }, [baselineRef, lastScan?.id, scannedDir]);
+  const deleteSelectedBaseline = useCallback(() => { const item = baselines.find((entry) => entry.gitRef === baselineRef); if (!scannedDir || !item || !window.confirm(`删除基线“${item.name}”？`)) return; void window.electronAPI.securityAudit.baselines.remove({ projectDir: scannedDir, id: item.id }).then(() => { setBaselines((current) => current.filter((entry) => entry.id !== item.id)); setBaselineRef('HEAD'); }); }, [baselineRef, baselines, scannedDir]);
 
   useEffect(() => {
     if (!commandScanRequested) return;
@@ -265,7 +269,14 @@ export function SecurityAuditPanel(): JSX.Element {
   const sortedFindings = findings
     ? [...findings].sort((a, b) => SEVERITY_WEIGHT[a.severity] - SEVERITY_WEIGHT[b.severity])
     : [];
-  const filteredFindings = severityFilter === 'all' ? sortedFindings : sortedFindings.filter((f) => f.severity === severityFilter);
+  const filteredFindings = sortedFindings.filter((finding) => {
+    if (severityFilter !== 'all' && finding.severity !== severityFilter) return false;
+    if (categoryFilter !== 'all' && finding.category !== categoryFilter) return false;
+    if (statusFilter === 'active' && ['false-positive', 'accepted', 'fixed'].includes(finding.status ?? 'open')) return false;
+    if (statusFilter === 'suppressed' && !['false-positive', 'accepted'].includes(finding.status ?? 'open')) return false;
+    if (statusFilter === 'fixed' && finding.status !== 'fixed') return false;
+    const query = findingQuery.trim().toLowerCase(); return !query || `${finding.title} ${finding.ruleId ?? ''} ${finding.location.file}`.toLowerCase().includes(query);
+  });
 
   const counts = findings
     ? (['P0', 'P1', 'P2', 'P3'] as const).reduce<Record<Finding['severity'], number>>(
@@ -296,6 +307,7 @@ export function SecurityAuditPanel(): JSX.Element {
           </select>
           {scanMode === 'incremental' && <select aria-label="扫描基线" className="h-8 w-36 rounded border border-border bg-background px-2 text-xs" value={baselineRef} onChange={(event) => setBaselineRef(event.target.value)} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'}><option value="HEAD">HEAD</option>{baselines.map((item) => <option key={item.id} value={item.gitRef}>{item.name} · {item.gitRef}</option>)}</select>}
           {scannedDir && <Button onClick={addBaseline}>保存基线</Button>}
+          {scanMode === 'incremental' && baselines.some((item) => item.gitRef === baselineRef) && <Button onClick={deleteSelectedBaseline}>删除基线</Button>}
           {(progress.phase === 'scanning' || progress.phase === 'triaging') && jobId && <Button onClick={() => { void window.electronAPI.securityAudit.scan.cancel(jobId); }}>取消</Button>}
           {scannedDir && findings && <Button onClick={() => { void window.electronAPI.securityAudit.report.exportSarif(scannedDir).then((result) => { if (result.ok) message.success(`SARIF 已导出：${result.filePath}`); }); }}>导出 SARIF</Button>}
           <Button icon={<Play size={14} />} type="primary" onClick={runScan} loading={progress.phase === 'scanning' || progress.phase === 'triaging'}>
@@ -371,6 +383,12 @@ export function SecurityAuditPanel(): JSX.Element {
                 </Tag>
               ))}
               <Tag color="purple">共 {findings.length}</Tag>
+            </Space>
+            <Space size="small" wrap>
+              <input aria-label="搜索发现项" className="h-8 w-56 rounded border border-border bg-background px-2 text-xs" value={findingQuery} onChange={(event) => setFindingQuery(event.target.value)} placeholder="搜索标题、规则或文件" />
+              <select aria-label="状态筛选" className="h-8 rounded border border-border bg-background px-2 text-xs" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="active">活动问题</option><option value="all">全部状态</option><option value="suppressed">误报/接受风险</option><option value="fixed">已修复</option></select>
+              <select aria-label="类别筛选" className="h-8 rounded border border-border bg-background px-2 text-xs" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as typeof categoryFilter)}><option value="all">全部类别</option><option value="sast">SAST</option><option value="sca">依赖</option><option value="secret">密钥</option><option value="iac">IaC</option><option value="config">配置</option></select>
+              <Tag>{filteredFindings.length}/{findings.length}</Tag>
             </Space>
 
             {/* 过滤 */}
