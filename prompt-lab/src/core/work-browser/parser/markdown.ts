@@ -36,19 +36,19 @@ function block(html: string): string {
   out = out.replace(/<style[\s\S]*?<\/style>/gi, '');
 
   // 块级标签换行处理
-  out = out.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/gi, (_m, _t, c) => `\n\n${inline(String(c))}\n\n`);
+  out = out.replace(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _t, c) => `\n\n## ${inline(String(c)).trim()}\n\n`);
   out = out.replace(/<hr\s*\/?>/gi, '\n\n---\n\n');
-  out = out.replace(/<blockquote>([\s\S]*?)<\/blockquote>/gi, (_m, c) => `\n\n> ${inline(String(c)).replace(/\n/g, '\n> ')}\n\n`);
-  out = out.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_m, c) => `\n\n\`\`\`\n${String(c).replace(/<[^>]+>/g, '').trim()}\n\`\`\`\n\n`);
-  out = out.replace(/<p>([\s\S]*?)<\/p>/gi, (_m, c) => `\n\n${inline(String(c))}\n\n`);
+  out = out.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_m, c) => `\n\n> ${inline(String(c)).replace(/\n/g, '\n> ')}\n\n`);
+  out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_m, c) => `\n\n\`\`\`\n${String(c).replace(/<[^>]+>/g, '').trim()}\n\`\`\`\n\n`);
+  out = out.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, (_m, c) => `\n\n${inline(String(c)).trim()}\n\n`);
 
   // 列表
-  out = out.replace(/<ul>([\s\S]*?)<\/ul>/gi, (_m, c) => {
-    const items = String(c).match(/<li>([\s\S]*?)<\/li>/gi) || [];
+  out = out.replace(/<ul\b[^>]*>([\s\S]*?)<\/ul>/gi, (_m, c) => {
+    const items = String(c).match(/<li\b[^>]*>([\s\S]*?)<\/li>/gi) || [];
     return '\n\n' + items.map((li) => `- ${inline(li.replace(/<\/?li>/gi, '')).trim()}`).join('\n') + '\n\n';
   });
-  out = out.replace(/<ol>([\s\S]*?)<\/ol>/gi, (_m, c) => {
-    const items = String(c).match(/<li>([\s\S]*?)<\/li>/gi) || [];
+  out = out.replace(/<ol\b[^>]*>([\s\S]*?)<\/ol>/gi, (_m, c) => {
+    const items = String(c).match(/<li\b[^>]*>([\s\S]*?)<\/li>/gi) || [];
     return '\n\n' + items.map((li, i) => `${i + 1}. ${inline(li.replace(/<\/?li>/gi, '')).trim()}`).join('\n') + '\n\n';
   });
 
@@ -68,6 +68,8 @@ function block(html: string): string {
   out = out.replace(/<[^>]+>/g, '');
   // 反转义
   out = out.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+  // HTML 源码中的标签缩进不应变成可见的 Markdown 空白段落。
+  out = out.replace(/\n[ \t]+\n/g, '\n\n');
   // 折叠多空行
   out = out.replace(/\n{3,}/g, '\n\n');
   return out.trim();

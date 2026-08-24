@@ -917,22 +917,25 @@ export const RssReaderPanel: React.FC = () => {
           )}
         </div>
       </section>
-      <main className="flex-1 min-w-0 overflow-auto bg-background/30">
+      <main className="flex-1 min-w-0 overflow-auto bg-gradient-to-b from-muted/30 via-background to-background">
         {current ? (
-          <article className="w-full max-w-[980px] mx-auto px-12 py-10">
-            <header className="pb-7 mb-8 border-b">
+          <article className="w-full max-w-[820px] mx-auto px-10 py-12 lg:px-14 lg:py-16">
+            <header className="pb-8 mb-10 border-b border-border/60">
               <div className="flex items-start justify-between gap-6">
-                <div>
-                  <p className="text-xs font-medium text-primary mb-3">
+                <div className="min-w-0">
+                  <p className="inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary mb-5">
                     {current.feedTitle}
                   </p>
-                  <h1 className="text-3xl font-semibold leading-[1.3] tracking-tight">
+                  <h1 className="text-[clamp(2rem,3vw,2.75rem)] font-bold leading-[1.16] tracking-[-0.025em] text-foreground">
                     {current.title}
                   </h1>
-                  <p className="text-sm text-muted-foreground mt-4">
+                  <p className="text-sm text-muted-foreground mt-6 flex flex-wrap items-center gap-2">
                     {[current.author, dateLabel(current.publishedAt)]
                       .filter(Boolean)
                       .join(" · ")}
+                    {fullTexts[`${current.feedId}:${current.id}`] && (
+                      <span> · 约 {Math.max(1, Math.ceil(fullTexts[`${current.feedId}:${current.id}`].wordCount / 220))} 分钟阅读</span>
+                    )}
                   </p>
                 </div>
                 <Button
@@ -950,7 +953,7 @@ export const RssReaderPanel: React.FC = () => {
               </div>
             </header>
             {fullTexts[`${current.feedId}:${current.id}`]?.markdown ? (
-              <div className="prose prose-slate dark:prose-invert max-w-none prose-p:text-[16px] prose-p:leading-8 prose-p:my-5 prose-headings:mt-9 prose-headings:mb-4 prose-a:text-primary prose-blockquote:border-primary/40 prose-blockquote:text-muted-foreground">
+              <div className="prose prose-slate dark:prose-invert max-w-none prose-p:text-[17px] prose-p:leading-[1.95] prose-p:my-6 prose-headings:font-semibold prose-headings:tracking-tight prose-headings:mt-12 prose-headings:mb-5 prose-h2:text-2xl prose-h3:text-xl prose-a:text-primary prose-a:font-medium prose-a:no-underline hover:prose-a:underline prose-strong:text-foreground prose-blockquote:rounded-r-lg prose-blockquote:border-primary/50 prose-blockquote:bg-muted/50 prose-blockquote:px-6 prose-blockquote:py-2 prose-blockquote:not-italic prose-blockquote:text-muted-foreground prose-li:my-2 prose-li:text-[17px] prose-li:leading-8 prose-hr:my-12 prose-img:rounded-xl">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
@@ -973,17 +976,17 @@ export const RssReaderPanel: React.FC = () => {
                 </ReactMarkdown>
               </div>
             ) : (
-              <div className="text-[16px] leading-8 whitespace-pre-wrap text-foreground/80">
+              <div className="whitespace-pre-wrap text-[17px] leading-[1.95] text-foreground/85">
                 {current.description || "该订阅源没有提供摘要。"}
               </div>
             )}
             {fullTexts[`${current.feedId}:${current.id}`] && (
-              <p className="mt-8 pt-4 border-t text-xs text-muted-foreground">
+              <p className="mt-12 pt-5 border-t border-border/60 text-xs text-muted-foreground">
                 正文已离线保存 ·{" "}
                 {fullTexts[`${current.feedId}:${current.id}`].wordCount} 词
               </p>
             )}
-            <div className="mt-8 flex gap-2">
+            <div className="mt-8 flex flex-wrap gap-2">
               {current.link &&
                 !fullTexts[`${current.feedId}:${current.id}`] && (
                   <Button

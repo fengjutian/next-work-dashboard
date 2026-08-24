@@ -60,4 +60,15 @@ describe('extractReadability', () => {
     expect(result.contentText).toContain('main article paragraph');
     expect(result.contentText).not.toContain('Navigation');
   });
+
+  it('preserves paragraph and heading boundaries when elements have attributes', async () => {
+    const result = await extractReadability(`<article class="story-content">
+      <h2 class="article-heading">Safety first</h2>
+      <p class="article-copy">First paragraph has enough text to form readable article content without being joined.</p>
+      <p data-section="two">Second paragraph stays separate from the first paragraph in Markdown output.</p>
+    </article>`);
+
+    expect(result.contentMarkdown).toContain('## Safety first');
+    expect(result.contentMarkdown).toContain('content without being joined.\n\nSecond paragraph');
+  });
 });

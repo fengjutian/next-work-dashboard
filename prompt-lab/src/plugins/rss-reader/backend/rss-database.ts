@@ -90,8 +90,8 @@ export function setRssNotificationsEnabled(enabled: boolean): void {
 export function saveRssArticleContent(feedId: string, articleId: string, text: string, markdown: string, wordCount: number): void {
   const databaseHandle = db();
   databaseHandle.transaction(() => {
-    databaseHandle.prepare(`INSERT INTO rss_article_content(feed_id,article_id,content_text,word_count,content_markdown,cached_at,format_version) VALUES(?,?,?,?,?,?,2) ON CONFLICT(feed_id,article_id)
-      DO UPDATE SET content_text=excluded.content_text,word_count=excluded.word_count,content_markdown=excluded.content_markdown,cached_at=excluded.cached_at,format_version=2`).run(feedId, articleId, text, wordCount, markdown, Date.now());
+    databaseHandle.prepare(`INSERT INTO rss_article_content(feed_id,article_id,content_text,word_count,content_markdown,cached_at,format_version) VALUES(?,?,?,?,?,?,3) ON CONFLICT(feed_id,article_id)
+      DO UPDATE SET content_text=excluded.content_text,word_count=excluded.word_count,content_markdown=excluded.content_markdown,cached_at=excluded.cached_at,format_version=3`).run(feedId, articleId, text, wordCount, markdown, Date.now());
     const article = databaseHandle.prepare('SELECT title,description,author FROM rss_articles WHERE feed_id=? AND id=?').get(feedId, articleId) as { title: string; description: string; author: string } | undefined;
     if (article) {
       databaseHandle.prepare('DELETE FROM rss_articles_fts WHERE feed_id=? AND article_id=?').run(feedId, articleId);
@@ -101,7 +101,7 @@ export function saveRssArticleContent(feedId: string, articleId: string, text: s
 }
 export function getRssArticleContent(feedId: string, articleId: string): { text: string; markdown: string; wordCount: number } | null {
   const row = db().prepare('SELECT content_text,content_markdown,word_count,format_version FROM rss_article_content WHERE feed_id=? AND article_id=?').get(feedId, articleId) as { content_text: string; content_markdown: string; word_count: number; format_version: number } | undefined;
-  return row && row.format_version >= 2 ? { text: row.content_text, markdown: row.content_markdown || row.content_text, wordCount: row.word_count } : null;
+  return row && row.format_version >= 3 ? { text: row.content_text, markdown: row.content_markdown || row.content_text, wordCount: row.word_count } : null;
 }
 export function searchRssArticles(query: string, limit = 200): Array<{ feedId: string; articleId: string }> {
   const tokens = query.trim().split(/\s+/).filter(Boolean).map((token) => `"${token.replace(/"/g, '""')}"`);
