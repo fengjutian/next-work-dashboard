@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { analyzeTypeScriptProject, applyInlineSuppressions, buildScanCoverage, builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, parseNpmLock, redactSecrets } from '../src/core/security-audit';
+import { analyzeTypeScriptProject, applyInlineSuppressions, buildScanCoverage, builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, parseDependencyLock, parseNpmLock, redactSecrets } from '../src/core/security-audit';
 import { redactScannerOutput, resolveTrustedScannerExecutable, runScannerProcess } from '../src/main/security-audit/external-process';
 import { parseGitleaksOutput, parseOsvOutput, parseSemgrepOutput, parseTrivyOutput, readLimitedJsonReport } from '../src/main/security-audit/external-scanners';
 
@@ -125,5 +125,19 @@ describe('security audit core', () => {
     const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     const suppressed = applyInlineSuppressions(root, findings);
     expect(suppressed[0]).toMatchObject({ status: 'false-positive', suppressed: { reason: 'accepted test fixture' } });
+  });
+
+  it('isolates function taint scopes and recognizes sanitizers', () => {
+    const root = temporaryRoot(); const file = 'scope.ts';
+    fs.writeFileSync(path.join(root, file), "import { exec } from 'node:child_process'; function first(req: any) { const value = req.query.x; return value; } function second() { const value = 'fixed'; exec(value); } function safe(req: any) { const value = path.basename(req.query.file); fs.readFile(value, () => {}); }");
+    const result = analyzeTypeScriptProject({ projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    expect(result.findings).toEqual([]);
+  });
+
+  it('parses Cargo, Yarn, pnpm and Python locked versions', () => {
+    expect(parseDependencyLock('Cargo.lock', '[[package]]\nname = "serde"\nversion = "1.0.0"\n')).toContainEqual({ name: 'serde', version: '1.0.0', source: 'Cargo.lock' });
+    expect(parseDependencyLock('yarn.lock', 'left-pad@^1.0.0:\n  version "1.3.0"\n')).toContainEqual({ name: 'left-pad', version: '1.3.0', source: 'yarn.lock' });
+    expect(parseDependencyLock('pnpm-lock.yaml', 'packages:\n  /lodash/4.17.21:\n')).toContainEqual({ name: 'lodash', version: '4.17.21', source: 'pnpm-lock.yaml' });
+    expect(parseDependencyLock('requirements.txt', 'django==5.0.1\n')).toContainEqual({ name: 'django', version: '5.0.1', source: 'requirements.txt' });
   });
 });
