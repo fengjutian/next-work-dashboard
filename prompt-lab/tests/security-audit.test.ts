@@ -108,7 +108,7 @@ describe('security audit core', () => {
     const result = analyzeTypeScriptProject({ projectDir: root, files: ['src/shell.ts', 'src/wrapper.ts', 'src/route.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
     const finding = result.findings.find((item) => item.ruleId === 'taint.command-injection');
     expect(finding?.confidence).toBe('high');
-    expect(finding?.trace?.map((step) => step.kind)).toEqual(['source', 'propagation', 'call', 'call', 'sink']);
+    expect(finding?.trace?.map((step) => step.kind)).toEqual(['source', 'propagation', 'propagation', 'call', 'call', 'sink']);
   });
 
   it('detects Express authorization gaps and framework coverage', () => {
