@@ -7,6 +7,21 @@ import { deleteRssRule, getRssArticleContent, getRssHttpCache, getRssNotificatio
 import type { RssArticle, RssFeed, RssKeywordRule, RssSubscription } from '../types';
 
 const MAX_FEED_BYTES = 5 * 1024 * 1024;
+const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+export function rssRequestHeaders(kind: 'feed' | 'article'): Record<string, string> {
+  if (kind === 'article') return {
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': BROWSER_USER_AGENT,
+  };
+  return {
+    Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*',
+    'User-Agent': 'next-work-dashboard/0.3 RSS Reader',
+  };
+}
 
 export function privateAddress(address: string): boolean {
   if (address === '::1' || address === '::' || address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe8') || address.startsWith('fe9') || address.startsWith('fea') || address.startsWith('feb')) return true;
@@ -26,11 +41,11 @@ async function safeHttpUrl(value: string): Promise<URL> {
   return url;
 }
 
-async function fetchSafely(rawUrl: string): Promise<{ response: Response; url: URL; cachedBody?: string }> {
+async function fetchSafely(rawUrl: string, kind: 'feed' | 'article' = 'feed'): Promise<{ response: Response; url: URL; cachedBody?: string }> {
   let url = await safeHttpUrl(rawUrl);
   for (let redirects = 0; redirects <= 5; redirects += 1) {
     const cached = getRssHttpCache(url.toString());
-    const headers: Record<string, string> = { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*', 'User-Agent': 'next-work-dashboard/0.2 RSS Reader' };
+    const headers = rssRequestHeaders(kind);
     if (cached?.etag) headers['If-None-Match'] = cached.etag;
     if (cached?.lastModified) headers['If-Modified-Since'] = cached.lastModified;
     const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers });
@@ -156,7 +171,7 @@ export function registerRssIpc(): void {
   ipcMain.handle('rss:article:extract', async (_event, feedId: string, articleId: string, rawUrl: string) => {
     const cached = getRssArticleContent(feedId, articleId);
     if (cached) return cached;
-    const { response, url, cachedBody } = await fetchSafely(rawUrl);
+    const { response, url, cachedBody } = await fetchSafely(rawUrl, 'article');
     if (response.status !== 304 && !response.ok) throw new Error(`正文请求失败（HTTP ${response.status}）`);
     const html = cachedBody ?? await response.text();
     if (html.length > MAX_FEED_BYTES) throw new Error('网页超过 5 MB 限制');

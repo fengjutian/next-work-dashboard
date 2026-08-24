@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverFeedUrl, privateAddress, ruleMatches } from '../../src/plugins/rss-reader/backend/rss-service';
+import { discoverFeedUrl, privateAddress, rssRequestHeaders, ruleMatches } from '../../src/plugins/rss-reader/backend/rss-service';
 import type { RssArticle, RssKeywordRule } from '../../src/plugins/rss-reader/types';
 
 describe('RSS network helpers', () => {
@@ -24,5 +24,13 @@ describe('RSS network helpers', () => {
     expect(ruleMatches(article, rule)).toBe(true);
     expect(ruleMatches(article, { ...rule, excludeKeywords: ['TOOLING'] })).toBe(false);
     expect(ruleMatches(article, { ...rule, enabled: false })).toBe(false);
+  });
+
+  it('uses browser navigation headers for article extraction', () => {
+    const headers = rssRequestHeaders('article');
+    expect(headers['User-Agent']).toContain('Mozilla/5.0');
+    expect(headers.Accept).toContain('text/html');
+    expect(headers['Accept-Language']).toContain('zh-CN');
+    expect(rssRequestHeaders('feed').Accept).toContain('application/rss+xml');
   });
 });
