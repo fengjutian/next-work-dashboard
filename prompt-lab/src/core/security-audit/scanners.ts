@@ -66,13 +66,13 @@ function scanRules(context: ScanContext): SecurityFinding[] {
 }
 
 export const builtinRuleScanner: SecurityScanner = {
-  id: 'builtin-rules', name: 'Built-in Secret/SAST/Electron/IaC',
+  id: 'builtin-rules', name: '内置密钥/SAST/Electron/IaC 规则',
   async detect() { return true; },
   async scan(context) { return scanRules(context); },
 };
 
 export const dependencyManifestScanner: SecurityScanner = {
-  id: 'dependency-manifest', name: 'Dependency Manifest Audit',
+  id: 'dependency-manifest', name: '依赖清单审计',
   async detect(context) { return context.files.some((file) => /(^|\/)(package\.json|Cargo\.toml|requirements\.txt|go\.mod)$/i.test(file)); },
   async scan(context) {
     const now = Date.now();

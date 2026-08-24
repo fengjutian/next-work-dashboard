@@ -38,7 +38,7 @@ function lockFindings(context: ScanContext): SecurityFinding[] {
   return findings;
 }
 
-export const lockfileScanner: SecurityScanner = { id: 'lockfile-analysis', name: 'Dependency Lockfile Analysis', async detect(context) { return context.files.some((file) => /(?:(?:package-lock|npm-shrinkwrap)\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|requirements(?:-[^.]+)?\.txt)$/i.test(file)); }, async scan(context) { return lockFindings(context); } };
+export const lockfileScanner: SecurityScanner = { id: 'lockfile-analysis', name: '依赖锁文件分析', async detect(context) { return context.files.some((file) => /(?:(?:package-lock|npm-shrinkwrap)\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|requirements(?:-[^.]+)?\.txt)$/i.test(file)); }, async scan(context) { return lockFindings(context); } };
 
 const osvCache = new Map<string, { expires: number; vulnerabilities: Array<Record<string, unknown>> }>();
 function ecosystemFor(source: string): string { if (/Cargo\.lock$/i.test(source)) return 'crates.io'; if (/requirements/i.test(source)) return 'PyPI'; return 'npm'; }
@@ -61,7 +61,7 @@ export async function queryOsvForLocks(context: ScanContext): Promise<SecurityFi
   }
   return findings;
 }
-export const osvLockfileScanner: SecurityScanner = { id: 'osv-lockfile', name: 'OSV Exact Lockfile Vulnerability Match', async detect(context) { return context.networkPolicy === 'allow' && context.files.some((file) => /(?:lock|requirements)/i.test(file)); }, scan: queryOsvForLocks };
+export const osvLockfileScanner: SecurityScanner = { id: 'osv-lockfile', name: 'OSV 精确版本漏洞匹配', async detect(context) { return context.networkPolicy === 'allow' && context.files.some((file) => /(?:lock|requirements)/i.test(file)); }, scan: queryOsvForLocks };
 
 const secretPattern = /(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*["']?([^\s"']{12,})|\b((?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,})\b/gi;
 const lastGitCommit = new Map<string, string>();
@@ -86,4 +86,4 @@ export async function scanGitHistory(context: ScanContext): Promise<SecurityFind
   }
   const combined = new Map([...(gitFindingCache.get(context.projectDir) ?? []), ...findings].map((finding) => [finding.fingerprint, finding])); const result = [...combined.values()]; gitFindingCache.set(context.projectDir, result); return result;
 }
-export const gitHistoryScanner: SecurityScanner = { id: 'git-history-secrets', name: 'Git History Secret Scan', async detect(context) { return fs.existsSync(path.join(context.projectDir, '.git')); }, scan: scanGitHistory };
+export const gitHistoryScanner: SecurityScanner = { id: 'git-history-secrets', name: 'Git 历史密钥扫描', async detect(context) { return fs.existsSync(path.join(context.projectDir, '.git')); }, scan: scanGitHistory };

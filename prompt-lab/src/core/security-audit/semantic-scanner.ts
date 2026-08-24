@@ -155,7 +155,7 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
 }
 
 export const semanticScanner = {
-  id: 'semantic-analysis', name: 'TypeScript AST / Data-flow Analysis',
+  id: 'semantic-analysis', name: 'TypeScript AST / 数据流分析',
   async detect(context: ScanContext) { return context.files.some((file) => codeFile.test(file)); },
   async scan(context: ScanContext) { return analyzeTypeScriptProject(context).findings; },
 };

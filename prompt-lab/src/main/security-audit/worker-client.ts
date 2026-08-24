@@ -14,7 +14,7 @@ function getWorker(): Worker {
 }
 
 export const backgroundSemanticScanner: SecurityScanner = {
-  id: 'semantic-analysis', name: 'TypeScript AST / Data-flow Analysis (Worker)',
+  id: 'semantic-analysis', name: 'TypeScript AST / 数据流分析（后台）',
   async detect(context) { return context.files.some((file) => /\.[cm]?[jt]sx?$/i.test(file)); },
   async scan(context) {
     const worker = getWorker(); const id = `semantic-${Date.now()}-${Math.random().toString(36).slice(2)}`;
