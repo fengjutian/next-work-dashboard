@@ -1,7 +1,7 @@
 {
   "name": "next-work-dashboard",
   "productName": "next-work-dashboard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "next-work-dashboard — 本地优先的 AI 工作台",
   "main": ".vite/build/main.js",
   "private": true,

@@ -26,6 +26,8 @@ function scanRules(context: ScanContext): SecurityFinding[] {
     if (content.includes('\0')) continue;
     const lines = content.split(/\r?\n/);
     for (const rule of RULES) {
+      // Docker USER is a file/stage-level property and is evaluated below.
+      if (rule.id === 'iac.docker-root') continue;
       if (rule.files && !rule.files.test(file)) continue;
       lines.forEach((line, index) => {
         if (!rule.pattern.test(line)) return;
@@ -33,6 +35,28 @@ function scanRules(context: ScanContext): SecurityFinding[] {
         const key = fingerprint('builtin-rules', rule.id, file, excerpt);
         findings.push({ id: findingId(key), fingerprint: key, scannerId: 'builtin-rules', ruleId: rule.id, category: rule.category, severity: rule.severity, confidence: 'medium', status: 'open', title: rule.title, description: rule.description, location: { file, line: index + 1 }, evidence: [{ kind: 'code', excerpt, location: { file, line: index + 1 } }], recommendation: rule.recommendation, cwe: rule.cwe, firstSeenAt: now, lastSeenAt: now });
       });
+    }
+    if (/(^|\/)Dockerfile$/i.test(file)) {
+      const stages = new Map<string, { user?: string }>();
+      let finalStage: { line: number; from: string; user?: string } | undefined;
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index].trim();
+        if (!line || line.startsWith('#')) continue;
+        const from = /^FROM(?:\s+--platform=\S+)?\s+(\S+)(?:\s+AS\s+(\S+))?/i.exec(line);
+        if (from) {
+          finalStage = { line: index + 1, from: line, user: stages.get(from[1].toLowerCase())?.user };
+          if (from[2]) stages.set(from[2].toLowerCase(), finalStage);
+          continue;
+        }
+        const user = /^USER\s+([^\s#]+)/i.exec(line);
+        if (user && finalStage) finalStage.user = user[1];
+      }
+      if (finalStage && (!finalStage.user || /^(?:root|0)(?::|$)/i.test(finalStage.user))) {
+        const rule = RULES.find((item) => item.id === 'iac.docker-root')!;
+        const excerpt = finalStage.from.slice(0, 500);
+        const key = fingerprint('builtin-rules', rule.id, file, excerpt);
+        findings.push({ id: findingId(key), fingerprint: key, scannerId: 'builtin-rules', ruleId: rule.id, category: rule.category, severity: rule.severity, confidence: 'medium', status: 'open', title: rule.title, description: rule.description, location: { file, line: finalStage.line }, evidence: [{ kind: 'code', excerpt, location: { file, line: finalStage.line } }], recommendation: rule.recommendation, cwe: rule.cwe, firstSeenAt: now, lastSeenAt: now });
+      }
     }
   }
   return findings;

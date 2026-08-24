@@ -65,6 +65,18 @@ describe('security audit core', () => {
     expect(findings[0].evidence[0].excerpt).not.toContain('abcdefghijklmnop');
   });
 
+  it('evaluates the effective USER in the final Docker build stage', async () => {
+    const root = temporaryRoot();
+    const scan = async (content: string) => {
+      fs.writeFileSync(path.join(root, 'Dockerfile'), content);
+      return builtinRuleScanner.scan({ projectDir: root, files: ['Dockerfile'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    };
+    expect((await scan('FROM node:22\nUSER node\n')).map((item) => item.ruleId)).not.toContain('iac.docker-root');
+    expect((await scan('FROM node:22\nUSER root\n')).map((item) => item.ruleId)).toContain('iac.docker-root');
+    expect((await scan('FROM node:22 AS base\nUSER node\nFROM base AS runtime\n')).map((item) => item.ruleId)).not.toContain('iac.docker-root');
+    expect((await scan('FROM node:22 AS build\nUSER node\nFROM alpine AS runtime\n')).map((item) => item.ruleId)).toContain('iac.docker-root');
+  });
+
   it('keeps first-seen state and marks missing findings fixed', async () => {
     const root = temporaryRoot(); const file = 'unsafe.ts';
     fs.writeFileSync(path.join(root, file), 'eval(input)');
