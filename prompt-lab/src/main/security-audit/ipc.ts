@@ -14,7 +14,7 @@ import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
 import type { FindingStatus, ScanRequest } from '../../core/security-audit';
 import fs from 'node:fs';
 import path from 'node:path';
-import { cancelScan, createBaseline, createSarif, getSetting, listBaselines, listFindings, listScanners, listScans, removeBaseline, setSetting, startScan, updateFinding } from './service';
+import { cancelScan, compareBaseline, createBaseline, createSarif, getSetting, listBaselines, listFindings, listScanners, listScans, removeBaseline, setSetting, startScan, updateFinding } from './service';
 
 let initialized = false;
 
@@ -75,6 +75,7 @@ export function setupSecurityAuditIPC(): void {
   ipcMain.handle('security-audit:baselines:list', (_e, projectDir: string) => listBaselines(resolveWorkspacePath(projectDir)));
   ipcMain.handle('security-audit:baselines:create', (_e, input: { projectDir: string; name: string; gitRef: string; scanId?: string }) => createBaseline(resolveWorkspacePath(input.projectDir), input.name, input.gitRef, input.scanId));
   ipcMain.handle('security-audit:baselines:remove', (_e, input: { projectDir: string; id: string }) => ({ ok: removeBaseline(resolveWorkspacePath(input.projectDir), input.id) }));
+  ipcMain.handle('security-audit:baselines:compare', (_e, input: { projectDir: string; id: string }) => compareBaseline(resolveWorkspacePath(input.projectDir), input.id));
 
   ipcMain.handle('security-audit:scanners:list', (_e, input?: { projectDir?: string; networkPolicy?: 'deny' | 'allow'; force?: boolean }) => {
     const projectDir = input?.projectDir ? resolveWorkspacePath(input.projectDir) : undefined;

@@ -106,3 +106,4 @@ export interface ScanCoverage {
   baselineRef?: string;
 }
 export interface SecurityBaseline { id: string; projectDir: string; name: string; gitRef: string; scanId?: string; createdAt: number }
+export interface BaselineComparison { baseline: SecurityBaseline; currentScanId?: string; newFindings: SecurityFinding[]; fixedFindings: SecurityFinding[]; unchangedCount: number }

@@ -1,5 +1,5 @@
 import { safeStorage, type WebContents } from 'electron';
-import { SecurityScanOrchestrator, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
+import { SecurityScanOrchestrator, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type BaselineComparison, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
 import { externalScanners, listExternalScannerAvailability } from './external-scanners';
 import { createBaseline, listBaselines, readSecurityAuditData, recordFindingEvent, removeBaseline, writeSecurityAuditData, type StoredSecurityAuditData } from './database';
 import { backgroundSemanticScanner } from './worker-client';
@@ -98,6 +98,11 @@ export function updateFinding(projectDir: string, findingId: string, status: Fin
   save(data); recordFindingEvent(projectDir, findingId, status, reason); return finding;
 }
 export { createBaseline, listBaselines, removeBaseline };
+export function compareBaseline(projectDir: string, baselineId: string): BaselineComparison {
+  const baseline = listBaselines(projectDir).find((item) => item.id === baselineId); if (!baseline) throw new Error('BASELINE_NOT_FOUND'); const scans = listScans(projectDir); const baselineScan = scans.find((item) => item.id === baseline.scanId); const current = scans.find((item) => item.status === 'completed');
+  const before = new Map((baselineScan?.findings ?? []).filter((item) => item.status !== 'fixed').map((item) => [item.fingerprint, item])); const after = new Map((current?.findings ?? []).filter((item) => item.status !== 'fixed').map((item) => [item.fingerprint, item]));
+  return { baseline, currentScanId: current?.id, newFindings: [...after.values()].filter((item) => !before.has(item.fingerprint)), fixedFindings: [...before.values()].filter((item) => !after.has(item.fingerprint)), unchangedCount: [...after.keys()].filter((key) => before.has(key)).length };
+}
 export function listScans(projectDir: string): ScanRecord[] { return load().scans.filter((scan) => scan.projectDir === projectDir); }
 export async function listScanners(projectDir?: string, networkPolicy: 'deny' | 'allow' = 'deny', force = false): Promise<import('../../core/security-audit').ScannerStatus[]> {
   const external = await listExternalScannerAvailability(projectDir, networkPolicy, force);

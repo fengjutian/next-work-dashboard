@@ -34,6 +34,7 @@ export const securityAuditBridge = {
     list: (projectDir: string) => ipcRenderer.invoke('security-audit:baselines:list', projectDir),
     create: (input: { projectDir: string; name: string; gitRef: string; scanId?: string }) => ipcRenderer.invoke('security-audit:baselines:create', input),
     remove: (input: { projectDir: string; id: string }) => ipcRenderer.invoke('security-audit:baselines:remove', input),
+    compare: (input: { projectDir: string; id: string }) => ipcRenderer.invoke('security-audit:baselines:compare', input),
   },
   scanners: { list: (input?: { projectDir?: string; networkPolicy?: 'deny' | 'allow'; force?: boolean }) => ipcRenderer.invoke('security-audit:scanners:list', input) },
   report: { exportSarif: (projectDir: string) => ipcRenderer.invoke('security-audit:report:export-sarif', projectDir) },
