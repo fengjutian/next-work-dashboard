@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { FindingCategory, ScanContext, SecurityFinding, SecurityScanner, SecuritySeverity } from './types';
 import { findingId, fingerprint, redactSecrets } from './security';
 import { semanticScanner } from './semantic-scanner';
-import { gitHistoryScanner, lockfileScanner } from './supply-chain-scanners';
+import { gitHistoryScanner, lockfileScanner, osvLockfileScanner } from './supply-chain-scanners';
 
 interface Rule { id: string; title: string; pattern: RegExp; category: FindingCategory; severity: SecuritySeverity; description: string; recommendation: string; cwe?: string; files?: RegExp }
 
@@ -91,4 +91,4 @@ export const dependencyManifestScanner: SecurityScanner = {
   },
 };
 
-export const builtinScanners: SecurityScanner[] = [builtinRuleScanner, semanticScanner, dependencyManifestScanner, lockfileScanner, gitHistoryScanner];
+export const builtinScanners: SecurityScanner[] = [builtinRuleScanner, semanticScanner, dependencyManifestScanner, lockfileScanner, gitHistoryScanner, osvLockfileScanner];

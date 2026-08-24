@@ -31,6 +31,7 @@ export interface SecurityFinding {
   lastSeenAt: number;
   fixedAt?: number;
   suppressed?: { reason: string; at: number };
+  secretVerification?: { provider: string; status: 'valid' | 'invalid' | 'unknown'; checkedAt: number };
 }
 
 export type ScanMode = 'full' | 'incremental';
@@ -67,9 +68,10 @@ export interface ScanRequest {
   aiReview?: boolean;
   /** Runtime-only application AI config. It is never persisted by Security Audit. */
   aiConfig?: { baseUrl: string; apiKey: string; model: string };
+  verifySecrets?: boolean;
 }
 export interface ScanProgress { jobId: string; projectDir?: string; phase: 'scanning' | 'triaging' | 'completed' | 'failed' | 'cancelled'; percent: number; message: string; findingsCount?: number }
-export interface ScanContext { projectDir: string; files: string[]; signal: AbortSignal; networkPolicy: ScannerNetworkPolicy; emit(progress: Omit<ScanProgress, 'jobId'>): void }
+export interface ScanContext { projectDir: string; files: string[]; signal: AbortSignal; networkPolicy: ScannerNetworkPolicy; verifySecrets?: boolean; emit(progress: Omit<ScanProgress, 'jobId'>): void }
 export interface SecurityScanner {
   readonly id: string;
   readonly name: string;

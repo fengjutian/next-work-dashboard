@@ -2341,6 +2341,15 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
+  ipcMain.handle('workspace:gitGraphChangedFiles', async (_event, rootPath: string, base: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath); const safeBase = String(base || 'HEAD~1').trim();
+      if (!/^[\w./~^@{}+-]{1,200}$/.test(safeBase)) throw new Error('INVALID_GIT_BASE');
+      const output = execFileSync('git', ['diff', '--name-only', '--no-renames', `${safeBase}...HEAD`], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      return { success: true, data: output.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+
   ipcMain.handle('workspace:createAgentWorktree', async (_event, rootPath: string, sessionId: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);

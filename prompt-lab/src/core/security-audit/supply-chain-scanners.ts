@@ -40,6 +40,29 @@ function lockFindings(context: ScanContext): SecurityFinding[] {
 
 export const lockfileScanner: SecurityScanner = { id: 'lockfile-analysis', name: 'Dependency Lockfile Analysis', async detect(context) { return context.files.some((file) => /(?:(?:package-lock|npm-shrinkwrap)\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|requirements(?:-[^.]+)?\.txt)$/i.test(file)); }, async scan(context) { return lockFindings(context); } };
 
+const osvCache = new Map<string, { expires: number; vulnerabilities: Array<Record<string, unknown>> }>();
+function ecosystemFor(source: string): string { if (/Cargo\.lock$/i.test(source)) return 'crates.io'; if (/requirements/i.test(source)) return 'PyPI'; return 'npm'; }
+export async function queryOsvForLocks(context: ScanContext): Promise<SecurityFinding[]> {
+  if (context.networkPolicy !== 'allow') return [];
+  const dependencies: LockedDependency[] = [];
+  for (const file of context.files.filter((item) => /(?:(?:package-lock|npm-shrinkwrap)\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|requirements(?:-[^.]+)?\.txt)$/i.test(item))) { try { dependencies.push(...parseDependencyLock(file, fs.readFileSync(path.join(context.projectDir, file), 'utf8'))); } catch { /* malformed manifests are handled by the lockfile scanner */ } }
+  const unique = [...new Map(dependencies.filter((item) => item.name && item.version).map((item) => [`${ecosystemFor(item.source)}:${item.name}:${item.version}`, item])).values()].slice(0, 2_000); const findings: SecurityFinding[] = []; const now = Date.now();
+  for (let offset = 0; offset < unique.length; offset += 250) {
+    const batch = unique.slice(offset, offset + 250); const uncached = batch.filter((item) => !osvCache.has(`${ecosystemFor(item.source)}:${item.name}:${item.version}`) || (osvCache.get(`${ecosystemFor(item.source)}:${item.name}:${item.version}`)?.expires ?? 0) < now);
+    if (uncached.length) {
+      const response = await fetch('https://api.osv.dev/v1/querybatch', { method: 'POST', signal: context.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ queries: uncached.map((item) => ({ package: { name: item.name, ecosystem: ecosystemFor(item.source) }, version: item.version })) }) });
+      if (!response.ok) throw new Error(`OSV_HTTP_${response.status}`); const body = await response.json() as { results?: Array<{ vulns?: Array<Record<string, unknown>> }> };
+      uncached.forEach((item, index) => osvCache.set(`${ecosystemFor(item.source)}:${item.name}:${item.version}`, { expires: now + 60 * 60 * 1000, vulnerabilities: body.results?.[index]?.vulns ?? [] }));
+    }
+    for (const dependency of batch) for (const vulnerability of osvCache.get(`${ecosystemFor(dependency.source)}:${dependency.name}:${dependency.version}`)?.vulnerabilities ?? []) {
+      const id = String(vulnerability.id ?? 'OSV-UNKNOWN'); const aliases = Array.isArray(vulnerability.aliases) ? vulnerability.aliases.map(String) : []; const cve = aliases.find((alias) => alias.startsWith('CVE-')); const excerpt = `${dependency.name}@${dependency.version}`; const key = fingerprint('osv-lockfile', id, dependency.source, excerpt);
+      findings.push({ id: findingId(key), fingerprint: key, scannerId: 'osv-lockfile', ruleId: id, category: 'sca', severity: 'P1', confidence: 'high', confidenceRationale: 'The exact locked package ecosystem, name and version matched the OSV vulnerability database.', status: 'open', title: `${id}: ${String(vulnerability.summary ?? dependency.name)}`, description: String(vulnerability.details ?? vulnerability.summary ?? 'Known dependency vulnerability.').slice(0, 2000), location: { file: dependency.source, line: 1 }, evidence: [{ kind: 'dependency', excerpt }], recommendation: 'Upgrade to a non-affected version listed by the package advisory and regenerate the lockfile.', cve, firstSeenAt: now, lastSeenAt: now });
+    }
+  }
+  return findings;
+}
+export const osvLockfileScanner: SecurityScanner = { id: 'osv-lockfile', name: 'OSV Exact Lockfile Vulnerability Match', async detect(context) { return context.networkPolicy === 'allow' && context.files.some((file) => /(?:lock|requirements)/i.test(file)); }, scan: queryOsvForLocks };
+
 const secretPattern = /(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*["']?([^\s"']{12,})|\b((?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,})\b/gi;
 export async function scanGitHistory(context: ScanContext): Promise<SecurityFinding[]> {
   if (!fs.existsSync(path.join(context.projectDir, '.git'))) return [];

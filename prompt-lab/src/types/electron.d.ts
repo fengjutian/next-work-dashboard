@@ -350,6 +350,7 @@ export interface ElectronAPI {
     languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
     gitGraphMetadata: (rootPath: string) => Promise<WorkspaceResult<Array<{ path: string; churn: number; authors: Array<{ name: string; commits: number }> }>>>;
+    gitGraphChangedFiles: (rootPath: string, base: string) => Promise<WorkspaceResult<string[]>>;
     gitInit: (rootPath: string) => Promise<WorkspaceResult<string>>;
     createAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo>>;
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo | null>>;
@@ -662,7 +663,7 @@ export interface ElectronAPI {
       set: (key: string, value: string) => Promise<{ ok: boolean }>;
     };
     scan: {
-      start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; networkPolicy?: 'deny' | 'allow'; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => Promise<{ ok: boolean; cancelled?: boolean; jobId?: string; projectDir?: string }>;
+      start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; networkPolicy?: 'deny' | 'allow'; verifySecrets?: boolean; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => Promise<{ ok: boolean; cancelled?: boolean; jobId?: string; projectDir?: string }>;
       cancel: (jobId: string) => Promise<{ ok: boolean }>;
       onProgress: (callback: (progress: import('../core/security-audit').ScanProgress) => void) => () => void;
     };

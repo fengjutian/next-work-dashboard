@@ -17,7 +17,7 @@ export const securityAuditBridge = {
     set: (key: string, value: string) => ipcRenderer.invoke('security-audit:settings:set', key, value),
   },
   scan: {
-    start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; networkPolicy?: 'deny' | 'allow'; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => ipcRenderer.invoke('security-audit:scan:start', input),
+    start: (input: { projectDir: string; mode?: 'full' | 'incremental'; baselineRef?: string; scanners?: string[]; networkPolicy?: 'deny' | 'allow'; verifySecrets?: boolean; aiReview?: boolean; aiConfig?: { baseUrl: string; apiKey: string; model: string } }) => ipcRenderer.invoke('security-audit:scan:start', input),
     cancel: (jobId: string) => ipcRenderer.invoke('security-audit:scan:cancel', jobId),
     onProgress: (callback: (progress: ScanProgress) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, progress: ScanProgress) => callback(progress);

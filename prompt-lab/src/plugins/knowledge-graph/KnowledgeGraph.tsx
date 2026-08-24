@@ -133,6 +133,7 @@ export const KnowledgeGraph: React.FC = () => {
   const [impact, setImpact] = useState<ImpactAnalysis | null>(null);
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
   const [snapshotDiffText, setSnapshotDiffText] = useState('');
+  const [gitBase, setGitBase] = useState('HEAD~1');
   const graphHealth = graphData ? evaluateGraphHealth(graphData) : null;
 
   const inspectGraphNode = useCallback((nodeId: string) => {
@@ -162,6 +163,16 @@ export const KnowledgeGraph: React.FC = () => {
     if (format === 'pdf') { const popup = window.open('', '_blank'); if (popup) { popup.document.write(`<pre style="white-space:pre-wrap;font:14px system-ui">${file.content.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))}</pre>`); popup.document.close(); popup.print(); } return; }
     downloadGraphFile(`knowledge-graph-${new Date().toISOString().slice(0, 10)}.${file.extension}`, file.mime, file.content);
   }, [graphData, graphHealth, impact]);
+
+  const inspectGitGraphImpact = useCallback(async () => {
+    if (!graphData || !activeKnowledgeWorkspace.activeRoot) { toast('请先打开知识工作区', 'error'); return; }
+    const result = await window.electronAPI.workspace.gitGraphChangedFiles(activeKnowledgeWorkspace.activeRoot, gitBase);
+    if (!result.success) { toast(result.error ?? 'Git 影响分析失败', 'error'); return; }
+    const changed = new Set((result.data ?? []).map((path) => path.replace(/\\/g, '/').toLowerCase()));
+    const roots = graphData.nodes.filter((node) => node.sourcePath && changed.has(node.sourcePath.replace(/\\/g, '/').toLowerCase()));
+    const affected = new Set(roots.map((node) => node.id)); roots.forEach((node) => analyzeGraphImpact(graphData, node.id, { maxDepth: 5, acceptedOnly: true }).direct.concat(analyzeGraphImpact(graphData, node.id, { maxDepth: 5, acceptedOnly: true }).transitive).forEach((item) => affected.add(item.id)));
+    setSnapshotDiffText(`${gitBase} → HEAD：改动文件 ${(result.data ?? []).length}，命中图节点 ${roots.length}，传播影响 ${Math.max(0, affected.size - roots.length)}`);
+  }, [gitBase, graphData, toast]);
 
   // 人工/AI 图谱自动保存；知识工作区扫描结果是临时视图，不覆盖持久数据。
   useEffect(() => {
@@ -897,6 +908,7 @@ export const KnowledgeGraph: React.FC = () => {
             </select>
             <button className="h-7 rounded border" onClick={createGraphSnapshot}>快照</button>
           </div>
+          <div className="flex gap-1"><input className="h-7 min-w-0 flex-1 rounded border bg-background px-2" value={gitBase} onChange={(event) => setGitBase(event.target.value)} placeholder="Git base / PR 分支"/><button className="h-7 rounded border px-2" onClick={() => void inspectGitGraphImpact()}>Git/PR 影响</button></div>
           {impact ? <div className="rounded border p-2 text-[11px]">
             <p className="font-medium">影响风险 {impact.score}/100</p><p className="text-muted-foreground">直接 {impact.direct.length} · 间接 {impact.transitive.length} · 路径 {impact.paths.length} · 循环 {impact.cycles.length}</p>
             <p className="mt-1 max-h-12 overflow-auto">{[...impact.direct, ...impact.transitive].slice(0, 20).map((node) => node.label).join('、') || '没有传播影响'}</p>

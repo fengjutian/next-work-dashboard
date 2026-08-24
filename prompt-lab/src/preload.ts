@@ -689,6 +689,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke("workspace:gitStatus", rootPath),
     gitGraphMetadata: (rootPath: string) =>
       ipcRenderer.invoke("workspace:gitGraphMetadata", rootPath),
+    gitGraphChangedFiles: (rootPath: string, base: string) =>
+      ipcRenderer.invoke("workspace:gitGraphChangedFiles", rootPath, base),
     gitInit: (rootPath: string) =>
       ipcRenderer.invoke("workspace:gitInit", rootPath),
     createAgentWorktree: (rootPath: string, sessionId: string) =>

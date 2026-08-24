@@ -65,7 +65,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
       const coverage = buildScanCoverage(input.projectDir, files, input.mode ?? 'full', input.baselineRef);
       emit({ phase: 'scanning', percent: 2, message: `已确定 ${files.length} 个扫描文件` });
       const selectedScanners = [...new Set([...builtinScanners.map((scanner) => scanner.id), ...(input.scanners ?? [])])];
-      const scanResult = await orchestrator.runDetailed({ projectDir: input.projectDir, files, signal: controller.signal, networkPolicy: input.networkPolicy ?? 'deny', emit }, selectedScanners);
+      const scanResult = await orchestrator.runDetailed({ projectDir: input.projectDir, files, signal: controller.signal, networkPolicy: input.networkPolicy ?? 'deny', verifySecrets: Boolean(input.verifySecrets), emit }, selectedScanners);
       let findings = scanResult.findings;
       if (input.aiReview) { emit({ phase: 'triaging', percent: 85, message: '系统默认 AI 正在复核确定性扫描结果', findingsCount: findings.length }); findings = await reviewWithAI(findings, controller.signal, input.aiConfig); }
       const current = load();
