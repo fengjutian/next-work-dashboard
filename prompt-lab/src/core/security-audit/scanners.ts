@@ -52,7 +52,8 @@ function scanRules(context: ScanContext): SecurityFinding[] {
         if (user && finalStage) finalStage.user = user[1];
       }
       if (finalStage && (!finalStage.user || /^(?:root|0)(?::|$)/i.test(finalStage.user))) {
-        const rule = RULES.find((item) => item.id === 'iac.docker-root')!;
+        const rule = RULES.find((item) => item.id === 'iac.docker-root');
+        if (!rule) continue;
         const excerpt = finalStage.from.slice(0, 500);
         const key = fingerprint('builtin-rules', rule.id, file, excerpt);
         findings.push({ id: findingId(key), fingerprint: key, scannerId: 'builtin-rules', ruleId: rule.id, category: rule.category, severity: rule.severity, confidence: 'medium', status: 'open', title: rule.title, description: rule.description, location: { file, line: finalStage.line }, evidence: [{ kind: 'code', excerpt, location: { file, line: finalStage.line } }], recommendation: rule.recommendation, cwe: rule.cwe, firstSeenAt: now, lastSeenAt: now });
