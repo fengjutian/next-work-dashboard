@@ -11,11 +11,10 @@
  */
 import { dialog, ipcMain } from 'electron';
 import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
-import type { ScanRequest } from '../../core/security-audit';
+import type { FindingStatus, ScanRequest } from '../../core/security-audit';
 import fs from 'node:fs';
 import path from 'node:path';
 import { cancelScan, createSarif, getSetting, listFindings, listScanners, listScans, setSetting, startScan, updateFinding } from './service';
-import type { FindingStatus } from '../../core/security-audit';
 
 let initialized = false;
 

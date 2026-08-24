@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import ts from 'typescript';
+import * as ts from 'typescript';
 import { findingId, fingerprint, redactSecrets } from './security';
 import type { FindingCategory, FindingConfidence, FindingTraceStep, ScanContext, SecurityFinding, SecuritySeverity } from './types';
 
 type FunctionInfo = { name: string; file: string; node: ts.FunctionLikeDeclaration; source: ts.SourceFile; calls: string[] };
+type FunctionSink = { parameterIndex: number; rule: SinkRule; sink: ts.CallExpression; source: ts.SourceFile };
 type Flow = { expression: ts.Expression; source: ts.Node; sourceLabel: string; path: FindingTraceStep[] };
 type SinkRule = { id: string; category: FindingCategory; severity: SecuritySeverity; title: string; cwe: string; recommendation: string; match: (call: ts.CallExpression) => ts.Expression | undefined };
 
@@ -59,20 +60,46 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
     }; visit(source);
   }
   for (const info of functions.values()) { const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) { const name = propertyPath(node.expression).split('.').at(-1); if (name && functions.has(name)) info.calls.push(name); } ts.forEachChild(node, visit); }; visit(info.node); }
+  const functionSinks = new Map<string, FunctionSink[]>();
+  for (const info of functions.values()) {
+    const parameters = info.node.parameters.map((parameter) => ts.isIdentifier(parameter.name) ? parameter.name.text : ''); const summaries: FunctionSink[] = [];
+    const visit = (node: ts.Node): void => { if (ts.isCallExpression(node)) for (const rule of sinks) { const argument = rule.match(node); if (!argument) continue; const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const parameterIndex = parameters.findIndex((name) => names.includes(name)); if (parameterIndex >= 0) summaries.push({ parameterIndex, rule, sink: node, source: info.source }); } ts.forEachChild(node, visit); };
+    visit(info.node); if (summaries.length) functionSinks.set(info.name, summaries);
+  }
   const findings: SecurityFinding[] = [];
   for (const { source } of files) {
     const tainted = new Map<string, Flow>();
     const visit = (node: ts.Node, currentFunction?: string): void => {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         const direct = sourceLabel(node.initializer); const inherited = ts.isIdentifier(node.initializer) ? tainted.get(node.initializer.text) : undefined;
-        if (direct || inherited) tainted.set(node.name.text, direct ? { expression: node.initializer, source: node.initializer, sourceLabel: direct, path: [{ kind: 'source', label: direct, location: locationOf(source, node.initializer) }, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] } : { ...inherited!, expression: node.initializer, path: [...inherited!.path, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] });
+        if (direct) tainted.set(node.name.text, { expression: node.initializer, source: node.initializer, sourceLabel: direct, path: [{ kind: 'source', label: direct, location: locationOf(source, node.initializer) }, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] });
+        else if (inherited) tainted.set(node.name.text, { ...inherited, expression: node.initializer, path: [...inherited.path, { kind: 'propagation', label: node.name.text, location: locationOf(source, node) }] });
       }
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) { const direct = sourceLabel(node.right); const inherited = ts.isIdentifier(node.right) ? tainted.get(node.right.text) : undefined; if (direct || inherited) tainted.set(node.left.text, direct ? { expression: node.right, source: node.right, sourceLabel: direct, path: [{ kind: 'source', label: direct, location: locationOf(source, node.right) }] } : inherited!); }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) { const direct = sourceLabel(node.right); const inherited = ts.isIdentifier(node.right) ? tainted.get(node.right.text) : undefined; if (direct) tainted.set(node.left.text, { expression: node.right, source: node.right, sourceLabel: direct, path: [{ kind: 'source', label: direct, location: locationOf(source, node.right) }] }); else if (inherited) tainted.set(node.left.text, inherited); }
       if (ts.isCallExpression(node)) for (const rule of sinks) {
         const argument = rule.match(node); if (!argument) continue;
         const direct = sourceLabel(argument); const identifiers: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) identifiers.push(child.text); ts.forEachChild(child, collect); }; collect(argument);
         const inherited = identifiers.map((name) => tainted.get(name)).find(Boolean); const flow = direct ? { expression: argument, source: argument, sourceLabel: direct, path: [{ kind: 'source' as const, label: direct, location: locationOf(source, argument) }] } : inherited;
         if (flow) { if (currentFunction) flow.path.push({ kind: 'call', label: currentFunction, location: locationOf(source, node) }); findings.push(makeFinding(rule, source, node, flow, direct ? 'high' : 'medium')); }
+      }
+      if (ts.isCallExpression(node)) {
+        const callee = propertyPath(node.expression).split('.').at(-1); const summaries = callee ? functionSinks.get(callee) : undefined;
+        for (const summary of summaries ?? []) {
+          const argument = node.arguments[summary.parameterIndex]; if (!argument) continue; const direct = sourceLabel(argument); const identifiers: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) identifiers.push(child.text); ts.forEachChild(child, collect); }; collect(argument); const inherited = identifiers.map((name) => tainted.get(name)).find(Boolean);
+          const flow = direct ? { expression: argument, source: argument, sourceLabel: direct, path: [{ kind: 'source' as const, label: direct, location: locationOf(source, argument) }] } : inherited;
+          if (flow) { const callStep = { kind: 'call' as const, label: `${callee}()`, location: locationOf(source, node) }; findings.push(makeFinding(summary.rule, summary.source, summary.sink, { ...flow, path: [...flow.path, callStep] }, 'high')); }
+        }
+      }
+      if (ts.isCallExpression(node) && /^(?:app|router)\.(?:get|post|put|patch|delete)$/.test(propertyPath(node.expression))) {
+        const route = node.arguments[0]; const handler = node.arguments.at(-1); const body = handler?.getText() ?? ''; const middleware = node.arguments.slice(1, -1).map(textOf).join(' ');
+        if (route && handler && /\b(?:req|request)\.params\b/.test(body) && /\.(?:findOne|findById|findUnique|query|execute)\s*\(/.test(body) && !/(?:auth|session|permission|authorize|owner|userId)/i.test(`${middleware} ${body}`)) {
+          const rule: SinkRule = { id: 'framework.express-idor', category: 'sast', severity: 'P1', title: 'Express object lookup lacks an authorization check', cwe: 'CWE-639', recommendation: 'Authorize the current principal against the requested object, preferably in a shared route policy middleware.', match: () => undefined };
+          const label = `Route parameter: ${textOf(route)}`; findings.push(makeFinding(rule, source, handler, { expression: route as ts.Expression, source: route, sourceLabel: label, path: [{ kind: 'source', label, location: locationOf(source, route) }] }, 'medium'));
+        }
+      }
+      if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && node.name.text === 'dangerouslySetInnerHTML' && node.initializer) {
+        const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(node.initializer); const flow = names.map((name) => tainted.get(name)).find(Boolean);
+        if (flow) { const rule: SinkRule = { id: 'framework.react-xss', category: 'sast', severity: 'P1', title: 'Untrusted input reaches dangerouslySetInnerHTML', cwe: 'CWE-79', recommendation: 'Avoid raw HTML or sanitize it with a maintained HTML sanitizer before rendering.', match: () => undefined }; findings.push(makeFinding(rule, source, node, flow, 'high')); }
       }
       let nextFunction = currentFunction;
       if (ts.isFunctionDeclaration(node) && node.name) nextFunction = node.name.text;

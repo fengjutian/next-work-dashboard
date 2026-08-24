@@ -89,3 +89,15 @@ export function mergeWithBaseline(current: SecurityFinding[], previous: Security
   const resolved = previous.filter((item) => !currentKeys.has(item.fingerprint) && (!scopedFiles || scopedFiles.has(item.location.file)) && item.status !== 'fixed').map((item) => ({ ...item, status: 'fixed' as const, fixedAt: now, lastSeenAt: now }));
   return [...active, ...untouched, ...resolved];
 }
+
+export function applyInlineSuppressions(root: string, findings: SecurityFinding[], now = Date.now()): SecurityFinding[] {
+  const cache = new Map<string, string[]>();
+  return findings.map((finding) => {
+    let lines = cache.get(finding.location.file);
+    if (!lines) { try { lines = fs.readFileSync(path.join(root, finding.location.file), 'utf8').split(/\r?\n/); } catch { lines = []; } cache.set(finding.location.file, lines); }
+    const nearby = lines.slice(Math.max(0, finding.location.line - 3), finding.location.line).join('\n');
+    const directive = /security-audit-ignore(?:\s+|:\s*)(\S+)(?:\s+(.+))?/i.exec(nearby);
+    if (!directive || (directive[1] !== '*' && directive[1] !== finding.ruleId)) return finding;
+    return { ...finding, status: 'false-positive' as const, suppressed: { reason: directive[2]?.trim() || `Inline suppression for ${directive[1]}`, at: now } };
+  });
+}

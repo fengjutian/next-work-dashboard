@@ -49,6 +49,8 @@ export interface Finding {
   confidence?: 'low' | 'medium' | 'high';
   status?: 'open' | 'confirmed' | 'false-positive' | 'accepted' | 'fixed';
   evidence?: Array<{ kind: string; excerpt: string }>;
+  trace?: import('../../core/security-audit').FindingTraceStep[];
+  suppressed?: { reason: string; at: number };
   aiReview?: { verdict: string; rationale: string; reviewedAt: number };
 }
 

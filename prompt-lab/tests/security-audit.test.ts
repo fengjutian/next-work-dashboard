@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, redactSecrets } from '../src/core/security-audit';
+import { analyzeTypeScriptProject, applyInlineSuppressions, buildScanCoverage, builtinRuleScanner, enumerateTextFiles, findingsToSarif, mergeWithBaseline, parseNpmLock, redactSecrets } from '../src/core/security-audit';
 import { redactScannerOutput, resolveTrustedScannerExecutable, runScannerProcess } from '../src/main/security-audit/external-process';
 import { parseGitleaksOutput, parseOsvOutput, parseSemgrepOutput, parseTrivyOutput, readLimitedJsonReport } from '../src/main/security-audit/external-scanners';
 
@@ -98,5 +98,32 @@ describe('security audit core', () => {
     const sarif = findingsToSarif(findings, root) as { version: string; runs: Array<{ results: Array<{ partialFingerprints: { primaryLocationLineHash: string } }> }> };
     expect(sarif.version).toBe('2.1.0');
     expect(sarif.runs[0].results[0].partialFingerprints.primaryLocationLineHash).toBe(findings[0].fingerprint);
+  });
+
+  it('tracks taint through variables and cross-file function calls', () => {
+    const root = temporaryRoot(); fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'src', 'shell.ts'), "import { exec } from 'node:child_process'; export function run(value: string) { exec(value); }");
+    fs.writeFileSync(path.join(root, 'src', 'route.ts'), "import { run } from './shell'; export function route(req: any) { const command = req.query.command; run(command); }");
+    const result = analyzeTypeScriptProject({ projectDir: root, files: ['src/shell.ts', 'src/route.ts'], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    const finding = result.findings.find((item) => item.ruleId === 'taint.command-injection');
+    expect(finding?.confidence).toBe('high');
+    expect(finding?.trace?.map((step) => step.kind)).toEqual(['source', 'propagation', 'call', 'sink']);
+  });
+
+  it('detects Express authorization gaps and framework coverage', () => {
+    const root = temporaryRoot(); const file = 'routes.ts';
+    fs.writeFileSync(path.join(root, file), "import express from 'express'; const app = express(); app.get('/users/:id', async (req) => db.user.findById(req.params.id));");
+    const context = { projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny' as const, emit: () => undefined };
+    const result = analyzeTypeScriptProject(context);
+    expect(result.findings.map((item) => item.ruleId)).toContain('framework.express-idor');
+    expect(buildScanCoverage(root, [file], 'full').frameworks).toContain('Express');
+  });
+
+  it('parses npm lockfiles and honors inline rule suppressions', async () => {
+    expect(parseNpmLock(JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/a': { version: '1.0.0', integrity: 'sha512-ok' } } }))).toEqual([{ name: 'a', version: '1.0.0', integrity: 'sha512-ok', source: 'package-lock.json' }]);
+    const root = temporaryRoot(); const file = 'unsafe.ts'; fs.writeFileSync(path.join(root, file), '// security-audit-ignore sast.eval accepted test fixture\neval(input)');
+    const findings = await builtinRuleScanner.scan({ projectDir: root, files: [file], signal: new AbortController().signal, networkPolicy: 'deny', emit: () => undefined });
+    const suppressed = applyInlineSuppressions(root, findings);
+    expect(suppressed[0]).toMatchObject({ status: 'false-positive', suppressed: { reason: 'accepted test fixture' } });
   });
 });

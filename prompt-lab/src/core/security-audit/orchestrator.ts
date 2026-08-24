@@ -1,4 +1,5 @@
 import type { ScannerRunResult, ScanContext, ScanProgress, SecurityFinding, SecurityScanner } from './types';
+import { applyInlineSuppressions } from './security';
 
 export class SecurityScanOrchestrator {
   constructor(private readonly scanners: SecurityScanner[]) {}
@@ -38,7 +39,7 @@ export class SecurityScanOrchestrator {
       }
     }
     const unique = new Map(findings.map((finding) => [finding.fingerprint, finding]));
-    return { findings: [...unique.values()], scannerRuns };
+    return { findings: applyInlineSuppressions(context.projectDir, [...unique.values()]), scannerRuns };
   }
 }
 

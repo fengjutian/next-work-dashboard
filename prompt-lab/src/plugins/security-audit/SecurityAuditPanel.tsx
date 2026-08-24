@@ -140,6 +140,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [scannerDetectionRunning, setScannerDetectionRunning] = useState(false);
   const [networkAllowed, setNetworkAllowed] = useState(false);
   const [scannerRuns, setScannerRuns] = useState<import('../../core/security-audit').ScannerRunResult[]>([]);
+  const [lastScan, setLastScan] = useState<import('../../core/security-audit').ScanRecord | null>(null);
 
   const loadScanners = useCallback((force = false) => {
     setScannerDetectionRunning(true);
@@ -189,7 +190,7 @@ export function SecurityAuditPanel(): JSX.Element {
         setScannedDir(resultDir);
         void api.findings.list(resultDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
       }
-      if (resultDir && ['completed', 'failed', 'cancelled'].includes(detail.phase)) void api.scans.list(resultDir).then((items) => setScannerRuns(items[0]?.scannerRuns ?? []));
+      if (resultDir && ['completed', 'failed', 'cancelled'].includes(detail.phase)) void api.scans.list(resultDir).then((items) => { setScannerRuns(items[0]?.scannerRuns ?? []); setLastScan(items[0] ?? null); });
     });
   }, [scannedDir]);
 
@@ -232,6 +233,18 @@ export function SecurityAuditPanel(): JSX.Element {
       }
     }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
   }, []);
+
+  const updateFindingStatus = useCallback((finding: Finding, status: import('../../core/security-audit').FindingStatus) => {
+    if (!scannedDir) return;
+    const reason = status === 'false-positive' || status === 'accepted' ? window.prompt(status === 'false-positive' ? '请输入误报原因' : '请输入接受风险的原因') : undefined;
+    if ((status === 'false-positive' || status === 'accepted') && reason === null) return;
+    void window.electronAPI.securityAudit.findings.update({ projectDir: scannedDir, findingId: finding.id, status, reason }).then((updated) => {
+      const next = { ...updated, detectedAt: updated.lastSeenAt };
+      setFindings((current) => current?.map((item) => item.id === updated.id ? next : item) ?? null);
+      setActiveFinding((current) => current?.id === updated.id ? next : current);
+      message.success('发现项状态已更新');
+    }).catch((error: unknown) => message.warning(securityAuditErrorMessage(error)));
+  }, [scannedDir]);
 
   useEffect(() => {
     if (!commandScanRequested) return;
@@ -292,6 +305,15 @@ export function SecurityAuditPanel(): JSX.Element {
       {scannerRuns.length > 0 && <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border px-5 py-2 text-[11px]">
         <span className="shrink-0 text-muted-foreground">本次运行</span>
         {scannerRuns.map((run) => <Tag key={`${run.scannerId}:${run.startedAt}`} color={run.status === 'succeeded' ? 'green' : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'orange' : 'blue'}>{run.name}: {run.status} · {run.findingsCount} · {run.durationMs}ms{run.exitCode !== undefined ? ` · exit ${run.exitCode}` : ''}</Tag>)}
+      </div>}
+
+      {lastScan?.coverage && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/20 px-5 py-2 text-[11px]">
+        <span className="font-medium">扫描覆盖</span>
+        <Tag color={lastScan.coverage.skippedFiles ? 'orange' : 'green'}>{lastScan.coverage.scannedFiles}/{lastScan.coverage.discoveredFiles} 文件</Tag>
+        <Tag>{(lastScan.coverage.scannedBytes / 1024).toFixed(1)} KB</Tag>
+        <Tag color={lastScan.coverage.mode === 'full' ? 'green' : 'blue'}>{lastScan.coverage.mode === 'full' ? '完整扫描' : `增量 · ${lastScan.coverage.baselineRef ?? 'HEAD'}`}</Tag>
+        {Object.entries(lastScan.coverage.languages).map(([name, count]) => <Tag key={name}>{name} {count}</Tag>)}
+        {lastScan.coverage.frameworks.map((name) => <Tag key={name} color="purple">{name}</Tag>)}
       </div>}
 
       {/* Progress */}
@@ -376,6 +398,8 @@ export function SecurityAuditPanel(): JSX.Element {
                             {f.location.file}:{f.location.line}
                           </span>
                           {f.ruleId && <span className="ml-2 rounded bg-muted px-1 text-[10px]">{f.ruleId}</span>}
+                          {f.confidence && <span className="ml-2">置信度 {f.confidence}</span>}
+                          {f.status && f.status !== 'open' && <span className="ml-2">· {f.status}</span>}
                         </div>
                       </div>
                     </div>
@@ -442,6 +466,14 @@ export function SecurityAuditPanel(): JSX.Element {
                 <Tag color="purple">{activeFinding.ruleId}</Tag>
               </div>
             )}
+            {activeFinding.trace && activeFinding.trace.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">数据流 / 调用路径</div><div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">{activeFinding.trace.map((step, index) => <div key={`${step.kind}:${step.location.file}:${step.location.line}:${index}`} className="font-mono text-xs"><Tag color={step.kind === 'source' ? 'blue' : step.kind === 'sink' ? 'red' : 'purple'}>{step.kind}</Tag> {step.label} <span className="text-muted-foreground">— {step.location.file}:{step.location.line}</span></div>)}</div></div>}
+            {activeFinding.suppressed && <Alert type="warning" message={activeFinding.status} description={activeFinding.suppressed.reason} />}
+            <Space wrap>
+              <Button onClick={() => updateFindingStatus(activeFinding, 'confirmed')}>确认问题</Button>
+              <Button onClick={() => updateFindingStatus(activeFinding, 'false-positive')}>标记误报</Button>
+              <Button onClick={() => updateFindingStatus(activeFinding, 'accepted')}>接受风险</Button>
+              {activeFinding.status !== 'open' && <Button onClick={() => updateFindingStatus(activeFinding, 'open')}>重新打开</Button>}
+            </Space>
             {activeFinding.aiReview && <div><div className="mb-1 text-xs text-muted-foreground">AI 复核（辅助判断）</div><Alert type={activeFinding.aiReview.verdict === 'false-positive' ? 'warning' : 'info'} message={activeFinding.aiReview.verdict} description={activeFinding.aiReview.rationale} /></div>}
           </Space>
         )}
