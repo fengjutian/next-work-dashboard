@@ -15,7 +15,7 @@ export function buildTextEvidence(sources: ProductSpecSource[]): string {
   const blocks: string[] = [];
   for (const source of sources.filter((item) => item.kind !== 'image' && item.text?.trim())) {
     if (remaining <= 0) break;
-    const text = truncateSource(source.text!.trim(), Math.min(MAX_SOURCE_CHARS, remaining));
+    const text = truncateSource((source.text ?? '').trim(), Math.min(MAX_SOURCE_CHARS, remaining));
     blocks.push(`## 来源：${source.name}（${source.kind === 'code' ? '代码' : '文档'}）\n${text}`);
     remaining -= text.length;
   }

@@ -25,7 +25,7 @@ const PLUGIN_CATEGORIES: Array<{ id: PluginCategoryId; label: string; descriptio
 
 const BUILT_IN_CATEGORY: Record<string, PluginCategoryId> = {
   ai: 'ai', chat: 'ai', prompts: 'ai', 'style-image': 'ai',
-  history: 'knowledge', graph: 'knowledge', weread: 'knowledge', 'document-knowledge': 'knowledge',
+  history: 'knowledge', graph: 'knowledge', weread: 'knowledge', 'document-knowledge': 'knowledge', 'product-spec': 'knowledge',
   'office-studio': 'office', 'word-preview': 'office', 'excel-preview': 'office', 'ppt-preview': 'office',
   'pdf-preview': 'office', excalidraw: 'office', compare: 'office',
   'code-editor': 'development', terminal: 'development', database: 'development', 'disk-space': 'development',

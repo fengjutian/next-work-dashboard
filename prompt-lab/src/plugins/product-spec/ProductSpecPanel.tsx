@@ -33,6 +33,12 @@ export function ProductSpecPanel() {
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
+  useEffect(() => {
+    const reset = () => { controllerRef.current?.abort(); setSources([]); setProductName(''); setRequirements(''); setCode(''); setResult(''); setRunning(false); };
+    window.addEventListener('product-spec:new', reset);
+    return () => window.removeEventListener('product-spec:new', reset);
+  }, []);
+
   const addFiles = async (files: FileList | File[]) => {
     const added: ProductSpecSource[] = [];
     for (const file of Array.from(files)) {

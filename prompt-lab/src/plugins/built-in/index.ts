@@ -814,6 +814,9 @@ const builtInPlugins: Plugin[] = [
     enabled: false,
     order: 29,
     keepAlive: true,
+    activate: (context) => {
+      context.subscriptions.add(context.commands.register('product-spec.new', () => { window.dispatchEvent(new CustomEvent('product-spec:new')); }));
+    },
     contributions: {
       commands: [{ id: 'product-spec.new', title: '生成产品说明文档', category: '产品说明文档' }],
     },
