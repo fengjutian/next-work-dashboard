@@ -35,6 +35,16 @@ const SEVERITY_WEIGHT: Record<Finding['severity'], number> = {
   P2: 2,
   P3: 3,
 };
+const CONFIDENCE_LABEL = { low: '低', medium: '中', high: '高' } as const;
+const TRACE_KIND_LABEL = { source: '输入源', propagation: '传播', call: '函数调用', sink: '危险点' } as const;
+const EVIDENCE_KIND_LABEL: Record<string, string> = { code: '代码', tool: '扫描工具', dependency: '依赖' };
+const FINDING_STATUS_LABEL: Record<string, string> = { open: '待处理', confirmed: '已确认', 'false-positive': '误报', accepted: '已接受风险', fixed: '已修复' };
+const SCANNER_STATUS_LABEL: Record<string, string> = { succeeded: '成功', failed: '失败', skipped: '已跳过', cancelled: '已取消' };
+function localizeFinding(finding: Finding): Finding {
+  if (finding.ruleId !== 'secret.git-history') return finding;
+  const commit = /(?:commit|提交)\s+([a-f0-9]{7,40})/i.exec(`${finding.description} ${finding.evidence?.map((item) => item.excerpt).join(' ') ?? ''}`)?.[1] ?? '未知提交';
+  return { ...finding, title: 'Git 历史中发现疑似密钥', description: `提交 ${commit} 中曾加入疑似凭据。扫描器已对密钥脱敏，且不会持久化原始值。`, recommendation: '立即撤销并轮换该凭据，然后按照经过审批的历史重写流程从 Git 历史中移除。', confidenceRationale: finding.secretVerification?.status === 'valid' ? '密钥供应商已确认该脱敏凭据当前仍然有效。' : '该值符合凭据结构并出现在 Git 提交历史中，但尚未确认当前是否有效。', evidence: finding.evidence?.map((item) => ({ ...item, excerpt: `提交 ${commit} 中存在疑似密钥材料` })) };
+}
 
 // ── Mock 数据（v1 用，Phase 2 换成 IPC 真实结果） ──
 
@@ -197,7 +207,7 @@ export function SecurityAuditPanel(): JSX.Element {
       const resultDir = detail.projectDir ?? scannedDir;
       if (detail.phase === 'completed' && resultDir) {
         setScannedDir(resultDir);
-        void api.findings.list(resultDir).then((items) => setFindings(items.map((item) => ({ ...item, detectedAt: item.lastSeenAt }))));
+        void api.findings.list(resultDir).then((items) => setFindings(items.map((item) => localizeFinding({ ...item, detectedAt: item.lastSeenAt }))));
       }
       if (resultDir && ['completed', 'failed', 'cancelled'].includes(detail.phase)) void api.scans.list(resultDir).then((items) => { setScannerRuns(items[0]?.scannerRuns ?? []); setLastScan(items[0] ?? null); });
     });
@@ -248,7 +258,7 @@ export function SecurityAuditPanel(): JSX.Element {
     const reason = status === 'false-positive' || status === 'accepted' ? window.prompt(status === 'false-positive' ? '请输入误报原因' : '请输入接受风险的原因') : undefined;
     if ((status === 'false-positive' || status === 'accepted') && reason === null) return;
     void window.electronAPI.securityAudit.findings.update({ projectDir: scannedDir, findingId: finding.id, status, reason }).then((updated) => {
-      const next = { ...updated, detectedAt: updated.lastSeenAt };
+      const next = localizeFinding({ ...updated, detectedAt: updated.lastSeenAt });
       setFindings((current) => current?.map((item) => item.id === updated.id ? next : item) ?? null);
       setActiveFinding((current) => current?.id === updated.id ? next : current);
       message.success('发现项状态已更新');
@@ -332,7 +342,7 @@ export function SecurityAuditPanel(): JSX.Element {
 
       {scannerRuns.length > 0 && <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border px-5 py-2 text-[11px]">
         <span className="shrink-0 text-muted-foreground">本次运行</span>
-        {scannerRuns.map((run) => <Tag key={`${run.scannerId}:${run.startedAt}`} color={run.status === 'succeeded' ? 'green' : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'orange' : 'blue'}>{run.name}: {run.status} · {run.findingsCount} · {run.durationMs}ms{run.exitCode !== undefined ? ` · exit ${run.exitCode}` : ''}</Tag>)}
+        {scannerRuns.map((run) => <Tag key={`${run.scannerId}:${run.startedAt}`} color={run.status === 'succeeded' ? 'green' : run.status === 'failed' ? 'red' : run.status === 'cancelled' ? 'orange' : 'blue'}>{run.name}: {SCANNER_STATUS_LABEL[run.status]} · {run.findingsCount} 项 · {run.durationMs}ms{run.exitCode !== undefined ? ` · 退出码 ${run.exitCode}` : ''}</Tag>)}
       </div>}
 
       {lastScan?.coverage && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/20 px-5 py-2 text-[11px]">
@@ -433,8 +443,8 @@ export function SecurityAuditPanel(): JSX.Element {
                             {f.location.file}:{f.location.line}
                           </span>
                           {f.ruleId && <span className="ml-2 rounded bg-muted px-1 text-[10px]">{f.ruleId}</span>}
-                          {f.confidence && <span className="ml-2">置信度 {f.confidence}</span>}
-                          {f.status && f.status !== 'open' && <span className="ml-2">· {f.status}</span>}
+                          {f.confidence && <span className="ml-2">置信度 {CONFIDENCE_LABEL[f.confidence]}</span>}
+                          {f.status && f.status !== 'open' && <span className="ml-2">· {FINDING_STATUS_LABEL[f.status] ?? f.status}</span>}
                         </div>
                       </div>
                     </div>
@@ -496,17 +506,17 @@ export function SecurityAuditPanel(): JSX.Element {
               <div className="mb-1 text-xs text-muted-foreground">修复建议</div>
               <div className="text-sm leading-relaxed">{activeFinding.recommendation}</div>
             </div>
-            {activeFinding.evidence && activeFinding.evidence.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">证据</div>{activeFinding.evidence.map((item, index) => <pre key={`${item.kind}:${index}`} className="overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs"><Tag>{item.kind}</Tag>{' '}{item.excerpt}</pre>)}</div>}
+            {activeFinding.evidence && activeFinding.evidence.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">证据</div>{activeFinding.evidence.map((item, index) => <pre key={`${item.kind}:${index}`} className="overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs"><Tag>{EVIDENCE_KIND_LABEL[item.kind] ?? item.kind}</Tag>{' '}{item.excerpt}</pre>)}</div>}
             {activeFinding.ruleId && (
               <div>
                 <div className="mb-1 text-xs text-muted-foreground">规则</div>
                 <Tag color="purple">{activeFinding.ruleId}</Tag>
               </div>
             )}
-            {activeFinding.trace && activeFinding.trace.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">数据流 / 调用路径</div><div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">{activeFinding.trace.map((step, index) => <div key={`${step.kind}:${step.location.file}:${step.location.line}:${index}`} className="font-mono text-xs"><Tag color={step.kind === 'source' ? 'blue' : step.kind === 'sink' ? 'red' : 'purple'}>{step.kind}</Tag> {step.label} <span className="text-muted-foreground">— {step.location.file}:{step.location.line}</span></div>)}</div></div>}
-            {activeFinding.suppressed && <Alert type="warning" message={activeFinding.status} description={activeFinding.suppressed.reason} />}
+            {activeFinding.trace && activeFinding.trace.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">数据流 / 调用路径</div><div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">{activeFinding.trace.map((step, index) => <div key={`${step.kind}:${step.location.file}:${step.location.line}:${index}`} className="font-mono text-xs"><Tag color={step.kind === 'source' ? 'blue' : step.kind === 'sink' ? 'red' : 'purple'}>{TRACE_KIND_LABEL[step.kind]}</Tag> {step.label} <span className="text-muted-foreground">— {step.location.file}:{step.location.line}</span></div>)}</div></div>}
+            {activeFinding.suppressed && <Alert type="warning" message={FINDING_STATUS_LABEL[activeFinding.status ?? 'open']} description={activeFinding.suppressed.reason} />}
             {activeFinding.secretVerification && <Alert type={activeFinding.secretVerification.status === 'valid' ? 'error' : 'info'} message={`密钥验证：${activeFinding.secretVerification.status}`} description={`${activeFinding.secretVerification.provider} · ${new Date(activeFinding.secretVerification.checkedAt).toLocaleString()}`} />}
-            {activeFinding.confidenceRationale && <Alert type="info" message={`置信度：${activeFinding.confidence ?? 'unknown'}`} description={activeFinding.confidenceRationale} />}
+            {activeFinding.confidenceRationale && <Alert type="info" message={`置信度：${activeFinding.confidence ? CONFIDENCE_LABEL[activeFinding.confidence] : '未知'}`} description={activeFinding.confidenceRationale} />}
             <Space wrap>
               <Button onClick={() => updateFindingStatus(activeFinding, 'confirmed')}>确认问题</Button>
               <Button onClick={() => updateFindingStatus(activeFinding, 'false-positive')}>标记误报</Button>

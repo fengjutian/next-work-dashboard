@@ -28,10 +28,10 @@ const propertyPath = (node: ts.Expression): string => {
 };
 const sourceLabel = (node: ts.Expression): string | undefined => {
   const value = propertyPath(node);
-  if (/^(?:req|request)\.(?:body|query|params|headers|cookies)(?:\.|\[\]|$)/i.test(value)) return `HTTP input: ${value}`;
-  if (/^(?:location\.(?:search|hash)|document\.URL|window\.name)$/i.test(value)) return `Browser input: ${value}`;
-  if (/^(?:event|ipcEvent)\.senderFrame(?:\.|$)/i.test(value)) return `Electron IPC input: ${value}`;
-  if (ts.isCallExpression(node) && /^(?:process\.env|searchParams\.get|URLSearchParams)$/.test(propertyPath(node.expression))) return `External input: ${textOf(node)}`;
+  if (/^(?:req|request)\.(?:body|query|params|headers|cookies)(?:\.|\[\]|$)/i.test(value)) return `HTTP 输入：${value}`;
+  if (/^(?:location\.(?:search|hash)|document\.URL|window\.name)$/i.test(value)) return `浏览器输入：${value}`;
+  if (/^(?:event|ipcEvent)\.senderFrame(?:\.|$)/i.test(value)) return `Electron IPC 输入：${value}`;
+  if (ts.isCallExpression(node) && /^(?:process\.env|searchParams\.get|URLSearchParams)$/.test(propertyPath(node.expression))) return `外部输入：${textOf(node)}`;
   return undefined;
 };
 const sourceInside = (node: ts.Expression): { node: ts.Expression; label: string } | undefined => {
@@ -42,14 +42,14 @@ const inheritedFlow = (node: ts.Expression, tainted: Map<string, Flow>): Flow | 
 const isSanitized = (node: ts.Expression): boolean => ts.isCallExpression(node) && /^(?:DOMPurify\.sanitize|sanitizeHtml|validator\.escape|encodeURIComponent|path\.basename|[A-Za-z_$][\w$]*Schema\.(?:parse|safeParse))$/.test(propertyPath(node.expression));
 
 const sinks: SinkRule[] = [
-  { id: 'taint.command-injection', category: 'sast', severity: 'P0', title: 'Untrusted input reaches command execution', cwe: 'CWE-78', recommendation: 'Use a fixed executable and validated argument array; never compose shell commands from request or IPC data.', match: (call) => /^(?:exec|execSync|child_process\.exec)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
-  { id: 'taint.ssrf', category: 'sast', severity: 'P1', title: 'Untrusted input controls an outbound request', cwe: 'CWE-918', recommendation: 'Parse the URL and enforce an HTTPS host allowlist; reject loopback, private and link-local destinations.', match: (call) => /^(?:fetch|axios(?:\.get|\.post|\.request)?|got|request)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
-  { id: 'taint.path-traversal', category: 'sast', severity: 'P1', title: 'Untrusted input reaches a filesystem path', cwe: 'CWE-22', recommendation: 'Resolve the path under an allowed root and verify the resulting relative path cannot escape it.', match: (call) => /^(?:fs\.)?(?:readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream|unlink|rm|open)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
-  { id: 'taint.sql-injection', category: 'sast', severity: 'P0', title: 'Untrusted input reaches a database query', cwe: 'CWE-89', recommendation: 'Use parameterized queries or ORM bindings for every value.', match: (call) => /(?:^|\.)(?:query|execute|raw|exec)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
-  { id: 'taint.xss', category: 'sast', severity: 'P1', title: 'Untrusted input reaches an HTML rendering sink', cwe: 'CWE-79', recommendation: 'Render as text or sanitize with a context-aware HTML sanitizer.', match: (call) => /^(?:document\.write|insertAdjacentHTML)$/.test(propertyPath(call.expression)) ? call.arguments.at(-1) : undefined },
-  { id: 'taint.open-redirect', category: 'sast', severity: 'P2', title: 'Untrusted input controls a redirect target', cwe: 'CWE-601', recommendation: 'Use relative destinations or enforce an exact origin and path allowlist.', match: (call) => /(?:^|\.)redirect$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
-  { id: 'taint.unsafe-deserialization', category: 'sast', severity: 'P0', title: 'Untrusted input reaches an unsafe deserializer', cwe: 'CWE-502', recommendation: 'Use JSON with schema validation and remove executable object deserialization.', match: (call) => /(?:^|\.)(?:deserialize|unserialize|load)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
-  { id: 'taint.log-injection', category: 'sast', severity: 'P2', title: 'Untrusted input is written to logs', cwe: 'CWE-117', recommendation: 'Use structured logging and escape line breaks and control characters.', match: (call) => /^(?:console|logger|log)\.(?:log|info|warn|error)$/.test(propertyPath(call.expression)) ? call.arguments.find((argument) => Boolean(sourceLabel(argument)) || ts.isIdentifier(argument)) : undefined },
+  { id: 'taint.command-injection', category: 'sast', severity: 'P0', title: '不可信输入进入命令执行', cwe: 'CWE-78', recommendation: '使用固定的可执行文件和经过校验的参数数组，禁止使用请求或 IPC 数据拼接 Shell 命令。', match: (call) => /^(?:exec|execSync|child_process\.exec)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
+  { id: 'taint.ssrf', category: 'sast', severity: 'P1', title: '不可信输入控制外部网络请求', cwe: 'CWE-918', recommendation: '解析 URL 并执行 HTTPS 主机白名单校验，同时拒绝回环、私有和链路本地地址。', match: (call) => /^(?:fetch|axios(?:\.get|\.post|\.request)?|got|request)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
+  { id: 'taint.path-traversal', category: 'sast', severity: 'P1', title: '不可信输入进入文件系统路径', cwe: 'CWE-22', recommendation: '在允许的根目录下解析路径，并验证生成的相对路径不能逃逸根目录。', match: (call) => /^(?:fs\.)?(?:readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream|unlink|rm|open)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
+  { id: 'taint.sql-injection', category: 'sast', severity: 'P0', title: '不可信输入进入数据库查询', cwe: 'CWE-89', recommendation: '所有动态值均应使用参数化查询或 ORM 参数绑定。', match: (call) => /(?:^|\.)(?:query|execute|raw|exec)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
+  { id: 'taint.xss', category: 'sast', severity: 'P1', title: '不可信输入进入 HTML 渲染点', cwe: 'CWE-79', recommendation: '优先按文本渲染；确需 HTML 时，使用与上下文匹配的可靠净化器。', match: (call) => /^(?:document\.write|insertAdjacentHTML)$/.test(propertyPath(call.expression)) ? call.arguments.at(-1) : undefined },
+  { id: 'taint.open-redirect', category: 'sast', severity: 'P2', title: '不可信输入控制重定向目标', cwe: 'CWE-601', recommendation: '仅使用相对目标，或对来源和路径执行精确白名单校验。', match: (call) => /(?:^|\.)redirect$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
+  { id: 'taint.unsafe-deserialization', category: 'sast', severity: 'P0', title: '不可信输入进入不安全反序列化', cwe: 'CWE-502', recommendation: '使用 JSON 和结构校验，移除可执行对象反序列化。', match: (call) => /(?:^|\.)(?:deserialize|unserialize|load)$/.test(propertyPath(call.expression)) ? call.arguments[0] : undefined },
+  { id: 'taint.log-injection', category: 'sast', severity: 'P2', title: '不可信输入被写入日志', cwe: 'CWE-117', recommendation: '使用结构化日志，并转义换行符和控制字符。', match: (call) => /^(?:console|logger|log)\.(?:log|info|warn|error)$/.test(propertyPath(call.expression)) ? call.arguments.find((argument) => Boolean(sourceLabel(argument)) || ts.isIdentifier(argument)) : undefined },
 ];
 
 function frameworkNames(files: Array<{ source: ts.SourceFile; content: string }>): string[] {
@@ -60,7 +60,7 @@ function frameworkNames(files: Array<{ source: ts.SourceFile; content: string }>
 function makeFinding(rule: SinkRule, sourceFile: ts.SourceFile, sink: ts.Node, flow: Flow, confidence: FindingConfidence): SecurityFinding {
   const location = locationOf(sourceFile, sink); const excerpt = redactSecrets(textOf(sink));
   const key = fingerprint('semantic-analysis', rule.id, location.file, `${location.line}:${excerpt}`); const now = Date.now();
-  return { id: findingId(key), fingerprint: key, scannerId: 'semantic-analysis', ruleId: rule.id, category: rule.category, severity: rule.severity, confidence, confidenceRationale: confidence === 'high' ? 'AST-confirmed source and sink with a direct or interprocedural data-flow path.' : 'AST-confirmed sensitive operation with a heuristic authorization or propagation assessment.', status: 'open', title: rule.title, description: `${flow.sourceLabel} flows into a security-sensitive operation.`, location, evidence: [{ kind: 'code', excerpt, location }], trace: [...flow.path, { kind: 'sink', label: textOf(sink), location }], recommendation: rule.recommendation, cwe: rule.cwe, firstSeenAt: now, lastSeenAt: now };
+  return { id: findingId(key), fingerprint: key, scannerId: 'semantic-analysis', ruleId: rule.id, category: rule.category, severity: rule.severity, confidence, confidenceRationale: confidence === 'high' ? 'AST 已确认输入源、危险点以及直接或跨函数的数据流路径。' : 'AST 已确认敏感操作，但授权检查或传播路径包含启发式判断。', status: 'open', title: rule.title, description: `${flow.sourceLabel} 流入了安全敏感操作。`, location, evidence: [{ kind: 'code', excerpt, location }], trace: [...flow.path, { kind: 'sink', label: textOf(sink), location }], recommendation: rule.recommendation, cwe: rule.cwe, firstSeenAt: now, lastSeenAt: now };
 }
 
 export function analyzeTypeScriptProject(context: ScanContext): { findings: SecurityFinding[]; frameworks: string[] } {
@@ -108,9 +108,9 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
       if (ts.isCallExpression(node)) {
         const callName = propertyPath(node.expression); const first = node.arguments[0]; const literal = first && ts.isStringLiteralLike(first) ? first.text.toLowerCase() : '';
         const reportStatic = (rule: SinkRule, rationale: string): void => { const label = rationale; findings.push(makeFinding(rule, source, node, { expression: node, source: node, sourceLabel: label, path: [{ kind: 'source', label, location: locationOf(source, node) }] }, 'high')); };
-        if (/^(?:crypto\.)?createHash$/.test(callName) && ['md5', 'sha1'].includes(literal)) reportStatic({ id: 'crypto.weak-hash', category: 'sast', severity: 'P2', title: `Weak cryptographic hash: ${literal.toUpperCase()}`, cwe: 'CWE-328', recommendation: 'Use SHA-256 or stronger; use Argon2id, scrypt or bcrypt for passwords.', match: () => undefined }, `Static AST match for createHash('${literal}')`);
-        if (/^(?:jwt\.)?verify$/.test(callName) && (node.arguments.length < 3 || !/algorithms\s*:/.test(node.arguments[2]?.getText() ?? ''))) reportStatic({ id: 'auth.jwt-algorithm-not-pinned', category: 'sast', severity: 'P1', title: 'JWT verification does not pin allowed algorithms', cwe: 'CWE-347', recommendation: 'Pass an explicit allowlist of accepted JWT algorithms and validate issuer and audience.', match: () => undefined }, 'JWT verify call without an explicit algorithms allowlist');
-        if (callName === 'cors' && (!first || literal === '*')) reportStatic({ id: 'config.permissive-cors', category: 'config', severity: 'P2', title: 'Permissive CORS configuration', cwe: 'CWE-942', recommendation: 'Allow only trusted origins and avoid credentials with wildcard origins.', match: () => undefined }, 'CORS middleware has no restricted origin configuration');
+        if (/^(?:crypto\.)?createHash$/.test(callName) && ['md5', 'sha1'].includes(literal)) reportStatic({ id: 'crypto.weak-hash', category: 'sast', severity: 'P2', title: `使用了弱哈希算法：${literal.toUpperCase()}`, cwe: 'CWE-328', recommendation: '使用 SHA-256 或更强的算法；密码应使用 Argon2id、scrypt 或 bcrypt。', match: () => undefined }, `AST 静态匹配到 createHash('${literal}')`);
+        if (/^(?:jwt\.)?verify$/.test(callName) && (node.arguments.length < 3 || !/algorithms\s*:/.test(node.arguments[2]?.getText() ?? ''))) reportStatic({ id: 'auth.jwt-algorithm-not-pinned', category: 'sast', severity: 'P1', title: 'JWT 验证未限定允许的算法', cwe: 'CWE-347', recommendation: '显式传入允许的 JWT 算法白名单，并校验签发方和受众。', match: () => undefined }, 'JWT verify 调用未配置明确的算法白名单');
+        if (callName === 'cors' && (!first || literal === '*')) reportStatic({ id: 'config.permissive-cors', category: 'config', severity: 'P2', title: 'CORS 配置过于宽松', cwe: 'CWE-942', recommendation: '仅允许可信来源，且不要将凭据与通配来源组合使用。', match: () => undefined }, 'CORS 中间件未限制允许的来源');
       }
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         if (isSanitized(node.initializer)) { tainted.delete(node.name.text); }
@@ -137,13 +137,13 @@ export function analyzeTypeScriptProject(context: ScanContext): { findings: Secu
       if (ts.isCallExpression(node) && /^(?:app|router)\.(?:get|post|put|patch|delete)$/.test(propertyPath(node.expression))) {
         const route = node.arguments[0]; const handler = node.arguments.at(-1); const body = handler?.getText() ?? ''; const middleware = node.arguments.slice(1, -1).map(textOf).join(' ');
         if (route && handler && /\b(?:req|request)\.params\b/.test(body) && /\.(?:findOne|findById|findUnique|query|execute)\s*\(/.test(body) && !/(?:auth|session|permission|authorize|owner|userId)/i.test(`${middleware} ${body}`)) {
-          const rule: SinkRule = { id: 'framework.express-idor', category: 'sast', severity: 'P1', title: 'Express object lookup lacks an authorization check', cwe: 'CWE-639', recommendation: 'Authorize the current principal against the requested object, preferably in a shared route policy middleware.', match: () => undefined };
-          const label = `Route parameter: ${textOf(route)}`; findings.push(makeFinding(rule, source, handler, { expression: route as ts.Expression, source: route, sourceLabel: label, path: [{ kind: 'source', label, location: locationOf(source, route) }] }, 'medium'));
+          const rule: SinkRule = { id: 'framework.express-idor', category: 'sast', severity: 'P1', title: 'Express 对象查询缺少授权检查', cwe: 'CWE-639', recommendation: '校验当前用户是否有权访问目标对象，建议在统一的路由权限中间件中实现。', match: () => undefined };
+          const label = `路由参数：${textOf(route)}`; findings.push(makeFinding(rule, source, handler, { expression: route as ts.Expression, source: route, sourceLabel: label, path: [{ kind: 'source', label, location: locationOf(source, route) }] }, 'medium'));
         }
       }
       if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && node.name.text === 'dangerouslySetInnerHTML' && node.initializer) {
         const names: string[] = []; const collect = (child: ts.Node): void => { if (ts.isIdentifier(child)) names.push(child.text); ts.forEachChild(child, collect); }; collect(node.initializer); const flow = names.map((name) => tainted.get(name)).find(Boolean);
-        if (flow) { const rule: SinkRule = { id: 'framework.react-xss', category: 'sast', severity: 'P1', title: 'Untrusted input reaches dangerouslySetInnerHTML', cwe: 'CWE-79', recommendation: 'Avoid raw HTML or sanitize it with a maintained HTML sanitizer before rendering.', match: () => undefined }; findings.push(makeFinding(rule, source, node, flow, 'high')); }
+        if (flow) { const rule: SinkRule = { id: 'framework.react-xss', category: 'sast', severity: 'P1', title: '不可信输入进入 dangerouslySetInnerHTML', cwe: 'CWE-79', recommendation: '避免直接渲染原始 HTML；确有需要时，先使用持续维护的 HTML 净化器处理。', match: () => undefined }; findings.push(makeFinding(rule, source, node, flow, 'high')); }
       }
       let nextFunction = currentFunction; let childScope = tainted;
       if (ts.isFunctionDeclaration(node) && node.name) { nextFunction = node.name.text; childScope = new Map(); }
