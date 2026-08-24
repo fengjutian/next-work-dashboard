@@ -140,6 +140,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [scannerStateReady, setScannerStateReady] = useState(false);
   const [scannerDetectionRunning, setScannerDetectionRunning] = useState(false);
   const [networkAllowed, setNetworkAllowed] = useState(false);
+  const [verifySecrets, setVerifySecrets] = useState(false);
   const [scannerRuns, setScannerRuns] = useState<import('../../core/security-audit').ScannerRunResult[]>([]);
   const [lastScan, setLastScan] = useState<import('../../core/security-audit').ScanRecord | null>(null);
   const [baselines, setBaselines] = useState<import('../../core/security-audit').SecurityBaseline[]>([]);
@@ -221,12 +222,12 @@ export function SecurityAuditPanel(): JSX.Element {
     if (!api) { void runMockScan(); return; }
     setFindings(null);
     setProgress({ phase: 'scanning', percent: 0, message: '请选择项目目录…' });
-    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef, scanners: selectedScanners, networkPolicy: networkAllowed ? 'allow' : 'deny', aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
+    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef, scanners: selectedScanners, networkPolicy: networkAllowed ? 'allow' : 'deny', verifySecrets: networkAllowed && verifySecrets, aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
       if (!result.ok || !result.projectDir || !result.jobId) { setProgress({ phase: 'idle', percent: 0, message: '已取消' }); return; }
       setScannedDir(result.projectDir);
       setJobId(result.jobId);
     }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: securityAuditErrorMessage(error) }));
-  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, baselineRef, networkAllowed, runMockScan, scanMode, scannedDir, selectedScanners]);
+  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, baselineRef, networkAllowed, runMockScan, scanMode, scannedDir, selectedScanners, verifySecrets]);
 
   const selectProject = useCallback(() => {
     void window.electronAPI.securityAudit.project.select().then((result) => {
@@ -310,6 +311,7 @@ export function SecurityAuditPanel(): JSX.Element {
           {scanner.name}{scanner.builtIn ? '（内置）' : scanner.ready ? '' : scanner.installed ? '（未就绪）' : '（未安装）'}
         </label>)}
         <label className="flex shrink-0 items-center gap-1 rounded border border-orange-300 bg-orange-50 px-2 py-1 text-orange-800"><input type="checkbox" checked={networkAllowed} disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setNetworkAllowed(event.target.checked)} />允许扫描器联网（OSV/Trivy）</label>
+        <label className="flex shrink-0 items-center gap-1 rounded border border-red-300 bg-red-50 px-2 py-1 text-red-800" title="仅对支持的供应商执行只读验证；凭据不会保存或发送给 AI"><input type="checkbox" checked={verifySecrets} disabled={!networkAllowed || progress.phase === 'scanning' || progress.phase === 'triaging'} onChange={(event) => setVerifySecrets(event.target.checked)} />验证密钥有效性</label>
         <Button className="ml-auto shrink-0" loading={scannerDetectionRunning} onClick={() => loadScanners(true)}>重新检测</Button>
       </div>}
 
@@ -479,6 +481,7 @@ export function SecurityAuditPanel(): JSX.Element {
             )}
             {activeFinding.trace && activeFinding.trace.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">数据流 / 调用路径</div><div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">{activeFinding.trace.map((step, index) => <div key={`${step.kind}:${step.location.file}:${step.location.line}:${index}`} className="font-mono text-xs"><Tag color={step.kind === 'source' ? 'blue' : step.kind === 'sink' ? 'red' : 'purple'}>{step.kind}</Tag> {step.label} <span className="text-muted-foreground">— {step.location.file}:{step.location.line}</span></div>)}</div></div>}
             {activeFinding.suppressed && <Alert type="warning" message={activeFinding.status} description={activeFinding.suppressed.reason} />}
+            {activeFinding.secretVerification && <Alert type={activeFinding.secretVerification.status === 'valid' ? 'error' : 'info'} message={`密钥验证：${activeFinding.secretVerification.status}`} description={`${activeFinding.secretVerification.provider} · ${new Date(activeFinding.secretVerification.checkedAt).toLocaleString()}`} />}
             {activeFinding.confidenceRationale && <Alert type="info" message={`置信度：${activeFinding.confidence ?? 'unknown'}`} description={activeFinding.confidenceRationale} />}
             <Space wrap>
               <Button onClick={() => updateFindingStatus(activeFinding, 'confirmed')}>确认问题</Button>

@@ -64,19 +64,26 @@ export async function queryOsvForLocks(context: ScanContext): Promise<SecurityFi
 export const osvLockfileScanner: SecurityScanner = { id: 'osv-lockfile', name: 'OSV Exact Lockfile Vulnerability Match', async detect(context) { return context.networkPolicy === 'allow' && context.files.some((file) => /(?:lock|requirements)/i.test(file)); }, scan: queryOsvForLocks };
 
 const secretPattern = /(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*["']?([^\s"']{12,})|\b((?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,})\b/gi;
+const lastGitCommit = new Map<string, string>();
+const gitFindingCache = new Map<string, SecurityFinding[]>();
+async function verifySecret(secret: string, signal: AbortSignal): Promise<{ provider: string; status: 'valid' | 'invalid' | 'unknown'; checkedAt: number }> {
+  const checkedAt = Date.now(); if (!/^(?:ghp_|github_pat_)/.test(secret)) return { provider: 'unknown', status: 'unknown', checkedAt };
+  try { const response = await fetch('https://api.github.com/user', { signal, headers: { authorization: `Bearer ${secret}`, accept: 'application/vnd.github+json', 'user-agent': 'next-work-dashboard-security-audit' } }); return { provider: 'GitHub', status: response.ok ? 'valid' : response.status === 401 || response.status === 403 ? 'invalid' : 'unknown', checkedAt }; } catch { return { provider: 'GitHub', status: 'unknown', checkedAt }; }
+}
 export async function scanGitHistory(context: ScanContext): Promise<SecurityFinding[]> {
   if (!fs.existsSync(path.join(context.projectDir, '.git'))) return [];
-  let output = ''; try { ({ stdout: output } = await execFileAsync('git', ['log', '--all', '--format=commit:%H', '-p', '--no-ext-diff', '--unified=0'], { cwd: context.projectDir, windowsHide: true, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, signal: context.signal, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot } })); } catch (error) { if (context.signal.aborted) throw error; return []; }
+  let output = ''; let head = ''; try { ({ stdout: head } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: context.projectDir, windowsHide: true, timeout: 5_000, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot } })); const previous = lastGitCommit.get(context.projectDir); const range = previous && previous.trim() !== head.trim() ? [`${previous.trim()}..${head.trim()}`] : previous ? [] : ['--all']; if (!range.length) return gitFindingCache.get(context.projectDir) ?? []; ({ stdout: output } = await execFileAsync('git', ['log', ...range, '--format=commit:%H', '-p', '--no-ext-diff', '--unified=0', '--diff-filter=AM'], { cwd: context.projectDir, windowsHide: true, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, signal: context.signal, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot } })); lastGitCommit.set(context.projectDir, head.trim()); } catch (error) { if (context.signal.aborted) throw error; return gitFindingCache.get(context.projectDir) ?? []; }
   const findings: SecurityFinding[] = []; let commit = 'unknown'; let file = 'git-history'; let line = 1; const now = Date.now();
   for (const raw of output.split(/\r?\n/)) {
     if (raw.startsWith('commit:')) { commit = raw.slice(7, 19); continue; }
     if (raw.startsWith('+++ b/')) { file = raw.slice(6); continue; }
     const header = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(raw); if (header) { line = Number(header[1]); continue; }
     if (!raw.startsWith('+') || raw.startsWith('+++')) continue;
-    secretPattern.lastIndex = 0; if (!secretPattern.test(raw.slice(1))) { line += 1; continue; }
+    secretPattern.lastIndex = 0; const match = secretPattern.exec(raw.slice(1)); if (!match) { line += 1; continue; } const rawSecret = match[1] ?? match[2] ?? '';
     const ruleId = 'secret.git-history'; const excerpt = `Secret material exists in commit ${commit}`; const key = fingerprint('git-history-secrets', ruleId, file, `${commit}:${line}`);
-    findings.push({ id: findingId(key), fingerprint: key, scannerId: 'git-history-secrets', ruleId, category: 'secret', severity: 'P0', confidence: 'high', status: 'open', title: 'Secret found in Git history', description: `A credential-like value was added in commit ${commit}. The secret is redacted and was not persisted by the scanner.`, location: { file, line }, evidence: [{ kind: 'tool', excerpt, location: { file, line } }], recommendation: 'Revoke and rotate the credential, then remove it from Git history with an approved history-rewrite procedure.', cwe: 'CWE-798', firstSeenAt: now, lastSeenAt: now }); line += 1;
+    const verification = context.verifySecrets && context.networkPolicy === 'allow' ? await verifySecret(rawSecret, context.signal) : undefined;
+    findings.push({ id: findingId(key), fingerprint: key, scannerId: 'git-history-secrets', ruleId, category: 'secret', severity: 'P0', confidence: verification?.status === 'valid' ? 'high' : 'medium', confidenceRationale: verification?.status === 'valid' ? 'The provider confirmed this redacted credential is currently valid.' : 'The value matches a credential structure in committed history; validity was not confirmed.', status: 'open', title: 'Secret found in Git history', description: `A credential-like value was added in commit ${commit}. The secret is redacted and was not persisted by the scanner.`, location: { file, line }, evidence: [{ kind: 'tool', excerpt, location: { file, line } }], secretVerification: verification, recommendation: 'Revoke and rotate the credential, then remove it from Git history with an approved history-rewrite procedure.', cwe: 'CWE-798', firstSeenAt: now, lastSeenAt: now }); line += 1;
   }
-  return findings;
+  const combined = new Map([...(gitFindingCache.get(context.projectDir) ?? []), ...findings].map((finding) => [finding.fingerprint, finding])); const result = [...combined.values()]; gitFindingCache.set(context.projectDir, result); return result;
 }
 export const gitHistoryScanner: SecurityScanner = { id: 'git-history-secrets', name: 'Git History Secret Scan', async detect(context) { return fs.existsSync(path.join(context.projectDir, '.git')); }, scan: scanGitHistory };

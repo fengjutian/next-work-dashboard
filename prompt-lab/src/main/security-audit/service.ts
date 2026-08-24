@@ -2,9 +2,11 @@ import { safeStorage, type WebContents } from 'electron';
 import { SecurityScanOrchestrator, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
 import { externalScanners, listExternalScannerAvailability } from './external-scanners';
 import { createBaseline, listBaselines, readSecurityAuditData, recordFindingEvent, removeBaseline, writeSecurityAuditData, type StoredSecurityAuditData } from './database';
+import { backgroundSemanticScanner } from './worker-client';
 
 const jobs = new Map<string, AbortController>();
-const orchestrator = new SecurityScanOrchestrator([...builtinScanners, ...externalScanners]);
+const runtimeBuiltinScanners = builtinScanners.map((scanner) => scanner.id === 'semantic-analysis' ? backgroundSemanticScanner : scanner);
+const orchestrator = new SecurityScanOrchestrator([...runtimeBuiltinScanners, ...externalScanners]);
 
 function load(): StoredSecurityAuditData { return readSecurityAuditData(); }
 function save(data: StoredSecurityAuditData): void { writeSecurityAuditData(data); }
