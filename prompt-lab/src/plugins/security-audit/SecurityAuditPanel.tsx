@@ -132,7 +132,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [activeFinding, setActiveFinding] = useState<Finding | null>(null);
   const [severityFilter, setSeverityFilter] = useState<Finding['severity'] | 'all'>('all');
   const [jobId, setJobId] = useState<string | null>(null);
-  const [scanMode, setScanMode] = useState<'full' | 'incremental'>('incremental');
+  const [scanMode, setScanMode] = useState<'full' | 'incremental'>('full');
   const [commandScanRequested, setCommandScanRequested] = useState(false);
   const [scanners, setScanners] = useState<ScannerInfo[]>([]);
   const [selectedScanners, setSelectedScanners] = useState<string[]>([]);
