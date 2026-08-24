@@ -16,6 +16,9 @@ import { KnowledgeFolderTree } from './KnowledgeFolderTree';
 import { findDuplicateEntities, mergeEntities, stableEntityId } from '@/core/knowledge-graph/entity-normalization';
 import { attachDocumentHashes, deactivateMissingDocuments, reconcileDocuments } from '@/core/knowledge-graph/lifecycle';
 import { hybridGraphSearch, type HybridSearchResult } from '@/core/knowledge-graph/hybrid-search';
+import { analyzeGraphImpact, diffGraphSnapshots, evaluateGraphHealth } from '@/core/knowledge-graph/analysis';
+import { exportGraphContent } from '@/core/knowledge-graph/export';
+import type { GraphSnapshot, ImpactAnalysis, ImpactDirection } from './graph-types';
 import { createOpenAIProvider } from '@/core/llm';
 
 type KnowledgeWorkspaceView = KnowledgeIndex & {
@@ -43,6 +46,13 @@ const DEFAULT_NODES = [
 ];
 const GRAPH_STORAGE_KEY = 'prompt-lab:knowledge-graph:v1';
 const LEGACY_CODE_GRAPH_LIMIT = 100;
+const GRAPH_SNAPSHOT_KEY = 'prompt-lab:knowledge-graph:snapshots:v1';
+
+function downloadGraphFile(name: string, mime: string, content: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 // ── 默认节点工厂 ──
 const makeDefaultNodes = (): GraphNode[] =>
@@ -120,6 +130,39 @@ export const KnowledgeGraph: React.FC = () => {
   const [hybridResult, setHybridResult] = useState<HybridSearchResult | null>(null);
   const [graphAnswer, setGraphAnswer] = useState('');
   const [graphAsking, setGraphAsking] = useState(false);
+  const [impactDirection, setImpactDirection] = useState<ImpactDirection>('downstream');
+  const [impact, setImpact] = useState<ImpactAnalysis | null>(null);
+  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
+  const [snapshotDiffText, setSnapshotDiffText] = useState('');
+  const graphHealth = graphData ? evaluateGraphHealth(graphData) : null;
+
+  const inspectGraphNode = useCallback((nodeId: string) => {
+    setSelectedGraphNodeId(nodeId);
+    if (graphData) setImpact(analyzeGraphImpact(graphData, nodeId, { direction: impactDirection, maxDepth: 5, acceptedOnly: true }));
+  }, [graphData, impactDirection]);
+
+  const createGraphSnapshot = useCallback(() => {
+    if (!graphData) return;
+    const snapshots = JSON.parse(localStorage.getItem(GRAPH_SNAPSHOT_KEY) ?? '[]') as GraphSnapshot[];
+    const next = [...snapshots.slice(-9), { id: crypto.randomUUID(), createdAt: Date.now(), graph: graphData } satisfies GraphSnapshot];
+    localStorage.setItem(GRAPH_SNAPSHOT_KEY, JSON.stringify(next)); toast('图谱快照已创建', 'success');
+  }, [graphData, toast]);
+
+  const compareLatestSnapshot = useCallback(() => {
+    if (!graphData) return;
+    const snapshots = JSON.parse(localStorage.getItem(GRAPH_SNAPSHOT_KEY) ?? '[]') as GraphSnapshot[];
+    const latest = snapshots.at(-1); if (!latest) { toast('请先创建图谱快照', 'error'); return; }
+    const diff = diffGraphSnapshots(latest, graphData);
+    setSnapshotDiffText(`新增 ${diff.addedNodeIds.length} 节点 / 删除 ${diff.removedNodeIds.length} / 修改 ${diff.changedNodeIds.length} / 新增 ${diff.addedEdges.length} 关系 / 删除 ${diff.removedEdges.length} 关系`);
+  }, [graphData, toast]);
+
+  const exportGraph = useCallback((format: 'json' | 'markdown' | 'svg' | 'pdf') => {
+    if (!graphData || !graphHealth) return;
+    const actual = format === 'pdf' ? 'markdown' : format;
+    const file = exportGraphContent(actual, graphData, graphHealth, impact ?? undefined);
+    if (format === 'pdf') { const popup = window.open('', '_blank'); if (popup) { popup.document.write(`<pre style="white-space:pre-wrap;font:14px system-ui">${file.content.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))}</pre>`); popup.document.close(); popup.print(); } return; }
+    downloadGraphFile(`knowledge-graph-${new Date().toISOString().slice(0, 10)}.${file.extension}`, file.mime, file.content);
+  }, [graphData, graphHealth, impact]);
 
   // 人工/AI 图谱自动保存；知识工作区扫描结果是临时视图，不覆盖持久数据。
   useEffect(() => {
@@ -846,6 +889,31 @@ export const KnowledgeGraph: React.FC = () => {
           {hybridResult && <div className="space-y-1 rounded border p-2"><p>命中 {hybridResult.nodes.length} 个实体、{hybridResult.edges.length} 条关系、{hybridResult.documents.length} 篇文档</p><div className="max-h-24 overflow-auto text-[10px] text-muted-foreground">{hybridResult.nodes.map((node) => <span key={node.id} className="mr-2 inline-block">{node.label}</span>)}{hybridResult.documents.map((document) => <p key={document.sourcePath ?? document.name} className="truncate">{document.name} · {Math.round(document.score * 100)}%</p>)}</div><div className="grid grid-cols-2 gap-1"><button className="h-6 rounded border" onClick={() => void navigator.clipboard.writeText(hybridResult.context).then(() => toast('检索上下文已复制', 'success'))}>复制上下文</button><button className="h-6 rounded bg-primary text-primary-foreground disabled:opacity-50" disabled={!aiApi.apiKey || graphAsking} onClick={() => void askGraph()}>{graphAsking ? '回答中…' : '基于证据回答'}</button></div>{graphAnswer && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">{graphAnswer}</pre>}</div>}
         </section>
 
+        {graphData && graphHealth && <section className="space-y-2 border-t p-3 text-xs">
+          <div className="flex items-center justify-between"><span className="font-medium">图谱分析</span><span className="font-semibold">{graphHealth.grade} · {graphHealth.score}</span></div>
+          <div className="grid grid-cols-3 gap-1">
+            <select className="col-span-2 h-7 rounded border bg-background px-1" value={impactDirection} onChange={(event) => { const direction = event.target.value as ImpactDirection; setImpactDirection(direction); if (selectedGraphNodeId) setImpact(analyzeGraphImpact(graphData, selectedGraphNodeId, { direction, maxDepth: 5, acceptedOnly: true })); }}>
+              <option value="downstream">下游影响</option><option value="upstream">上游依赖</option><option value="both">双向关系</option>
+            </select>
+            <button className="h-7 rounded border" onClick={createGraphSnapshot}>快照</button>
+          </div>
+          {impact ? <div className="rounded border p-2 text-[11px]">
+            <p className="font-medium">影响风险 {impact.score}/100</p><p className="text-muted-foreground">直接 {impact.direct.length} · 间接 {impact.transitive.length} · 路径 {impact.paths.length} · 循环 {impact.cycles.length}</p>
+            <p className="mt-1 max-h-12 overflow-auto">{[...impact.direct, ...impact.transitive].slice(0, 20).map((node) => node.label).join('、') || '没有传播影响'}</p>
+          </div> : <p className="text-[11px] text-muted-foreground">点击图中节点分析上下游与传播路径</p>}
+          <div className="max-h-28 space-y-1 overflow-auto rounded border p-1">
+            {graphHealth.findings.length ? graphHealth.findings.slice(0, 20).map((finding) => <button key={finding.id} className="block w-full truncate rounded px-1.5 py-1 text-left hover:bg-accent" title={`${finding.explanation}\n${finding.suggestedAction ?? ''}`} onClick={() => finding.nodeIds[0] && inspectGraphNode(finding.nodeIds[0])}>{finding.severity === 'error' ? '错误' : finding.severity === 'warning' ? '警告' : '提示'} · {finding.explanation}</button>) : <p className="p-1 text-green-600">未发现图结构问题</p>}
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            <button className="h-7 rounded border" onClick={compareLatestSnapshot}>快照 Diff</button>
+            <button className="h-7 rounded border" onClick={() => exportGraph('json')}>JSON</button>
+            <button className="h-7 rounded border" onClick={() => exportGraph('markdown')}>报告</button>
+            <button className="h-7 rounded border" onClick={() => exportGraph('svg')}>SVG</button>
+            <button className="h-7 rounded border" onClick={() => exportGraph('pdf')}>打印/PDF</button>
+          </div>
+          {snapshotDiffText && <p className="rounded bg-muted p-2 text-[11px]">{snapshotDiffText}</p>}
+        </section>}
+
         <NodePanel
           nodes={nodes}
           nodeInput={nodeInput}
@@ -876,7 +944,7 @@ export const KnowledgeGraph: React.FC = () => {
 
       {/* 右侧图谱区 */}
       <div className="flex-1 flex flex-col bg-card overflow-hidden relative">
-        <GraphCanvas graphData={graphData} onNodeSelect={knowledgeIndex ? selectKnowledgeDocument : undefined} onEdgeStatusChange={updateRelationStatus} />
+        <GraphCanvas graphData={graphData} onNodeSelect={(nodeId) => { inspectGraphNode(nodeId); if (knowledgeIndex?.documents.some((document) => document.uri === nodeId)) void selectKnowledgeDocument(nodeId); }} onEdgeStatusChange={updateRelationStatus} />
         {selectedKnowledgeDocument && (
           <aside className="absolute bottom-3 right-14 top-3 z-20 flex w-80 flex-col overflow-hidden rounded-lg border bg-background/95 shadow-xl backdrop-blur">
             <div className="flex items-start justify-between border-b p-3">

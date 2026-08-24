@@ -349,6 +349,7 @@ export interface ElectronAPI {
     semanticSearch: (rootPath: string, symbol: string) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     languageSemanticSearch: (rootPath: string, relativePath: string, line: number, column: number) => Promise<WorkspaceResult<WorkspaceSemanticResult[]>>;
     gitStatus: (rootPath: string) => Promise<WorkspaceResult<WorkspaceGitStatus[]>>;
+    gitGraphMetadata: (rootPath: string) => Promise<WorkspaceResult<Array<{ path: string; churn: number; authors: Array<{ name: string; commits: number }> }>>>;
     gitInit: (rootPath: string) => Promise<WorkspaceResult<string>>;
     createAgentWorktree: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo>>;
     getAgentWorktreeStatus: (rootPath: string, sessionId: string) => Promise<WorkspaceResult<AgentWorktreeInfo | null>>;

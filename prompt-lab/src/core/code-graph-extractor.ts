@@ -5,6 +5,7 @@ export interface CodeDocument { path: string; content: string }
 export interface CodeGraphOptions { maxNodes?: number }
 
 const SCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const GENERIC_EXTENSIONS = new Set(['.py', '.go', '.rs', '.java', '.kt', '.kts', '.cs', '.rb', '.php', '.swift', '.vue', '.svelte', '.c', '.h', '.cpp', '.cc', '.hpp']);
 
 function extension(path: string): string {
   const match = path.toLowerCase().match(/\.[^.\\/]+$/);
@@ -32,6 +33,24 @@ export function extractCodeGraph(documents: CodeDocument[], options: CodeGraphOp
       edges.push({ source, target, label, weight: 1, kind: 'code' });
     }
   };
+
+  // Conservative adapter layer for non-JS/TS languages. It creates exact file nodes and
+  // heuristic declaration/dependency edges, keeping the resolution visible to consumers.
+  for (const document of documents.filter((item) => GENERIC_EXTENSIONS.has(extension(item.path)))) {
+    const fileId = nodeId(document.path, 'file', document.path);
+    addNode(fileId, document.path, '文件', document.path);
+    const declarationPatterns = [
+      /\b(?:class|interface|struct|enum|trait|protocol|module)\s+([A-Za-z_$][\w$]*)/g,
+      /\b(?:def|func|fn|function|fun)\s+([A-Za-z_$][\w$]*)/g,
+    ];
+    for (const pattern of declarationPatterns) for (const match of document.content.matchAll(pattern)) {
+      const id = nodeId(document.path, 'symbol', match[1]); addNode(id, match[1], '符号', document.path); addEdge(fileId, id, '定义'); declarations.set(match[1], [...(declarations.get(match[1]) ?? []), id]);
+    }
+    const importPatterns = [/\b(?:import|from|use|require)\s*(?:\()?['"]?([\w@./:-]+)/g, /#include\s*[<"]([^>"]+)/g];
+    for (const pattern of importPatterns) for (const match of document.content.matchAll(pattern)) {
+      const moduleId = nodeId(match[1], 'module', match[1]); addNode(moduleId, match[1], '模块', document.path); addEdge(fileId, moduleId, '导入');
+    }
+  }
 
   for (const document of documents.filter((item) => SCRIPT_EXTENSIONS.has(extension(item.path)))) {
     const fileId = nodeId(document.path, 'file', document.path);
@@ -101,4 +120,4 @@ export function extractCodeGraph(documents: CodeDocument[], options: CodeGraphOp
   return { nodes: kept.map((node) => ({ ...node, degree: keptDegree.get(node.id) ?? 0 })), edges: keptEdges };
 }
 
-export function isSupportedCodePath(path: string): boolean { return SCRIPT_EXTENSIONS.has(extension(path)); }
+export function isSupportedCodePath(path: string): boolean { return SCRIPT_EXTENSIONS.has(extension(path)) || GENERIC_EXTENSIONS.has(extension(path)); }

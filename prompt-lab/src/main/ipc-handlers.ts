@@ -2326,6 +2326,21 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
+  ipcMain.handle('workspace:gitGraphMetadata', async (_event, rootPath: string) => {
+    try {
+      const root = resolveWorkspacePath(rootPath);
+      const output = execFileSync('git', ['log', '--format=@@%aN', '--numstat', '--no-renames', '-n', '1000'], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+      const files = new Map<string, { churn: number; lastModifiedAt?: number; authors: Map<string, number> }>(); let author = 'Unknown';
+      for (const line of output.split(/\r?\n/)) {
+        if (line.startsWith('@@')) { author = line.slice(2).trim() || 'Unknown'; continue; }
+        const match = line.match(/^(\d+|-)\s+(\d+|-)\s+(.+)$/); if (!match) continue;
+        const entry = files.get(match[3]) ?? { churn: 0, authors: new Map<string, number>() };
+        entry.churn += (Number(match[1]) || 0) + (Number(match[2]) || 0); entry.authors.set(author, (entry.authors.get(author) ?? 0) + 1); files.set(match[3], entry);
+      }
+      return { success: true, data: [...files].map(([filePath, value]) => ({ path: filePath, churn: value.churn, authors: [...value.authors].map(([name, commits]) => ({ name, commits })).sort((a, b) => b.commits - a.commits).slice(0, 5) })) };
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+  });
+
   ipcMain.handle('workspace:createAgentWorktree', async (_event, rootPath: string, sessionId: string) => {
     try {
       const root = resolveWorkspacePath(rootPath);

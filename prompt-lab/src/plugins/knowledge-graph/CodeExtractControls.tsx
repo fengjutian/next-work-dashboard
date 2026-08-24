@@ -23,6 +23,11 @@ export const CodeExtractControls: React.FC<{ onExtract: (graph: GraphData) => vo
       }
       if (documents.length === 0) throw new Error('所选工作区中没有可抽取的 JavaScript/TypeScript 文件');
       const graph = extractCodeGraph(documents, { maxNodes });
+      const metadata = await window.electronAPI.workspace.gitGraphMetadata(folder.path);
+      if (metadata.success) {
+        const byPath = new Map((metadata.data ?? []).map((item) => [item.path.replace(/\\/g, '/').toLowerCase(), item]));
+        graph.nodes = graph.nodes.map((node) => { const item = node.sourcePath ? byPath.get(node.sourcePath.replace(/\\/g, '/').toLowerCase()) : undefined; return item ? { ...node, metrics: { ...node.metrics, churn: item.churn, authors: item.authors } } : node; });
+      }
       onExtract(graph);
       toast(`代码图谱：${documents.length} 个文件，${graph.nodes.length} 个节点，${graph.edges.length} 条边`, 'success');
     } catch (error) {

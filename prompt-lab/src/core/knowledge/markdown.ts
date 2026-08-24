@@ -37,8 +37,12 @@ export function extractWikiLinks(content: string): WikiLink[] {
     for (const match of withoutInlineCode.matchAll(/(!)?\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g)) {
       links.push({
         raw: match[0], target: match[2].trim(), label: match[3]?.trim(),
-        embedded: Boolean(match[1]), line: index + 1,
+        embedded: Boolean(match[1]), line: index + 1, kind: 'wiki',
       });
+    }
+    for (const match of withoutInlineCode.matchAll(/(!)?\[([^\]]*)\]\(([^)]+\.(?:md|mdx)(?:#[^)\s]+)?)(?:\s+["'][^"']*["'])?\)/gi)) {
+      const [target, anchor] = match[3].trim().split('#', 2);
+      links.push({ raw: match[0], target, label: match[2]?.trim() || undefined, embedded: Boolean(match[1]), line: index + 1, kind: 'markdown', anchor });
     }
   });
   return links;

@@ -12,6 +12,8 @@ import { SankeyView } from './SankeyView';
 echarts.use([GraphChart, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 type GraphView = 'relation' | 'layered' | 'aggregate' | 'local' | 'matrix' | 'sankey';
+type ColorMode = 'category' | 'source' | 'status' | 'churn' | 'impact';
+type SizeMode = 'degree' | 'churn' | 'impact';
 
 const NODE_COLORS = [
   '#7c3aed', '#2563eb', '#0891b2', '#059669', '#ca8a04',
@@ -104,6 +106,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
   const [view, setView] = useState<GraphView>('aggregate');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<{ edge: GraphEdge; index: number } | null>(null);
+  const [colorMode, setColorMode] = useState<ColorMode>('category');
+  const [sizeMode, setSizeMode] = useState<SizeMode>('degree');
   const validGraph = useMemo(() => graphData ? sanitizeGraph(graphData) : null, [graphData]);
   const fallbackNodeId = useMemo(() => validGraph?.nodes.reduce<GraphNode | undefined>(
     (best, node) => !best || node.degree > best.degree ? node : best,
@@ -135,7 +139,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
     const chart = echarts.init(container, undefined, { renderer: 'canvas' });
     chartRef.current = chart;
     const maxWeight = Math.max(...displayGraph.edges.map((edge) => edge.weight), 1);
-    const maxDegree = Math.max(...displayGraph.nodes.map((node) => node.degree), 1);
     const isLargeGraph = displayGraph.nodes.length > 180;
     const sortedByDegree = [...displayGraph.nodes].sort((a, b) => b.degree - a.degree);
     const labeledNodeIds = new Set(sortedByDegree.slice(0, isLargeGraph ? 24 : sortedByDegree.length).map((node) => node.id));
@@ -170,9 +173,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
         data: displayGraph.nodes.map((node) => {
           const categoryName = nodeCategory(node, view);
           const position = positions?.get(node.id);
+          const metric = sizeMode === 'churn' ? (node.metrics?.churn ?? 0) : sizeMode === 'impact' ? (node.metrics?.blastRadius ?? 0) : node.degree;
+          const maxMetric = Math.max(...displayGraph.nodes.map((item) => sizeMode === 'churn' ? (item.metrics?.churn ?? 0) : sizeMode === 'impact' ? (item.metrics?.blastRadius ?? 0) : item.degree), 1);
           const size = view === 'aggregate'
-            ? 22 + Math.sqrt(node.degree / maxDegree) * 28
-            : 18 + Math.sqrt(node.degree / maxDegree) * 24;
+            ? 22 + Math.sqrt(metric / maxMetric) * 28
+            : 18 + Math.sqrt(metric / maxMetric) * 24;
           return {
             id: node.id,
             name: node.label,
@@ -186,6 +191,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
             y: position?.y,
             label: { show: view === 'aggregate' || labeledNodeIds.has(node.id) },
             itemStyle: {
+              color: colorMode === 'source' ? NODE_COLORS[['manual', 'extracted', 'wiki-link', 'code'].indexOf(node.source) % NODE_COLORS.length]
+                : colorMode === 'churn' ? `rgba(239,68,68,${Math.min(.25 + (node.metrics?.churn ?? 0) / 20, 1)})`
+                  : colorMode === 'impact' ? `rgba(245,158,11,${Math.min(.25 + (node.metrics?.blastRadius ?? 0) / 30, 1)})` : undefined,
               borderColor: '#ffffff',
               borderWidth: 2,
               shadowBlur: view === 'aggregate' ? 10 : 5,
@@ -262,7 +270,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
       if (chartRef.current === chart) chartRef.current = null;
       chart.dispose();
     };
-  }, [categories, displayGraph, onNodeSelect, validGraph, view]);
+  }, [categories, colorMode, displayGraph, onNodeSelect, sizeMode, validGraph, view]);
 
   if (!graphData) {
     return <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -275,6 +283,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graphData, onNodeSelec
     <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border border-border bg-background/95 p-1 shadow-sm backdrop-blur">
       <select className="h-7 rounded bg-transparent px-2 text-xs outline-none" value={view} onChange={(event) => setView(event.target.value as GraphView)}>
         <option value="aggregate">模块聚合</option><option value="layered">分层依赖</option><option value="local">局部关系</option><option value="sankey">桑基图</option><option value="matrix">依赖矩阵</option><option value="relation">完整关系</option>
+      </select>
+      <select className="h-7 rounded border-l bg-transparent px-2 text-xs outline-none" value={colorMode} onChange={(event) => setColorMode(event.target.value as ColorMode)} title="节点颜色">
+        <option value="category">按类型着色</option><option value="source">按来源着色</option><option value="status">按状态着色</option><option value="churn">按变更热度</option><option value="impact">按影响范围</option>
+      </select>
+      <select className="h-7 rounded border-l bg-transparent px-2 text-xs outline-none" value={sizeMode} onChange={(event) => setSizeMode(event.target.value as SizeMode)} title="节点大小">
+        <option value="degree">大小：关联度</option><option value="churn">大小：变更量</option><option value="impact">大小：影响范围</option>
       </select>
       {view === 'local' && <select className="h-7 max-w-56 rounded border-l border-border bg-transparent px-2 text-xs outline-none" value={selectedNodeId ?? fallbackNodeId ?? ''} onChange={(event) => setSelectedNodeId(event.target.value)}>
         {(validGraph?.nodes ?? []).slice().sort((a, b) => a.label.localeCompare(b.label)).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}

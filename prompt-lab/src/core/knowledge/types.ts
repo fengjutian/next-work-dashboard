@@ -6,6 +6,8 @@ export interface WikiLink {
   label?: string;
   embedded: boolean;
   line: number;
+  kind?: 'wiki' | 'markdown';
+  anchor?: string;
 }
 
 export interface KnowledgeDocument {
