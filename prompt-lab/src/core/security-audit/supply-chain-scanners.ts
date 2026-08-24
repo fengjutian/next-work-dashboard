@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { findingId, fingerprint } from './security';
 import type { ScanContext, SecurityFinding, SecurityScanner } from './types';
+import { classifySecret, extractSecretCandidate, isLikelyTestPath, secretDigest, type SecretCandidate } from './secret-analysis';
 
 const execFileAsync = promisify(execFile);
 export type LockedDependency = { name: string; version: string; integrity?: string; source: string };
@@ -86,4 +87,26 @@ export async function scanGitHistory(context: ScanContext): Promise<SecurityFind
   }
   const combined = new Map([...(gitFindingCache.get(context.projectDir) ?? []), ...findings].map((finding) => [finding.fingerprint, finding])); const result = [...combined.values()]; gitFindingCache.set(context.projectDir, result); return result;
 }
-export const gitHistoryScanner: SecurityScanner = { id: 'git-history-secrets', name: 'Git 历史密钥扫描', async detect(context) { return fs.existsSync(path.join(context.projectDir, '.git')); }, scan: scanGitHistory };
+export async function scanGitHistoryAggregated(context: ScanContext): Promise<SecurityFinding[]> {
+  if (!fs.existsSync(path.join(context.projectDir, '.git'))) return [];
+  let output = ''; try { ({ stdout: output } = await execFileAsync('git', ['log', '--all', '--format=commit:%H', '-p', '--no-ext-diff', '--unified=0', '--diff-filter=AM'], { cwd: context.projectDir, windowsHide: true, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, signal: context.signal, env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot } })); } catch (error) { if (context.signal.aborted) throw error; return []; }
+  type Group = { candidate: SecretCandidate; commits: Set<string>; locations: Map<string, { file: string; line: number }>; occurrences: number };
+  const groups = new Map<string, Group>(); let commit = 'unknown'; let file = 'git-history'; let line = 1;
+  for (const raw of output.split(/\r?\n/)) {
+    if (raw.startsWith('commit:')) { commit = raw.slice(7, 19); continue; }
+    if (raw.startsWith('+++ b/')) { file = raw.slice(6); continue; }
+    const header = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(raw); if (header) { line = Number(header[1]); continue; }
+    if (!raw.startsWith('+') || raw.startsWith('+++')) continue;
+    const added = raw.slice(1); let candidate = extractSecretCandidate(added, file); if (!candidate) { const provider = /\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b/.exec(added)?.[0]; if (provider) candidate = classifySecret('token', provider, file); }
+    if (!candidate || isLikelyTestPath(file)) { line += 1; continue; } const digest = secretDigest(candidate.value); const group = groups.get(digest) ?? { candidate, commits: new Set(), locations: new Map(), occurrences: 0 }; group.commits.add(commit); group.locations.set(`${file}:${line}`, { file, line }); group.occurrences += 1; groups.set(digest, group); line += 1;
+  }
+  const findings: SecurityFinding[] = []; const now = Date.now();
+  for (const [digest, group] of groups) {
+    let currentExists = false; for (const candidateFile of context.files) { if (isLikelyTestPath(candidateFile)) continue; try { if (fs.readFileSync(path.join(context.projectDir, candidateFile), 'utf8').includes(group.candidate.value)) { currentExists = true; break; } } catch { /* file changed while scanning */ } }
+    const verification = context.verifySecrets && context.networkPolicy === 'allow' ? await verifySecret(group.candidate.value, context.signal) : undefined; const locations = [...group.locations.values()].slice(0, 100); const primary = locations[0] ?? { file: 'git-history', line: 1 }; const commits = [...group.commits].slice(0, 100);
+    const severity = verification?.status === 'valid' && currentExists ? 'P0' : currentExists ? group.candidate.severity : verification?.status === 'valid' ? 'P1' : group.candidate.confidence === 'high' ? 'P2' : 'P3'; const confidence = verification?.status === 'valid' ? 'high' : group.candidate.confidence; const key = fingerprint('git-history-secrets', 'secret.git-history', 'git-history', digest);
+    findings.push({ id: findingId(key), fingerprint: key, scannerId: 'git-history-secrets', ruleId: 'secret.git-history', category: 'secret', severity, confidence, confidenceRationale: verification?.status === 'valid' ? '密钥供应商已确认该脱敏凭据当前仍然有效。' : group.candidate.rationale, status: 'open', title: `Git 历史中发现疑似${group.candidate.kind === 'password' ? '密码' : '密钥'}`, description: `同一疑似凭据在 ${commits.length} 个提交、${locations.length} 个位置中出现 ${group.occurrences} 次；${currentExists ? '当前代码中仍然存在' : '当前代码中已不存在'}。`, location: primary, evidence: locations.slice(0, 10).map((location) => ({ kind: 'tool' as const, excerpt: `Git 历史位置：${location.file}:${location.line}`, location })), secretVerification: verification, secretDetails: { kind: group.candidate.kind, variableName: group.candidate.variableName, currentExists, historyExists: true, occurrences: group.occurrences, locations, commits, valueFingerprint: digest }, recommendation: currentExists ? '立即撤销并轮换凭据，将当前代码改为安全的密钥存储方式，并清理 Git 历史。' : '确认凭据已撤销或轮换；如仍然有效，请立即撤销，并评估是否需要清理 Git 历史。', cwe: 'CWE-798', firstSeenAt: now, lastSeenAt: now });
+  }
+  return findings;
+}
+export const gitHistoryScanner: SecurityScanner = { id: 'git-history-secrets', name: 'Git 历史密钥扫描（聚合）', async detect(context) { return fs.existsSync(path.join(context.projectDir, '.git')); }, scan: scanGitHistoryAggregated };

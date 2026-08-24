@@ -14,6 +14,7 @@ export interface SecretFindingDetails {
   occurrences: number;
   locations: FindingLocation[];
   commits?: string[];
+  valueFingerprint: string;
 }
 
 export interface SecurityFinding {
