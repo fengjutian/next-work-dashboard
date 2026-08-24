@@ -133,6 +133,7 @@ export function SecurityAuditPanel(): JSX.Element {
   const [severityFilter, setSeverityFilter] = useState<Finding['severity'] | 'all'>('all');
   const [jobId, setJobId] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<'full' | 'incremental'>('full');
+  const [baselineRef, setBaselineRef] = useState('HEAD');
   const [commandScanRequested, setCommandScanRequested] = useState(false);
   const [scanners, setScanners] = useState<ScannerInfo[]>([]);
   const [selectedScanners, setSelectedScanners] = useState<string[]>([]);
@@ -217,12 +218,12 @@ export function SecurityAuditPanel(): JSX.Element {
     if (!api) { void runMockScan(); return; }
     setFindings(null);
     setProgress({ phase: 'scanning', percent: 0, message: '请选择项目目录…' });
-    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef: 'HEAD', scanners: selectedScanners, networkPolicy: networkAllowed ? 'allow' : 'deny', aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
+    void api.scan.start({ projectDir: scannedDir ?? '', mode: scanMode, baselineRef, scanners: selectedScanners, networkPolicy: networkAllowed ? 'allow' : 'deny', aiReview: true, aiConfig: { baseUrl: aiApi.baseUrl, apiKey: aiApi.apiKey, model: aiApi.model } }).then((result) => {
       if (!result.ok || !result.projectDir || !result.jobId) { setProgress({ phase: 'idle', percent: 0, message: '已取消' }); return; }
       setScannedDir(result.projectDir);
       setJobId(result.jobId);
     }).catch((error: unknown) => setProgress({ phase: 'failed', percent: 100, message: securityAuditErrorMessage(error) }));
-  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, networkAllowed, runMockScan, scanMode, scannedDir, selectedScanners]);
+  }, [aiApi.apiKey, aiApi.baseUrl, aiApi.model, baselineRef, networkAllowed, runMockScan, scanMode, scannedDir, selectedScanners]);
 
   const selectProject = useCallback(() => {
     void window.electronAPI.securityAudit.project.select().then((result) => {
@@ -284,6 +285,7 @@ export function SecurityAuditPanel(): JSX.Element {
             <option value="incremental">增量扫描</option>
             <option value="full">完整扫描</option>
           </select>
+          {scanMode === 'incremental' && <input aria-label="基线 Git 引用" title="增量扫描基线 Git 引用" className="h-8 w-28 rounded border border-border bg-background px-2 text-xs" value={baselineRef} onChange={(event) => setBaselineRef(event.target.value)} placeholder="HEAD / main" disabled={progress.phase === 'scanning' || progress.phase === 'triaging'} />}
           {(progress.phase === 'scanning' || progress.phase === 'triaging') && jobId && <Button onClick={() => { void window.electronAPI.securityAudit.scan.cancel(jobId); }}>取消</Button>}
           {scannedDir && findings && <Button onClick={() => { void window.electronAPI.securityAudit.report.exportSarif(scannedDir).then((result) => { if (result.ok) message.success(`SARIF 已导出：${result.filePath}`); }); }}>导出 SARIF</Button>}
           <Button icon={<Play size={14} />} type="primary" onClick={runScan} loading={progress.phase === 'scanning' || progress.phase === 'triaging'}>
@@ -468,6 +470,7 @@ export function SecurityAuditPanel(): JSX.Element {
             )}
             {activeFinding.trace && activeFinding.trace.length > 0 && <div><div className="mb-1 text-xs text-muted-foreground">数据流 / 调用路径</div><div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">{activeFinding.trace.map((step, index) => <div key={`${step.kind}:${step.location.file}:${step.location.line}:${index}`} className="font-mono text-xs"><Tag color={step.kind === 'source' ? 'blue' : step.kind === 'sink' ? 'red' : 'purple'}>{step.kind}</Tag> {step.label} <span className="text-muted-foreground">— {step.location.file}:{step.location.line}</span></div>)}</div></div>}
             {activeFinding.suppressed && <Alert type="warning" message={activeFinding.status} description={activeFinding.suppressed.reason} />}
+            {activeFinding.confidenceRationale && <Alert type="info" message={`置信度：${activeFinding.confidence ?? 'unknown'}`} description={activeFinding.confidenceRationale} />}
             <Space wrap>
               <Button onClick={() => updateFindingStatus(activeFinding, 'confirmed')}>确认问题</Button>
               <Button onClick={() => updateFindingStatus(activeFinding, 'false-positive')}>标记误报</Button>

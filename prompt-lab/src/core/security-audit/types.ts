@@ -15,6 +15,7 @@ export interface SecurityFinding {
   category: FindingCategory;
   severity: SecuritySeverity;
   confidence: FindingConfidence;
+  confidenceRationale?: string;
   status: FindingStatus;
   title: string;
   description: string;

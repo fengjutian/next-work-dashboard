@@ -6,7 +6,7 @@ import { findingId, fingerprint } from './security';
 import type { ScanContext, SecurityFinding, SecurityScanner } from './types';
 
 const execFileAsync = promisify(execFile);
-type LockedDependency = { name: string; version: string; integrity?: string; source: string };
+export type LockedDependency = { name: string; version: string; integrity?: string; source: string };
 
 export function parseNpmLock(content: string): LockedDependency[] {
   const json = JSON.parse(content) as { lockfileVersion?: number; packages?: Record<string, { version?: string; integrity?: string }>; dependencies?: Record<string, { version?: string; integrity?: string }> };
@@ -14,12 +14,22 @@ export function parseNpmLock(content: string): LockedDependency[] {
   return Object.entries(json.dependencies ?? {}).map(([name, value]) => ({ name, version: String(value.version ?? ''), integrity: value.integrity, source: 'package-lock.json' }));
 }
 
+export function parseDependencyLock(file: string, content: string): LockedDependency[] {
+  const base = path.basename(file).toLowerCase();
+  if (base === 'package-lock.json' || base === 'npm-shrinkwrap.json') return parseNpmLock(content).map((item) => ({ ...item, source: file }));
+  if (base === 'cargo.lock') return [...content.matchAll(/\[\[package\]\][\s\S]*?\nname\s*=\s*"([^"]+)"[\s\S]*?\nversion\s*=\s*"([^"]+)"/g)].map((match) => ({ name: match[1], version: match[2], source: file }));
+  if (base === 'yarn.lock') return [...content.matchAll(/^"?([^"\s][^:\n]*?)"?:\s*\n\s+version\s+"([^"]+)"/gm)].map((match) => ({ name: match[1].replace(/@[^@]+$/, ''), version: match[2], source: file }));
+  if (base === 'pnpm-lock.yaml') return [...content.matchAll(/^\s{2,}\/([^/\s]+(?:\/[^/\s]+)?)\/([^:\s]+):/gm)].map((match) => ({ name: match[1], version: match[2], source: file }));
+  if (/^requirements(?:-[^.]+)?\.txt$/.test(base)) return content.split(/\r?\n/).map((line) => /^\s*([A-Za-z0-9_.-]+)\s*==\s*([^\s;]+)/.exec(line)).filter((match): match is RegExpExecArray => Boolean(match)).map((match) => ({ name: match[1], version: match[2], source: file }));
+  return [];
+}
+
 function lockFindings(context: ScanContext): SecurityFinding[] {
   const now = Date.now(); const findings: SecurityFinding[] = [];
-  for (const file of context.files.filter((item) => /(^|\/)(?:package-lock|npm-shrinkwrap)\.json$/i.test(item))) {
-    let dependencies: LockedDependency[]; try { dependencies = parseNpmLock(fs.readFileSync(path.join(context.projectDir, file), 'utf8')); } catch { continue; }
+  for (const file of context.files.filter((item) => /(^|\/)(?:(?:package-lock|npm-shrinkwrap)\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|requirements(?:-[^.]+)?\.txt)$/i.test(item))) {
+    let dependencies: LockedDependency[]; try { dependencies = parseDependencyLock(file, fs.readFileSync(path.join(context.projectDir, file), 'utf8')); } catch { continue; }
     for (const dependency of dependencies) {
-      if (dependency.integrity || /^(?:file:|link:)/.test(dependency.version)) continue;
+      if (!/(?:package-lock|npm-shrinkwrap)\.json$/i.test(file) || dependency.integrity || /^(?:file:|link:)/.test(dependency.version)) continue;
       const ruleId = 'sca.lockfile-missing-integrity'; const excerpt = `${dependency.name}@${dependency.version}`;
       const key = fingerprint('lockfile-analysis', ruleId, file, excerpt);
       findings.push({ id: findingId(key), fingerprint: key, scannerId: 'lockfile-analysis', ruleId, category: 'sca', severity: 'P2', confidence: 'high', status: 'open', title: 'Locked dependency has no integrity hash', description: `${excerpt} is resolved without a recorded package integrity hash.`, location: { file, line: 1 }, evidence: [{ kind: 'dependency', excerpt }], recommendation: 'Regenerate the lockfile with a current trusted package manager and review the resolved registry.', cwe: 'CWE-494', firstSeenAt: now, lastSeenAt: now });
@@ -28,7 +38,7 @@ function lockFindings(context: ScanContext): SecurityFinding[] {
   return findings;
 }
 
-export const lockfileScanner: SecurityScanner = { id: 'lockfile-analysis', name: 'Dependency Lockfile Analysis', async detect(context) { return context.files.some((file) => /(?:package-lock|npm-shrinkwrap)\.json$/i.test(file)); }, async scan(context) { return lockFindings(context); } };
+export const lockfileScanner: SecurityScanner = { id: 'lockfile-analysis', name: 'Dependency Lockfile Analysis', async detect(context) { return context.files.some((file) => /(?:(?:package-lock|npm-shrinkwrap)\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|requirements(?:-[^.]+)?\.txt)$/i.test(file)); }, async scan(context) { return lockFindings(context); } };
 
 const secretPattern = /(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*["']?([^\s"']{12,})|\b((?:sk|ghp|github_pat)_[A-Za-z0-9_-]{12,})\b/gi;
 export async function scanGitHistory(context: ScanContext): Promise<SecurityFinding[]> {

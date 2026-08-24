@@ -47,6 +47,7 @@ export interface Finding {
   scannerId?: string;
   category?: 'sast' | 'sca' | 'secret' | 'iac' | 'config';
   confidence?: 'low' | 'medium' | 'high';
+  confidenceRationale?: string;
   status?: 'open' | 'confirmed' | 'false-positive' | 'accepted' | 'fixed';
   evidence?: Array<{ kind: string; excerpt: string }>;
   trace?: import('../../core/security-audit').FindingTraceStep[];
