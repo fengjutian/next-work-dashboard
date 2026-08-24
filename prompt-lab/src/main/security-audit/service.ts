@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, safeStorage, type WebContents } from 'electron';
-import { SecurityScanOrchestrator, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
+import { SecurityScanOrchestrator, buildScanCoverage, builtinScanners, findingsToSarif, mergeWithBaseline, progressFor, resolveScanFiles, type FindingStatus, type ScanRecord, type ScanRequest, type SecurityFinding } from '../../core/security-audit';
 import { externalScanners, listExternalScannerAvailability } from './external-scanners';
 
 interface StoredData { version: 1; settings: Record<string, string>; scans: ScanRecord[] }
@@ -72,6 +72,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
   void (async () => {
     try {
       const files = await resolveScanFiles(input.projectDir, input.mode ?? 'full', input.baselineRef);
+      const coverage = buildScanCoverage(input.projectDir, files, input.mode ?? 'full', input.baselineRef);
       emit({ phase: 'scanning', percent: 2, message: `已确定 ${files.length} 个扫描文件` });
       const selectedScanners = [...new Set([...builtinScanners.map((scanner) => scanner.id), ...(input.scanners ?? [])])];
       const scanResult = await orchestrator.runDetailed({ projectDir: input.projectDir, files, signal: controller.signal, networkPolicy: input.networkPolicy ?? 'deny', emit }, selectedScanners);
@@ -80,7 +81,7 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
       const current = load();
       findings = mergeWithBaseline(findings, lastFindings(current, input.projectDir), Date.now(), input.mode === 'incremental' ? new Set(files) : undefined);
       const saved = current.scans.find((scan) => scan.id === jobId);
-      if (saved) Object.assign(saved, { findings, scannerRuns: scanResult.scannerRuns, status: 'completed', completedAt: Date.now() });
+      if (saved) Object.assign(saved, { findings, scannerRuns: scanResult.scannerRuns, coverage, status: 'completed', completedAt: Date.now() });
       save(current);
       emit({ phase: 'completed', percent: 100, message: '扫描完成', findingsCount: findings.filter((item) => item.status !== 'fixed').length });
     } catch (error) {
@@ -97,6 +98,13 @@ export async function startScan(input: ScanRequest, sender: WebContents): Promis
 
 export function cancelScan(jobId: string): boolean { const job = jobs.get(jobId); if (!job) return false; job.abort(); return true; }
 export function listFindings(projectDir: string): SecurityFinding[] { return lastFindings(load(), projectDir); }
+export function updateFinding(projectDir: string, findingId: string, status: FindingStatus, reason?: string): SecurityFinding {
+  const data = load(); const scan = data.scans.find((item) => item.projectDir === projectDir && item.status === 'completed'); const finding = scan?.findings.find((item) => item.id === findingId);
+  if (!finding) throw new Error('FINDING_NOT_FOUND');
+  finding.status = status;
+  finding.suppressed = status === 'false-positive' || status === 'accepted' ? { reason: String(reason ?? '').trim().slice(0, 1000) || status, at: Date.now() } : undefined;
+  save(data); return finding;
+}
 export function listScans(projectDir: string): ScanRecord[] { return load().scans.filter((scan) => scan.projectDir === projectDir); }
 export async function listScanners(projectDir?: string, networkPolicy: 'deny' | 'allow' = 'deny', force = false): Promise<import('../../core/security-audit').ScannerStatus[]> {
   const external = await listExternalScannerAvailability(projectDir, networkPolicy, force);

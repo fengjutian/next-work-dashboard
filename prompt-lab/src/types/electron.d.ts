@@ -667,6 +667,7 @@ export interface ElectronAPI {
     };
     findings: {
       list: (projectDir: string) => Promise<import('../core/security-audit').SecurityFinding[]>;
+      update: (input: { projectDir: string; findingId: string; status: import('../core/security-audit').FindingStatus; reason?: string }) => Promise<import('../core/security-audit').SecurityFinding>;
     };
     scans: { list: (projectDir: string) => Promise<import('../core/security-audit').ScanRecord[]> };
     scanners: { list: (input?: { projectDir?: string; networkPolicy?: 'deny' | 'allow'; force?: boolean }) => Promise<import('../core/security-audit').ScannerStatus[]> };

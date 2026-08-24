@@ -14,7 +14,8 @@ import { authorizeWorkspace, resolveWorkspacePath } from '../workspace/path';
 import type { ScanRequest } from '../../core/security-audit';
 import fs from 'node:fs';
 import path from 'node:path';
-import { cancelScan, createSarif, getSetting, listFindings, listScanners, listScans, setSetting, startScan } from './service';
+import { cancelScan, createSarif, getSetting, listFindings, listScanners, listScans, setSetting, startScan, updateFinding } from './service';
+import type { FindingStatus } from '../../core/security-audit';
 
 let initialized = false;
 
@@ -69,6 +70,7 @@ export function setupSecurityAuditIPC(): void {
   ipcMain.handle('security-audit:findings:list', (_e, projectDir: string) => {
     return listFindings(resolveWorkspacePath(projectDir));
   });
+  ipcMain.handle('security-audit:findings:update', (_e, input: { projectDir: string; findingId: string; status: FindingStatus; reason?: string }) => updateFinding(resolveWorkspacePath(input.projectDir), input.findingId, input.status, input.reason));
 
   ipcMain.handle('security-audit:scans:list', (_e, projectDir: string) => listScans(resolveWorkspacePath(projectDir)));
 

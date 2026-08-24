@@ -27,6 +27,7 @@ export const securityAuditBridge = {
   },
   findings: {
     list: (projectDir: string) => ipcRenderer.invoke('security-audit:findings:list', projectDir),
+    update: (input: { projectDir: string; findingId: string; status: import('../core/security-audit').FindingStatus; reason?: string }) => ipcRenderer.invoke('security-audit:findings:update', input),
   },
   scans: { list: (projectDir: string) => ipcRenderer.invoke('security-audit:scans:list', projectDir) },
   scanners: { list: (input?: { projectDir?: string; networkPolicy?: 'deny' | 'allow'; force?: boolean }) => ipcRenderer.invoke('security-audit:scanners:list', input) },

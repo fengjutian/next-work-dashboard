@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { SecurityFinding, ScanMode } from './types';
+import type { ScanCoverage, SecurityFinding, ScanMode } from './types';
 
 const execFileAsync = promisify(execFile);
 export const DEFAULT_EXCLUDES = new Set(['.git', 'node_modules', 'dist', 'build', 'out', 'coverage', '.next', 'target', 'vendor']);
@@ -45,6 +45,15 @@ export function enumerateTextFiles(root: string): string[] {
   };
   visit(root);
   return output;
+}
+
+export function buildScanCoverage(root: string, scannedFiles: string[], mode: ScanMode, baselineRef?: string): ScanCoverage {
+  const discovered = enumerateTextFiles(root); const languages: Record<string, number> = {}; let scannedBytes = 0;
+  const names: Record<string, string> = { '.ts': 'TypeScript', '.tsx': 'TypeScript React', '.js': 'JavaScript', '.jsx': 'React JSX', '.json': 'JSON', '.rs': 'Rust', '.py': 'Python', '.go': 'Go', '.java': 'Java', '.yml': 'YAML', '.yaml': 'YAML' };
+  for (const file of scannedFiles) { const language = names[path.extname(file).toLowerCase()] ?? 'Other'; languages[language] = (languages[language] ?? 0) + 1; try { scannedBytes += fs.statSync(path.join(root, file)).size; } catch { /* file changed during scan */ } }
+  const manifests = scannedFiles.map((file) => { try { return fs.readFileSync(path.join(root, file), 'utf8').slice(0, 100_000); } catch { return ''; } }).join('\n');
+  const frameworks = [['Express', /["']express["']/], ['React', /["']react["']/], ['Electron IPC', /ipcMain\.|ipcRenderer\.|["']electron["']/], ['Next.js', /["']next["']/]].filter(([, matcher]) => (matcher as RegExp).test(manifests)).map(([name]) => name as string);
+  return { discoveredFiles: discovered.length, scannedFiles: scannedFiles.length, skippedFiles: Math.max(0, discovered.length - scannedFiles.length), scannedBytes, languages, frameworks, mode, baselineRef };
 }
 
 export async function resolveScanFiles(root: string, mode: ScanMode, baselineRef = 'HEAD'): Promise<string[]> {

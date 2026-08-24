@@ -5,6 +5,7 @@ export type FindingStatus = 'open' | 'confirmed' | 'false-positive' | 'accepted'
 
 export interface FindingLocation { file: string; line: number; column?: number }
 export interface FindingEvidence { kind: 'code' | 'tool' | 'dependency'; excerpt: string; location?: FindingLocation }
+export interface FindingTraceStep { kind: 'source' | 'propagation' | 'call' | 'sink'; label: string; location: FindingLocation }
 
 export interface SecurityFinding {
   id: string;
@@ -19,6 +20,7 @@ export interface SecurityFinding {
   description: string;
   location: FindingLocation;
   evidence: FindingEvidence[];
+  trace?: FindingTraceStep[];
   recommendation: string;
   cwe?: string;
   cve?: string;
@@ -27,6 +29,7 @@ export interface SecurityFinding {
   firstSeenAt: number;
   lastSeenAt: number;
   fixedAt?: number;
+  suppressed?: { reason: string; at: number };
 }
 
 export type ScanMode = 'full' | 'incremental';
@@ -87,4 +90,15 @@ export interface ScanRecord {
   status: ScanProgress['phase'];
   findings: SecurityFinding[];
   scannerRuns: ScannerRunResult[];
+  coverage?: ScanCoverage;
+}
+export interface ScanCoverage {
+  discoveredFiles: number;
+  scannedFiles: number;
+  skippedFiles: number;
+  scannedBytes: number;
+  languages: Record<string, number>;
+  frameworks: string[];
+  mode: ScanMode;
+  baselineRef?: string;
 }
