@@ -6,6 +6,15 @@ export type FindingStatus = 'open' | 'confirmed' | 'false-positive' | 'accepted'
 export interface FindingLocation { file: string; line: number; column?: number }
 export interface FindingEvidence { kind: 'code' | 'tool' | 'dependency'; excerpt: string; location?: FindingLocation }
 export interface FindingTraceStep { kind: 'source' | 'propagation' | 'call' | 'sink'; label: string; location: FindingLocation }
+export interface SecretFindingDetails {
+  kind: 'generic' | 'github' | 'openai' | 'aws' | 'private-key' | 'password' | 'token';
+  variableName?: string;
+  currentExists: boolean;
+  historyExists: boolean;
+  occurrences: number;
+  locations: FindingLocation[];
+  commits?: string[];
+}
 
 export interface SecurityFinding {
   id: string;
@@ -32,6 +41,7 @@ export interface SecurityFinding {
   fixedAt?: number;
   suppressed?: { reason: string; at: number };
   secretVerification?: { provider: string; status: 'valid' | 'invalid' | 'unknown'; checkedAt: number };
+  secretDetails?: SecretFindingDetails;
 }
 
 export type ScanMode = 'full' | 'incremental';
@@ -104,6 +114,10 @@ export interface ScanCoverage {
   frameworks: string[];
   mode: ScanMode;
   baselineRef?: string;
+  capability: 'full' | 'partial' | 'limited';
+  capabilitySummary: string;
+  analyzedLanguages: string[];
+  unanalyzedLanguages: string[];
 }
 export interface SecurityBaseline { id: string; projectDir: string; name: string; gitRef: string; scanId?: string; createdAt: number }
 export interface BaselineComparison { baseline: SecurityBaseline; currentScanId?: string; newFindings: SecurityFinding[]; fixedFindings: SecurityFinding[]; unchangedCount: number }
