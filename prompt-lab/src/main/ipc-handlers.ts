@@ -2360,11 +2360,12 @@ export function setupIPC(webviewPreloadPath: string) {
     try {
       const inputs = Array.isArray(payload?.filePaths) ? payload.filePaths.map(resolveManagedVideo) : [];
       if (inputs.length < 3 || inputs.some((item) => !item)) return { success: false, error: '拼接至少需要 3 个有效的生成视频' };
+      const validInputs = inputs.filter((item): item is string => Boolean(item));
       const safeId = String(payload?.outputId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
       if (!safeId) return { success: false, error: 'outputId 不能为空' };
       listPath = path.join(videoGenDir, `${safeId}-concat.txt`);
       const escapePath = (item: string) => item.replace(/'/g, `'\\''`);
-      fs.writeFileSync(listPath, inputs.map((item) => `file '${escapePath(item!)}'`).join('\n'), 'utf8');
+      fs.writeFileSync(listPath, validInputs.map((item) => `file '${escapePath(item)}'`).join('\n'), 'utf8');
       const output = path.join(videoGenDir, `${safeId}-complete.mp4`);
       try { await runVideoFfmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', output]); }
       catch { await runVideoFfmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', output]); }

@@ -28,6 +28,7 @@ const MINIMAX_KEY_STORAGE = 'nwd:video-generation:minimax-api-key';
 const MINIMAX_BASE_URL_STORAGE = 'nwd:video-generation:minimax-base-url';
 const POLL_STATE_STORAGE = 'nwd:video-generation:active-polls';
 const POLL_PAUSED_STORAGE = 'nwd:video-generation:polls-paused';
+const STORYBOARD_RUNS_STORAGE = 'nwd:video-generation:storyboard-runs';
 const HISTORY_PAGE_SIZE = 12;
 const MAX_PROMPT_LENGTH = 7000;
 const POLL_STAGGER_MS = 1500; // 多个 active poll 错峰启动，避免一上线就把 MiniMax 打爆
@@ -99,6 +100,24 @@ interface ActivePoll {
   apiKey: string;
   baseUrl: string;
   model: string;
+  storyboardRunId?: string;
+  segmentIndex?: number;
+}
+
+interface StoryboardRun {
+  id: string;
+  requests: VideoGenerationRequest[];
+  filePaths: string[];
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+function loadStoryboardRuns(): StoryboardRun[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(STORYBOARD_RUNS_STORAGE) || '[]') as StoryboardRun[];
+    return Array.isArray(value) ? value.filter((item) => item?.id && Array.isArray(item.requests) && item.requests.length >= MIN_STORYBOARD_SEGMENTS) : [];
+  } catch { return []; }
 }
 
 function loadActivePolls(): ActivePoll[] {
@@ -405,17 +424,21 @@ export const VideoGenerationPanel: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [activePolls, setActivePolls] = useState<ActivePoll[]>(() => loadActivePolls());
+  const [storyboardRuns, setStoryboardRuns] = useState<StoryboardRun[]>(() => loadStoryboardRuns());
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [videoMeta, setVideoMeta] = useState<{ recordId: string; mimeType: string } | null>(null);
   const [pollPaused, setPollPaused] = useState<boolean>(() => localStorage.getItem(POLL_PAUSED_STORAGE) === '1');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activePollsRef = useRef<ActivePoll[]>([]);
+  const storyboardRunsRef = useRef<StoryboardRun[]>([]);
   activePollsRef.current = activePolls;
+  storyboardRunsRef.current = storyboardRuns;
 
   useEffect(() => { localStorage.setItem(MINIMAX_KEY_STORAGE, apiKey); }, [apiKey]);
   useEffect(() => { localStorage.setItem(MINIMAX_BASE_URL_STORAGE, baseUrl); }, [baseUrl]);
   useEffect(() => { persistActivePolls(activePolls); }, [activePolls]);
+  useEffect(() => { localStorage.setItem(STORYBOARD_RUNS_STORAGE, JSON.stringify(storyboardRuns)); }, [storyboardRuns]);
   useEffect(() => { localStorage.setItem(POLL_PAUSED_STORAGE, pollPaused ? '1' : '0'); }, [pollPaused]);
 
   const refreshLibrary = useCallback(() => {
@@ -437,6 +460,44 @@ export const VideoGenerationPanel: React.FC = () => {
     notifApi.error({ message: '视频生成失败', description: message, placement: 'bottomRight', duration: 6 });
     setActivePolls((current) => current.filter((poll) => poll.recordId !== recordId));
   }, [notifApi]);
+
+  const continueStoryboard = useCallback(async (poll: ActivePoll, filePath: string): Promise<void> => {
+    if (!poll.storyboardRunId || poll.segmentIndex === undefined) return;
+    const run = storyboardRunsRef.current.find((item) => item.id === poll.storyboardRunId);
+    if (!run) return;
+    const completedPaths = [...run.filePaths, filePath];
+    const nextIndex = poll.segmentIndex + 1;
+    if (nextIndex >= run.requests.length) {
+      const outputId = `storyboard-${run.id}`;
+      const result = await window.electronAPI.videoGeneration.concat({ filePaths: completedPaths, outputId });
+      if (!result.success || !result.filePath) throw new Error(result.error || '多段视频拼接失败');
+      await createTask({ id: outputId, taskId: outputId, prompt: run.requests[0].prompt, model: run.model,
+        mode: 'text-to-video', duration: run.requests.reduce((sum, item) => sum + (item.duration || 6), 0),
+        resolution: run.requests[0].resolution || '768P', ratio: run.requests[0].ratio || '16:9' });
+      await attachFile(outputId, result.fileName || '', result.filePath, result.bytes || 0);
+      await updateStatus(outputId, 'succeeded');
+      setStoryboardRuns((current) => current.filter((item) => item.id !== run.id));
+      refreshLibrary();
+      notifApi.success({ message: '连续视频已生成并拼接', description: `${run.requests.length} 段已合成为一个完整 MP4。`, placement: 'bottomRight' });
+      return;
+    }
+    const frame = await window.electronAPI.videoGeneration.extractLastFrame({ filePath, recordId: poll.recordId });
+    if (!frame.success || !frame.data || !frame.name || !frame.mimeType) throw new Error(frame.error || '无法提取上一段尾帧');
+    const uploaded = await window.electronAPI.videoGeneration.uploadReference({ name: frame.name, mimeType: frame.mimeType, data: frame.data, ttlHours: 1 });
+    if (frame.filePath) void window.electronAPI.videoGeneration.cleanup(frame.filePath);
+    if (!uploaded.success || !uploaded.url) throw new Error(uploaded.error || '上一段尾帧上传失败');
+    const payload: VideoGenerationRequest = { ...run.requests[nextIndex], mode: 'image-to-video', firstFrameUrl: uploaded.url };
+    const response = await window.electronAPI.videoGeneration.create(payload);
+    if (!response.success || !response.taskId) throw new Error(response.error || `第 ${nextIndex + 1} 段提交失败`);
+    const taskId = response.taskId;
+    const recordId = makeId();
+    await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: payload.model || DEFAULT_MODEL,
+      mode: 'image-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+    setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, filePaths: completedPaths } : item));
+    setActivePolls((current) => [...current, { recordId, taskId, attempts: 0, apiKey: run.apiKey,
+      baseUrl: run.baseUrl, model: run.model, storyboardRunId: run.id, segmentIndex: nextIndex }]);
+    refreshLibrary();
+  }, [notifApi, refreshLibrary]);
 
   // 轮询单个任务直到终态。失败 / 超时 / 取消都会停。
   const pollOnce = useCallback(async (poll: ActivePoll): Promise<void> => {
@@ -460,6 +521,11 @@ export const VideoGenerationPanel: React.FC = () => {
         }
         await attachFile(poll.recordId, dl.fileName || '', dl.filePath, dl.bytes || 0);
         await updateStatus(poll.recordId, 'succeeded');
+        try { await continueStoryboard(poll, dl.filePath); }
+        catch (err) {
+          if (poll.storyboardRunId) setStoryboardRuns((current) => current.filter((item) => item.id !== poll.storyboardRunId));
+          notifApi.error({ message: '连续视频续写中断', description: err instanceof Error ? err.message : String(err), placement: 'bottomRight', duration: 8 });
+        }
         notifApi.success({ message: '视频生成完成', description: '可以预览、下载或转发到视频播放器。', placement: 'bottomRight' });
         refreshLibrary();
       } catch (err) {
@@ -480,7 +546,7 @@ export const VideoGenerationPanel: React.FC = () => {
     if (poll.attempts + 1 >= POLL_MAX_ATTEMPTS) {
       recordError(poll.recordId, `轮询超过 ${POLL_MAX_ATTEMPTS} 次仍未成功，请检查账户额度或稍后重试`);
     }
-  }, [notifApi, recordError, refreshLibrary, stopPolling]);
+  }, [continueStoryboard, notifApi, recordError, refreshLibrary, stopPolling]);
 
   // 启动一个轮询（如果已经在跑就跳过）
   const startPolling = useCallback((poll: ActivePoll) => {
@@ -713,23 +779,24 @@ export const VideoGenerationPanel: React.FC = () => {
       duration, resolution, ratio, mode: 'text-to-video' }, { globalPrompt: prompt, continuityBible, segments });
     if (requests.some((request) => request.prompt.length > MAX_PROMPT_LENGTH)) { showError(`某一分段合成后的提示词超过 ${MAX_PROMPT_LENGTH} 字符，请精简全局设定或分段描述`); return; }
     setSubmitting(true);
-    let submitted = 0;
     try {
-      for (const payload of requests) {
-        const response = await window.electronAPI.videoGeneration.create(payload);
-        if (!response.success || !response.taskId) throw new Error(response.error || `第 ${submitted + 1} 段提交失败`);
-        const recordId = makeId();
-        await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: payload.model || DEFAULT_MODEL,
-          mode: 'text-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
-        startPolling({ recordId, taskId: response.taskId, attempts: 0, apiKey: payload.apiKey,
-          baseUrl: payload.baseUrl || baseUrl, model: payload.model || DEFAULT_MODEL });
-        submitted += 1;
-      }
+      const payload = requests[0];
+      const response = await window.electronAPI.videoGeneration.create(payload);
+      if (!response.success || !response.taskId) throw new Error(response.error || '第 1 段提交失败');
+      const recordId = makeId();
+      const runId = makeId();
+      const run: StoryboardRun = { id: runId, requests, filePaths: [], apiKey: payload.apiKey,
+        baseUrl: payload.baseUrl || baseUrl, model: payload.model || DEFAULT_MODEL };
+      setStoryboardRuns((current) => [...current, run]);
+      await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: run.model,
+        mode: 'text-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+      startPolling({ recordId, taskId: response.taskId, attempts: 0, apiKey: run.apiKey, baseUrl: run.baseUrl,
+        model: run.model, storyboardRunId: runId, segmentIndex: 0 });
       refreshLibrary();
-      showInfo('多段视频任务已提交', `${submitted} 段已进入生成队列；每段共享连续性设定，可在视频库分别查看。`);
+      showInfo('连续视频已开始生成', `先生成第 1/${requests.length} 段，完成后将自动提取尾帧并续写下一段。`);
     } catch (err) {
       refreshLibrary();
-      showError(`${submitted} 段已提交；${err instanceof Error ? err.message : '后续片段提交失败'}`);
+      showError(err instanceof Error ? err.message : '连续视频提交失败');
     } finally { setSubmitting(false); }
   }, [apiKey, baseUrl, continuityBible, duration, model, prompt, ratio, refreshLibrary, resolution, segments, showError, showInfo, startPolling]);
 
