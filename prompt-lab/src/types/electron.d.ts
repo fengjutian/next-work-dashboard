@@ -203,6 +203,9 @@ export interface ElectronAPI {
     delete: (documentId: string) => Promise<{ success: boolean; error?: string }>;
   };
   office: import('../plugins/office-studio/types').OfficeStudioAPI;
+  markdownToWord: {
+    save: (data: ArrayBuffer, defaultName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  };
   toggleAlwaysOnTop: () => Promise<boolean>;
   getAutoLaunch: () => Promise<boolean>;
   setAutoLaunch: (enabled: boolean) => Promise<boolean>;

@@ -41,6 +41,7 @@ const terminal = preloadable(() => import('../terminal').then((m) => ({ default:
 const database = preloadable(() => import('../database').then((m) => ({ default: m.DatabaseBrowser })));
 const codeEditor = preloadable(() => import('../code-editor').then((m) => ({ default: m.CodeEditorPanel })));
 const markdownEditor = preloadable(() => import('../markdown-editor').then((m) => ({ default: m.MarkdownEditorPanel })));
+const markdownToWord = preloadable(() => import('../markdown-to-word').then((m) => ({ default: m.MarkdownToWordPanel })));
 const compare = preloadable(() => import('../compare').then((m) => ({ default: m.ComparePanel })));
 const documentKnowledge = preloadable(() => import('../document-knowledge').then((m) => ({ default: m.DocumentKnowledgePanel })));
 const hanyuJinjie = preloadable(() => import('../hanyu-jinjie').then((m) => ({ default: m.HanyuJinjiePanel })));
@@ -82,6 +83,7 @@ const TerminalPluginPanel = terminal.component;
 const DatabaseBrowser = database.component;
 const CodeEditorPanel = codeEditor.component;
 const MarkdownEditorPanel = markdownEditor.component;
+const MarkdownToWordPanel = markdownToWord.component;
 const ComparePanel = compare.component;
 const DocumentKnowledgePanel = documentKnowledge.component;
 const HanyuJinjiePanel = hanyuJinjie.component;
@@ -111,6 +113,19 @@ const OutlineScaffolderPanel = outlineScaffolder.component;
 const ClassicalReadingPanel = classicalReading.component;
 
 const builtInPlugins: Plugin[] = [
+  {
+    id: 'markdown-to-word',
+    name: 'Markdown 转 Word',
+    icon: Word,
+    component: MarkdownToWordPanel,
+    preload: markdownToWord.preload,
+    enabled: false,
+    order: 10,
+    activate: (context) => context.commands.register('markdown-to-word.export', () => { window.dispatchEvent(new CustomEvent('markdown-to-word:export')); }),
+    contributions: {
+      commands: [{ id: 'markdown-to-word.export', title: 'Markdown 转 Word', category: '文档工具' }],
+    },
+  },
   {
     id: 'outline-scaffolder',
     name: '章节文档生成器',

@@ -51,6 +51,7 @@ import { deliverAgentPR, pushAgentBranch, createGitHubPR, registerPRProvider, ty
 import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
+import { registerMarkdownToWordIpc } from '../plugins/markdown-to-word/backend/ipc';
 import { registerRssIpc } from '../plugins/rss-reader/backend/rss-service';
 import { setupMyCastIPC, startDaemon as startMyCastDaemon, shutdownDaemon as shutdownMyCastDaemon } from '../plugins/mycast/backend/mycast-service';
 import { setupPhoneIPC, stopPhoneService } from '../plugins/phone/backend/phone-service';
@@ -156,6 +157,7 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 
 export function setupIPC(webviewPreloadPath: string) {
   registerOfficeIpc();
+  registerMarkdownToWordIpc();
   registerRssIpc();
   const outlineProjectsPath = path.join(app.getPath('userData'), 'outline-scaffolder-projects.json');
   ipcMain.handle('outline-projects:load', () => {

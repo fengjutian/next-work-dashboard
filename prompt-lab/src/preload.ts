@@ -153,6 +153,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke("office:renderPage", filePath, page),
     close: (filePath) => ipcRenderer.invoke("office:close", filePath),
   },
+  markdownToWord: {
+    save: (data, defaultName) =>
+      ipcRenderer.invoke("markdown-to-word:save", data, defaultName),
+  },
 
   // V2 功能
   toggleAlwaysOnTop: () => ipcRenderer.invoke("window-toggle-always-on-top"),

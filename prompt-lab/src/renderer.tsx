@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Component, type ErrorInfo, type PropsWithChildren } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 
@@ -6,14 +6,14 @@ interface RootErrorBoundaryState {
   error: Error | null;
 }
 
-class RootErrorBoundary extends React.Component<React.PropsWithChildren, RootErrorBoundaryState> {
+class RootErrorBoundary extends Component<PropsWithChildren, RootErrorBoundaryState> {
   state: RootErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): RootErrorBoundaryState {
     return { error };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('[renderer] Uncaught React error', error, info.componentStack);
   }
 
@@ -84,6 +84,6 @@ void bootstrap().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   const root = document.getElementById('root');
   if (root) {
-    root.innerHTML = `<main style="height:100vh;display:grid;place-items:center;font-family:system-ui;background:#fff;color:#222"><section style="max-width:560px;padding:24px"><h1>应用启动失败</h1><p style="color:#666">${message.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)}</p><button onclick="location.reload()" style="padding:8px 16px">重新加载</button></section></main>`;
+    root.innerHTML = `<main style="height:100vh;display:grid;place-items:center;font-family:system-ui;background:#fff;color:#222"><section style="max-width:560px;padding:24px"><h1>应用启动失败</h1><p style="color:#666">${message.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character)}</p><button onclick="location.reload()" style="padding:8px 16px">重新加载</button></section></main>`;
   }
 });
