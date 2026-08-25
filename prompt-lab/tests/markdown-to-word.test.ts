@@ -37,7 +37,8 @@ describe('markdown to Word converter', () => {
     expect(xml).toContain('w:val="Heading1"');
     expect(xml).toContain('<w:numPr>');
     expect(xml).toContain('w:val="Quote"');
-    expect(xml).toContain('const a = 1;');
+    expect(xml).toContain('<w:t>const</w:t>');
+    expect(xml).toContain('<w:t>a</w:t>');
     expect(xml).toContain('<w:tbl>');
   });
 
@@ -47,5 +48,46 @@ describe('markdown to Word converter', () => {
     expect(zip.file('[Content_Types].xml')).not.toBeNull();
     expect(zip.file('word/document.xml')).not.toBeNull();
     expect(await zip.file('docProps/core.xml')?.async('string')).toContain('<dc:title>Test</dc:title>');
+  });
+
+  it('creates advanced Word parts and external relationships', async () => {
+    const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 100, 0, 0, 0, 50]);
+    const buffer = await markdownToDocx('# Report\n\n[OpenAI](https://openai.com)\n\n![Chart](chart.png)\n\nA fact[^1].\n\n[^1]: Source', {
+      title: 'Report', author: 'Author', header: 'Header', footer: 'Footer', pageNumbers: true, cover: true,
+      chapterNumbering: true, tableZebra: true, resolveImage: async () => ({ data: png.buffer, mimeType: 'image/png' }),
+    });
+    const zip = await JSZip.loadAsync(buffer);
+    const document = await zip.file('word/document.xml')?.async('string');
+    const rels = await zip.file('word/_rels/document.xml.rels')?.async('string');
+    expect(document).toContain('<w:drawing>');
+    expect(document).toContain('<w:hyperlink r:id=');
+    expect(document).toContain('<w:footnoteReference');
+    expect(rels).toContain('relationships/hyperlink');
+    expect(rels).toContain('relationships/image');
+    expect(zip.file('word/media/image1.png')).not.toBeNull();
+    expect(zip.file('word/header1.xml')).not.toBeNull();
+    expect(zip.file('word/footer1.xml')).not.toBeNull();
+    expect(zip.file('word/footnotes.xml')).not.toBeNull();
+    expect(await zip.file('word/settings.xml')?.async('string')).toContain('updateFields');
+  });
+
+  it('converts formulas, alerts and common HTML', () => {
+    const xml = markdownToDocumentXml('$$ E = mc^2 $$\n> [!WARNING] Be careful\n<table><tr><th>A</th></tr><tr><td>B</td></tr></table>\n<u>underlined</u>');
+    expect(xml).toContain('<m:oMathPara');
+    expect(xml).toContain('ED7D31');
+    expect(xml).toContain('<w:tbl>');
+    expect(xml).toContain('<w:u w:val="single"/>');
+  });
+
+  it('supports image attributes, table captions and citations', async () => {
+    const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 100, 0, 0, 0, 50]);
+    const buffer = await markdownToDocx('![Chart](chart.png){width=50% align=right caption="Sales"}\n\nTable: Results\n| A | B |\n|:---|---:|\n|1|2|\n\nSee [@doe].\n\n[@doe]: Doe, 2026.', { resolveImage: async () => ({ data: png.buffer, mimeType: 'image/png' }) });
+    const zip = await JSZip.loadAsync(buffer);
+    const xml = await zip.file('word/document.xml')?.async('string');
+    expect(xml).toContain('w:val="right"');
+    expect(xml).toContain('图 1  Sales');
+    expect(xml).toContain('表 1  Results');
+    expect(xml).toContain('w:anchor="ref_doe"');
+    expect(xml).toContain('Doe, 2026.');
   });
 });

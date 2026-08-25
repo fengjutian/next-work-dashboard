@@ -24,6 +24,20 @@ export function MarkdownToWordPanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [view, setView] = useState<'edit' | 'split' | 'preview'>('split');
+  const [sourcePath, setSourcePath] = useState<string>();
+  const [author, setAuthor] = useState('');
+  const [fontFamily, setFontFamily] = useState('Microsoft YaHei');
+  const [fontSize, setFontSize] = useState(11);
+  const [lineSpacing, setLineSpacing] = useState(1.5);
+  const [marginCm, setMarginCm] = useState(2.54);
+  const [header, setHeader] = useState('');
+  const [footer, setFooter] = useState('');
+  const [cover, setCover] = useState(false);
+  const [pageNumbers, setPageNumbers] = useState(true);
+  const [chapterNumbering, setChapterNumbering] = useState(false);
+  const [tableZebra, setTableZebra] = useState(true);
+  const [plantUmlServer, setPlantUmlServer] = useState('');
+  const [template, setTemplate] = useState<'standard' | 'business' | 'academic'>('standard');
 
   const openFile = useCallback(async () => {
     const picked = await window.electronAPI.pickFile({ accept: '.md,.markdown,.txt' });
@@ -32,6 +46,7 @@ export function MarkdownToWordPanel() {
     try {
       const text = file.text ?? new TextDecoder(file.encoding === 'gbk' ? 'gbk' : 'utf-8').decode(Uint8Array.from(atob(file.content), (char) => char.charCodeAt(0)));
       setMarkdown(text);
+      setSourcePath(file.path);
       setFileName(file.name.replace(/\.(md|markdown|txt)$/i, '') || suggestedName(text));
       setMessage(`已打开 ${file.name}`);
     } catch { setMessage('无法读取该文件，请确认文件是文本格式。'); }
@@ -42,12 +57,24 @@ export function MarkdownToWordPanel() {
     setBusy(true);
     setMessage('正在生成 Word 文档…');
     try {
-      const data = await markdownToDocx(markdown, { title: fileName || suggestedName(markdown) });
+      const data = await markdownToDocx(markdown, {
+        title: fileName || suggestedName(markdown), author, fontFamily, fontSize, lineSpacing, marginCm,
+        header, footer, cover, pageNumbers, chapterNumbering, tableZebra, sourcePath, template,
+        resolveImage: (source) => window.electronAPI.markdownToWord.loadAsset(source, sourcePath),
+        renderDiagram: async (language, source) => {
+          if (language === 'plantuml') return plantUmlServer ? window.electronAPI.markdownToWord.renderPlantUml(source, plantUmlServer) : null;
+          const mermaid = (await import('mermaid')).default;
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+          const { svg } = await mermaid.render(`md-word-${crypto.randomUUID()}`, source);
+          const bytes = new TextEncoder().encode(svg);
+          return { data: bytes.buffer, mimeType: 'image/svg+xml' };
+        },
+      });
       const result = await window.electronAPI.markdownToWord.save(data, fileName || suggestedName(markdown));
       setMessage(result.success ? `已导出：${result.filePath}` : result.error === 'CANCELLED' ? '已取消导出。' : `导出失败：${result.error || '未知错误'}`);
     } catch (error) { setMessage(`生成失败：${error instanceof Error ? error.message : String(error)}`); }
     finally { setBusy(false); }
-  }, [fileName, markdown]);
+  }, [author, chapterNumbering, cover, fileName, fontFamily, fontSize, footer, header, lineSpacing, marginCm, markdown, pageNumbers, plantUmlServer, sourcePath, tableZebra, template]);
 
   useEffect(() => {
     const handler = () => { void exportWord(); };
@@ -84,6 +111,24 @@ export function MarkdownToWordPanel() {
       </div>}
     </div>
     <div className="border-t bg-muted/20 px-5 py-2">
+      <details className="mb-2">
+        <summary className="cursor-pointer select-none text-xs font-medium">Word 排版与文档设置</summary>
+        <div className="mt-3 grid grid-cols-2 gap-3 text-xs md:grid-cols-4 xl:grid-cols-6">
+          <label>样式模板<select value={template} onChange={(event) => { const value = event.target.value as typeof template; setTemplate(value); if (value === 'business') { setFontFamily('Aptos'); setLineSpacing(1.15); } else if (value === 'academic') { setFontFamily('Times New Roman'); setLineSpacing(2); } else { setFontFamily('Microsoft YaHei'); setLineSpacing(1.5); } }} className="mt-1 h-8 w-full rounded border bg-background px-2"><option value="standard">标准中文</option><option value="business">商务报告</option><option value="academic">学术论文</option></select></label>
+          <label>作者<input value={author} onChange={(event) => setAuthor(event.target.value)} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label>字体<input value={fontFamily} onChange={(event) => setFontFamily(event.target.value)} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label>字号（pt）<input type="number" min="8" max="36" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label>行距<input type="number" min="1" max="3" step="0.1" value={lineSpacing} onChange={(event) => setLineSpacing(Number(event.target.value))} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label>页边距（cm）<input type="number" min="1" max="5" step="0.1" value={marginCm} onChange={(event) => setMarginCm(Number(event.target.value))} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label>页眉<input value={header} onChange={(event) => setHeader(event.target.value)} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label>页脚<input value={footer} onChange={(event) => setFooter(event.target.value)} className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label className="md:col-span-2">PlantUML 服务（可选）<input value={plantUmlServer} onChange={(event) => setPlantUmlServer(event.target.value)} placeholder="https://www.plantuml.com/plantuml" className="mt-1 h-8 w-full rounded border bg-background px-2" /></label>
+          <label className="flex items-end gap-2 pb-2"><input type="checkbox" checked={cover} onChange={(event) => setCover(event.target.checked)} />生成封面</label>
+          <label className="flex items-end gap-2 pb-2"><input type="checkbox" checked={pageNumbers} onChange={(event) => setPageNumbers(event.target.checked)} />显示页码</label>
+          <label className="flex items-end gap-2 pb-2"><input type="checkbox" checked={chapterNumbering} onChange={(event) => setChapterNumbering(event.target.checked)} />章节自动编号</label>
+          <label className="flex items-end gap-2 pb-2"><input type="checkbox" checked={tableZebra} onChange={(event) => setTableZebra(event.target.checked)} />表格斑马纹</label>
+        </div>
+      </details>
       <details>
         <summary className="cursor-pointer select-none text-xs font-medium">支持的格式与导出能力</summary>
         <div className="mt-2 grid max-h-28 grid-cols-2 gap-x-8 gap-y-1 overflow-auto text-xs leading-5 text-muted-foreground md:grid-cols-4">
@@ -94,7 +139,11 @@ export function MarkdownToWordPanel() {
           <span>目录占位符 [TOC]</span><span>分页符 \pagebreak</span><span>脚注 [^1]</span>
           <span>术语与定义列表</span><span>==文本高亮==</span><span>^上标^ 与 ~下标~</span>
           <span>邮箱地址</span><span>代码语言标签</span><span>YAML Front Matter</span>
-          <span>Emoji 与 Unicode</span><span>Word 可编辑内容</span><span>本地离线生成</span><span>实时安全预览</span>
+          <span>本地/网络图片嵌入</span><span>图片宽度、对齐与题注</span><span>页眉、页脚与页码</span>
+          <span>封面与文档元数据</span><span>表格列宽、对齐与斑马纹</span><span>代码语法高亮</span>
+          <span>LaTeX 线性公式</span><span>Mermaid 与 PlantUML</span><span>NOTE/TIP/WARNING 提示块</span>
+          <span>原生 Word 脚注</span><span>参考文献与文内引用</span><span>常见 HTML 与 HTML 表格</span>
+          <span>三套 Word 样式模板</span><span>Emoji 与 Unicode</span><span>Word 可编辑内容</span><span>本地离线生成</span><span>实时安全预览</span>
         </div>
       </details>
     </div>

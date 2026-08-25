@@ -156,6 +156,10 @@ const electronAPI: ElectronAPI = {
   markdownToWord: {
     save: (data, defaultName) =>
       ipcRenderer.invoke("markdown-to-word:save", data, defaultName),
+    loadAsset: (source, markdownPath) =>
+      ipcRenderer.invoke("markdown-to-word:asset", source, markdownPath),
+    renderPlantUml: (source, server) =>
+      ipcRenderer.invoke("markdown-to-word:plantuml", source, server),
   },
 
   // V2 功能

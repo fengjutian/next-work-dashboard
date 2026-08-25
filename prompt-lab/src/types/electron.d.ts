@@ -205,6 +205,8 @@ export interface ElectronAPI {
   office: import('../plugins/office-studio/types').OfficeStudioAPI;
   markdownToWord: {
     save: (data: ArrayBuffer, defaultName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+    loadAsset: (source: string, markdownPath?: string) => Promise<{ data: ArrayBuffer; mimeType: string } | null>;
+    renderPlantUml: (source: string, server: string) => Promise<{ data: ArrayBuffer; mimeType: string } | null>;
   };
   toggleAlwaysOnTop: () => Promise<boolean>;
   getAutoLaunch: () => Promise<boolean>;
