@@ -41,6 +41,7 @@ export function buildStoryboardRequests(base: Omit<VideoGenerationRequest, 'prom
       options.continuityBible.trim() ? `全局连续性设定：${options.continuityBible.trim()}。所有分段必须严格保持一致。` : '',
       `当前为第 ${index + 1}/${total} 段（${segment.title.trim() || `第 ${index + 1} 段`}）。`, handoff,
       `本段内容：${segment.prompt.trim()}`, ending,
+      index === total - 1 && segment.endState.trim() ? '这是最终段，必须完整收束动作和叙事，不留下未完成事件。' : '',
     ].filter(Boolean).join('\n') };
   });
 }

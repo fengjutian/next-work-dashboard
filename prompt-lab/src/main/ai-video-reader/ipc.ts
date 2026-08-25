@@ -294,7 +294,7 @@ function mediaBinaryCandidates(
   return [...new Set(candidates)];
 }
 
-function findMediaBinary(name: "ffmpeg" | "ffprobe"): string | null {
+export function findMediaBinary(name: "ffmpeg" | "ffprobe"): string | null {
   const executable = process.platform === "win32" ? `${name}.exe` : name;
   const platformDirectory =
     process.platform === "win32"

@@ -42,6 +42,7 @@ import {
   type LanceMemoryChunk,
 } from './lancedb-memory';
 import { mcpManager } from './mcp/mcp-manager';
+import { findMediaBinary } from './ai-video-reader/ipc';
 import type { McpServerConfig } from '../types/mcp';
 import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getAgentWorktreeConflictVersions, mergeAgentWorktree, previewAgentWorktreeMerge } from './agent/worktree';
 import { agentTaskService } from './agent/task-service';
@@ -619,6 +620,21 @@ export function setupIPC(webviewPreloadPath: string) {
   // 元数据走 SQLite（避免 50MB+ 视频塞进 BLOB）。Renderer 按需拉 blob 播放。
   const videoGenDir = path.join(app.getPath('userData'), 'video-generation');
   fs.mkdirSync(videoGenDir, { recursive: true });
+
+  const runVideoFfmpeg = (args: string[]): Promise<void> => new Promise((resolve, reject) => {
+    const binary = findMediaBinary('ffmpeg');
+    if (!binary) { reject(new Error('未找到 FFmpeg，请先在 AI 视频阅读器设置中配置')); return; }
+    execFile(binary, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { windowsHide: true }, (error, _stdout, stderr) => {
+      if (error) reject(new Error(`FFmpeg 执行失败：${String(stderr || error.message).slice(-1000)}`));
+      else resolve();
+    });
+  });
+
+  const resolveManagedVideo = (value: unknown): string | null => {
+    const resolved = path.resolve(String(value || ''));
+    const root = path.resolve(videoGenDir) + path.sep;
+    return resolved.startsWith(root) && fs.existsSync(resolved) ? resolved : null;
+  };
 
   const readVideoAsBlob = async (filePath: string): Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }> => {
     try {
@@ -2324,6 +2340,38 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
+  });
+
+  ipcMain.handle('video-generation:extract-last-frame', async (_event, payload: { filePath: string; recordId: string }) => {
+    try {
+      const input = resolveManagedVideo(payload?.filePath);
+      if (!input) return { success: false, error: '只允许处理视频生成目录内的文件' };
+      const safeId = String(payload?.recordId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
+      if (!safeId) return { success: false, error: 'recordId 不能为空' };
+      const output = path.join(videoGenDir, `${safeId}-last-frame.jpg`);
+      await runVideoFfmpeg(['-sseof', '-0.08', '-i', input, '-frames:v', '1', '-q:v', '2', output]);
+      const bytes = fs.readFileSync(output);
+      return { success: true, filePath: output, name: `${safeId}-last-frame.jpg`, mimeType: 'image/jpeg', data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+    } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) }; }
+  });
+
+  ipcMain.handle('video-generation:concat', async (_event, payload: { filePaths: string[]; outputId: string }) => {
+    let listPath = '';
+    try {
+      const inputs = Array.isArray(payload?.filePaths) ? payload.filePaths.map(resolveManagedVideo) : [];
+      if (inputs.length < 3 || inputs.some((item) => !item)) return { success: false, error: '拼接至少需要 3 个有效的生成视频' };
+      const safeId = String(payload?.outputId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
+      if (!safeId) return { success: false, error: 'outputId 不能为空' };
+      listPath = path.join(videoGenDir, `${safeId}-concat.txt`);
+      const escapePath = (item: string) => item.replace(/'/g, `'\\''`);
+      fs.writeFileSync(listPath, inputs.map((item) => `file '${escapePath(item!)}'`).join('\n'), 'utf8');
+      const output = path.join(videoGenDir, `${safeId}-complete.mp4`);
+      try { await runVideoFfmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', output]); }
+      catch { await runVideoFfmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart', output]); }
+      const stat = fs.statSync(output);
+      return { success: true, filePath: output, fileName: path.basename(output), bytes: stat.size };
+    } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) }; }
+    finally { if (listPath && fs.existsSync(listPath)) fs.unlinkSync(listPath); }
   });
 
   ipcMain.handle('workspace:gitGraphMetadata', async (_event, rootPath: string) => {

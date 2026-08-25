@@ -711,6 +711,7 @@ export const VideoGenerationPanel: React.FC = () => {
     if (error) { showError(error); return; }
     const requests = buildStoryboardRequests({ apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined, model: model.trim() || DEFAULT_MODEL,
       duration, resolution, ratio, mode: 'text-to-video' }, { globalPrompt: prompt, continuityBible, segments });
+    if (requests.some((request) => request.prompt.length > MAX_PROMPT_LENGTH)) { showError(`某一分段合成后的提示词超过 ${MAX_PROMPT_LENGTH} 字符，请精简全局设定或分段描述`); return; }
     setSubmitting(true);
     let submitted = 0;
     try {
@@ -843,6 +844,7 @@ export const VideoGenerationPanel: React.FC = () => {
               key={item.id}
               type="button"
               onClick={() => setMode(item.id)}
+              disabled={storyboardMode && item.id !== 'text-to-video'}
               className={`rounded-md border px-2 py-2 text-left text-xs ${mode === item.id ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'}`}
             >
               <span className="block font-medium">{item.label}</span>
@@ -868,7 +870,7 @@ export const VideoGenerationPanel: React.FC = () => {
 
         <label className="mb-4 flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-xs">
           <span><span className="block font-medium">多段连续视频</span><span className="text-[10px] text-muted-foreground">3 段起，可继续添加；统一角色、场景和镜头状态</span></span>
-          <input type="checkbox" checked={storyboardMode} onChange={(event) => setStoryboardMode(event.target.checked)} />
+          <input type="checkbox" checked={storyboardMode} onChange={(event) => { setStoryboardMode(event.target.checked); if (event.target.checked) setMode('text-to-video'); }} />
         </label>
         {storyboardMode && (
           <div className="mb-4 space-y-3 rounded-lg border p-3">

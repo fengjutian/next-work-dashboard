@@ -259,6 +259,8 @@ const electronAPI: ElectronAPI = {
       videoUrl: string;
       recordId: string;
     }) => ipcRenderer.invoke("video-generation:download", payload),
+    extractLastFrame: (payload: { filePath: string; recordId: string }) => ipcRenderer.invoke("video-generation:extract-last-frame", payload),
+    concat: (payload: { filePaths: string[]; outputId: string }) => ipcRenderer.invoke("video-generation:concat", payload),
     cancel: (payload: {
       baseUrl?: string;
       apiKey: string;
