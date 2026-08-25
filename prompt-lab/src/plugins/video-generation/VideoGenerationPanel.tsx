@@ -13,6 +13,7 @@ import type {
   VideoTaskStatus,
 } from './types';
 import { DEFAULT_MODEL, POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS } from './core/api';
+import { buildStoryboardRequests, createStoryboardSegment, MIN_STORYBOARD_SEGMENTS, validateStoryboard, type VideoStoryboardSegment } from './core/storyboard';
 import {
   attachFile,
   createTask,
@@ -378,6 +379,9 @@ export const VideoGenerationPanel: React.FC = () => {
   const [baseUrl, setBaseUrl] = useState<string>(() => readStoredBaseUrl());
   const [model, setModel] = useState<string>(DEFAULT_MODEL);
   const [prompt, setPrompt] = useState<string>('');
+  const [storyboardMode, setStoryboardMode] = useState(false);
+  const [continuityBible, setContinuityBible] = useState('');
+  const [segments, setSegments] = useState<VideoStoryboardSegment[]>(() => Array.from({ length: MIN_STORYBOARD_SEGMENTS }, (_, index) => createStoryboardSegment(index)));
   const [mode, setMode] = useState<VideoGenerationMode>('text-to-video');
   const [duration, setDuration] = useState<number>(6);
   const [resolution, setResolution] = useState<VideoResolution>('768P');
@@ -701,6 +705,33 @@ export const VideoGenerationPanel: React.FC = () => {
     }
   }, [validateAndBuildPayload, baseUrl, refreshLibrary, startPolling, showError, showInfo]);
 
+  const handleStoryboardSubmit = useCallback(async () => {
+    if (!apiKey.trim()) { showError('请先填写 MiniMax API Key'); return; }
+    const error = validateStoryboard({ globalPrompt: prompt, continuityBible, segments });
+    if (error) { showError(error); return; }
+    const requests = buildStoryboardRequests({ apiKey: apiKey.trim(), baseUrl: baseUrl.trim() || undefined, model: model.trim() || DEFAULT_MODEL,
+      duration, resolution, ratio, mode: 'text-to-video' }, { globalPrompt: prompt, continuityBible, segments });
+    setSubmitting(true);
+    let submitted = 0;
+    try {
+      for (const payload of requests) {
+        const response = await window.electronAPI.videoGeneration.create(payload);
+        if (!response.success || !response.taskId) throw new Error(response.error || `第 ${submitted + 1} 段提交失败`);
+        const recordId = makeId();
+        await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: payload.model || DEFAULT_MODEL,
+          mode: 'text-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+        startPolling({ recordId, taskId: response.taskId, attempts: 0, apiKey: payload.apiKey,
+          baseUrl: payload.baseUrl || baseUrl, model: payload.model || DEFAULT_MODEL });
+        submitted += 1;
+      }
+      refreshLibrary();
+      showInfo('多段视频任务已提交', `${submitted} 段已进入生成队列；每段共享连续性设定，可在视频库分别查看。`);
+    } catch (err) {
+      refreshLibrary();
+      showError(`${submitted} 段已提交；${err instanceof Error ? err.message : '后续片段提交失败'}`);
+    } finally { setSubmitting(false); }
+  }, [apiKey, baseUrl, continuityBible, duration, model, prompt, ratio, refreshLibrary, resolution, segments, showError, showInfo, startPolling]);
+
   const handleDelete = useCallback(async (record: StoredVideoRecord) => {
     if (!window.confirm(`确定删除这条视频记录吗？${record.fileName ? '本地视频文件会一并删除。' : ''}`)) return;
     stopPolling(record.id);
@@ -835,6 +866,38 @@ export const VideoGenerationPanel: React.FC = () => {
         />
         <p className="mb-4 text-right text-[10px] text-muted-foreground">{prompt.length}/{MAX_PROMPT_LENGTH}</p>
 
+        <label className="mb-4 flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-xs">
+          <span><span className="block font-medium">多段连续视频</span><span className="text-[10px] text-muted-foreground">3 段起，可继续添加；统一角色、场景和镜头状态</span></span>
+          <input type="checkbox" checked={storyboardMode} onChange={(event) => setStoryboardMode(event.target.checked)} />
+        </label>
+        {storyboardMode && (
+          <div className="mb-4 space-y-3 rounded-lg border p-3">
+            <label className="block text-xs font-medium">全局连续性设定
+              <textarea className="mt-1 min-h-20 w-full resize-y rounded-md border bg-background p-2 font-normal" value={continuityBible}
+                onChange={(event) => setContinuityBible(event.target.value)} placeholder="人物外观、服装、场景、色调、镜头方向、持续出现的道具……" />
+            </label>
+            {segments.map((segment, index) => (
+              <div key={segment.id} className="rounded-md border bg-muted/20 p-2">
+                <div className="mb-2 flex items-center gap-2">
+                  <input className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs font-medium" value={segment.title}
+                    onChange={(event) => setSegments((current) => current.map((item) => item.id === segment.id ? { ...item, title: event.target.value } : item))} />
+                  <Button type="button" size="sm" variant="ghost" disabled={segments.length <= MIN_STORYBOARD_SEGMENTS}
+                    onClick={() => setSegments((current) => current.filter((item) => item.id !== segment.id))} title="删除本段"><Trash2 className="h-3.5 w-3.5" /></Button>
+                </div>
+                <textarea className="min-h-20 w-full resize-y rounded-md border bg-background p-2 text-xs" value={segment.prompt}
+                  onChange={(event) => setSegments((current) => current.map((item) => item.id === segment.id ? { ...item, prompt: event.target.value } : item))}
+                  placeholder={`第 ${index + 1} 段发生的动作、镜头运动和情节`} />
+                <input className="mt-2 h-8 w-full rounded-md border bg-background px-2 text-xs" value={segment.endState}
+                  onChange={(event) => setSegments((current) => current.map((item) => item.id === segment.id ? { ...item, endState: event.target.value } : item))}
+                  placeholder={index === segments.length - 1 ? '最终收束状态（可选）' : '本段结束状态，下一段将自动承接（推荐填写）'} />
+              </div>
+            ))}
+            <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => setSegments((current) => [...current, createStoryboardSegment(current.length)])}>
+              <Plus className="mr-1 h-3.5 w-3.5" />添加第 {segments.length + 1} 段
+            </Button>
+          </div>
+        )}
+
         {mode === 'image-to-video' && (
           <ReferenceUploader
             label="首帧图片"
@@ -947,8 +1010,8 @@ export const VideoGenerationPanel: React.FC = () => {
           </select>
         </label>
 
-        <Button className="w-full" disabled={submitting} onClick={() => void handleSubmit()}>
-          {submitting ? <><Loader2 className="mr-2 h-4 w-4" />正在提交</> : <><Plus className="mr-2 h-4 w-4" />提交视频生成任务</>}
+        <Button className="w-full" disabled={submitting} onClick={() => void (storyboardMode ? handleStoryboardSubmit() : handleSubmit())}>
+          {submitting ? <><Loader2 className="mr-2 h-4 w-4" />正在提交</> : <><Plus className="mr-2 h-4 w-4" />{storyboardMode ? `提交 ${segments.length} 段连续视频` : '提交视频生成任务'}</>}
         </Button>
 
         {totalActive > 0 && (
