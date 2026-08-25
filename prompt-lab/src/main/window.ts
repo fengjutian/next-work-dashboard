@@ -20,7 +20,7 @@ export function createWindow(preloadPath: string) {
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
     },
   });
 
@@ -84,9 +84,26 @@ export function createWindow(preloadPath: string) {
     console.error(`[window] Renderer load failed (${code}): ${description} - ${validatedURL}`);
     showWindow();
   });
+  const rendererCrashes: number[] = [];
   win.webContents.on('render-process-gone', (_event, details) => {
     console.error('[window] Renderer process exited', details);
     showWindow();
+    const now = Date.now();
+    rendererCrashes.push(now);
+    while (rendererCrashes[0] && now - rendererCrashes[0] > 60_000) rendererCrashes.shift();
+    if (rendererCrashes.length <= 2 && !win.isDestroyed()) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.webContents.reload();
+      }, 750);
+    } else {
+      console.error('[window] Renderer recovery stopped after repeated crashes');
+    }
+  });
+  win.webContents.on('unresponsive', () => {
+    console.error('[window] Renderer became unresponsive');
+  });
+  win.webContents.on('responsive', () => {
+    console.info('[window] Renderer became responsive again');
   });
   // `ready-to-show` can be skipped when the renderer fails before first paint.
   const showFallback = setTimeout(showWindow, 5_000);
