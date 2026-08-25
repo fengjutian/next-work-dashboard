@@ -111,6 +111,10 @@ interface StoryboardRun {
   apiKey: string;
   baseUrl: string;
   model: string;
+  status?: 'running' | 'failed';
+  failedIndex?: number;
+  error?: string;
+  stitchScores?: number[];
 }
 
 function loadStoryboardRuns(): StoryboardRun[] {
@@ -461,10 +465,22 @@ export const VideoGenerationPanel: React.FC = () => {
     setActivePolls((current) => current.filter((poll) => poll.recordId !== recordId));
   }, [notifApi]);
 
+  const markStoryboardFailed = useCallback((poll: ActivePoll, error: string) => {
+    if (!poll.storyboardRunId) return;
+    setStoryboardRuns((current) => current.map((item) => item.id === poll.storyboardRunId
+      ? { ...item, status: 'failed', failedIndex: poll.segmentIndex, error } : item));
+  }, []);
+
   const continueStoryboard = useCallback(async (poll: ActivePoll, filePath: string): Promise<void> => {
     if (!poll.storyboardRunId || poll.segmentIndex === undefined) return;
     const run = storyboardRunsRef.current.find((item) => item.id === poll.storyboardRunId);
     if (!run) return;
+    if (run.filePaths.length) {
+      const inspection = await window.electronAPI.videoGeneration.inspectStitch({ previousPath: run.filePaths[run.filePaths.length - 1], nextPath: filePath });
+      if (!inspection.success) throw new Error(inspection.error || '接缝质量检测失败');
+      setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, stitchScores: [...(item.stitchScores || []), inspection.score || 0] } : item));
+      if (!inspection.passed) throw new Error(`第 ${poll.segmentIndex}→${poll.segmentIndex + 1} 段接缝连续性仅 ${Math.round((inspection.score || 0) * 100)}%，请重生成本段`);
+    }
     const completedPaths = [...run.filePaths, filePath];
     const nextIndex = poll.segmentIndex + 1;
     if (nextIndex >= run.requests.length) {
@@ -505,7 +521,9 @@ export const VideoGenerationPanel: React.FC = () => {
     if (!response.success || !response.info) {
       // 单独一次失败不立即放弃，再试 1 次；attempts 增 1。
       if (poll.attempts + 1 >= POLL_MAX_ATTEMPTS) {
-        recordError(poll.recordId, response.error || '查询任务失败');
+        const error = response.error || '查询任务失败';
+        recordError(poll.recordId, error);
+        markStoryboardFailed(poll, error);
         return;
       }
       setActivePolls((current) => current.map((item) => item.recordId === poll.recordId ? { ...item, attempts: poll.attempts + 1 } : item));
@@ -516,15 +534,18 @@ export const VideoGenerationPanel: React.FC = () => {
       try {
         const dl = await window.electronAPI.videoGeneration.download({ taskId: poll.taskId, videoUrl: info.videoUrl, recordId: poll.recordId });
         if (!dl.success || !dl.filePath) {
-          recordError(poll.recordId, dl.error || '下载成片失败');
+          const error = dl.error || '下载成片失败';
+          recordError(poll.recordId, error);
+          markStoryboardFailed(poll, error);
           return;
         }
         await attachFile(poll.recordId, dl.fileName || '', dl.filePath, dl.bytes || 0);
         await updateStatus(poll.recordId, 'succeeded');
         try { await continueStoryboard(poll, dl.filePath); }
         catch (err) {
-          if (poll.storyboardRunId) setStoryboardRuns((current) => current.filter((item) => item.id !== poll.storyboardRunId));
-          notifApi.error({ message: '连续视频续写中断', description: err instanceof Error ? err.message : String(err), placement: 'bottomRight', duration: 8 });
+          const error = err instanceof Error ? err.message : String(err);
+          markStoryboardFailed(poll, error);
+          notifApi.error({ message: '连续视频续写中断', description: error, placement: 'bottomRight', duration: 8 });
         }
         notifApi.success({ message: '视频生成完成', description: '可以预览、下载或转发到视频播放器。', placement: 'bottomRight' });
         refreshLibrary();
@@ -538,15 +559,18 @@ export const VideoGenerationPanel: React.FC = () => {
     if (info.status === 'failed' || info.status === 'cancelled') {
       await updateStatus(poll.recordId, info.status);
       recordError(poll.recordId, info.error || `任务${STATUS_LABEL[info.status]}`);
+      markStoryboardFailed(poll, info.error || `第 ${(poll.segmentIndex || 0) + 1} 段${STATUS_LABEL[info.status]}`);
       refreshLibrary();
       return;
     }
     // 还在 processing / queued / preparing — 增加 attempts
     setActivePolls((current) => current.map((item) => item.recordId === poll.recordId ? { ...item, attempts: poll.attempts + 1 } : item));
     if (poll.attempts + 1 >= POLL_MAX_ATTEMPTS) {
-      recordError(poll.recordId, `轮询超过 ${POLL_MAX_ATTEMPTS} 次仍未成功，请检查账户额度或稍后重试`);
+      const error = `轮询超过 ${POLL_MAX_ATTEMPTS} 次仍未成功，请检查账户额度或稍后重试`;
+      recordError(poll.recordId, error);
+      markStoryboardFailed(poll, error);
     }
-  }, [continueStoryboard, notifApi, recordError, refreshLibrary, stopPolling]);
+  }, [continueStoryboard, markStoryboardFailed, notifApi, recordError, refreshLibrary, stopPolling]);
 
   // 启动一个轮询（如果已经在跑就跳过）
   const startPolling = useCallback((poll: ActivePoll) => {
@@ -834,6 +858,34 @@ export const VideoGenerationPanel: React.FC = () => {
     showInfo('已重新加入轮询');
   }, [apiKey, baseUrl, model, refreshLibrary, showInfo, startPolling]);
 
+  const resumeStoryboard = useCallback(async (run: StoryboardRun) => {
+    const index = run.failedIndex;
+    if (index === undefined) return;
+    try {
+      let payload: VideoGenerationRequest = run.requests[index];
+      if (index > 0) {
+        const previousPath = run.filePaths[index - 1];
+        if (!previousPath) throw new Error('缺少上一段成片，无法从失败段续写');
+        const frame = await window.electronAPI.videoGeneration.extractLastFrame({ filePath: previousPath, recordId: run.id });
+        if (!frame.success || !frame.data || !frame.name || !frame.mimeType) throw new Error(frame.error || '提取上一段尾帧失败');
+        const uploaded = await window.electronAPI.videoGeneration.uploadReference({ name: frame.name, mimeType: frame.mimeType, data: frame.data, ttlHours: 1 });
+        if (frame.filePath) void window.electronAPI.videoGeneration.cleanup(frame.filePath);
+        if (!uploaded.success || !uploaded.url) throw new Error(uploaded.error || '尾帧上传失败');
+        payload = { ...payload, mode: 'image-to-video', firstFrameUrl: uploaded.url };
+      }
+      const response = await window.electronAPI.videoGeneration.create(payload);
+      if (!response.success || !response.taskId) throw new Error(response.error || `第 ${index + 1} 段重新提交失败`);
+      const recordId = makeId();
+      await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: run.model, mode: payload.mode || 'text-to-video',
+        duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+      setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, status: 'running', error: undefined } : item));
+      startPolling({ recordId, taskId: response.taskId, attempts: 0, apiKey: run.apiKey, baseUrl: run.baseUrl, model: run.model,
+        storyboardRunId: run.id, segmentIndex: index });
+      refreshLibrary();
+      showInfo('已从失败段继续', `正在重新生成第 ${index + 1}/${run.requests.length} 段，前面的成功片段会保留。`);
+    } catch (err) { showError(err instanceof Error ? err.message : '恢复连续视频失败'); }
+  }, [refreshLibrary, showError, showInfo, startPolling]);
+
   const handleReveal = useCallback(async (record: StoredVideoRecord) => {
     if (!record.filePath) { showError('这条记录还没有本地文件'); return; }
     const result = await window.electronAPI.videoGeneration.reveal(record.filePath);
@@ -1095,6 +1147,13 @@ export const VideoGenerationPanel: React.FC = () => {
             </Button>
           </div>
         )}
+        {storyboardRuns.filter((run) => run.status === 'failed').map((run) => (
+          <div key={run.id} className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800 dark:bg-rose-950/20">
+            <div className="font-medium">连续视频在第 {(run.failedIndex || 0) + 1}/{run.requests.length} 段中断</div>
+            <div className="mt-1 text-[10px]">{run.error}</div>
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => void resumeStoryboard(run)}>仅重生成本段并继续</Button>
+          </div>
+        ))}
       </section>
 
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
