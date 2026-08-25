@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, FileText, Upload } from '@/components/icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Columns2, Download, Edit3, Eye, FileText, Upload } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { markdownToDocx } from './converter';
 
@@ -21,6 +23,7 @@ export function MarkdownToWordPanel() {
   const [fileName, setFileName] = useState('Markdown文档');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [view, setView] = useState<'edit' | 'split' | 'preview'>('split');
 
   const openFile = useCallback(async () => {
     const picked = await window.electronAPI.pickFile({ accept: '.md,.markdown,.txt' });
@@ -65,14 +68,32 @@ export function MarkdownToWordPanel() {
       <input id="word-file-name" value={fileName} onChange={(event) => setFileName(event.target.value)} className="h-8 w-64 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" placeholder="文档名称" />
       <span className="text-xs text-muted-foreground">.docx</span>
       <div className="flex-1" />
+      <div className="flex rounded-md border bg-background p-0.5">
+        <button type="button" onClick={() => setView('edit')} title="仅编辑" className={`rounded p-1.5 ${view === 'edit' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}><Edit3 className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => setView('split')} title="分屏预览" className={`rounded p-1.5 ${view === 'split' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}><Columns2 className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => setView('preview')} title="仅预览" className={`rounded p-1.5 ${view === 'preview' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}><Eye className="h-3.5 w-3.5" /></button>
+      </div>
       <span className="text-xs text-muted-foreground">{markdown.length.toLocaleString()} 字符</span>
     </div>
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_260px]">
-      <textarea aria-label="Markdown 内容" value={markdown} onChange={(event) => setMarkdown(event.target.value)} spellCheck={false} className="h-full min-h-0 resize-none border-0 bg-background p-5 font-mono text-sm leading-6 outline-none" placeholder="# 输入 Markdown 内容…" />
-      <aside className="border-l bg-muted/20 p-5 text-sm">
-        <h2 className="mb-3 font-medium">支持的格式</h2>
-        <ul className="space-y-2 text-xs leading-5 text-muted-foreground"><li>六级标题与普通段落</li><li>有序、无序及嵌套列表</li><li>粗体、斜体、删除线、行内代码</li><li>引用、代码块、分隔线</li><li>GFM 表格与链接文本</li><li>中文字体与 A4 页面设置</li></ul>
-      </aside>
+    <div className={`grid min-h-0 flex-1 ${view === 'split' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+      {view !== 'preview' && <textarea aria-label="Markdown 内容" value={markdown} onChange={(event) => setMarkdown(event.target.value)} spellCheck={false} className="h-full min-h-0 resize-none border-0 bg-background p-5 font-mono text-sm leading-6 outline-none" placeholder="# 输入 Markdown 内容…" />}
+      {view !== 'edit' && <div aria-label="Markdown 预览" className={`min-h-0 overflow-auto bg-white p-8 text-slate-900 ${view === 'split' ? 'border-l' : ''}`}>
+        <article className="prose prose-slate mx-auto max-w-4xl prose-headings:scroll-mt-4 prose-pre:overflow-auto prose-table:block prose-table:overflow-x-auto">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+        </article>
+      </div>}
+    </div>
+    <div className="border-t bg-muted/20 px-5 py-2">
+      <details>
+        <summary className="cursor-pointer select-none text-xs font-medium">支持的格式与导出能力</summary>
+        <div className="mt-2 grid grid-cols-2 gap-x-8 gap-y-1 text-xs leading-5 text-muted-foreground md:grid-cols-3">
+          <span>六级标题与普通段落</span><span>有序、无序及嵌套列表</span><span>GFM 任务清单</span>
+          <span>粗体、斜体与删除线</span><span>行内代码与代码块</span><span>引用与嵌套引用</span>
+          <span>GFM 表格</span><span>行内链接与自动网址</span><span>图片说明及替代文本</span>
+          <span>分隔线与换行</span><span>Markdown 转义字符</span><span>中文字体与 A4 页面</span>
+          <span>Word 可编辑内容</span><span>本地离线生成</span><span>实时安全预览</span>
+        </div>
+      </details>
     </div>
     <footer aria-live="polite" className="min-h-9 border-t px-5 py-2 text-xs text-muted-foreground">{message || 'Word 文档在本地生成，内容不会上传。'}</footer>
   </div>;

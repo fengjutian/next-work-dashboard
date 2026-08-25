@@ -15,20 +15,25 @@ function run(text: string, properties = ''): string {
 }
 
 export function inlineMarkdownToWord(text: string): string {
-  const pattern = /(\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^)]+\))/g;
+  const pattern = /(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<]+|\\[\\`*_[\]~])/g;
   const output: string[] = [];
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0;
     if (index > cursor) output.push(run(text.slice(cursor, index)));
     const token = match[0];
-    if (token.startsWith('**') || token.startsWith('__')) output.push(run(token.slice(2, -2), '<w:b/>'));
+    if (token.startsWith('\\')) output.push(run(token.slice(1)));
+    else if (token.startsWith('![')) {
+      const parts = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(token);
+      output.push(run(parts ? `图片：${parts[1] || '未命名图片'} (${parts[2]})` : token, '<w:i/><w:color w:val="666666"/>'));
+    } else if (token.startsWith('**') || token.startsWith('__')) output.push(run(token.slice(2, -2), '<w:b/>'));
     else if (token.startsWith('~~')) output.push(run(token.slice(2, -2), '<w:strike/>'));
     else if (token.startsWith('`')) output.push(run(token.slice(1, -1), '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:shd w:fill="EDEDED"/>'));
     else if (token.startsWith('[')) {
       const parts = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
       output.push(run(parts ? `${parts[1]} (${parts[2]})` : token, '<w:color w:val="0563C1"/><w:u w:val="single"/>'));
-    } else output.push(run(token.slice(1, -1), '<w:i/>'));
+    } else if (/^https?:\/\//.test(token)) output.push(run(token, '<w:color w:val="0563C1"/><w:u w:val="single"/>'));
+    else output.push(run(token.slice(1, -1), '<w:i/>'));
     cursor = index + token.length;
   }
   if (cursor < text.length) output.push(run(text.slice(cursor)));
@@ -83,11 +88,13 @@ export function markdownToDocumentXml(markdown: string): string {
     if (list) {
       const level = Math.min(8, Math.floor(list[1].length / 2));
       const ordered = /^\d/.test(list[2]);
-      body.push(paragraph(inlineMarkdownToWord(list[3]), undefined, `<w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="${ordered ? 2 : 1}"/></w:numPr>`));
+      const task = /^\[([ xX])\]\s+(.+)$/.exec(list[3]);
+      const content = task ? `${task[1].toLowerCase() === 'x' ? '☒' : '☐'} ${task[2]}` : list[3];
+      body.push(paragraph(inlineMarkdownToWord(content), undefined, `<w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="${ordered ? 2 : 1}"/></w:numPr>`));
       continue;
     }
-    const quote = /^>\s?(.*)$/.exec(line);
-    if (quote) { body.push(paragraph(inlineMarkdownToWord(quote[1]), 'Quote')); continue; }
+    const quote = /^(>+)\s?(.*)$/.exec(line);
+    if (quote) { body.push(paragraph(inlineMarkdownToWord(quote[2]), 'Quote', `<w:ind w:left="${Math.min(2880, quote[1].length * 720)}"/>`)); continue; }
     if (/^([-*_])(?:\s*\1){2,}\s*$/.test(line)) { body.push('<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:color="808080"/></w:pBdr></w:pPr></w:p>'); continue; }
     body.push(paragraph(inlineMarkdownToWord(line)));
   }

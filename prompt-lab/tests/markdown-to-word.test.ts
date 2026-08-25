@@ -4,10 +4,19 @@ import { inlineMarkdownToWord, markdownToDocx, markdownToDocumentXml } from '../
 
 describe('markdown to Word converter', () => {
   it('escapes XML and converts inline formatting', () => {
-    const xml = inlineMarkdownToWord('A & **bold** and `code`');
+    const xml = inlineMarkdownToWord('A & **bold**, `code`, https://example.com and ![chart](chart.png)');
     expect(xml).toContain('A &amp; ');
     expect(xml).toContain('<w:b/>');
     expect(xml).toContain('Consolas');
+    expect(xml).toContain('0563C1');
+    expect(xml).toContain('图片：chart (chart.png)');
+  });
+
+  it('converts task lists and nested quotes', () => {
+    const xml = markdownToDocumentXml('- [x] done\n- [ ] todo\n>> nested');
+    expect(xml).toContain('☒ done');
+    expect(xml).toContain('☐ todo');
+    expect(xml).toContain('w:left="1440"');
   });
 
   it('converts headings, lists, quotes, code blocks and tables', () => {
