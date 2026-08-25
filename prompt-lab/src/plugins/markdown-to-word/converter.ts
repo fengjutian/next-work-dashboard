@@ -15,7 +15,7 @@ function run(text: string, properties = ''): string {
 }
 
 export function inlineMarkdownToWord(text: string): string {
-  const pattern = /(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<]+|\\[\\`*_[\]~])/g;
+  const pattern = /(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|==[^=]+==|`[^`]+`|\^[^^]+\^|~[^~]+~|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^)]+\)|\[\^[^\]]+\]|https?:\/\/[^\s<]+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\\[\\`*_[\]~^=])/g;
   const output: string[] = [];
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
@@ -28,11 +28,15 @@ export function inlineMarkdownToWord(text: string): string {
       output.push(run(parts ? `图片：${parts[1] || '未命名图片'} (${parts[2]})` : token, '<w:i/><w:color w:val="666666"/>'));
     } else if (token.startsWith('**') || token.startsWith('__')) output.push(run(token.slice(2, -2), '<w:b/>'));
     else if (token.startsWith('~~')) output.push(run(token.slice(2, -2), '<w:strike/>'));
+    else if (token.startsWith('==')) output.push(run(token.slice(2, -2), '<w:highlight w:val="yellow"/>'));
     else if (token.startsWith('`')) output.push(run(token.slice(1, -1), '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:shd w:fill="EDEDED"/>'));
+    else if (token.startsWith('^')) output.push(run(token.slice(1, -1), '<w:vertAlign w:val="superscript"/>'));
+    else if (token.startsWith('~')) output.push(run(token.slice(1, -1), '<w:vertAlign w:val="subscript"/>'));
+    else if (token.startsWith('[^')) output.push(run(token.slice(2, -1), '<w:vertAlign w:val="superscript"/><w:color w:val="0563C1"/>'));
     else if (token.startsWith('[')) {
       const parts = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
       output.push(run(parts ? `${parts[1]} (${parts[2]})` : token, '<w:color w:val="0563C1"/><w:u w:val="single"/>'));
-    } else if (/^https?:\/\//.test(token)) output.push(run(token, '<w:color w:val="0563C1"/><w:u w:val="single"/>'));
+    } else if (/^https?:\/\//.test(token) || token.includes('@')) output.push(run(token, '<w:color w:val="0563C1"/><w:u w:val="single"/>'));
     else output.push(run(token.slice(1, -1), '<w:i/>'));
     cursor = index + token.length;
   }
@@ -63,17 +67,44 @@ export function markdownToDocumentXml(markdown: string): string {
   const body: string[] = [];
   let inCode = false;
   let code: string[] = [];
+  let codeLanguage = '';
+  const footnotes: Array<{ id: string; content: string }> = [];
+  if (lines[0]?.trim() === '---') {
+    const end = lines.slice(1).findIndex((line) => line.trim() === '---');
+    if (end >= 0) lines.splice(0, end + 2);
+  }
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (/^```/.test(line.trim())) {
+    const fence = /^```\s*([^\s`]*)/.exec(line.trim());
+    if (fence) {
       if (inCode) {
+        if (codeLanguage) body.push(paragraph(run(codeLanguage.toUpperCase(), '<w:b/><w:color w:val="666666"/><w:sz w:val="16"/>'), undefined, '<w:shd w:fill="E7E6E6"/><w:spacing w:before="120"/>'));
         body.push(paragraph(run(code.join('\n'), '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="19"/>'), undefined, '<w:shd w:fill="F2F2F2"/><w:spacing w:before="120" w:after="120"/>'));
         code = [];
+        codeLanguage = '';
+      } else {
+        codeLanguage = fence[1] || '';
       }
       inCode = !inCode;
       continue;
     }
     if (inCode) { code.push(line); continue; }
+    const footnote = /^\[\^([^\]]+)\]:\s*(.+)$/.exec(line);
+    if (footnote) { footnotes.push({ id: footnote[1], content: footnote[2] }); continue; }
+    if (/^\s*\[TOC\]\s*$/i.test(line)) {
+      body.push('<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>在 Word 中更新域以生成目录</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>');
+      continue;
+    }
+    if (/^\s*<!--\s*pagebreak\s*-->\s*$/i.test(line) || /^\s*\\pagebreak\s*$/.test(line)) {
+      body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+      continue;
+    }
+    if (index + 1 < lines.length && /^:\s+/.test(lines[index + 1])) {
+      body.push(paragraph(inlineMarkdownToWord(line), undefined, '<w:keepNext/><w:spacing w:after="0"/>'));
+      index += 1;
+      body.push(paragraph(inlineMarkdownToWord(lines[index].replace(/^:\s+/, '')), undefined, '<w:ind w:left="720"/><w:spacing w:before="0"/>'));
+      continue;
+    }
     if (line.includes('|') && index + 1 < lines.length && isSeparator(lines[index + 1])) {
       const rows = [splitTableRow(line)];
       index += 2;
@@ -99,6 +130,10 @@ export function markdownToDocumentXml(markdown: string): string {
     body.push(paragraph(inlineMarkdownToWord(line)));
   }
   if (inCode && code.length) body.push(paragraph(run(code.join('\n'))));
+  if (footnotes.length) {
+    body.push(paragraph(run('脚注', '<w:b/>'), 'Heading2'));
+    footnotes.forEach((note) => body.push(paragraph(`${run(note.id, '<w:vertAlign w:val="superscript"/>')}${run(`  ${note.content}`)}`, undefined, '<w:spacing w:after="80"/>')));
+  }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
 }
 

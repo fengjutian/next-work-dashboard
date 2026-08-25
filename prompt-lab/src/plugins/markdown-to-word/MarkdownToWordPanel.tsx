@@ -86,12 +86,15 @@ export function MarkdownToWordPanel() {
     <div className="border-t bg-muted/20 px-5 py-2">
       <details>
         <summary className="cursor-pointer select-none text-xs font-medium">支持的格式与导出能力</summary>
-        <div className="mt-2 grid grid-cols-2 gap-x-8 gap-y-1 text-xs leading-5 text-muted-foreground md:grid-cols-3">
+        <div className="mt-2 grid max-h-28 grid-cols-2 gap-x-8 gap-y-1 overflow-auto text-xs leading-5 text-muted-foreground md:grid-cols-4">
           <span>六级标题与普通段落</span><span>有序、无序及嵌套列表</span><span>GFM 任务清单</span>
           <span>粗体、斜体与删除线</span><span>行内代码与代码块</span><span>引用与嵌套引用</span>
           <span>GFM 表格</span><span>行内链接与自动网址</span><span>图片说明及替代文本</span>
           <span>分隔线与换行</span><span>Markdown 转义字符</span><span>中文字体与 A4 页面</span>
-          <span>Word 可编辑内容</span><span>本地离线生成</span><span>实时安全预览</span>
+          <span>目录占位符 [TOC]</span><span>分页符 \pagebreak</span><span>脚注 [^1]</span>
+          <span>术语与定义列表</span><span>==文本高亮==</span><span>^上标^ 与 ~下标~</span>
+          <span>邮箱地址</span><span>代码语言标签</span><span>YAML Front Matter</span>
+          <span>Emoji 与 Unicode</span><span>Word 可编辑内容</span><span>本地离线生成</span><span>实时安全预览</span>
         </div>
       </details>
     </div>
