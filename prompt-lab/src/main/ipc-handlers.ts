@@ -43,7 +43,7 @@ import {
 } from './lancedb-memory';
 import { mcpManager } from './mcp/mcp-manager';
 import { findMediaBinary } from './ai-video-reader/ipc';
-import { calculateRgbFrameSimilarity, stitchPasses } from '../plugins/video-generation/core/continuity';
+import { analyzeStitchFrames, stitchPasses } from '../plugins/video-generation/core/continuity';
 import type { McpServerConfig } from '../types/mcp';
 import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getAgentWorktreeConflictVersions, mergeAgentWorktree, previewAgentWorktreeMerge } from './agent/worktree';
 import { agentTaskService } from './agent/task-service';
@@ -2377,18 +2377,22 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) }; }
   });
 
-  ipcMain.handle('video-generation:inspect-stitch', async (_event, payload: { previousPath: string; nextPath: string }) => {
+  ipcMain.handle('video-generation:inspect-stitch', async (_event, payload: { previousPath: string; nextPath: string; threshold?: number }) => {
     try {
       const previous = resolveManagedVideo(payload?.previousPath);
       const next = resolveManagedVideo(payload?.nextPath);
       if (!previous || !next) return { success: false, error: '只允许分析视频生成目录内的文件' };
       const binary = findMediaBinary('ffmpeg');
       if (!binary) return { success: false, error: '未找到 FFmpeg' };
-      const frameArgs = (input: string, last: boolean) => ['-hide_banner', '-loglevel', 'error', ...(last ? ['-sseof', '-0.08'] : []), '-i', input, '-frames:v', '1', '-vf', 'scale=64:64,format=rgb24', '-f', 'rawvideo', 'pipe:1'];
-      const [tail, head] = await Promise.all([runVideoBinaryBuffer(binary, frameArgs(previous, true)), runVideoBinaryBuffer(binary, frameArgs(next, false))]);
-      if (tail.length !== head.length || !tail.length) throw new Error('无法读取接缝帧');
-      const score = calculateRgbFrameSimilarity(tail, head);
-      return { success: true, score, passed: stitchPasses(score) };
+      const frameArgs = (input: string, last: boolean) => ['-hide_banner', '-loglevel', 'error', ...(last ? ['-sseof', '-0.3'] : []), '-i', input, ...(!last ? ['-t', '0.3'] : []), '-frames:v', '2', '-vf', 'fps=8,scale=64:64,format=rgb24', '-f', 'rawvideo', 'pipe:1'];
+      const [tailRaw, headRaw] = await Promise.all([runVideoBinaryBuffer(binary, frameArgs(previous, true)), runVideoBinaryBuffer(binary, frameArgs(next, false))]);
+      const frameBytes = 64 * 64 * 3;
+      const frames = (buffer: Buffer) => { const result: Uint8Array[] = []; for (let offset = 0; offset + frameBytes <= buffer.length; offset += frameBytes) result.push(buffer.subarray(offset, offset + frameBytes)); return result; };
+      const tail = frames(tailRaw); const head = frames(headRaw);
+      if (!tail.length || !head.length) throw new Error('无法读取接缝帧');
+      const metrics = analyzeStitchFrames(tail[Math.max(0, tail.length - 2)], tail[tail.length - 1], head[0], head[Math.min(1, head.length - 1)], 64, 64);
+      const threshold = Math.max(0.4, Math.min(0.95, Number(payload?.threshold) || 0.65));
+      return { success: true, score: metrics.score, passed: stitchPasses(metrics.score, threshold), threshold, metrics };
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) }; }
   });
 

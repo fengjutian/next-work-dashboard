@@ -260,7 +260,7 @@ const electronAPI: ElectronAPI = {
       recordId: string;
     }) => ipcRenderer.invoke("video-generation:download", payload),
     extractLastFrame: (payload: { filePath: string; recordId: string }) => ipcRenderer.invoke("video-generation:extract-last-frame", payload),
-    inspectStitch: (payload: { previousPath: string; nextPath: string }) => ipcRenderer.invoke("video-generation:inspect-stitch", payload),
+    inspectStitch: (payload: { previousPath: string; nextPath: string; threshold?: number }) => ipcRenderer.invoke("video-generation:inspect-stitch", payload),
     concat: (payload: { filePaths: string[]; outputId: string }) => ipcRenderer.invoke("video-generation:concat", payload),
     cancel: (payload: {
       baseUrl?: string;

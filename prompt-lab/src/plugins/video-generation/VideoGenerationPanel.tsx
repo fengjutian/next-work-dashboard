@@ -29,6 +29,7 @@ const MINIMAX_BASE_URL_STORAGE = 'nwd:video-generation:minimax-base-url';
 const POLL_STATE_STORAGE = 'nwd:video-generation:active-polls';
 const POLL_PAUSED_STORAGE = 'nwd:video-generation:polls-paused';
 const STORYBOARD_RUNS_STORAGE = 'nwd:video-generation:storyboard-runs';
+const STITCH_THRESHOLD_STORAGE = 'nwd:video-generation:stitch-threshold';
 const HISTORY_PAGE_SIZE = 12;
 const MAX_PROMPT_LENGTH = 7000;
 const POLL_STAGGER_MS = 1500; // 多个 active poll 错峰启动，避免一上线就把 MiniMax 打爆
@@ -115,6 +116,8 @@ interface StoryboardRun {
   failedIndex?: number;
   error?: string;
   stitchScores?: number[];
+  stitchReports?: Array<{ segmentIndex: number; score: number; metrics?: import('./core/continuity').StitchMetrics; accepted?: boolean }>;
+  pendingFilePath?: string;
 }
 
 function loadStoryboardRuns(): StoryboardRun[] {
@@ -394,6 +397,15 @@ const ReferenceListUploader: React.FC<ReferenceListUploaderProps> = ({ label, ki
   );
 };
 
+const StitchMetricsGrid: React.FC<{ metrics: import('./core/continuity').StitchMetrics }> = ({ metrics }) => (
+  <div className="mt-2 grid grid-cols-2 gap-1 text-[10px]">
+    <span>SSIM {Math.round(metrics.ssim * 100)}%</span><span>运动 {Math.round(metrics.motionDirection * 100)}%</span>
+    <span>主体位置 {Math.round(metrics.subjectPosition * 100)}%</span><span>直方图 {Math.round(metrics.histogram * 100)}%</span>
+    <span>曝光 {Math.round(metrics.exposure * 100)}%</span><span>色温 {Math.round(metrics.colorTemperature * 100)}%</span>
+    <span>人脸 {metrics.faceIdentity === null ? '未可靠检测' : `${Math.round(metrics.faceIdentity * 100)}%（低置信度）`}</span>
+  </div>
+);
+
 export const VideoGenerationPanel: React.FC = () => {
   const [notifApi, contextHolder] = notification.useNotification();
   const aiApi = useStore((state) => state.aiApi);
@@ -403,6 +415,7 @@ export const VideoGenerationPanel: React.FC = () => {
   const [model, setModel] = useState<string>(DEFAULT_MODEL);
   const [prompt, setPrompt] = useState<string>('');
   const [storyboardMode, setStoryboardMode] = useState(false);
+  const [stitchThreshold, setStitchThreshold] = useState(() => Math.max(0.4, Math.min(0.95, Number(localStorage.getItem(STITCH_THRESHOLD_STORAGE)) || 0.65)));
   const [continuityBible, setContinuityBible] = useState('');
   const [segments, setSegments] = useState<VideoStoryboardSegment[]>(() => Array.from({ length: MIN_STORYBOARD_SEGMENTS }, (_, index) => createStoryboardSegment(index)));
   const [mode, setMode] = useState<VideoGenerationMode>('text-to-video');
@@ -443,6 +456,7 @@ export const VideoGenerationPanel: React.FC = () => {
   useEffect(() => { localStorage.setItem(MINIMAX_BASE_URL_STORAGE, baseUrl); }, [baseUrl]);
   useEffect(() => { persistActivePolls(activePolls); }, [activePolls]);
   useEffect(() => { localStorage.setItem(STORYBOARD_RUNS_STORAGE, JSON.stringify(storyboardRuns)); }, [storyboardRuns]);
+  useEffect(() => { localStorage.setItem(STITCH_THRESHOLD_STORAGE, String(stitchThreshold)); }, [stitchThreshold]);
   useEffect(() => { localStorage.setItem(POLL_PAUSED_STORAGE, pollPaused ? '1' : '0'); }, [pollPaused]);
 
   const refreshLibrary = useCallback(() => {
@@ -471,15 +485,18 @@ export const VideoGenerationPanel: React.FC = () => {
       ? { ...item, status: 'failed', failedIndex: poll.segmentIndex, error } : item));
   }, []);
 
-  const continueStoryboard = useCallback(async (poll: ActivePoll, filePath: string): Promise<void> => {
+  const continueStoryboard = useCallback(async (poll: ActivePoll, filePath: string, acceptLowScore = false): Promise<void> => {
     if (!poll.storyboardRunId || poll.segmentIndex === undefined) return;
     const run = storyboardRunsRef.current.find((item) => item.id === poll.storyboardRunId);
     if (!run) return;
-    if (run.filePaths.length) {
-      const inspection = await window.electronAPI.videoGeneration.inspectStitch({ previousPath: run.filePaths[run.filePaths.length - 1], nextPath: filePath });
+    if (run.filePaths.length && !acceptLowScore) {
+      const inspection = await window.electronAPI.videoGeneration.inspectStitch({ previousPath: run.filePaths[run.filePaths.length - 1], nextPath: filePath, threshold: stitchThreshold });
       if (!inspection.success) throw new Error(inspection.error || '接缝质量检测失败');
-      setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, stitchScores: [...(item.stitchScores || []), inspection.score || 0] } : item));
-      if (!inspection.passed) throw new Error(`第 ${poll.segmentIndex}→${poll.segmentIndex + 1} 段接缝连续性仅 ${Math.round((inspection.score || 0) * 100)}%，请重生成本段`);
+      const report = { segmentIndex: poll.segmentIndex, score: inspection.score || 0, metrics: inspection.metrics };
+      setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, stitchScores: [...(item.stitchScores || []), inspection.score || 0], stitchReports: [...(item.stitchReports || []), report], pendingFilePath: inspection.passed ? undefined : filePath } : item));
+      if (!inspection.passed) throw new Error(`第 ${poll.segmentIndex}→${poll.segmentIndex + 1} 段综合连续性 ${Math.round((inspection.score || 0) * 100)}%，低于阈值 ${Math.round(stitchThreshold * 100)}%`);
+    } else if (acceptLowScore && poll.segmentIndex !== undefined) {
+      setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, stitchReports: (item.stitchReports || []).map((report) => report.segmentIndex === poll.segmentIndex ? { ...report, accepted: true } : report) } : item));
     }
     const completedPaths = [...run.filePaths, filePath];
     const nextIndex = poll.segmentIndex + 1;
@@ -509,11 +526,11 @@ export const VideoGenerationPanel: React.FC = () => {
     const recordId = makeId();
     await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: payload.model || DEFAULT_MODEL,
       mode: 'image-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
-    setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, filePaths: completedPaths } : item));
+    setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, filePaths: completedPaths, status: 'running', error: undefined, pendingFilePath: undefined } : item));
     setActivePolls((current) => [...current, { recordId, taskId, attempts: 0, apiKey: run.apiKey,
       baseUrl: run.baseUrl, model: run.model, storyboardRunId: run.id, segmentIndex: nextIndex }]);
     refreshLibrary();
-  }, [notifApi, refreshLibrary]);
+  }, [notifApi, refreshLibrary, stitchThreshold]);
 
   // 轮询单个任务直到终态。失败 / 超时 / 取消都会停。
   const pollOnce = useCallback(async (poll: ActivePoll): Promise<void> => {
@@ -886,6 +903,15 @@ export const VideoGenerationPanel: React.FC = () => {
     } catch (err) { showError(err instanceof Error ? err.message : '恢复连续视频失败'); }
   }, [refreshLibrary, showError, showInfo, startPolling]);
 
+  const acceptStoryboardStitch = useCallback(async (run: StoryboardRun) => {
+    if (run.failedIndex === undefined || !run.pendingFilePath) return;
+    try {
+      await continueStoryboard({ recordId: run.id, taskId: run.id, attempts: 0, apiKey: run.apiKey, baseUrl: run.baseUrl,
+        model: run.model, storyboardRunId: run.id, segmentIndex: run.failedIndex }, run.pendingFilePath, true);
+      showInfo('已接受低分接缝', '将保留当前片段并继续生成或拼接。');
+    } catch (err) { showError(err instanceof Error ? err.message : '继续故事板失败'); }
+  }, [continueStoryboard, showError, showInfo]);
+
   const handleReveal = useCallback(async (record: StoredVideoRecord) => {
     if (!record.filePath) { showError('这条记录还没有本地文件'); return; }
     const result = await window.electronAPI.videoGeneration.reveal(record.filePath);
@@ -993,6 +1019,11 @@ export const VideoGenerationPanel: React.FC = () => {
         </label>
         {storyboardMode && (
           <div className="mb-4 space-y-3 rounded-lg border p-3">
+            <label className="block text-xs font-medium">接缝质量阈值：{Math.round(stitchThreshold * 100)}%
+              <input type="range" min={40} max={95} step={1} value={Math.round(stitchThreshold * 100)} className="mt-1 w-full"
+                onChange={(event) => setStitchThreshold(Number(event.target.value) / 100)} />
+              <span className="text-[10px] font-normal text-muted-foreground">综合 SSIM、运动方向、主体位置、曝光、色温、直方图及低置信度人脸区域指标。</span>
+            </label>
             <label className="block text-xs font-medium">全局连续性设定
               <textarea className="mt-1 min-h-20 w-full resize-y rounded-md border bg-background p-2 font-normal" value={continuityBible}
                 onChange={(event) => setContinuityBible(event.target.value)} placeholder="人物外观、服装、场景、色调、镜头方向、持续出现的道具……" />
@@ -1151,7 +1182,9 @@ export const VideoGenerationPanel: React.FC = () => {
           <div key={run.id} className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800 dark:bg-rose-950/20">
             <div className="font-medium">连续视频在第 {(run.failedIndex || 0) + 1}/{run.requests.length} 段中断</div>
             <div className="mt-1 text-[10px]">{run.error}</div>
-            <Button size="sm" variant="outline" className="mt-2" onClick={() => void resumeStoryboard(run)}>仅重生成本段并继续</Button>
+            {run.stitchReports?.at(-1)?.metrics && <StitchMetricsGrid metrics={run.stitchReports.at(-1)?.metrics as import('./core/continuity').StitchMetrics} />}
+            <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" onClick={() => void resumeStoryboard(run)}>仅重生成本段</Button>
+              {run.pendingFilePath && <Button size="sm" variant="outline" onClick={() => void acceptStoryboardStitch(run)}>接受低分接缝并继续</Button>}</div>
           </div>
         ))}
       </section>
