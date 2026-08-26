@@ -1,4 +1,4 @@
-export type { WereadAdapter, WereadAiConfig, WereadAiRecommendRequest, WereadAiSummaryRequest, WereadHostApi, WereadRecommendItem, WereadSummaryItem, WereadTaskRepository } from './adapter';
+export type { WereadAdapter, WereadAiConfig, WereadAiRecommendRequest, WereadAiSummaryRequest, WereadHostApi, WereadHostServices, WereadReaderConfig, WereadRecommendItem, WereadSaveFileResult, WereadSummaryItem, WereadTaskRepository } from './adapter';
 export { WereadProvider, useWereadAdapter } from './context';
 export type { WereadProviderProps } from './context';
 export { Button } from './Button';

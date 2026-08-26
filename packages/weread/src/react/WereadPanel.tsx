@@ -155,7 +155,16 @@ const BookNotes: React.FC<{ book: ExportedBook; query?: string }> = ({ book, que
 };
 
 export const WereadPanel: React.FC = () => {
-  const { api, tasks } = useWereadAdapter();
+  const adapter = useWereadAdapter();
+  const { api, tasks } = adapter;
+  const host = adapter.host ?? {
+    getToken: (service: string) => window.electronAPI.auth.getToken(service),
+    saveToken: (service: string, token: string, label?: string) => window.electronAPI.auth.saveToken(service, token, label),
+    saveFile: (content: string, defaultName: string) => window.electronAPI.saveFile(content, defaultName),
+    openExternal: (url: string) => window.electronAPI.shell.openExternal(url),
+  };
+  const readerMode = adapter.reader?.mode ?? 'electron';
+  const readerUrl = adapter.reader?.url ?? 'https://weread.qq.com/';
   const panelRef = useRef<HTMLDivElement>(null);
   const webviewRef = useRef<WereadWebviewElement | null>(null);
   const readerCssKeyRef = useRef<string | null>(null);
@@ -257,10 +266,14 @@ export const WereadPanel: React.FC = () => {
   }, [readerPreferences, webviewReady]);
 
   useEffect(() => {
-    void window.electronAPI.auth.getToken(TOKEN_SERVICE).then((token) => {
+    void host.getToken(TOKEN_SERVICE).then((token) => {
       if (token) setApiKey(token);
     });
   }, []);
+
+  useEffect(() => {
+    if (readerMode !== 'electron') setWebviewReady(true);
+  }, [readerMode]);
 
   useEffect(() => {
     const webview = webviewRef.current;
@@ -527,7 +540,7 @@ export const WereadPanel: React.FC = () => {
     if (!tasks.isReady()) { setError('本地数据库正在初始化，请稍后重试'); return; }
     setLoading(true); setError(''); setBooks([]); setStatus('正在读取笔记本列表…');
     try {
-      await window.electronAPI.auth.saveToken(TOKEN_SERVICE, key, '微信读书 API Key');
+      await host.saveToken(TOKEN_SERVICE, key, '微信读书 API Key');
       const summaries: BookSummary[] = [];
       let lastSort: number | undefined;
       for (let page = 0; page < 1000; page += 1) {
@@ -581,7 +594,7 @@ export const WereadPanel: React.FC = () => {
   async function exportMarkdown(exportBooks = books, incremental = false) {
     if (!exportBooks.length) { setStatus(incremental ? '没有自上次导出后发生变化的书籍' : '没有可导出的笔记'); return; }
     const label = exportBooks.length === 1 ? safeWereadFilename(exportBooks[0].title) : incremental ? '微信读书增量笔记' : '微信读书笔记';
-    const result = await window.electronAPI.saveFile(makeWereadMarkdown(exportBooks, incremental), `${label}-${new Date().toISOString().slice(0, 10)}.md`);
+    const result = await host.saveFile(makeWereadMarkdown(exportBooks, incremental), `${label}-${new Date().toISOString().slice(0, 10)}.md`);
     if (!result.success) { setError('导出已取消或保存失败'); return; }
     tasks.markExported(exportBooks.map((book) => ({ bookId: book.bookId, fingerprint: wereadBookFingerprint(book) })));
     await tasks.flush();
@@ -597,7 +610,7 @@ export const WereadPanel: React.FC = () => {
   return (
     <div ref={panelRef} className="weread-panel flex h-full flex-col bg-card">
       {!zenMode && <div className="relative flex h-10 items-center gap-1 border-b bg-background px-2">
-        {mode === 'reader' && <>
+        {mode === 'reader' && readerMode === 'electron' && <>
           <Button variant="ghost" size="icon" className="h-7 w-7" title="后退" aria-label="后退" onClick={() => webviewRef.current?.goBack()}><ArrowLeft /></Button>
           <Button variant="ghost" size="icon" className="h-7 w-7" title="前进" aria-label="前进" onClick={() => webviewRef.current?.goForward()}><ArrowRight /></Button>
           <Button variant="ghost" size="icon" className="h-7 w-7" title="刷新" aria-label="刷新" onClick={() => webviewRef.current?.reload()}><RefreshCw /></Button>
@@ -631,7 +644,7 @@ export const WereadPanel: React.FC = () => {
           <div className="border-b px-3 py-2 text-xs font-medium">最近阅读</div>
           <div className="weread-scroll max-h-96 overflow-auto p-1.5">
             {recentReadings.length === 0 && <p className="px-3 py-8 text-center text-xs text-muted-foreground">打开一本书后会自动记录</p>}
-            {recentReadings.map((item) => <button key={item.bookId} type="button" className="flex w-full gap-3 rounded-md p-2 text-left hover:bg-accent" onClick={() => { webviewRef.current?.loadURL(item.url); setRecentReadingsOpen(false); setMode('reader'); }}>
+            {recentReadings.map((item) => <button key={item.bookId} type="button" className="flex w-full gap-3 rounded-md p-2 text-left hover:bg-accent" onClick={() => { if (readerMode === 'electron') webviewRef.current?.loadURL(item.url); else void host.openExternal(item.url); setRecentReadingsOpen(false); setMode('reader'); }}>
               <div className="h-14 w-10 shrink-0 overflow-hidden rounded bg-muted">{item.coverUrl && <img src={item.coverUrl} alt="" className="h-full w-full object-cover" />}</div>
               <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium" title={item.title}>{item.title}</p><p className="mt-1 truncate text-[10px] text-muted-foreground" title={item.chapter}>{item.chapter || '上次阅读位置'}</p><p className="mt-1 text-[10px] tabular-nums text-muted-foreground">{Math.round(item.progress * 100)}% · {formatReadingDuration(item.totalSeconds)}</p></div>
             </button>)}
@@ -651,7 +664,7 @@ export const WereadPanel: React.FC = () => {
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-0.5 bg-muted/40" aria-hidden="true">
             <div className="h-full bg-primary/70 transition-[width] duration-300" style={{ width: `${readingProgress}%` }} />
           </div>
-          {!webviewReady && (
+          {readerMode === 'electron' && !webviewReady && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background">
               <div className="flex flex-col items-center gap-3 text-muted-foreground">
                 <Loader2 className="h-6 w-6 animate-spin" />
@@ -659,11 +672,15 @@ export const WereadPanel: React.FC = () => {
               </div>
             </div>
           )}
-          <webview ref={webviewRef as unknown as React.Ref<HTMLWebViewElement>} src="https://weread.qq.com/" partition="persist:weread"
+          {readerMode === 'electron' && <webview ref={webviewRef as unknown as React.Ref<HTMLWebViewElement>} src={readerUrl} partition="persist:weread"
             useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
             // @ts-expect-error webview-specific attribute
-            allowpopups="true" />
+            allowpopups="true" />}
+          {readerMode === 'iframe' && <iframe title="微信读书" src={readerUrl} className="absolute inset-0 h-full w-full border-0" onLoad={() => setWebviewReady(true)} />}
+          {readerMode === 'external' && <div className="absolute inset-0 flex items-center justify-center bg-background p-6">
+            <div className="max-w-sm text-center"><BookOpen className="mx-auto mb-4 h-10 w-10 text-muted-foreground" /><h3 className="font-medium">在系统浏览器中阅读</h3><p className="mt-2 text-sm text-muted-foreground">当前宿主使用外部阅读器模式，笔记同步、分析与导出仍在应用内完成。</p><Button className="mt-4" onClick={() => void host.openExternal(readerUrl)}>打开微信读书 <ExternalLink className="ml-2 h-4 w-4" /></Button></div>
+          </div>}
         </div>
       )}
       {visitedModes.current.has('analytics') && (
@@ -677,7 +694,7 @@ export const WereadPanel: React.FC = () => {
             <div>
               <h2 className="text-lg font-semibold">导出全部读书笔记</h2>
               <p className="mt-1 text-sm text-muted-foreground">获取全部划线、个人想法和点评。书签内容受接口限制，只统计数量。</p>
-              <Button variant="link" className="mt-1 h-auto px-0 text-sm" onClick={() => void window.electronAPI.shell.openExternal('https://weread.qq.com/r/weread-skills')}>
+              <Button variant="link" className="mt-1 h-auto px-0 text-sm" onClick={() => void host.openExternal('https://weread.qq.com/r/weread-skills')}>
                 获取微信读书 API Key <ExternalLink className="h-3.5 w-3.5" />
               </Button>
             </div>

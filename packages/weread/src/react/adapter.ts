@@ -50,6 +50,25 @@ export interface WereadHostApi {
   wereadAiRecommend(payload: WereadAiRecommendRequest): Promise<{ success: boolean; recommendations?: WereadRecommendItem[]; error?: string }>;
 }
 
+export interface WereadSaveFileResult {
+  success: boolean;
+  path?: string;
+  error?: string;
+}
+
+export interface WereadHostServices {
+  getToken(service: string): Promise<string | null>;
+  saveToken(service: string, token: string, label?: string): Promise<void>;
+  saveFile(content: string, defaultName: string): Promise<WereadSaveFileResult>;
+  openExternal(url: string): Promise<void>;
+}
+
+export interface WereadReaderConfig {
+  /** Electron embeds a webview; web embeds an iframe; external opens the site outside the panel. */
+  mode: 'electron' | 'iframe' | 'external';
+  url?: string;
+}
+
 /** Renderer-side task repository. Backed by SQLite in the prompt-lab host. */
 export interface WereadTaskRepository {
   loadCache(query?: string): WereadCachedBook[];
@@ -74,4 +93,6 @@ export interface WereadAdapter {
   api: WereadHostApi;
   ai: WereadAiConfig;
   tasks: WereadTaskRepository;
+  host?: WereadHostServices;
+  reader?: WereadReaderConfig;
 }
