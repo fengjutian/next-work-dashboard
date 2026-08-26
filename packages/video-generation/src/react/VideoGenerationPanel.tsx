@@ -630,10 +630,10 @@ export const VideoGenerationPanel: React.FC<VideoGenerationPanelProps> = ({ adap
     const timers: number[] = [];
     activePolls.forEach((poll, index) => {
       const delay = POLL_INTERVAL_MS + index * POLL_STAGGER_MS;
-      const t = globalThis.setTimeout(() => { void pollOnce(poll); }, delay);
+      const t = window.setTimeout(() => { void pollOnce(poll); }, delay);
       timers.push(t);
     });
-    return () => { timers.forEach((t) => globalThis.clearTimeout(t)); };
+    return () => { timers.forEach((t) => window.clearTimeout(t)); };
   }, [activePolls, pollOnce, pollPaused]);
 
   // 选中的任务变化时，加载对应的视频 blob URL
