@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { DOMParser, type Element as XmlElement } from '@xmldom/xmldom';
-import type { RssFeed, RssFeedItem } from '../types';
+import type { RssFeed, RssFeedItem } from './types';
 
 function text(element: XmlElement | null, ...names: string[]): string {
   if (!element) return '';

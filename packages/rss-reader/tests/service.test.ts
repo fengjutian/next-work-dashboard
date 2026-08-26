@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { discoverFeedUrl, privateAddress, rssRequestHeaders, ruleMatches } from '../../src/plugins/rss-reader/backend/rss-service';
-import type { RssArticle, RssKeywordRule } from '../../src/plugins/rss-reader/types';
+import { discoverFeedUrl, privateAddress, rssRequestHeaders, ruleMatches } from '../src/main/service';
+import type { RssArticle, RssKeywordRule } from '../src/core/types';
 
 describe('RSS network helpers', () => {
   it('discovers relative RSS and Atom links from normal web pages', () => {

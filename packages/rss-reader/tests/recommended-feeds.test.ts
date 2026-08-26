@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   RECOMMENDED_FEEDS,
   unsubscribedRecommendations,
-} from "../../src/plugins/rss-reader/recommended-feeds";
+} from "../src/core/recommended-feeds";
 
 describe("RSS recommended feeds", () => {
   it("contains unique HTTPS feeds in useful categories", () => {

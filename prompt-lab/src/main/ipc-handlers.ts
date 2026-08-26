@@ -53,7 +53,10 @@ import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
 import { registerMarkdownToWordIpc } from '../plugins/markdown-to-word/backend/ipc';
-import { registerRssIpc } from '../plugins/rss-reader/backend/rss-service';
+import { registerRssIpc } from '@next-work/rss-reader/main';
+import Database from 'better-sqlite3';
+import { Notification as ElectronNotification } from 'electron';
+import { extractReadability } from '../core/work-browser/parser';
 import { setupMyCastIPC, startDaemon as startMyCastDaemon, shutdownDaemon as shutdownMyCastDaemon } from '../plugins/mycast/backend/mycast-service';
 import { setupPhoneIPC, stopPhoneService } from '../plugins/phone/backend/phone-service';
 import { setupVoiceIPC, startDaemon as startVoiceDaemon, shutdownDaemon as shutdownVoiceDaemon } from '../plugins/voice-input/backend/voice-engine-service';
@@ -159,7 +162,22 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 export function setupIPC(webviewPreloadPath: string) {
   registerOfficeIpc();
   registerMarkdownToWordIpc();
-  registerRssIpc();
+  let rssDatabase: Database.Database | null = null;
+  registerRssIpc(
+    { ipcMain },
+    {
+      openDatabase: () => {
+        if (!rssDatabase) {
+          rssDatabase = new Database(path.join(app.getPath('userData'), 'rss-reader.db'));
+        }
+        return rssDatabase;
+      },
+      extractReadability,
+      notify: (title, body) => {
+        if (ElectronNotification.isSupported()) new ElectronNotification({ title, body }).show();
+      },
+    },
+  );
   const outlineProjectsPath = path.join(app.getPath('userData'), 'outline-scaffolder-projects.json');
   ipcMain.handle('outline-projects:load', () => {
     try {

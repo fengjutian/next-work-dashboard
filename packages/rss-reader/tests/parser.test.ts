@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRssFeed } from '../../src/plugins/rss-reader/backend/rss-parser';
+import { parseRssFeed } from '../src/core/parser';
 
 describe('parseRssFeed', () => {
   it('parses RSS 2.0 and removes markup from descriptions', () => {

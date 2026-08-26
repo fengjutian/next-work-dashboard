@@ -1,13 +1,52 @@
-import { ipcMain, Notification } from 'electron';
+/**
+ * RSS reader main-process IPC service.
+ *
+ * Hosts call `registerRssIpc(adapter)` once during app startup. The adapter wires in
+ * the better-sqlite3 connection, the readability extractor, and OS-level notifications.
+ */
+
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { parseRssFeed } from './rss-parser';
-import { extractReadability } from '../../../core/work-browser/parser';
-import { deleteRssRule, getRssArticleContent, getRssHttpCache, getRssNotificationsEnabled, getRssRefreshMinutes, listRssRules, loadRssState, pruneRssArticles, saveRssArticleContent, saveRssHttpCache, saveRssRule, saveRssState, searchRssArticles, setRssNotificationsEnabled, setRssRefreshMinutes, setRssRetentionDays } from './rss-database';
-import type { RssArticle, RssFeed, RssKeywordRule, RssSubscription } from '../types';
+import { parseRssFeed } from '../core/parser';
+import { RSS_IPC } from './channels';
+import type { RssArticle, RssFeed, RssKeywordRule, RssState, RssSubscription } from '../core/types';
+import {
+  deleteRssRule as deleteRssRuleDb,
+  getRssArticleContent,
+  getRssHttpCache,
+  getRssNotificationsEnabled,
+  getRssRefreshMinutes,
+  getRssRetentionDays,
+  listRssRules,
+  loadRssState,
+  pruneRssArticles,
+  saveRssArticleContent,
+  saveRssHttpCache,
+  saveRssRule as saveRssRuleDb,
+  saveRssState,
+  searchRssArticles,
+  setRssNotificationsEnabled,
+  setRssRefreshMinutes as setRssRefreshMinutesDb,
+  setRssRetentionDays,
+  type RssMainAdapter,
+} from './database';
 
 const MAX_FEED_BYTES = 5 * 1024 * 1024;
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+export interface RssMainFullAdapter extends RssMainAdapter {
+  /**
+   * HTML → readable content extractor. Supplied by the host (e.g. `extractReadability`
+   * from `@next-work/work-browser/parser` once that package ships).
+   */
+  extractReadability(html: string): Promise<{ contentText: string; contentMarkdown: string; wordCount: number }>;
+  /**
+   * Show a desktop notification. Hosts are expected to honor OS-level capability
+   * checks (e.g. `Notification.isSupported()`). Enabled-state gating is done
+   * inside this module via `getRssNotificationsEnabled` before delegating here.
+   */
+  notify(title: string, body: string): void;
+}
 
 export function rssRequestHeaders(kind: 'feed' | 'article'): Record<string, string> {
   if (kind === 'article') return {
@@ -41,10 +80,10 @@ async function safeHttpUrl(value: string): Promise<URL> {
   return url;
 }
 
-async function fetchSafely(rawUrl: string, kind: 'feed' | 'article' = 'feed'): Promise<{ response: Response; url: URL; cachedBody?: string }> {
+async function fetchSafely(adapter: RssMainFullAdapter, rawUrl: string, kind: 'feed' | 'article' = 'feed'): Promise<{ response: Response; url: URL; cachedBody?: string }> {
   let url = await safeHttpUrl(rawUrl);
   for (let redirects = 0; redirects <= 5; redirects += 1) {
-    const cached = getRssHttpCache(url.toString());
+    const cached = getRssHttpCache(adapter, url.toString());
     const headers = rssRequestHeaders(kind);
     if (cached?.etag) headers['If-None-Match'] = cached.etag;
     if (cached?.lastModified) headers['If-Modified-Since'] = cached.lastModified;
@@ -71,20 +110,20 @@ export function discoverFeedUrl(html: string, pageUrl: URL): string | null {
   return null;
 }
 
-async function fetchFeed(rawUrl: string, allowDiscovery = true): Promise<RssFeed> {
-  const { response, url, cachedBody } = await fetchSafely(rawUrl.trim());
+async function fetchFeed(adapter: RssMainFullAdapter, rawUrl: string, allowDiscovery = true): Promise<RssFeed> {
+  const { response, url, cachedBody } = await fetchSafely(adapter, rawUrl.trim());
   if (response.status !== 304 && !response.ok) throw new Error(`订阅源请求失败（HTTP ${response.status}）`);
   const length = Number(response.headers.get('content-length') ?? 0);
   if (length > MAX_FEED_BYTES) throw new Error('订阅源超过 5 MB 限制');
   const body = cachedBody ?? await response.text();
   if (body.length > MAX_FEED_BYTES) throw new Error('订阅源超过 5 MB 限制');
-  if (!cachedBody) saveRssHttpCache(url.toString(), body, response.headers.get('etag'), response.headers.get('last-modified'));
+  if (!cachedBody) saveRssHttpCache(adapter, url.toString(), body, response.headers.get('etag'), response.headers.get('last-modified'));
   try { return parseRssFeed(body, url.toString()); }
   catch (parseError) {
     if (!allowDiscovery) throw parseError;
     const discovered = discoverFeedUrl(body, url);
     if (!discovered) throw new Error('该页面不是订阅源，也没有发现 RSS/Atom 地址');
-    return fetchFeed(discovered, false);
+    return fetchFeed(adapter, discovered, false);
   }
 }
 
@@ -102,88 +141,95 @@ export function ruleMatches(article: RssArticle, rule: RssKeywordRule): boolean 
   return (!includes.length || includes.some((word) => haystack.includes(word))) && !excludes.some((word) => haystack.includes(word));
 }
 
-function showNotification(title: string, body: string): void {
-  if (getRssNotificationsEnabled() && Notification.isSupported()) new Notification({ title, body: body.slice(0, 240) }).show();
+function showNotification(adapter: RssMainFullAdapter, title: string, body: string): void {
+  if (getRssNotificationsEnabled(adapter)) adapter.notify(title, body.slice(0, 240));
 }
 
-function mergeFeed(feed: RssFeed, category = '未分类'): void {
-  const state = loadRssState();
+function mergeFeed(adapter: RssMainFullAdapter, feed: RssFeed, category = '未分类'): void {
+  const state = loadRssState(adapter);
   const id = subscriptionId(feed.feedUrl);
   const existingFeed = state.subscriptions.find((item) => item.feedUrl === feed.feedUrl || item.id === id);
   const existingArticles = new Map(state.articles.map((item) => [`${item.feedId}:${item.id}`, item]));
   const knownIds = new Set(state.articles.filter((item) => item.feedId === existingFeed?.id).map((item) => item.id));
-  const rules = listRssRules();
+  const rules = listRssRules(adapter);
   const articles: RssArticle[] = feed.items.map((item) => {
     const existing = existingArticles.get(`${existingFeed?.id ?? id}:${item.id}`);
     const article: RssArticle = { ...item, feedId: existingFeed?.id ?? id, feedTitle: feed.title, read: existing?.read ?? false, starred: existing?.starred ?? false };
     if (existingFeed && !knownIds.has(item.id)) for (const rule of rules) if (ruleMatches(article, rule)) {
       if (rule.action === 'star') article.starred = true;
       if (rule.action === 'mark-read') article.read = true;
-      if (rule.action === 'notify') showNotification(`${feed.title} · ${rule.name}`, article.title);
+      if (rule.action === 'notify') showNotification(adapter, `${feed.title} · ${rule.name}`, article.title);
     }
     return article;
   });
   const subscription: RssSubscription = { id: existingFeed?.id ?? id, title: feed.title, description: feed.description, siteUrl: feed.siteUrl, feedUrl: feed.feedUrl, sourceUrl: existingFeed?.sourceUrl ?? feed.feedUrl, category: existingFeed?.category ?? category, addedAt: existingFeed?.addedAt ?? Date.now(), lastFetchedAt: Date.now() };
-  saveRssState({ subscriptions: [...state.subscriptions.filter((item) => item.id !== subscription.id), subscription], articles: [...articles, ...state.articles.filter((item) => item.feedId !== subscription.id)] });
+  saveRssState(adapter, { subscriptions: [...state.subscriptions.filter((item) => item.id !== subscription.id), subscription], articles: [...articles, ...state.articles.filter((item) => item.feedId !== subscription.id)] });
   const newArticles = existingFeed ? articles.filter((article) => !knownIds.has(article.id)) : [];
-  if (newArticles.length) showNotification(`${feed.title} 有 ${newArticles.length} 篇新文章`, newArticles.slice(0, 3).map((article) => article.title).join('、'));
+  if (newArticles.length) showNotification(adapter, `${feed.title} 有 ${newArticles.length} 篇新文章`, newArticles.slice(0, 3).map((article) => article.title).join('、'));
 }
 
 let refreshRunning = false;
-async function refreshAllFeeds(): Promise<void> {
+async function refreshAllFeeds(adapter: RssMainFullAdapter): Promise<void> {
   if (refreshRunning) return;
   refreshRunning = true;
   try {
-    const feeds = loadRssState().subscriptions;
+    const feeds = loadRssState(adapter).subscriptions;
     for (const feed of feeds) {
-      try { mergeFeed(await fetchFeed(feed.feedUrl), feed.category); }
+      try { mergeFeed(adapter, await fetchFeed(adapter, feed.feedUrl), feed.category); }
       catch (cause) {
-        const state = loadRssState();
-        saveRssState({ ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, lastFetchedAt: Date.now(), error: cause instanceof Error ? cause.message : String(cause) } : item) });
+        const state = loadRssState(adapter);
+        saveRssState(adapter, { ...state, subscriptions: state.subscriptions.map((item) => item.id === feed.id ? { ...item, lastFetchedAt: Date.now(), error: cause instanceof Error ? cause.message : String(cause) } : item) });
       }
     }
-    pruneRssArticles();
+    pruneRssArticles(adapter);
   } finally { refreshRunning = false; }
 }
 
-let backgroundTimer: NodeJS.Timeout | null = null;
-export function startRssBackgroundRefresh(): void {
+let backgroundTimer: ReturnType<typeof setInterval> | null = null;
+export function startRssBackgroundRefresh(adapter: RssMainFullAdapter): void {
   if (backgroundTimer) return;
   backgroundTimer = setInterval(() => {
-    const minutes = getRssRefreshMinutes();
+    const minutes = getRssRefreshMinutes(adapter);
     if (!minutes) return;
-    const feeds = loadRssState().subscriptions;
-    if (feeds.some((feed) => Date.now() - feed.lastFetchedAt >= minutes * 60_000)) void refreshAllFeeds();
+    const feeds = loadRssState(adapter).subscriptions;
+    if (feeds.some((feed) => Date.now() - feed.lastFetchedAt >= minutes * 60_000)) void refreshAllFeeds(adapter);
   }, 60_000);
-  backgroundTimer.unref();
+  if (typeof (backgroundTimer as { unref?: () => void }).unref === 'function') (backgroundTimer as { unref: () => void }).unref();
 }
 
-export function registerRssIpc(): void {
-  ipcMain.handle('rss:fetch', async (_event, rawUrl: string) => {
-    return fetchFeed(rawUrl);
+export interface RssIpcDeps {
+  ipcMain: {
+    handle(channel: string, listener: (event: unknown, ...args: any[]) => any): void;
+  };
+}
+
+export function registerRssIpc(deps: RssIpcDeps, adapter: RssMainFullAdapter): void {
+  const { ipcMain } = deps;
+  ipcMain.handle(RSS_IPC.FETCH, async (_event: unknown, rawUrl: string) => {
+    return fetchFeed(adapter, rawUrl);
   });
-  ipcMain.handle('rss:state:load', () => loadRssState());
-  ipcMain.handle('rss:state:save', (_event, state: { subscriptions: RssSubscription[]; articles: RssArticle[] }) => saveRssState(state));
-  ipcMain.handle('rss:refresh:all', async () => { await refreshAllFeeds(); return loadRssState(); });
-  ipcMain.handle('rss:settings:refresh', (_event, minutes: number) => setRssRefreshMinutes([0, 15, 60, 240].includes(minutes) ? minutes : 60));
-  ipcMain.handle('rss:settings:retention', (_event, days: number) => { setRssRetentionDays([0, 30, 90, 180].includes(days) ? days : 90); return pruneRssArticles(days); });
-  ipcMain.handle('rss:settings:notifications', (_event, enabled: boolean) => setRssNotificationsEnabled(!!enabled));
-  ipcMain.handle('rss:article:extract', async (_event, feedId: string, articleId: string, rawUrl: string) => {
-    const cached = getRssArticleContent(feedId, articleId);
+  ipcMain.handle(RSS_IPC.STATE_LOAD, () => loadRssState(adapter));
+  ipcMain.handle(RSS_IPC.STATE_SAVE, (_event: unknown, state: RssState) => saveRssState(adapter, state));
+  ipcMain.handle(RSS_IPC.REFRESH_ALL, async () => { await refreshAllFeeds(adapter); return loadRssState(adapter); });
+  ipcMain.handle(RSS_IPC.SETTINGS_REFRESH, (_event: unknown, minutes: number) => setRssRefreshMinutesDb(adapter, [0, 15, 60, 240].includes(minutes) ? minutes : 60));
+  ipcMain.handle(RSS_IPC.SETTINGS_RETENTION, (_event: unknown, days: number) => { setRssRetentionDays(adapter, [0, 30, 90, 180].includes(days) ? days : 90); return pruneRssArticles(adapter, days); });
+  ipcMain.handle(RSS_IPC.SETTINGS_NOTIFICATIONS, (_event: unknown, enabled: boolean) => setRssNotificationsEnabled(adapter, !!enabled));
+  ipcMain.handle(RSS_IPC.ARTICLE_EXTRACT, async (_event: unknown, feedId: string, articleId: string, rawUrl: string) => {
+    const cached = getRssArticleContent(adapter, feedId, articleId);
     if (cached) return cached;
-    const { response, url, cachedBody } = await fetchSafely(rawUrl, 'article');
+    const { response, url, cachedBody } = await fetchSafely(adapter, rawUrl, 'article');
     if (response.status !== 304 && !response.ok) throw new Error(`正文请求失败（HTTP ${response.status}）`);
     const html = cachedBody ?? await response.text();
     if (html.length > MAX_FEED_BYTES) throw new Error('网页超过 5 MB 限制');
-    if (!cachedBody) saveRssHttpCache(url.toString(), html, response.headers.get('etag'), response.headers.get('last-modified'));
-    const extracted = await extractReadability(html);
+    if (!cachedBody) saveRssHttpCache(adapter, url.toString(), html, response.headers.get('etag'), response.headers.get('last-modified'));
+    const extracted = await adapter.extractReadability(html);
     if (!extracted.contentText) throw new Error('未能提取到正文');
-    saveRssArticleContent(feedId, articleId, extracted.contentText, extracted.contentMarkdown, extracted.wordCount);
+    saveRssArticleContent(adapter, feedId, articleId, extracted.contentText, extracted.contentMarkdown, extracted.wordCount);
     return { text: extracted.contentText, markdown: extracted.contentMarkdown, wordCount: extracted.wordCount };
   });
-  ipcMain.handle('rss:search', (_event, query: string) => searchRssArticles(query));
-  ipcMain.handle('rss:rules:list', () => listRssRules());
-  ipcMain.handle('rss:rules:save', (_event, rule: RssKeywordRule) => saveRssRule(rule));
-  ipcMain.handle('rss:rules:delete', (_event, id: string) => deleteRssRule(id));
-  startRssBackgroundRefresh();
+  ipcMain.handle(RSS_IPC.SEARCH, (_event: unknown, query: string) => searchRssArticles(adapter, query));
+  ipcMain.handle(RSS_IPC.RULES_LIST, () => listRssRules(adapter));
+  ipcMain.handle(RSS_IPC.RULES_SAVE, (_event: unknown, rule: RssKeywordRule) => saveRssRuleDb(adapter, rule));
+  ipcMain.handle(RSS_IPC.RULES_DELETE, (_event: unknown, id: string) => deleteRssRuleDb(adapter, id));
+  startRssBackgroundRefresh(adapter);
 }

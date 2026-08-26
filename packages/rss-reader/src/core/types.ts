@@ -41,3 +41,8 @@ export interface RssKeywordRule {
   action: RssRuleAction;
   enabled: boolean;
 }
+
+export interface RssState {
+  subscriptions: RssSubscription[];
+  articles: RssArticle[];
+}

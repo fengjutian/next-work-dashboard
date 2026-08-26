@@ -86,6 +86,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
     "@next-work/outline-scaffolder": "file:../packages/outline-scaffolder",
+    "@next-work/rss-reader": "file:../packages/rss-reader",
     "@next-work/video-generation": "file:../packages/video-generation",
     "@radix-ui/react-scroll-area": "^1.2.15",
     "@radix-ui/react-separator": "^1.1.12",

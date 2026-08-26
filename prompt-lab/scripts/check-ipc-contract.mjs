@@ -6,7 +6,10 @@ const root = path.resolve(import.meta.dirname, '..');
 function filesUnder(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const target = path.join(directory, entry.name);
-    if (entry.isDirectory()) return filesUnder(target);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) return [];
+      return filesUnder(target);
+    }
     return /\.(ts|tsx)$/.test(entry.name) ? [target] : [];
   });
 }
@@ -76,25 +79,33 @@ function templatePrefix(literal) {
   return m ? `${m[1]}:` : null;
 }
 
-const sourceFiles = filesUnder(path.join(root, 'src'));
+const sourceFiles = [
+  ...filesUnder(path.join(root, 'src')),
+  ...filesUnder(path.join(root, '..', 'packages')),
+];
 const handlers = new Set();
 const invocations = new Set();
 const pushSends = new Set();
 const pushSubscribes = new Set();
 const dynamicPushPrefixes = new Set();
 let dynamicChannelCount = 0;
+const allConstants = {};
 
 for (const file of sourceFiles) {
   const source = fs.readFileSync(file, 'utf8');
   const constants = parseConstants(source);
+  // Merge so cross-file NAME.MEMBER references resolve (e.g. an ipcMain.handle
+  // in service.ts that consumes a `RSS_IPC.FETCH` constant defined in
+  // packages/rss-reader/src/main/channels.ts).
+  for (const [name, table] of Object.entries(constants)) allConstants[name] = table;
 
   for (const match of source.matchAll(new RegExp(`ipcMain\\.handle\\(\\s*${CHANNEL_ARG}`, 'g'))) {
-    const channel = resolveChannel(match[1] || match[2], constants);
+    const channel = resolveChannel(match[1] || match[2], allConstants);
     if (channel) handlers.add(channel);
   }
 
   for (const match of source.matchAll(new RegExp(`ipcRenderer\\.invoke\\(\\s*${CHANNEL_ARG}`, 'g'))) {
-    const channel = resolveChannel(match[1] || match[2], constants);
+    const channel = resolveChannel(match[1] || match[2], allConstants);
     if (channel) invocations.add(channel);
   }
 
@@ -111,7 +122,7 @@ for (const file of sourceFiles) {
       dynamicChannelCount += 1;
       continue;
     }
-    const channel = resolveChannel(raw, constants);
+    const channel = resolveChannel(raw, allConstants);
     if (channel) pushSends.add(channel);
   }
 
@@ -123,7 +134,7 @@ for (const file of sourceFiles) {
       dynamicChannelCount += 1;
       continue;
     }
-    const channel = resolveChannel(raw, constants);
+    const channel = resolveChannel(raw, allConstants);
     if (channel) pushSubscribes.add(channel);
   }
 }

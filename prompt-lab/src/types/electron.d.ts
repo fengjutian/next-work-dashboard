@@ -151,17 +151,17 @@ export interface ElectronAPI {
     pagesStatus: (remoteUrl: string) => Promise<{ success: boolean; data?: { state: string; conclusion?: string; url?: string; updatedAt?: string; branch?: string }; error?: string }>;
   };
   rss: {
-    fetch: (url: string) => Promise<import('../plugins/rss-reader/types').RssFeed>;
-    loadState: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
-    saveState: (state: { subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }) => Promise<void>;
-    refreshAll: () => Promise<{ subscriptions: import('../plugins/rss-reader/types').RssSubscription[]; articles: import('../plugins/rss-reader/types').RssArticle[] }>;
+    fetch: (url: string) => Promise<import('@next-work/rss-reader').RssFeed>;
+    loadState: () => Promise<{ subscriptions: import('@next-work/rss-reader').RssSubscription[]; articles: import('@next-work/rss-reader').RssArticle[] }>;
+    saveState: (state: { subscriptions: import('@next-work/rss-reader').RssSubscription[]; articles: import('@next-work/rss-reader').RssArticle[] }) => Promise<void>;
+    refreshAll: () => Promise<{ subscriptions: import('@next-work/rss-reader').RssSubscription[]; articles: import('@next-work/rss-reader').RssArticle[] }>;
     setRefreshMinutes: (minutes: number) => Promise<void>;
     setRetentionDays: (days: number) => Promise<number>;
     setNotificationsEnabled: (enabled: boolean) => Promise<void>;
     extractArticle: (feedId: string, articleId: string, url: string) => Promise<{ text: string; markdown: string; wordCount: number }>;
     search: (query: string) => Promise<Array<{ feedId: string; articleId: string }>>;
-    listRules: () => Promise<import('../plugins/rss-reader/types').RssKeywordRule[]>;
-    saveRule: (rule: import('../plugins/rss-reader/types').RssKeywordRule) => Promise<void>;
+    listRules: () => Promise<import('@next-work/rss-reader').RssKeywordRule[]>;
+    saveRule: (rule: import('@next-work/rss-reader').RssKeywordRule) => Promise<void>;
     deleteRule: (id: string) => Promise<void>;
   };
   plugins: {
