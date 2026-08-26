@@ -1,3 +1,5 @@
+import type { WereadAiRecommendRequest, WereadAiSummaryRequest, WereadRecommendItem, WereadSummaryItem } from './adapter';
+
 /**
  * Host globals consumed by WeRead. Hosts should provide an actual
  * implementation matching this shape on `window.electronAPI` (e.g. via an
@@ -27,6 +29,9 @@ declare global {
       auth: WereadElectronAuth;
       shell: WereadElectronShell;
       saveFile: (content: string, defaultName: string) => Promise<WereadElectronSaveFileResult>;
+      wereadRequest?: (apiKey: string, payload: Record<string, unknown>) => Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }>;
+      wereadAiSummary?: (payload: WereadAiSummaryRequest) => Promise<{ success: boolean; summaries?: WereadSummaryItem[]; error?: string }>;
+      wereadAiRecommend?: (payload: WereadAiRecommendRequest) => Promise<{ success: boolean; recommendations?: WereadRecommendItem[]; error?: string }>;
     };
   }
 }

@@ -1,12 +1,12 @@
 import type { WereadHostApi } from '../react/adapter';
 
-export type WereadTransport = <T>(operation: 'request' | 'ai-summary' | 'ai-recommend', payload: unknown) => Promise<T>;
+export type WereadTransport = (operation: 'request' | 'ai-summary' | 'ai-recommend', payload: unknown) => Promise<unknown>;
 
 export function createTransportWereadApi(transport: WereadTransport): WereadHostApi {
   return {
-    wereadRequest: (apiKey, payload) => transport('request', { apiKey, payload }),
-    wereadAiSummary: (payload) => transport('ai-summary', payload),
-    wereadAiRecommend: (payload) => transport('ai-recommend', payload),
+    wereadRequest: (apiKey, payload) => transport('request', { apiKey, payload }) as ReturnType<WereadHostApi['wereadRequest']>,
+    wereadAiSummary: (payload) => transport('ai-summary', payload) as ReturnType<WereadHostApi['wereadAiSummary']>,
+    wereadAiRecommend: (payload) => transport('ai-recommend', payload) as ReturnType<WereadHostApi['wereadAiRecommend']>,
   };
 }
 

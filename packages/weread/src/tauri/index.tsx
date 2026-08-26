@@ -1,4 +1,5 @@
 import React from 'react';
+import { invoke as defaultInvoke } from '@tauri-apps/api/core';
 import { WereadPanel, WereadProvider } from '../react';
 import type { WereadAdapter, WereadAiConfig, WereadHostApi, WereadHostServices, WereadTaskRepository } from '../react/adapter';
 import { createTransportWereadApi } from '../platform/api';
@@ -8,7 +9,7 @@ import { createLocalStorageWereadRepository } from '../platform/storage';
 export type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
 export interface TauriWereadOptions {
-  invoke: TauriInvoke;
+  invoke?: TauriInvoke;
   ai?: Partial<WereadAiConfig>;
   api?: WereadHostApi;
   host?: WereadHostServices;
@@ -16,10 +17,11 @@ export interface TauriWereadOptions {
   command?: string;
 }
 
-export function createTauriWereadAdapter(options: TauriWereadOptions): WereadAdapter {
+export function createTauriWereadAdapter(options: TauriWereadOptions = {}): WereadAdapter {
   const command = options.command ?? 'weread';
+  const invoke = options.invoke ?? defaultInvoke;
   return {
-    api: options.api ?? createTransportWereadApi((operation, payload) => options.invoke(command, { operation, payload })),
+    api: options.api ?? createTransportWereadApi((operation, payload) => invoke(command, { operation, payload })),
     ai: { baseUrl: '', apiKey: '', model: '', ...options.ai },
     tasks: options.tasks ?? createLocalStorageWereadRepository(),
     host: options.host ?? createBrowserWereadHost(),
@@ -27,7 +29,7 @@ export function createTauriWereadAdapter(options: TauriWereadOptions): WereadAda
   };
 }
 
-export function TauriWereadApp({ options }: { options: TauriWereadOptions }) {
+export function TauriWereadApp({ options = {} }: { options?: TauriWereadOptions }) {
   const adapter = React.useMemo(() => createTauriWereadAdapter(options), [options]);
   return <WereadProvider adapter={adapter}><WereadPanel /></WereadProvider>;
 }

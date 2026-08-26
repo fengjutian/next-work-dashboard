@@ -31,7 +31,114 @@ npm install @next-work-dashboard/weread react react-dom
 | `@next-work-dashboard/weread/core` | 类型、分析、索引、阅读记录和 Markdown 导出 |
 | `@next-work-dashboard/weread/react` | 面板、Provider、适配器和 UI 组件 |
 | `@next-work-dashboard/weread/main` | Electron IPC channel 与注册函数 |
+| `@next-work-dashboard/weread/web` | Web 默认适配器与开箱即用组件 |
+| `@next-work-dashboard/weread/electron` | Electron preload 自动适配器与组件 |
+| `@next-work-dashboard/weread/tauri` | Tauri invoke 适配器与组件 |
 | `@next-work-dashboard/weread/styles.css` | 面板基础样式 |
+
+## 三平台快速开始
+
+### Web
+
+Web 入口默认使用 `localStorage` 持久化、浏览器文件下载和 iframe 阅读器：
+
+```tsx
+import { WebWereadApp } from '@next-work-dashboard/weread/web';
+import '@next-work-dashboard/weread/styles.css';
+
+export default function App() {
+  return <WebWereadApp />;
+}
+```
+
+默认向以下同源接口发送 POST 请求：
+
+```text
+/api/weread/request
+/api/weread/ai-summary
+/api/weread/ai-recommend
+```
+
+可以配置服务地址、headers 或自定义 `fetch`：
+
+```tsx
+<WebWereadApp options={{
+  http: {
+    baseUrl: 'https://api.example.com/weread',
+    headers: { Authorization: 'Bearer app-token' },
+  },
+  readerMode: 'iframe',
+}} />
+```
+
+若目标站点禁止 iframe，可设置 `readerMode: 'external'`，使用系统浏览器阅读。
+
+### Electron
+
+注册 `registerWereadIpc` 并在 preload 暴露标准 bridge 后，渲染进程无需手写 adapter：
+
+```tsx
+import { ElectronWereadApp } from '@next-work-dashboard/weread/electron';
+import '@next-work-dashboard/weread/styles.css';
+
+export default function App() {
+  return <ElectronWereadApp />;
+}
+```
+
+Electron 入口会自动使用 `window.electronAPI` 的 `wereadRequest`、`wereadAiSummary`、`wereadAiRecommend`、`auth`、`saveFile` 和 `shell`，并启用内嵌 `<webview>` 阅读器。未传 `tasks` 时使用默认 localStorage 仓库；生产应用可传入 SQLite 仓库。
+
+### Tauri 2
+
+Tauri 入口直接使用官方 `invoke`：
+
+```tsx
+import { TauriWereadApp } from '@next-work-dashboard/weread/tauri';
+import '@next-work-dashboard/weread/styles.css';
+
+export default function App() {
+  return <TauriWereadApp options={{
+    ai: { baseUrl: '', apiKey: '', model: '' },
+  }} />;
+}
+```
+
+默认调用一个名为 `weread` 的 Rust command，并传入：
+
+```ts
+type TauriWereadCommand = {
+  operation: 'request' | 'ai-summary' | 'ai-recommend';
+  payload: unknown;
+};
+```
+
+Rust 侧可以用一个 command 分发三类请求：
+
+```rust
+#[tauri::command]
+async fn weread(
+    operation: String,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match operation.as_str() {
+        "request" => weread_request(payload).await,
+        "ai-summary" => weread_ai_summary(payload).await,
+        "ai-recommend" => weread_ai_recommend(payload).await,
+        _ => Err(format!("unsupported weread operation: {operation}")),
+    }
+}
+
+tauri::Builder::default()
+    .invoke_handler(tauri::generate_handler![weread]);
+```
+
+如果 command 名称不同：
+
+```tsx
+<TauriWereadApp options={{ command: 'my_weread_gateway' }} />
+```
+
+也可以传入自定义 `invoke`、`api`、`host` 或 SQLite repository。Tauri 默认使用 localStorage 仓库和外部阅读器模式，因此不依赖 Electron `<webview>`。
 
 ## React 快速接入
 
@@ -193,9 +300,15 @@ const ai = {
 
 真实密钥应由宿主安全配置层管理，不要写入源代码或提交到仓库。渲染进程应通过受控 preload bridge 发起请求。
 
-## Electron WebView
+## 阅读器策略
 
-面板的阅读器标签使用 Electron `<webview>`，需要宿主窗口允许 webview。非 Electron 宿主仍可复用笔记、搜索、统计、导出和 AI 功能，但应隐藏或替换阅读器入口。
+统一组件支持三种阅读器策略：
+
+| mode | 默认宿主 | 行为 |
+| --- | --- | --- |
+| `electron` | Electron | 使用 `<webview>`，支持导航、注入样式、进度和禅模式 |
+| `iframe` | Web | 在页面内嵌微信读书；受目标站点 CSP/X-Frame-Options 约束 |
+| `external` | Tauri | 使用宿主外链能力打开微信读书，应用内保留同步和分析功能 |
 
 以下状态默认保存在 `localStorage`：
 
@@ -322,7 +435,8 @@ npm publish --workspace @next-work-dashboard/weread --access public --dry-run
 
 ## 限制
 
-- 阅读器需要 Electron `<webview>`
+- Web iframe 是否可用取决于目标站点的 CSP/X-Frame-Options；不可用时改用 `external`
+- Tauri 的网络 command 需要宿主在 Rust 侧实现，前端协议保持固定
 - AI provider 必须兼容 Chat Completions API
 - 微信读书接口依赖外部 Agent Gateway
 - 数据持久化、文件写入、密钥保存和 preload 安全策略由宿主负责
