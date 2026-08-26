@@ -1,4 +1,17 @@
 {
+  "name": "next-work-dashboard",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:packages": "npm run build --workspaces --if-present",
+    "test:packages": "npm test --workspaces --if-present",
+    "typecheck:packages": "npm run typecheck --workspaces --if-present",
+    "verify:packages": "npm run typecheck:packages && npm run test:packages && npm run build:packages",
+    "publish:packages:dry-run": "npm publish --workspaces --access public --dry-run",
+    "publish:packages": "npm publish --workspaces --access public"
+  },
   "dependencies": {
     "meyda": "^5.6.3",
     "node-pty": "^1.1.0",
