@@ -1,4 +1,4 @@
-import { BrowserWindow, app, ipcMain, Menu, dialog, shell } from 'electron';
+﻿import { BrowserWindow, app, ipcMain, Menu, dialog, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -54,6 +54,7 @@ import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
 import { registerMarkdownToWordIpc } from '../plugins/markdown-to-word/backend/ipc';
 import { registerRssIpc } from '@next-work/rss-reader/main';
+import { registerWereadIpc } from '@next-work/weread/main';
 import Database from 'better-sqlite3';
 import { Notification as ElectronNotification } from 'electron';
 import { extractReadability } from '../core/work-browser/parser';
@@ -162,6 +163,7 @@ async function applyGitPatch(root: string, patchText: string): Promise<string> {
 export function setupIPC(webviewPreloadPath: string) {
   registerOfficeIpc();
   registerMarkdownToWordIpc();
+  registerWereadIpc({ ipcMain });
   let rssDatabase: Database.Database | null = null;
   registerRssIpc(
     { ipcMain },
@@ -202,14 +204,14 @@ export function setupIPC(webviewPreloadPath: string) {
     try {
       const remote = String(remoteValue ?? '').trim();
       const match = remote.match(/github\.com[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
-      if (!match) throw new Error('仅支持查询 GitHub 仓库');
+      if (!match) throw new Error('浠呮敮鎸佹煡璇?GitHub 浠撳簱');
       const owner = encodeURIComponent(match[1]);
       const repository = encodeURIComponent(match[2].replace(/\.git$/i, ''));
       const response = await fetch(`https://api.github.com/repos/${owner}/${repository}/actions/workflows/pages.yml/runs?per_page=1`, {
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'next-work-dashboard' },
         signal: AbortSignal.timeout(12_000),
       });
-      if (response.status === 404) return { success: false, error: '未找到 Pages workflow，或仓库为私有仓库且需要鉴权' };
+      if (response.status === 404) return { success: false, error: '鏈壘鍒?Pages workflow锛屾垨浠撳簱涓虹鏈変粨搴撲笖闇€瑕侀壌鏉? };
       if (!response.ok) throw new Error(`GitHub API ${response.status}`);
       const payload = await response.json() as { workflow_runs?: Array<{ status?: string; conclusion?: string | null; html_url?: string; updated_at?: string; head_branch?: string }> };
       const run = payload.workflow_runs?.[0];
@@ -222,16 +224,16 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('outline-secrets:load', (_event, kind: unknown) => {
     const name = kind === 'review' ? 'outline-scaffolder-review' : kind === 'minimax' ? 'outline-scaffolder-minimax' : '';
     if (!name) return { success: false, error: 'INVALID_SECRET_KIND' };
-    if (!isEncryptionAvailable()) return { success: false, error: '系统安全存储不可用，API Key 未从磁盘读取' };
+    if (!isEncryptionAvailable()) return { success: false, error: '绯荤粺瀹夊叏瀛樺偍涓嶅彲鐢紝API Key 鏈粠纾佺洏璇诲彇' };
     return { success: true, value: getToken(name) ?? '' };
   });
   ipcMain.handle('outline-secrets:save', (_event, kind: unknown, value: unknown) => {
     const name = kind === 'review' ? 'outline-scaffolder-review' : kind === 'minimax' ? 'outline-scaffolder-minimax' : '';
     if (!name) return { success: false, error: 'INVALID_SECRET_KIND' };
-    if (!isEncryptionAvailable()) return { success: false, error: '系统安全存储不可用，无法安全保存 API Key' };
+    if (!isEncryptionAvailable()) return { success: false, error: '绯荤粺瀹夊叏瀛樺偍涓嶅彲鐢紝鏃犳硶瀹夊叏淇濆瓨 API Key' };
     const token = String(value ?? '').trim();
     if (!token) return { success: deleteToken(name) };
-    return saveToken(name, token, '章节文档生成器') ? { success: true } : { success: false, error: 'API Key 加密保存失败' };
+    return saveToken(name, token, '绔犺妭鏂囨。鐢熸垚鍣?) ? { success: true } : { success: false, error: 'API Key 鍔犲瘑淇濆瓨澶辫触' };
   });
   ipcMain.handle('outline-research:search', async (_event, rawQueries: unknown) => {
     const queries = Array.isArray(rawQueries) ? rawQueries.map((item) => String(item).trim().slice(0, 120)).filter(Boolean).slice(0, 3) : [];
@@ -265,8 +267,8 @@ export function setupIPC(webviewPreloadPath: string) {
           const title = String(item.display_name || '').trim();
           const url = String(item.doi || item.id || '').trim();
           if (!title || !/^https?:\/\//i.test(url)) continue;
-          const authors = (item.authorships ?? []).slice(0, 3).map((entry) => entry.author?.display_name).filter(Boolean).join('、');
-          results.push({ title, url, snippet: [authors, item.publication_year, item.type].filter(Boolean).join(' · '), domain: new URL(url).hostname, source: 'openalex' });
+          const authors = (item.authorships ?? []).slice(0, 3).map((entry) => entry.author?.display_name).filter(Boolean).join('銆?);
+          results.push({ title, url, snippet: [authors, item.publication_year, item.type].filter(Boolean).join(' 路 '), domain: new URL(url).hostname, source: 'openalex' });
           count += 1;
         }
       }
@@ -282,9 +284,9 @@ export function setupIPC(webviewPreloadPath: string) {
           const title = String(item.title?.[0] || '').trim();
           const url = String(item.URL || (item.DOI ? `https://doi.org/${item.DOI}` : '')).trim();
           if (!title || !/^https?:\/\//i.test(url)) continue;
-          const authors = (item.author ?? []).slice(0, 3).map((author) => [author.family, author.given].filter(Boolean).join(' ')).filter(Boolean).join('、');
+          const authors = (item.author ?? []).slice(0, 3).map((author) => [author.family, author.given].filter(Boolean).join(' ')).filter(Boolean).join('銆?);
           const year = item.published?.['date-parts']?.[0]?.[0];
-          results.push({ title, url, snippet: [authors, year, item.publisher, item.type].filter(Boolean).join(' · '), domain: new URL(url).hostname, source: 'crossref' });
+          results.push({ title, url, snippet: [authors, year, item.publisher, item.type].filter(Boolean).join(' 路 '), domain: new URL(url).hostname, source: 'crossref' });
           count += 1;
         }
       }
@@ -324,13 +326,13 @@ export function setupIPC(webviewPreloadPath: string) {
     win.webContents.on('context-menu', (_event, params) => {
       Menu.buildFromTemplate([
         {
-          label: '注入选中提示词',
+          label: '娉ㄥ叆閫変腑鎻愮ず璇?,
           enabled: !!params,
           click: () => win.webContents.send('inject-from-context-menu'),
         },
         { type: 'separator' },
-        { label: '复制', role: 'copy' },
-        { label: '粘贴', role: 'paste' },
+        { label: '澶嶅埗', role: 'copy' },
+        { label: '绮樿创', role: 'paste' },
       ]).popup();
     });
     win.webContents.once('destroyed', () => {
@@ -342,12 +344,12 @@ export function setupIPC(webviewPreloadPath: string) {
   BrowserWindow.getAllWindows().forEach(configureWindow);
   app.on('browser-window-created', (_event, win) => configureWindow(win));
 
-  // 暴露 webview preload 路径给渲染进程
+  // 鏆撮湶 webview preload 璺緞缁欐覆鏌撹繘绋?
   ipcMain.handle('get-webview-preload-path', () => {
     return webviewPreloadPath;
   });
 
-  // ── 提示词注入 ──
+  // 鈹€鈹€ 鎻愮ず璇嶆敞鍏?鈹€鈹€
   ipcMain.handle('inject-prompt', async (event, payload: {
     webviewId: number;
     text: string;
@@ -396,7 +398,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── 窗口控制 ──
+  // 鈹€鈹€ 绐楀彛鎺у埗 鈹€鈹€
   ipcMain.handle('window-minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.handle('window-maximize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -408,7 +410,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('window-hide', (event) => BrowserWindow.fromWebContents(event.sender)?.hide());
   ipcMain.handle('window-show', (event) => { const win = BrowserWindow.fromWebContents(event.sender); win?.show(); win?.focus(); });
 
-  // ── 窗口置顶 ──
+  // 鈹€鈹€ 绐楀彛缃《 鈹€鈹€
   ipcMain.handle('window-toggle-always-on-top', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return false;
@@ -417,7 +419,7 @@ export function setupIPC(webviewPreloadPath: string) {
     return ontop;
   });
 
-  // ── 开机启动 ──
+  // 鈹€鈹€ 寮€鏈哄惎鍔?鈹€鈹€
   const autoLauncher = new AutoLaunch({ name: 'next-work-dashboard' });
   ipcMain.handle('auto-launch-get', async () => {
     try { return await autoLauncher.isEnabled(); } catch { return false; }
@@ -428,13 +430,13 @@ export function setupIPC(webviewPreloadPath: string) {
     return enabled;
   });
 
-  // ── 数据持久化路径 ──
+  // 鈹€鈹€ 鏁版嵁鎸佷箙鍖栬矾寰?鈹€鈹€
   const dataPath = path.join(app.getPath('userData'), 'next-work-dashboard-data.json');
   const dbPath = path.join(app.getPath('userData'), 'next-work-dashboard.db');
   const documentCacheDir = path.join(app.getPath('userData'), 'document-cache');
   const exportDir = path.join(app.getPath('documents'), 'next-work-dashboard', 'conversations');
 
-  // ── favicon ──
+  // 鈹€鈹€ favicon 鈹€鈹€
   ipcMain.handle('fetch-favicon', async (_event, siteUrl: string) => {
     return await fetchSiteFavicon(siteUrl);
   });
@@ -462,11 +464,11 @@ export function setupIPC(webviewPreloadPath: string) {
         || /^192\.168\./.test(hostname)
         || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
       if (url.protocol !== 'https:' || !hostname || url.username || url.password || blockedHost) {
-        return { ok: false, status: 400, error: `UNSUPPORTED_LLM_PROXY_HOST: ${hostname || 'invalid host'}（仅允许公网 HTTPS 地址）` };
+        return { ok: false, status: 400, error: `UNSUPPORTED_LLM_PROXY_HOST: ${hostname || 'invalid host'}锛堜粎鍏佽鍏綉 HTTPS 鍦板潃锛塦 };
       }
       const apiKey = String(payload.apiKey ?? '').trim();
       if (!apiKey) return { ok: false, status: 401, error: 'MISSING_API_KEY' };
-      if (!/^[\x21-\x7E]+$/.test(apiKey)) return { ok: false, status: 400, error: 'INVALID_API_KEY_FORMAT: API Key 只能包含 ASCII 字符，请勿填写中文说明、空格或占位文字' };
+      if (!/^[\x21-\x7E]+$/.test(apiKey)) return { ok: false, status: 400, error: 'INVALID_API_KEY_FORMAT: API Key 鍙兘鍖呭惈 ASCII 瀛楃锛岃鍕垮～鍐欎腑鏂囪鏄庛€佺┖鏍兼垨鍗犱綅鏂囧瓧' };
       const body = { ...payload.body, stream: false, ...(isMiniMaxM3 ? { max_tokens: 32_768 } : {}) };
       const controller = new AbortController();
       let timedOut = false;
@@ -482,7 +484,7 @@ export function setupIPC(webviewPreloadPath: string) {
           if (response.ok) {
             const miniMaxData = data as { base_resp?: { status_code?: number; status_msg?: string }; choices?: Array<{ finish_reason?: string; message?: { content?: unknown; reasoning_content?: unknown; reasoning_details?: Array<{ text?: string }> } }>; output_sensitive?: boolean } | undefined;
             const businessCode = Number(miniMaxData?.base_resp?.status_code || 0);
-            if (businessCode !== 0) return { ok: false, status: 400, error: `MiniMax 业务错误 ${businessCode}: ${miniMaxData?.base_resp?.status_msg || '请求未成功'}` };
+            if (businessCode !== 0) return { ok: false, status: 400, error: `MiniMax 涓氬姟閿欒 ${businessCode}: ${miniMaxData?.base_resp?.status_msg || '璇锋眰鏈垚鍔?}` };
             const choice = miniMaxData?.choices?.[0];
             const content = choice?.message?.content;
             const hasContent = Array.isArray(content) ? content.length > 0 : String(content ?? '').trim().length > 0;
@@ -490,24 +492,24 @@ export function setupIPC(webviewPreloadPath: string) {
               const reasoningLength = String(choice?.message?.reasoning_content ?? '').length
                 + (choice?.message?.reasoning_details ?? []).reduce((sum, item) => sum + String(item.text ?? '').length, 0);
               const detail = miniMaxData?.output_sensitive
-                ? '输出触发内容安全策略'
+                ? '杈撳嚭瑙﹀彂鍐呭瀹夊叏绛栫暐'
                 : choice?.finish_reason === 'length'
-                  ? '推理过程耗尽了输出额度'
-                  : `响应正文为空${reasoningLength ? `（已产生 ${reasoningLength} 字符推理内容）` : ''}`;
-              return { ok: false, status: 422, error: `MiniMax-M3 未返回最终正文：${detail}。请缩短待审校文章或改用 MiniMax-M2.7。` };
+                  ? '鎺ㄧ悊杩囩▼鑰楀敖浜嗚緭鍑洪搴?
+                  : `鍝嶅簲姝ｆ枃涓虹┖${reasoningLength ? `锛堝凡浜х敓 ${reasoningLength} 瀛楃鎺ㄧ悊鍐呭锛塦 : ''}`;
+              return { ok: false, status: 422, error: `MiniMax-M3 鏈繑鍥炴渶缁堟鏂囷細${detail}銆傝缂╃煭寰呭鏍℃枃绔犳垨鏀圭敤 MiniMax-M2.7銆俙 };
             }
             return { ok: true, status: response.status, data };
           }
           const retryable = response.status === 429 || response.status === 529 || (response.status >= 500 && response.status <= 599);
           if (!retryable || attempt === retryDelays.length - 1) {
-            const suffix = retryable ? `\n已自动重试 ${attempt} 次，服务仍然繁忙。` : '';
+            const suffix = retryable ? `\n宸茶嚜鍔ㄩ噸璇?${attempt} 娆★紝鏈嶅姟浠嶇劧绻佸繖銆俙 : '';
             return { ok: false, status: response.status, error: `${text.slice(0, 1000)}${suffix}` };
           }
         }
-        return { ok: false, status: 503, error: '模型服务暂时不可用' };
+        return { ok: false, status: 503, error: '妯″瀷鏈嶅姟鏆傛椂涓嶅彲鐢? };
       } catch (error) {
         if (timedOut || (error instanceof Error && error.name === 'AbortError')) {
-          return { ok: false, status: 408, error: '模型生成超过 5 分钟，请缩短输入或更换响应更快的模型' };
+          return { ok: false, status: 408, error: '妯″瀷鐢熸垚瓒呰繃 5 鍒嗛挓锛岃缂╃煭杈撳叆鎴栨洿鎹㈠搷搴旀洿蹇殑妯″瀷' };
         }
         throw error;
       } finally { clearTimeout(timeout); }
@@ -523,15 +525,15 @@ export function setupIPC(webviewPreloadPath: string) {
       const model = String(payload.model || '').trim();
       const prompt = String(payload.prompt || '').trim().slice(0, 8000);
       if (payload.provider === 'minimax') {
-        if (!apiKey || !model || !prompt) return { success: false, error: '请填写 MiniMax API Key、模型和提示词' };
-        if (!/^[\x21-\x7E]+$/.test(apiKey)) return { success: false, error: 'API Key 格式无效：只能包含 ASCII 字符，请勿填写中文说明、空格或占位文字' };
+        if (!apiKey || !model || !prompt) return { success: false, error: '璇峰～鍐?MiniMax API Key銆佹ā鍨嬪拰鎻愮ず璇? };
+        if (!/^[\x21-\x7E]+$/.test(apiKey)) return { success: false, error: 'API Key 鏍煎紡鏃犳晥锛氬彧鑳藉寘鍚?ASCII 瀛楃锛岃鍕垮～鍐欎腑鏂囪鏄庛€佺┖鏍兼垨鍗犱綅鏂囧瓧' };
         const allowedModels = new Set(['image-01', 'image-01-live']);
         const allowedRatios = new Set(['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9']);
-        if (!allowedModels.has(model)) return { success: false, error: '不支持的 MiniMax 图像模型' };
+        if (!allowedModels.has(model)) return { success: false, error: '涓嶆敮鎸佺殑 MiniMax 鍥惧儚妯″瀷' };
         const aspectRatio = allowedRatios.has(String(payload.aspectRatio)) ? String(payload.aspectRatio) : '1:1';
-        if (model === 'image-01-live' && aspectRatio === '21:9') return { success: false, error: 'image-01-live 不支持 21:9 画幅' };
+        if (model === 'image-01-live' && aspectRatio === '21:9') return { success: false, error: 'image-01-live 涓嶆敮鎸?21:9 鐢诲箙' };
         const referenceUrl = String(payload.image?.url || '').trim();
-        if (referenceUrl && !/^https:\/\//i.test(referenceUrl)) return { success: false, error: 'MiniMax 参考图必须是可公网访问的 HTTPS 图片链接' };
+        if (referenceUrl && !/^https:\/\//i.test(referenceUrl)) return { success: false, error: 'MiniMax 鍙傝€冨浘蹇呴』鏄彲鍏綉璁块棶鐨?HTTPS 鍥剧墖閾炬帴' };
         const seed = Number.isSafeInteger(payload.seed) && Number(payload.seed) >= 0 ? Number(payload.seed) : undefined;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 600_000);
@@ -569,8 +571,8 @@ export function setupIPC(webviewPreloadPath: string) {
           const statusCode = Number(data?.base_resp?.status_code ?? 0);
           const serviceError = typeof data?.error === 'string' ? data.error : data?.error?.message;
           if (!response.ok || (Number.isFinite(statusCode) && statusCode !== 0)) {
-            const message = data?.base_resp?.status_msg || serviceError || text.slice(0, 1000) || `MiniMax 返回 HTTP ${response.status}`;
-            return { success: false, error: `MiniMax 图片生成失败${statusCode ? `（错误码 ${statusCode}）` : ''}：${message}` };
+            const message = data?.base_resp?.status_msg || serviceError || text.slice(0, 1000) || `MiniMax 杩斿洖 HTTP ${response.status}`;
+            return { success: false, error: `MiniMax 鍥剧墖鐢熸垚澶辫触${statusCode ? `锛堥敊璇爜 ${statusCode}锛塦 : ''}锛?{message}` };
           }
           const base64Result = data?.data?.image_base64;
           const encoded = (Array.isArray(base64Result) ? base64Result[0] : base64Result)
@@ -582,7 +584,7 @@ export function setupIPC(webviewPreloadPath: string) {
             || data?.data?.images?.[0]?.url;
           if (imageUrl) {
             const imageResponse = await fetch(imageUrl, { signal: AbortSignal.timeout(120_000) });
-            if (!imageResponse.ok) return { success: false, error: '图片已生成，但下载 MiniMax 临时结果失败' };
+            if (!imageResponse.ok) return { success: false, error: '鍥剧墖宸茬敓鎴愶紝浣嗕笅杞?MiniMax 涓存椂缁撴灉澶辫触' };
             const mime = imageResponse.headers.get('content-type') || 'image/jpeg';
             return { success: true, imageDataUrl: `data:${mime};base64,${Buffer.from(await imageResponse.arrayBuffer()).toString('base64')}` };
           }
@@ -590,17 +592,17 @@ export function setupIPC(webviewPreloadPath: string) {
           const successCount = Number(data?.metadata?.success_count ?? 0);
           const details = [
             data?.base_resp?.status_msg && data.base_resp.status_msg !== 'success' ? data.base_resp.status_msg : '',
-            failedCount > 0 ? `失败 ${failedCount} 张` : '',
-            Number.isFinite(successCount) ? `成功 ${successCount} 张` : '',
-            data?.id ? `任务 ID：${data.id}` : '',
-          ].filter(Boolean).join('；');
+            failedCount > 0 ? `澶辫触 ${failedCount} 寮燻 : '',
+            Number.isFinite(successCount) ? `鎴愬姛 ${successCount} 寮燻 : '',
+            data?.id ? `浠诲姟 ID锛?{data.id}` : '',
+          ].filter(Boolean).join('锛?);
           return {
             success: false,
-            error: `MiniMax 请求已完成，但没有返回可用图片${details ? `（${details}）` : ''}。可能被内容安全策略拦截；请调整提示词后重试，若持续失败再检查套餐额度与 image-01 权限。`,
+            error: `MiniMax 璇锋眰宸插畬鎴愶紝浣嗘病鏈夎繑鍥炲彲鐢ㄥ浘鐗?{details ? `锛?{details}锛塦 : ''}銆傚彲鑳借鍐呭瀹夊叏绛栫暐鎷︽埅锛涜璋冩暣鎻愮ず璇嶅悗閲嶈瘯锛岃嫢鎸佺画澶辫触鍐嶆鏌ュ椁愰搴︿笌 image-01 鏉冮檺銆俙,
           };
         } finally { clearTimeout(timeout); }
       }
-      if (!/^https:\/\//i.test(baseUrl) || !apiKey || !model || !prompt) return { success: false, error: '图片服务配置或提示词不完整' };
+      if (!/^https:\/\//i.test(baseUrl) || !apiKey || !model || !prompt) return { success: false, error: '鍥剧墖鏈嶅姟閰嶇疆鎴栨彁绀鸿瘝涓嶅畬鏁? };
       const endpoint = `${baseUrl}/images/${payload.image ? 'edits' : 'generations'}`;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 600_000);
@@ -608,7 +610,7 @@ export function setupIPC(webviewPreloadPath: string) {
       try {
         if (payload.image) {
           const bytes = Buffer.from(payload.image.dataBase64, 'base64');
-          if (bytes.byteLength > 20 * 1024 * 1024) return { success: false, error: '参考图片不能超过 20 MB' };
+          if (bytes.byteLength > 20 * 1024 * 1024) return { success: false, error: '鍙傝€冨浘鐗囦笉鑳借秴杩?20 MB' };
           const form = new FormData();
           form.append('model', model); form.append('prompt', prompt); form.append('size', String(payload.size || '1024x1024')); form.append('quality', String(payload.quality || 'medium'));
           form.append('image', new Blob([bytes], { type: payload.image.mimeType || 'image/png' }), payload.image.name || 'reference.png');
@@ -620,34 +622,34 @@ export function setupIPC(webviewPreloadPath: string) {
       const text = await response.text();
       let data: { error?: { message?: string }; data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }> } | null;
       try { data = JSON.parse(text) as typeof data; } catch { data = null; }
-      if (!response.ok) return { success: false, error: data?.error?.message || text.slice(0, 1000) || `图片服务返回 ${response.status}` };
+      if (!response.ok) return { success: false, error: data?.error?.message || text.slice(0, 1000) || `鍥剧墖鏈嶅姟杩斿洖 ${response.status}` };
       const item = data?.data?.[0];
       if (item?.b64_json) return { success: true, imageDataUrl: `data:image/png;base64,${item.b64_json}`, revisedPrompt: item.revised_prompt };
       if (item?.url) {
         const imageResponse = await fetch(item.url, { signal: AbortSignal.timeout(120_000) });
-        if (!imageResponse.ok) return { success: false, error: '图片已生成，但下载结果失败' };
+        if (!imageResponse.ok) return { success: false, error: '鍥剧墖宸茬敓鎴愶紝浣嗕笅杞界粨鏋滃け璐? };
         const mime = imageResponse.headers.get('content-type') || 'image/png';
         const encoded = Buffer.from(await imageResponse.arrayBuffer()).toString('base64');
         return { success: true, imageDataUrl: `data:${mime};base64,${encoded}`, revisedPrompt: item.revised_prompt };
       }
-      return { success: false, error: '图片服务未返回可识别的结果' };
+      return { success: false, error: '鍥剧墖鏈嶅姟鏈繑鍥炲彲璇嗗埆鐨勭粨鏋? };
     } catch (error) {
-      const message = error instanceof Error && error.name === 'AbortError' ? '图片生成超时（10 分钟）' : (error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error && error.name === 'AbortError' ? '鍥剧墖鐢熸垚瓒呮椂锛?0 鍒嗛挓锛? : (error instanceof Error ? error.message : String(error));
       return { success: false, error: message };
     }
   });
 
-  // ── Video Generation (MiniMax-H3) ──────────────────────────────
-  // 异步三段式：submit → poll → download。下载后的 MP4 落到 userData/video-generation/，
-  // 元数据走 SQLite（避免 50MB+ 视频塞进 BLOB）。Renderer 按需拉 blob 播放。
+  // 鈹€鈹€ Video Generation (MiniMax-H3) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // 寮傛涓夋寮忥細submit 鈫?poll 鈫?download銆備笅杞藉悗鐨?MP4 钀藉埌 userData/video-generation/锛?
+  // 鍏冩暟鎹蛋 SQLite锛堥伩鍏?50MB+ 瑙嗛濉炶繘 BLOB锛夈€俁enderer 鎸夐渶鎷?blob 鎾斁銆?
   const videoGenDir = path.join(app.getPath('userData'), 'video-generation');
   fs.mkdirSync(videoGenDir, { recursive: true });
 
   const runVideoFfmpeg = (args: string[]): Promise<void> => new Promise((resolve, reject) => {
     const binary = findMediaBinary('ffmpeg');
-    if (!binary) { reject(new Error('未找到 FFmpeg，请先在 AI 视频阅读器设置中配置')); return; }
+    if (!binary) { reject(new Error('鏈壘鍒?FFmpeg锛岃鍏堝湪 AI 瑙嗛闃呰鍣ㄨ缃腑閰嶇疆')); return; }
     execFile(binary, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { windowsHide: true }, (error, _stdout, stderr) => {
-      if (error) reject(new Error(`FFmpeg 执行失败：${String(stderr || error.message).slice(-1000)}`));
+      if (error) reject(new Error(`FFmpeg 鎵ц澶辫触锛?{String(stderr || error.message).slice(-1000)}`));
       else resolve();
     });
   });
@@ -662,11 +664,11 @@ export function setupIPC(webviewPreloadPath: string) {
   interface VideoProbeInfo { width: number; height: number; fps: number; duration: number; hasAudio: boolean }
   const probeVideo = async (filePath: string): Promise<VideoProbeInfo> => {
     const binary = findMediaBinary('ffprobe');
-    if (!binary) throw new Error('未找到 FFprobe，请确认它与 FFmpeg 位于同一目录');
+    if (!binary) throw new Error('鏈壘鍒?FFprobe锛岃纭瀹冧笌 FFmpeg 浣嶄簬鍚屼竴鐩綍');
     const output = await runVideoBinaryBuffer(binary, ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', filePath]);
     const parsed = JSON.parse(output.toString('utf8')) as { streams?: Array<{ codec_type?: string; width?: number; height?: number; avg_frame_rate?: string; r_frame_rate?: string; duration?: string }>; format?: { duration?: string } };
     const video = parsed.streams?.find((stream) => stream.codec_type === 'video');
-    if (!video?.width || !video.height) throw new Error('FFprobe 未检测到有效视频流');
+    if (!video?.width || !video.height) throw new Error('FFprobe 鏈娴嬪埌鏈夋晥瑙嗛娴?);
     const rate = video.avg_frame_rate || video.r_frame_rate || '25/1';
     const [numerator, denominator] = rate.split('/').map(Number);
     return { width: video.width, height: video.height, fps: denominator ? numerator / denominator : numerator || 25,
@@ -681,12 +683,12 @@ export function setupIPC(webviewPreloadPath: string) {
 
   const readVideoAsBlob = async (filePath: string): Promise<{ success: boolean; bytes?: number; mimeType?: string; data?: ArrayBuffer; error?: string }> => {
     try {
-      if (!filePath || !fs.existsSync(filePath)) return { success: false, error: '视频文件不存在或已被删除' };
+      if (!filePath || !fs.existsSync(filePath)) return { success: false, error: '瑙嗛鏂囦欢涓嶅瓨鍦ㄦ垨宸茶鍒犻櫎' };
       const stat = fs.statSync(filePath);
-      if (stat.size > 200 * 1024 * 1024) return { success: false, error: `视频文件 ${(stat.size / 1024 / 1024).toFixed(1)} MB 超过 200 MB 单次读取上限` };
+      if (stat.size > 200 * 1024 * 1024) return { success: false, error: `瑙嗛鏂囦欢 ${(stat.size / 1024 / 1024).toFixed(1)} MB 瓒呰繃 200 MB 鍗曟璇诲彇涓婇檺` };
       const buffer = fs.readFileSync(filePath);
       const mimeType = filePath.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4';
-      // 转成 ArrayBuffer（IPC structured clone 友好）
+      // 杞垚 ArrayBuffer锛圛PC structured clone 鍙嬪ソ锛?
       return { success: true, bytes: stat.size, mimeType, data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -717,7 +719,7 @@ export function setupIPC(webviewPreloadPath: string) {
       if (!submit.success || !submit.taskId) return { success: false, error: submit.error, baseResp: submit.baseResp };
       return { success: true, taskId: submit.taskId, baseResp: submit.baseResp };
     } catch (err) {
-      const message = err instanceof Error && err.name === 'AbortError' ? '提交视频生成任务超时（1 分钟）' : (err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error && err.name === 'AbortError' ? '鎻愪氦瑙嗛鐢熸垚浠诲姟瓒呮椂锛? 鍒嗛挓锛? : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
     }
   });
@@ -727,8 +729,8 @@ export function setupIPC(webviewPreloadPath: string) {
       const apiKey = String(payload?.apiKey || '').trim();
       const taskId = String(payload?.taskId || '').trim();
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
-      if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
-      if (!taskId) return { success: false, error: 'taskId 不能为空' };
+      if (!apiKey) return { success: false, error: '璇峰～鍐?MiniMax API Key' };
+      if (!taskId) return { success: false, error: 'taskId 涓嶈兘涓虹┖' };
       const apiModule = await import('@next-work/video-generation/core');
       const { endpoint, init } = apiModule.buildQueryRequest(baseUrl, apiKey, taskId, payload.model);
       const controller = new AbortController();
@@ -750,29 +752,29 @@ export function setupIPC(webviewPreloadPath: string) {
         try { fileData = JSON.parse(fileText); } catch { /* keep null */ }
         if (!fileResponse.ok) return { success: false, error: apiModule.formatMiniMaxHttpError(fileResponse.status, fileData, fileText) };
         const retrieved = apiModule.parseFileRetrieveResponse(fileData);
-        if (!retrieved.videoUrl) return { success: false, error: retrieved.error || '无法获取视频下载地址' };
+        if (!retrieved.videoUrl) return { success: false, error: retrieved.error || '鏃犳硶鑾峰彇瑙嗛涓嬭浇鍦板潃' };
         info.videoUrl = retrieved.videoUrl;
       }
       return { success: true, info };
     } catch (err) {
-      const message = err instanceof Error && err.name === 'AbortError' ? '查询任务超时（30 秒）' : (err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error && err.name === 'AbortError' ? '鏌ヨ浠诲姟瓒呮椂锛?0 绉掞級' : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
     }
   });
 
-  // 取消 / 删除上游任务（DELETE /v2/video_generation/{task_id}）。
-  // MiniMax 文档：取消排队中的任务，或删除成功和失败的任务记录。
-  // 终态已 succeed / failed / cancelled 的任务也会被服务端清理记录。
+  // 鍙栨秷 / 鍒犻櫎涓婃父浠诲姟锛圖ELETE /v2/video_generation/{task_id}锛夈€?
+  // MiniMax 鏂囨。锛氬彇娑堟帓闃熶腑鐨勪换鍔★紝鎴栧垹闄ゆ垚鍔熷拰澶辫触鐨勪换鍔¤褰曘€?
+  // 缁堟€佸凡 succeed / failed / cancelled 鐨勪换鍔′篃浼氳鏈嶅姟绔竻鐞嗚褰曘€?
   ipcMain.handle('video-generation:cancel', async (_event, payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => {
     try {
       const apiKey = String(payload?.apiKey || '').trim();
       const taskId = String(payload?.taskId || '').trim();
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
-      if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
-      if (!taskId) return { success: false, error: 'taskId 不能为空' };
+      if (!apiKey) return { success: false, error: '璇峰～鍐?MiniMax API Key' };
+      if (!taskId) return { success: false, error: 'taskId 涓嶈兘涓虹┖' };
       const { buildCancelRequest, usesH3Protocol } = await import('@next-work/video-generation/core');
       if (!usesH3Protocol(payload.model)) {
-        return { success: true, baseResp: { statusCode: 0, statusMsg: 'Hailuo v1 不支持取消上游任务，已停止本地轮询' } };
+        return { success: true, baseResp: { statusCode: 0, statusMsg: 'Hailuo v1 涓嶆敮鎸佸彇娑堜笂娓镐换鍔★紝宸插仠姝㈡湰鍦拌疆璇? } };
       }
       const { endpoint, init } = buildCancelRequest(baseUrl, apiKey, taskId);
       const controller = new AbortController();
@@ -784,14 +786,14 @@ export function setupIPC(webviewPreloadPath: string) {
       const text = await response.text();
       let data: { base_resp?: { status_code?: number; status_msg?: string } } | null = null;
       try { data = JSON.parse(text); } catch { /* keep null */ }
-      if (!response.ok) return { success: false, error: `取消任务失败（HTTP ${response.status}）：${text.slice(0, 300)}` };
+      if (!response.ok) return { success: false, error: `鍙栨秷浠诲姟澶辫触锛圚TTP ${response.status}锛夛細${text.slice(0, 300)}` };
       const statusCode = data?.base_resp?.status_code;
       if (statusCode && statusCode !== 0) {
-        return { success: false, baseResp: { statusCode, statusMsg: data?.base_resp?.status_msg }, error: data?.base_resp?.status_msg || `MiniMax 返回 status_code=${statusCode}` };
+        return { success: false, baseResp: { statusCode, statusMsg: data?.base_resp?.status_msg }, error: data?.base_resp?.status_msg || `MiniMax 杩斿洖 status_code=${statusCode}` };
       }
       return { success: true, baseResp: { statusCode: 0, statusMsg: data?.base_resp?.status_msg } };
     } catch (err) {
-      const message = err instanceof Error && err.name === 'AbortError' ? '取消任务超时（30 秒）' : (err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error && err.name === 'AbortError' ? '鍙栨秷浠诲姟瓒呮椂锛?0 绉掞級' : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
     }
   });
@@ -800,32 +802,32 @@ export function setupIPC(webviewPreloadPath: string) {
     try {
       const videoUrl = String(payload?.videoUrl || '').trim();
       const recordId = String(payload?.recordId || '').trim();
-      if (!/^https?:\/\//i.test(videoUrl)) return { success: false, error: '成片地址必须是 http(s) URL' };
-      if (!recordId) return { success: false, error: 'recordId 不能为空' };
+      if (!/^https?:\/\//i.test(videoUrl)) return { success: false, error: '鎴愮墖鍦板潃蹇呴』鏄?http(s) URL' };
+      if (!recordId) return { success: false, error: 'recordId 涓嶈兘涓虹┖' };
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 300_000);
       let response: Response;
       try {
         response = await fetch(videoUrl, { signal: controller.signal });
       } finally { clearTimeout(timeout); }
-      if (!response.ok) return { success: false, error: `下载成片失败（HTTP ${response.status}）` };
+      if (!response.ok) return { success: false, error: `涓嬭浇鎴愮墖澶辫触锛圚TTP ${response.status}锛塦 };
       const arrayBuffer = await response.arrayBuffer();
       const bytes = arrayBuffer.byteLength;
-      if (bytes === 0) return { success: false, error: '成片内容为空' };
-      if (bytes > 500 * 1024 * 1024) return { success: false, error: `成片 ${(bytes / 1024 / 1024).toFixed(1)} MB 超过 500 MB 存储上限` };
+      if (bytes === 0) return { success: false, error: '鎴愮墖鍐呭涓虹┖' };
+      if (bytes > 500 * 1024 * 1024) return { success: false, error: `鎴愮墖 ${(bytes / 1024 / 1024).toFixed(1)} MB 瓒呰繃 500 MB 瀛樺偍涓婇檺` };
       const ext = (response.headers.get('content-type') || '').includes('webm') ? 'webm' : 'mp4';
       const safeName = `${recordId}.${ext}`;
       const filePath = path.join(videoGenDir, safeName);
       fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
       return { success: true, filePath, fileName: safeName, bytes, mimeType: ext === 'webm' ? 'video/webm' : 'video/mp4' };
     } catch (err) {
-      const message = err instanceof Error && err.name === 'AbortError' ? '下载成片超时（5 分钟）' : (err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error && err.name === 'AbortError' ? '涓嬭浇鎴愮墖瓒呮椂锛? 鍒嗛挓锛? : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
     }
   });
 
-  // 把用户选的本地图传到 litterbox.catbox.moe（免认证，1 小时 TTL，专为短时分享设计），
-  // 拿到 HTTPS URL 后再喂给 MiniMax 视频生成 API。MiniMax 端要求素材必须 https 可公网访问。
+  // 鎶婄敤鎴烽€夌殑鏈湴鍥句紶鍒?litterbox.catbox.moe锛堝厤璁よ瘉锛? 灏忔椂 TTL锛屼笓涓虹煭鏃跺垎浜璁★級锛?
+  // 鎷垮埌 HTTPS URL 鍚庡啀鍠傜粰 MiniMax 瑙嗛鐢熸垚 API銆侻iniMax 绔姹傜礌鏉愬繀椤?https 鍙叕缃戣闂€?
   const LITTERBOX_ENDPOINT = 'https://litterbox.catbox.moe/resources/internals/api.php';
   const ALLOWED_REFERENCE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif', 'video/mp4', 'video/quicktime', 'audio/wav', 'audio/mpeg', 'audio/x-wav']);
   const ALLOWED_REFERENCE_EXT = /\.(png|jpe?g|webp|heic|heif|mp4|mov|wav|mp3)$/i;
@@ -835,13 +837,13 @@ export function setupIPC(webviewPreloadPath: string) {
       const name = String(payload?.name || 'reference').slice(0, 120);
       const mimeType = String(payload?.mimeType || '').toLowerCase();
       if (!ALLOWED_REFERENCE_MIME.has(mimeType)) {
-        return { success: false, error: `不支持的素材类型：${mimeType || '未知'}。MiniMax 仅接收 PNG/JPEG/WEBP/HEIC 图片与 MP4/MOV 视频、WAV/MP3 音频。` };
+        return { success: false, error: `涓嶆敮鎸佺殑绱犳潗绫诲瀷锛?{mimeType || '鏈煡'}銆侻iniMax 浠呮帴鏀?PNG/JPEG/WEBP/HEIC 鍥剧墖涓?MP4/MOV 瑙嗛銆乄AV/MP3 闊抽銆俙 };
       }
       if (!ALLOWED_REFERENCE_EXT.test(name)) {
-        return { success: false, error: '文件扩展名需为 png/jpg/jpeg/webp/heic/heif/mp4/mov/wav/mp3 之一' };
+        return { success: false, error: '鏂囦欢鎵╁睍鍚嶉渶涓?png/jpg/jpeg/webp/heic/heif/mp4/mov/wav/mp3 涔嬩竴' };
       }
       const data = payload?.data;
-      if (!(data instanceof ArrayBuffer)) return { success: false, error: '素材数据缺失' };
+      if (!(data instanceof ArrayBuffer)) return { success: false, error: '绱犳潗鏁版嵁缂哄け' };
       const bytes = Buffer.from(data);
       const imageMax = 30 * 1024 * 1024;
       const videoMax = 50 * 1024 * 1024;
@@ -850,9 +852,9 @@ export function setupIPC(webviewPreloadPath: string) {
       const isVideo = mimeType.startsWith('video/');
       const isAudio = mimeType.startsWith('audio/');
       const cap = isImage ? imageMax : isVideo ? videoMax : isAudio ? audioMax : 0;
-      if (!cap) return { success: false, error: '无法识别的素材类别' };
-      if (bytes.byteLength === 0) return { success: false, error: '文件为空' };
-      if (bytes.byteLength > cap) return { success: false, error: `${name} 超过 ${(cap / 1024 / 1024).toFixed(0)} MB 上限（当前 ${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB）` };
+      if (!cap) return { success: false, error: '鏃犳硶璇嗗埆鐨勭礌鏉愮被鍒? };
+      if (bytes.byteLength === 0) return { success: false, error: '鏂囦欢涓虹┖' };
+      if (bytes.byteLength > cap) return { success: false, error: `${name} 瓒呰繃 ${(cap / 1024 / 1024).toFixed(0)} MB 涓婇檺锛堝綋鍓?${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB锛塦 };
 
       const ttlHours = Math.max(1, Math.min(72, Number(payload?.ttlHours) || 1));
       const form = new FormData();
@@ -867,14 +869,14 @@ export function setupIPC(webviewPreloadPath: string) {
         response = await fetch(LITTERBOX_ENDPOINT, { method: 'POST', body: form, signal: controller.signal });
       } finally { clearTimeout(timeout); }
       const text = (await response.text()).trim();
-      if (!response.ok) return { success: false, error: `litterbox 上传失败（HTTP ${response.status}）：${text.slice(0, 300)}` };
+      if (!response.ok) return { success: false, error: `litterbox 涓婁紶澶辫触锛圚TTP ${response.status}锛夛細${text.slice(0, 300)}` };
       const uploadedUrl = parseLitterboxUploadUrl(text);
       if (!uploadedUrl) {
-        return { success: false, error: `litterbox 返回非预期内容：${text.slice(0, 300)}` };
+        return { success: false, error: `litterbox 杩斿洖闈為鏈熷唴瀹癸細${text.slice(0, 300)}` };
       }
       return { success: true, url: uploadedUrl, ttlHours, bytes: bytes.byteLength };
     } catch (err) {
-      const message = err instanceof Error && err.name === 'AbortError' ? '上传参考素材超时（2 分钟）' : (err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error && err.name === 'AbortError' ? '涓婁紶鍙傝€冪礌鏉愯秴鏃讹紙2 鍒嗛挓锛? : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
     }
   });
@@ -886,7 +888,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('video-generation:reveal', async (_event, filePath: string) => {
     try {
       const target = String(filePath || '');
-      if (!target || !fs.existsSync(target)) return { success: false, error: '视频文件不存在' };
+      if (!target || !fs.existsSync(target)) return { success: false, error: '瑙嗛鏂囦欢涓嶅瓨鍦? };
       shell.showItemInFolder(target);
       return { success: true };
     } catch (err) {
@@ -902,11 +904,11 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('video-generation:cleanup', async (_event, filePath: string) => {
     try {
       const target = String(filePath || '');
-      if (!target) return { success: false, error: 'filePath 不能为空' };
-      // 安全护栏：只允许删除 userData/video-generation 下的文件
+      if (!target) return { success: false, error: 'filePath 涓嶈兘涓虹┖' };
+      // 瀹夊叏鎶ゆ爮锛氬彧鍏佽鍒犻櫎 userData/video-generation 涓嬬殑鏂囦欢
       const resolved = path.resolve(target);
       const allowedRoot = path.resolve(videoGenDir) + path.sep;
-      if (!resolved.startsWith(allowedRoot)) return { success: false, error: '禁止删除插件管理目录之外的文件' };
+      if (!resolved.startsWith(allowedRoot)) return { success: false, error: '绂佹鍒犻櫎鎻掍欢绠＄悊鐩綍涔嬪鐨勬枃浠? };
       if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
       return { success: true };
     } catch (err) {
@@ -972,7 +974,7 @@ export function setupIPC(webviewPreloadPath: string) {
   });
   ipcMain.handle('memory:index:clear', () => clearLanceMemoryIndex());
 
-  // ── 通用 HTTP fetch（绕过 CORS，供 AI 工具使用） ──
+  // 鈹€鈹€ 閫氱敤 HTTP fetch锛堢粫杩?CORS锛屼緵 AI 宸ュ叿浣跨敤锛?鈹€鈹€
   ipcMain.handle('fetch-url', async (_event, url: string, options?: { headers?: Record<string, string> }) => {
     try {
       const resp = await fetch(url, {
@@ -990,257 +992,8 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // 微信读书 Agent API。固定目标域名，避免把带凭据的请求变成通用代理。
-  ipcMain.handle('weread:request', async (_event, apiKey: string, payload: Record<string, unknown>) => {
-    const key = String(apiKey || '').trim();
-    if (!/^wrk-\S{4,}$/.test(key)) return { success: false, error: 'API Key 格式不正确' };
-    if (!payload || typeof payload.api_name !== 'string') return { success: false, error: '接口参数不正确' };
 
-    let lastError = '请求微信读书失败';
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60_000);
-      try {
-        const response = await fetch('https://i.weread.qq.com/api/agent/gateway', {
-          method: 'POST', signal: controller.signal,
-          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, skill_version: '1.0.4' }),
-        });
-        const text = await response.text();
-        if (!response.ok) {
-          let detail = text.trim().slice(0, 300);
-          try {
-            const body = JSON.parse(text) as { errmsg?: string; message?: string };
-            detail = body.errmsg || body.message || detail;
-          } catch { /* use response text */ }
-          lastError = `请求失败（HTTP ${response.status}）${detail ? `：${detail}` : ''}`;
-          if ((response.status === 429 || response.status === 499 || response.status >= 500) && attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 800 * 2 ** attempt));
-            continue;
-          }
-          return { success: false, error: lastError };
-        }
-        let data: Record<string, unknown>;
-        try { data = JSON.parse(text) as Record<string, unknown>; }
-        catch { return { success: false, error: '微信读书返回了无法解析的数据' }; }
-        if (typeof data.errcode === 'number' && data.errcode !== 0) {
-          return { success: false, error: String(data.errmsg || `微信读书错误 ${data.errcode}`) };
-        }
-        if (data.upgrade_info) return { success: false, error: String((data.upgrade_info as { message?: string }).message || '微信读书 Skill 需要升级') };
-        return { success: true, data };
-      } catch (error) {
-        lastError = error instanceof Error && error.name === 'AbortError'
-          ? '请求微信读书超时（60 秒）'
-          : error instanceof Error ? error.message : String(error);
-        if (attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 800 * 2 ** attempt));
-          continue;
-        }
-      } finally { clearTimeout(timeout); }
-    }
-    return { success: false, error: lastError };
-  });
-
-  // ── 微信读书 AI 摘要 ──
-  ipcMain.handle('weread:ai-summary', async (_event, payload: { baseUrl: string; apiKey: string; model: string; books: Array<{ bookId: string; title: string; author: string; highlights: string[]; reviews: string[] }> }) => {
-    const { baseUrl, apiKey, model, books } = payload;
-    if (!apiKey || !baseUrl || !model) return { success: false, error: '请先在设置中配置 AI API' };
-    if (!books?.length) return { success: false, error: '没有可分析的书籍' };
-
-    const BATCH_SIZE = 3;
-    const summaries: Array<{ bookId: string; summary: string; tags: string[] }> = [];
-
-    for (let i = 0; i < books.length; i += BATCH_SIZE) {
-      const batch = books.slice(i, i + BATCH_SIZE);
-      const booksText = batch.map((book, idx) => {
-        const lines = [`${idx + 1}. 《${book.title}》${book.author ? ` — ${book.author}` : ''}`];
-        if (book.highlights.length) lines.push(`划线摘录（${book.highlights.length} 条）：${book.highlights.slice(0, 10).join('；')}`);
-        if (book.reviews.length) lines.push(`个人想法（${book.reviews.length} 条）：${book.reviews.slice(0, 5).join('；')}`);
-        return lines.join('\n');
-      }).join('\n\n');
-
-      const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-      let lastError = '';
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        lastError = ''; // 每次重试前清空，避免上一次失败的错误残留
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 120_000);
-        try {
-          const response = await fetch(url, {
-            method: 'POST', signal: controller.signal,
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model,
-              messages: [
-                { role: 'system', content: '你是一位专业的阅读分析助手。为每本书生成一段简洁的中文摘要（2-4句）和3-5个标签。返回严格的 JSON 格式：{"books":[{"index":1,"summary":"...","tags":["标签1","标签2"]}]}。摘要要抓住书的主题和用户的关注点。标签要简短准确（2-4字）。' },
-                { role: 'user', content: booksText },
-              ],
-              temperature: 0.4, max_tokens: 2000,
-            }),
-          });
-          const text = await response.text();
-          if (!response.ok) {
-            let detail = text.slice(0, 300);
-            try { detail = JSON.parse(text).error?.message || detail; } catch { /* use raw */ }
-            lastError = `AI 请求失败（HTTP ${response.status}）：${detail}`;
-            if (attempt < 1 && response.status >= 500) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-            return { success: false, error: lastError };
-          }
-          if (!text.trim()) {
-            lastError = 'AI 返回了空响应，请重试';
-            if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-            break;
-          }
-
-          // 解析 HTTP 响应 JSON
-          let httpResult: { choices?: Array<{ message?: { content?: string } }> };
-          try { httpResult = JSON.parse(text) as typeof httpResult; }
-          catch {
-            lastError = `AI 返回非 JSON：${text.slice(0, 80)}`;
-            if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-            break;
-          }
-          const rawContent = (httpResult.choices?.[0]?.message?.content || '').trim();
-          if (!rawContent) {
-            lastError = 'AI 返回了空内容';
-            if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-            break;
-          }
-
-          // 清洗 AI 输出：去掉 markdown 代码块，提取 JSON 对象
-          let content = rawContent
-            .replace(/```(?:json)?\s*/gi, '')
-            .replace(/```\s*/g, '')
-            .trim();
-          const firstBrace = content.indexOf('{');
-          const lastBrace = content.lastIndexOf('}');
-          if (firstBrace >= 0 && lastBrace > firstBrace) content = content.slice(firstBrace, lastBrace + 1);
-
-          let parsed: { books?: Array<{ index: number; summary: string; tags: string[] }> };
-          try { parsed = JSON.parse(content) as typeof parsed; }
-          catch {
-            lastError = `AI 返回 JSON 格式异常：${content.slice(0, 80)}`;
-            if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-            break;
-          }
-          const items = parsed.books || (parsed as unknown as Array<{ index: number; summary: string; tags: string[] }>);
-          if (!Array.isArray(items)) { lastError = 'AI 返回的 JSON 结构异常（缺少 books 数组）'; break; }
-          for (const item of items) {
-            const bookIndex = (item.index || 1) - 1;
-            if (batch[bookIndex]) {
-              summaries.push({ bookId: batch[bookIndex].bookId, summary: item.summary || '', tags: item.tags || [] });
-            }
-          }
-          break; // 本批次成功，退出重试循环
-        } catch (err) {
-          lastError = err instanceof Error && err.name === 'AbortError' ? 'AI 请求超时' : err instanceof Error ? err.message : String(err);
-          if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-        } finally { clearTimeout(timeout); }
-      }
-      if (lastError) return { success: false, error: lastError, summaries };
-    }
-    return { success: true, summaries };
-  });
-
-  // ── 微信读书 AI 推荐 ──
-  ipcMain.handle('weread:ai-recommend', async (_event, payload: { baseUrl: string; apiKey: string; model: string; books: Array<{ title: string; author: string; highlights: string[]; reviews: string[] }> }) => {
-    const { baseUrl, apiKey, model, books } = payload;
-    if (!apiKey || !baseUrl || !model) return { success: false, error: '请先在设置中配置 AI API' };
-    if (!books?.length) return { success: false, error: '没有可分析的书籍' };
-
-    const authors = new Set(books.map((b) => b.author).filter(Boolean));
-    const allNotes = books.flatMap((b) => [...b.highlights.slice(0, 8), ...b.reviews.slice(0, 4)]).filter(Boolean);
-    // 避免书单过长撑爆 context window：最多取 60 本，优先笔记多的
-    const displayBooks = books.length > 60 ? books.slice(0, 60) : books;
-    const userText = [
-      `我已读的书籍（共 ${books.length} 本，列出前 ${displayBooks.length} 本）：`,
-      ...displayBooks.map((b) => `- 《${b.title}》${b.author ? `（${b.author}）` : ''}`),
-      '',
-      '我的阅读笔记摘要：',
-      ...allNotes.slice(0, 20).map((n) => `- ${n}`),
-      '',
-      `我关注的作者（共 ${authors.size} 位）：${[...authors].slice(0, 30).join('、')}${authors.size > 30 ? ' 等' : ''}`,
-      books.length > 60 ? `（另有 ${books.length - 60} 本书未列出）` : '',
-    ].join('\n');
-
-    const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-    let lastError = '';
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      lastError = '';
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 90_000);
-      try {
-        const response = await fetch(url, {
-          method: 'POST', signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: '你是一位专业的阅读推荐顾问。用户提供了完整的阅读历史（所有已读书籍和作者列表），以及部分重点书籍的笔记摘录。请仔细分析用户的阅读品味、关注的主题和偏好的作者，在此基础上推荐值得阅读的书籍。返回严格的 JSON 格式：{"recommendations":[{"type":"same_author","title":"书名","author":"作者","reason":"推荐理由（50字内，具体说明与用户已读书籍或作者的关联）"}]}。type 取值为：same_author（用户已读作者的其他值得读的作品，优先推荐笔记最活跃的作者）、similar（与用户阅读主题高度相近的书籍，可来自不同作者）、opposite（相反视角或对立观点的书籍，帮助用户拓展思维边界）。每类推荐 4-5 本，共 12-15 本。推荐理由要具体、个性化，引用用户实际读过的书或关注的主题。只推荐真实存在的书籍。' },
-              { role: 'user', content: userText },
-            ],
-            temperature: 0.7, max_tokens: 6000,
-          }),
-        });
-        const text = await response.text();
-        if (!response.ok) {
-          let detail = text.slice(0, 300);
-          try { detail = JSON.parse(text).error?.message || detail; } catch { /* use raw */ }
-          lastError = `AI 请求失败（HTTP ${response.status}）：${detail}`;
-          if (attempt < 1 && response.status >= 500) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-          return { success: false, error: lastError };
-        }
-        if (!text.trim()) {
-          lastError = 'AI 返回了空响应，请重试';
-          if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-          return { success: false, error: lastError };
-        }
-        let result: { choices?: Array<{ message?: { content?: string } }> };
-        try { result = JSON.parse(text) as typeof result; }
-        catch {
-          lastError = `AI 返回非 JSON 数据（前 100 字符）：${text.slice(0, 100)}`;
-          if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-          return { success: false, error: lastError };
-        }
-        const rawContent = (result.choices?.[0]?.message?.content || '').trim();
-        if (!rawContent) {
-          lastError = 'AI 返回了空内容，请重试';
-          if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-          return { success: false, error: lastError };
-        }
-        // 清洗 AI 输出：去掉 markdown 代码块包裹，提取 JSON 对象
-        let content = rawContent
-          .replace(/```(?:json)?\s*/gi, '')
-          .replace(/```\s*/g, '')
-          .trim();
-        const firstBrace = content.indexOf('{');
-        const lastBrace = content.lastIndexOf('}');
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-          content = content.slice(firstBrace, lastBrace + 1);
-        }
-        let parsed: { recommendations?: Array<{ type: string; title: string; author: string; reason: string }> };
-        try { parsed = JSON.parse(content) as typeof parsed; }
-        catch {
-          // JSON 可能被截断，尝试修复常见截断模式
-          const repaired = content.replace(/,\s*$/, '').replace(/"\s*$/, '"').replace(/\]\s*$/, ']}');
-          const fixed = repaired.endsWith('}') ? repaired : repaired + '}';
-          try { parsed = JSON.parse(fixed) as typeof parsed; }
-          catch {
-            lastError = `AI 返回格式异常（JSON 可能被截断），请重试。返回内容前 150 字符：${rawContent.slice(0, 150)}`;
-            if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-            return { success: false, error: lastError };
-          }
-        }
-        return { success: true, recommendations: parsed.recommendations || [] };
-      } catch (err) {
-        lastError = err instanceof Error && err.name === 'AbortError' ? 'AI 请求超时' : err instanceof Error ? err.message : String(err);
-        if (attempt < 1) { await new Promise((r) => setTimeout(r, 1000)); continue; }
-      } finally { clearTimeout(timeout); }
-    }
-    return { success: false, error: lastError };
-  });
-
-  // ── JSON 存储 ──
+  // 鈹€鈹€ JSON 瀛樺偍 鈹€鈹€
   ipcMain.handle('store-save', async (_event, data: string) => {
     try {
       fs.writeFileSync(dataPath, data, 'utf-8');
@@ -1262,7 +1015,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── SQLite 数据库持久化 ──
+  // 鈹€鈹€ SQLite 鏁版嵁搴撴寔涔呭寲 鈹€鈹€
   ipcMain.handle('db:load', async () => {
     try {
       if (fs.existsSync(dbPath)) {
@@ -1298,7 +1051,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('document-cache:load', async (_event, documentId: string) => {
     try {
       const filePath = cachedDocumentPath(documentId);
-      if (!fs.existsSync(filePath)) return { success: false, error: '缓存文件不存在' };
+      if (!fs.existsSync(filePath)) return { success: false, error: '缂撳瓨鏂囦欢涓嶅瓨鍦? };
       const buffer = fs.readFileSync(filePath);
       return { success: true, data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength), filePath };
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
@@ -1311,7 +1064,7 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   });
 
-  // ── 对话捕获存储 ──
+  // 鈹€鈹€ 瀵硅瘽鎹曡幏瀛樺偍 鈹€鈹€
   ipcMain.handle('store-conversation', async (_event, payload: {
     site: string;
     timestamp: number;
@@ -1336,7 +1089,7 @@ export function setupIPC(webviewPreloadPath: string) {
         : `${payload.site}-${date}.md`;
       const filePath = path.join(exportDir, fileName);
 
-      let userMsg = '(无法解析)';
+      let userMsg = '(鏃犳硶瑙ｆ瀽)';
       try {
         const body = payload.requestBody as Record<string, unknown>;
         if (body?.messages && Array.isArray(body.messages)) {
@@ -1369,7 +1122,7 @@ export function setupIPC(webviewPreloadPath: string) {
       if (payload.contentMode === 'document') {
         entryParts.push('', payload.responseContent.trim(), '');
       } else {
-        entryParts.push('', `---`, `### 🧑 用户 — ${time}`, '', userMsg, '', `### 🤖 AI — ${time}`, '', payload.responseContent, '');
+        entryParts.push('', `---`, `### 馃 鐢ㄦ埛 鈥?${time}`, '', userMsg, '', `### 馃 AI 鈥?${time}`, '', payload.responseContent, '');
       }
 
       const entry = entryParts.join('\n');
@@ -1386,7 +1139,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── 对话历史管理 ──
+  // 鈹€鈹€ 瀵硅瘽鍘嗗彶绠＄悊 鈹€鈹€
   const resolveConversationPath = (filePath: string): string | null => {
     const root = path.resolve(exportDir);
     const resolved = path.resolve(filePath);
@@ -1614,7 +1367,7 @@ export function setupIPC(webviewPreloadPath: string) {
     return { success: true };
   });
 
-  // ── 手动记忆管理 ──
+  // 鈹€鈹€ 鎵嬪姩璁板繂绠＄悊 鈹€鈹€
   const memoriesDir = path.join(app.getPath('documents'), 'next-work-dashboard', 'memories');
   const memorySettingsPath = path.join(memoriesDir, '.settings.json');
 
@@ -1713,12 +1466,12 @@ export function setupIPC(webviewPreloadPath: string) {
     } catch (err) { return { success: false, error: String(err) }; }
   });
 
-  // ── 按路径读取文件（供 AI 工具使用） ──
+  // 鈹€鈹€ 鎸夎矾寰勮鍙栨枃浠讹紙渚?AI 宸ュ叿浣跨敤锛?鈹€鈹€
   ipcMain.handle('dialog:readFileBuffer', async (_event, filePath: string) => {
     try {
       const resolved = path.resolve(filePath);
       if (!fs.existsSync(resolved)) {
-        return { success: false, error: '文件不存在' };
+        return { success: false, error: '鏂囦欢涓嶅瓨鍦? };
       }
       const buf = fs.readFileSync(resolved);
       const ext = path.extname(resolved).toLowerCase();
@@ -1751,12 +1504,12 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── 文件对话框 ──
+  // 鈹€鈹€ 鏂囦欢瀵硅瘽妗?鈹€鈹€
   ipcMain.handle('dialog:pickFile', async (_event, options?: { accept?: string; multiple?: boolean }) => {
     try {
       const win = BrowserWindow.getFocusedWindow();
       const filters = options?.accept
-        ? [{ name: '文件', extensions: options.accept.split(',').map((e) => e.replace(/^\./, '')) }]
+        ? [{ name: '鏂囦欢', extensions: options.accept.split(',').map((e) => e.replace(/^\./, '')) }]
         : [];
       const result = await dialog.showOpenDialog(win!, {
         properties: options?.multiple ? ['openFile', 'multiSelections'] : ['openFile'],
@@ -1843,7 +1596,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── 代码编辑器工作区（目录按需读取，不递归扫描） ──
+  // 鈹€鈹€ 浠ｇ爜缂栬緫鍣ㄥ伐浣滃尯锛堢洰褰曟寜闇€璇诲彇锛屼笉閫掑綊鎵弿锛?鈹€鈹€
   ipcMain.handle('workspace:openFolder', async () => {
     const win = BrowserWindow.getFocusedWindow();
     const result = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] });
@@ -2135,7 +1888,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ) => {
     try {
       const target = resolveNewWorkspacePath(rootPath, relativePath);
-      // 不强制覆盖；如果已存在则报错（除非 force）。
+      // 涓嶅己鍒惰鐩栵紱濡傛灉宸插瓨鍦ㄥ垯鎶ラ敊锛堥櫎闈?force锛夈€?
       if (fs.existsSync(target) && !options?.force) {
         return { success: false, error: 'ALREADY_EXISTS' };
       }
@@ -2389,9 +2142,9 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('video-generation:extract-last-frame', async (_event, payload: { filePath: string; recordId: string }) => {
     try {
       const input = resolveManagedVideo(payload?.filePath);
-      if (!input) return { success: false, error: '只允许处理视频生成目录内的文件' };
+      if (!input) return { success: false, error: '鍙厑璁稿鐞嗚棰戠敓鎴愮洰褰曞唴鐨勬枃浠? };
       const safeId = String(payload?.recordId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
-      if (!safeId) return { success: false, error: 'recordId 不能为空' };
+      if (!safeId) return { success: false, error: 'recordId 涓嶈兘涓虹┖' };
       const output = path.join(videoGenDir, `${safeId}-last-frame.jpg`);
       await runVideoFfmpeg(['-sseof', '-0.08', '-i', input, '-frames:v', '1', '-q:v', '2', output]);
       const bytes = fs.readFileSync(output);
@@ -2403,15 +2156,15 @@ export function setupIPC(webviewPreloadPath: string) {
     try {
       const previous = resolveManagedVideo(payload?.previousPath);
       const next = resolveManagedVideo(payload?.nextPath);
-      if (!previous || !next) return { success: false, error: '只允许分析视频生成目录内的文件' };
+      if (!previous || !next) return { success: false, error: '鍙厑璁稿垎鏋愯棰戠敓鎴愮洰褰曞唴鐨勬枃浠? };
       const binary = findMediaBinary('ffmpeg');
-      if (!binary) return { success: false, error: '未找到 FFmpeg' };
+      if (!binary) return { success: false, error: '鏈壘鍒?FFmpeg' };
       const frameArgs = (input: string, last: boolean) => ['-hide_banner', '-loglevel', 'error', ...(last ? ['-sseof', '-0.3'] : []), '-i', input, ...(!last ? ['-t', '0.3'] : []), '-frames:v', '2', '-vf', 'fps=8,scale=64:64,format=rgb24', '-f', 'rawvideo', 'pipe:1'];
       const [tailRaw, headRaw] = await Promise.all([runVideoBinaryBuffer(binary, frameArgs(previous, true)), runVideoBinaryBuffer(binary, frameArgs(next, false))]);
       const frameBytes = 64 * 64 * 3;
       const frames = (buffer: Buffer) => { const result: Uint8Array[] = []; for (let offset = 0; offset + frameBytes <= buffer.length; offset += frameBytes) result.push(buffer.subarray(offset, offset + frameBytes)); return result; };
       const tail = frames(tailRaw); const head = frames(headRaw);
-      if (!tail.length || !head.length) throw new Error('无法读取接缝帧');
+      if (!tail.length || !head.length) throw new Error('鏃犳硶璇诲彇鎺ョ紳甯?);
       const metrics = analyzeStitchFrames(tail[Math.max(0, tail.length - 2)], tail[tail.length - 1], head[0], head[Math.min(1, head.length - 1)], 64, 64);
       const threshold = Math.max(0.4, Math.min(0.95, Number(payload?.threshold) || 0.65));
       return { success: true, score: metrics.score, passed: stitchPasses(metrics.score, threshold), threshold, metrics };
@@ -2423,10 +2176,10 @@ export function setupIPC(webviewPreloadPath: string) {
     const normalizedPaths: string[] = [];
     try {
       const inputs = Array.isArray(payload?.filePaths) ? payload.filePaths.map(resolveManagedVideo) : [];
-      if (inputs.length < 3 || inputs.some((item) => !item)) return { success: false, error: '拼接至少需要 3 个有效的生成视频' };
+      if (inputs.length < 3 || inputs.some((item) => !item)) return { success: false, error: '鎷兼帴鑷冲皯闇€瑕?3 涓湁鏁堢殑鐢熸垚瑙嗛' };
       const validInputs = inputs.filter((item): item is string => Boolean(item));
       const safeId = String(payload?.outputId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
-      if (!safeId) return { success: false, error: 'outputId 不能为空' };
+      if (!safeId) return { success: false, error: 'outputId 涓嶈兘涓虹┖' };
       const probes = await Promise.all(validInputs.map(probeVideo));
       const target = probes[0];
       const width = Math.max(2, target.width - (target.width % 2));
@@ -2527,7 +2280,7 @@ export function setupIPC(webviewPreloadPath: string) {
 
 
 
-  // ── Agent tasks ──
+  // 鈹€鈹€ Agent tasks 鈹€鈹€
 
   ipcMain.handle("agent-task:create", async (_event, config: AgentTaskConfig) => {
     try {
@@ -2583,7 +2336,7 @@ export function setupIPC(webviewPreloadPath: string) {
     event.sender.once("destroyed", unsubscribe);
   });
 
-  // ── Agent worktree conflicts ──
+  // 鈹€鈹€ Agent worktree conflicts 鈹€鈹€
 
   ipcMain.handle("workspace:getAgentWorktreeConflictVersions", async (_event, rootPath: string, sessionId: string, filePath: string) => {
     try {
@@ -2595,7 +2348,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── PR delivery ──
+  // 鈹€鈹€ PR delivery 鈹€鈹€
 
   ipcMain.handle("agent:deliverPR", async (_event, rootPath: string, branch: string, config: PRDeliveryConfig, title: string, body: string, token?: string) => {
     try {
@@ -2703,7 +2456,7 @@ export function setupIPC(webviewPreloadPath: string) {
 
     return enqueueGitOp(root, async () => {
       const signal = controller.signal;
-      progress('started', `正在执行 ${operation}`);
+      progress('started', `姝ｅ湪鎵ц ${operation}`);
       try {
         if (signal.aborted) throw new Error('GIT_CANCELLED');
         let data: unknown;
@@ -2728,7 +2481,7 @@ export function setupIPC(webviewPreloadPath: string) {
             tags: tags.split(/\r?\n/).filter(Boolean),
           };
         } else if (operation === 'diagnostics') {
-          const read = (args: string[]) => runGit(root, args, 2 * 1024 * 1024, signal).catch((error) => `不可用：${redactGitSecrets(error instanceof Error ? error.message : String(error))}`);
+          const read = (args: string[]) => runGit(root, args, 2 * 1024 * 1024, signal).catch((error) => `涓嶅彲鐢細${redactGitSecrets(error instanceof Error ? error.message : String(error))}`);
           const [gitVersion, credentialHelper, credentialManagerVersion, userName, userEmail] = await Promise.all([
             read(['--version']),
             read(['config', '--show-origin', '--get-all', 'credential.helper']),
@@ -2737,12 +2490,12 @@ export function setupIPC(webviewPreloadPath: string) {
             read(['config', '--get', 'user.email']),
           ]);
           data = [
-            `Git: ${gitVersion || '未发现'}`,
-            `Credential Helper: ${credentialHelper || '未配置'}`,
-            `Git Credential Manager: ${credentialManagerVersion || '未发现'}`,
-            `SSH Agent: ${process.env.SSH_AUTH_SOCK ? `已连接 (${process.env.SSH_AUTH_SOCK})` : '未发现 SSH_AUTH_SOCK；Windows OpenSSH 可通过 ssh-agent 服务提供'}`,
-            `提交身份: ${userName || '未配置'} <${userEmail || '未配置'}>`,
-            `HTTPS Proxy: ${process.env.HTTPS_PROXY || process.env.https_proxy || '未配置'}`,
+            `Git: ${gitVersion || '鏈彂鐜?}`,
+            `Credential Helper: ${credentialHelper || '鏈厤缃?}`,
+            `Git Credential Manager: ${credentialManagerVersion || '鏈彂鐜?}`,
+            `SSH Agent: ${process.env.SSH_AUTH_SOCK ? `宸茶繛鎺?(${process.env.SSH_AUTH_SOCK})` : '鏈彂鐜?SSH_AUTH_SOCK锛沇indows OpenSSH 鍙€氳繃 ssh-agent 鏈嶅姟鎻愪緵'}`,
+            `鎻愪氦韬唤: ${userName || '鏈厤缃?} <${userEmail || '鏈厤缃?}>`,
+            `HTTPS Proxy: ${process.env.HTTPS_PROXY || process.env.https_proxy || '鏈厤缃?}`,
           ].join('\n');
         } else if (operation === 'createBranch') {
           data = await runGit(root, ['switch', '-c', validateGitRef(String(payload.name ?? ''))], 2 * 1024 * 1024, signal);
@@ -2857,16 +2610,16 @@ export function setupIPC(webviewPreloadPath: string) {
         } else {
           throw new Error('UNSUPPORTED_GIT_OPERATION');
         }
-        progress('completed', `${operation} 执行完成`);
+        progress('completed', `${operation} 鎵ц瀹屾垚`);
         return { success: true, data };
       } catch (error) {
         const raw = redactGitSecrets(error instanceof Error ? error.message : String(error));
         if (timedOut) {
-          progress('failed', '操作超时');
+          progress('failed', '鎿嶄綔瓒呮椂');
           return { success: false, error: 'GIT_TIMEOUT' };
         }
         if (raw === 'GIT_CANCELLED' || raw.includes('abort') || raw.includes('cancel')) {
-          progress('cancelled', '操作已取消');
+          progress('cancelled', '鎿嶄綔宸插彇娑?);
           return { success: false, error: 'GIT_CANCELLED' };
         }
         const message = classifyGitError(raw) ?? raw;
@@ -2943,7 +2696,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── 打开对话文件夹 ──
+  // 鈹€鈹€ 鎵撳紑瀵硅瘽鏂囦欢澶?鈹€鈹€
   ipcMain.handle('open-conversation-folder', async () => {
     try {
       if (!fs.existsSync(exportDir)) {
@@ -2968,7 +2721,7 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   });
 
-  // ── Token 安全存储 ──
+  // 鈹€鈹€ Token 瀹夊叏瀛樺偍 鈹€鈹€
   ipcMain.handle('auth:is-available', async () => isEncryptionAvailable());
   ipcMain.handle('auth:save-token', async (_event, service: string, token: string, label?: string) => {
     return saveToken(service, token, label);
@@ -2982,7 +2735,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('auth:list-services', async () => listServices());
   ipcMain.handle('auth:clear-all', async () => clearAll());
 
-  // ── Model Context Protocol ──
+  // 鈹€鈹€ Model Context Protocol 鈹€鈹€
   ipcMain.handle('mcp:list-servers', () => mcpManager.listStatuses());
   ipcMain.handle('mcp:save-server', (_event, config: McpServerConfig) => mcpManager.saveConfig(config));
   ipcMain.handle('mcp:remove-server', (_event, serverId: string) => mcpManager.removeConfig(serverId));
@@ -2997,7 +2750,7 @@ export function setupIPC(webviewPreloadPath: string) {
   ipcMain.handle('mcp:clear-audit', () => mcpManager.clearAudit());
   void mcpManager.connectAutoServers();
 
-  // ── 终端 ──
+  // 鈹€鈹€ 缁堢 鈹€鈹€
   ipcMain.handle('terminal:profiles', () => ({ success: true, data: discoverShellProfiles() }));
 
   ipcMain.handle('terminal:create', async (event, id: string, cwd?: string, profile?: { name: string; shell: string; args?: string[]; env?: Record<string, string> }) => {
@@ -3032,7 +2785,7 @@ export function setupIPC(webviewPreloadPath: string) {
     await shell.openExternal(url);
   });
 
-  // ── MyCast (局域网手机投屏 + 文件传输) ──
+  // 鈹€鈹€ MyCast (灞€鍩熺綉鎵嬫満鎶曞睆 + 鏂囦欢浼犺緭) 鈹€鈹€
   setupMyCastIPC();
   // Best-effort warm-start the sidecar so the plugin can immediately render status.
   startMyCastDaemon().catch((err) => {
@@ -3058,7 +2811,7 @@ export function setupIPC(webviewPreloadPath: string) {
   setupPhoneIPC();
   app.on('before-quit', () => { void stopPhoneService(); });
 
-  // ── Voice Engine (本地语音输入) ──
+  // 鈹€鈹€ Voice Engine (鏈湴璇煶杈撳叆) 鈹€鈹€
   setupVoiceIPC();
   startVoiceDaemon().catch((err) => {
     // eslint-disable-next-line no-console

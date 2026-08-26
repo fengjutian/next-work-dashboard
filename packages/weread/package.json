@@ -1,0 +1,48 @@
+{
+  "name": "@next-work/weread",
+  "version": "0.1.0",
+  "description": "Reusable WeRead (微信读书) reader core and React host boundary",
+  "type": "module",
+  "license": "MIT",
+  "files": ["dist", "README.md"],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "core": ["dist/core/index.d.ts"],
+      "react": ["dist/react/index.d.ts"]
+    }
+  },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
+    "./react": { "types": "./dist/react/index.d.ts", "import": "./dist/react/index.js" },
+    "./styles.css": "./dist/styles.css"
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run build:styles",
+    "build:styles": "node -e \"require('fs').copyFileSync('src/styles.css','dist/styles.css')\"",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0 || ^19.0.0",
+    "react-dom": "^18.3.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "echarts": "^5.5.1",
+    "lucide-react": "1.25.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "~5.4.5",
+    "vitest": "^2.1.9"
+  },
+  "publishConfig": { "access": "public" }
+}
