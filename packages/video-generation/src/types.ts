@@ -121,5 +121,3 @@ export interface VideoLibraryQuery {
   limit?: number;
   status?: VideoTaskStatus;
 }
-
-export type { VideoStoryboardOptions, VideoStoryboardSegment } from './core/storyboard';

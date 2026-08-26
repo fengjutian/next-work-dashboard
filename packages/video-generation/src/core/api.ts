@@ -64,7 +64,7 @@ export function normalizeRequest(input: VideoGenerationRequest): { ok: true; val
     ? (input.duration as number)
     : DEFAULT_DURATION;
 
-  const resolution: VideoResolution = ALLOWED_RESOLUTIONS.has(input.resolution as VideoResolution) ? (input.resolution as VideoResolution) : DEFAULT_RESOLUTIONS();
+  const resolution: VideoResolution = ALLOWED_RESOLUTIONS.has(input.resolution as VideoResolution) ? (input.resolution as VideoResolution) : DEFAULT_RESOLUTION;
   const ratio: VideoRatio = ALLOWED_RATIOS.has(input.ratio as VideoRatio) ? (input.ratio as VideoRatio) : DEFAULT_RATIO;
 
   const content: VideoContentItem[] = [{ type: 'text', text: prompt }];
@@ -102,10 +102,6 @@ export function normalizeRequest(input: VideoGenerationRequest): { ok: true; val
   }
 
   return { ok: true, value: { baseUrl, apiKey, model, prompt, duration, resolution, ratio: finalRatio, content } };
-}
-
-function DEFAULT_RESOLUTIONS(): VideoResolution {
-  return DEFAULT_RESOLUTION;
 }
 
 /** 组装 HTTP POST 提交任务的 options（headers/body/endpoint），main 进程直接 fetch 即可 */
