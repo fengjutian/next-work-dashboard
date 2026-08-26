@@ -21,6 +21,7 @@ import {
 import { redactGitSecrets } from './git/security';
 import { parseGitLog } from './git/history';
 import { classifyGitError } from './git/diagnostics';
+import { parseLitterboxUploadUrl } from './video-generation/reference-upload';
 import { parseGitBranches } from './git/overview';
 import { findSemanticMatches, type SemanticMatch } from './semantic-search';
 import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace/tasks';
@@ -849,10 +850,11 @@ export function setupIPC(webviewPreloadPath: string) {
       } finally { clearTimeout(timeout); }
       const text = (await response.text()).trim();
       if (!response.ok) return { success: false, error: `litterbox 上传失败（HTTP ${response.status}）：${text.slice(0, 300)}` };
-      if (!/^https:\/\/litterbox\.catbox\.moe\//.test(text)) {
+      const uploadedUrl = parseLitterboxUploadUrl(text);
+      if (!uploadedUrl) {
         return { success: false, error: `litterbox 返回非预期内容：${text.slice(0, 300)}` };
       }
-      return { success: true, url: text, ttlHours, bytes: bytes.byteLength };
+      return { success: true, url: uploadedUrl, ttlHours, bytes: bytes.byteLength };
     } catch (err) {
       const message = err instanceof Error && err.name === 'AbortError' ? '上传参考素材超时（2 分钟）' : (err instanceof Error ? err.message : String(err));
       return { success: false, error: message };
