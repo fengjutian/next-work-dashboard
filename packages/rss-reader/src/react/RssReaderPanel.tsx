@@ -1,5 +1,5 @@
 /**
- * @next-work/rss-reader — Renderer panel
+ * @next-work-dashboard/rss-reader — Renderer panel
  *
  * Host-agnostic RSS reader UI. All host capabilities (Electron preload bridge,
  * OS file pickers, search/copy APIs) are injected via `RssReaderAdapter`.

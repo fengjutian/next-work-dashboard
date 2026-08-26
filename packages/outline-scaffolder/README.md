@@ -1,4 +1,4 @@
-# @next-work/outline-scaffolder
+# @next-work-dashboard/outline-scaffolder
 
 Reusable TypeScript core and React host boundary for the next-work outline scaffolder.
 
@@ -15,8 +15,8 @@ research, GitHub Pages, image generation, and shell capabilities are supplied th
 `OutlineScaffolderAdapter`.
 
 ```tsx
-import { OutlineScaffolderPanel } from "@next-work/outline-scaffolder/react";
-import "@next-work/outline-scaffolder/styles.css";
+import { OutlineScaffolderPanel } from "@next-work-dashboard/outline-scaffolder/react";
+import "@next-work-dashboard/outline-scaffolder/styles.css";
 
 <OutlineScaffolderPanel adapter={adapter} />;
 ```

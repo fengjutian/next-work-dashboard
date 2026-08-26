@@ -1,8 +1,8 @@
 /**
- * @next-work/rss-reader host stylesheet
+ * @next-work-dashboard/rss-reader host stylesheet
  *
  * Hosts should import this once before mounting the panel:
- *   import "@next-work/rss-reader/styles.css";
+ *   import "@next-work-dashboard/rss-reader/styles.css";
  *
  * The package relies on the host's Tailwind (or equivalent) to generate the
  * utility classes used by the panel. This file only ships the CSS variables

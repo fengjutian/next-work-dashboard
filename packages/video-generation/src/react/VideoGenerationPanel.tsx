@@ -1,5 +1,5 @@
 /**
- * @next-work/video-generation — Renderer panel
+ * @next-work-dashboard/video-generation — Renderer panel
  *
  * Host-agnostic React component that:
  *  - drives the MiniMax (Hailuo / H3) async video generation flow

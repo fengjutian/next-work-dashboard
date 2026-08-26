@@ -1,5 +1,5 @@
 /**
- * IPC channel names used by `@next-work/rss-reader/main`.
+ * IPC channel names used by `@next-work-dashboard/rss-reader/main`.
  *
  * Exported as a constant table so the prompt-lab IPC contract checker
  * (which only scans `prompt-lab/src/`) can match these names without

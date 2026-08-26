@@ -1,8 +1,8 @@
 /**
- * @next-work/video-generation host stylesheet
+ * @next-work-dashboard/video-generation host stylesheet
  *
  * Hosts should import this once before mounting the panel:
- *   import "@next-work/video-generation/styles.css";
+ *   import "@next-work-dashboard/video-generation/styles.css";
  *
  * Provides:
  *  - CSS variables matching the prompt-lab Tailwind theme (HSL channels).

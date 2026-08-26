@@ -37,7 +37,7 @@ const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKi
 export interface RssMainFullAdapter extends RssMainAdapter {
   /**
    * HTML → readable content extractor. Supplied by the host (e.g. `extractReadability`
-   * from `@next-work/work-browser/parser` once that package ships).
+   * from `@next-work-dashboard/work-browser/parser` once that package ships).
    */
   extractReadability(html: string): Promise<{ contentText: string; contentMarkdown: string; wordCount: number }>;
   /**

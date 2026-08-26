@@ -1,7 +1,7 @@
 /**
- * prompt-lab wrapper for @next-work/video-generation.
+ * prompt-lab wrapper for @next-work-dashboard/video-generation.
  *
- * Hosts in @next-work/video-generation are host-agnostic; this file wires the
+ * Hosts in @next-work-dashboard/video-generation are host-agnostic; this file wires the
  * published panel to prompt-lab's concrete:
  *  - SQLite-backed task store (`db*VideoTask*` from `@/db`)
  *  - Electron preload bridge (`window.electronAPI`)
@@ -12,8 +12,8 @@
  */
 
 import React, { useMemo } from "react";
-import { VideoGenerationPanel as PublishedVideoGenerationPanel, type VideoGenerationAdapter } from "@next-work/video-generation/react";
-import "@next-work/video-generation/styles.css";
+import { VideoGenerationPanel as PublishedVideoGenerationPanel, type VideoGenerationAdapter } from "@next-work-dashboard/video-generation/react";
+import "@next-work-dashboard/video-generation/styles.css";
 import {
   dbDeleteVideoTask,
   dbGetVideoTask,
@@ -29,7 +29,7 @@ import type {
   VideoRatio,
   VideoResolution,
   VideoTaskStatus,
-} from "@next-work/video-generation";
+} from "@next-work-dashboard/video-generation";
 import { useStore } from "@/store/store";
 
 function recordToStored(row: DbVideoTaskRecord): StoredVideoRecord {

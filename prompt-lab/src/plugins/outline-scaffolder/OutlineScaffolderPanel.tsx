@@ -3,8 +3,8 @@ import {
   OutlineScaffolderPanel as PublishedOutlineScaffolderPanel,
   type OutlineScaffolderAdapter,
   type OutlineScaffolderHostApi,
-} from "@next-work/outline-scaffolder/react";
-import "@next-work/outline-scaffolder/styles.css";
+} from "@next-work-dashboard/outline-scaffolder/react";
+import "@next-work-dashboard/outline-scaffolder/styles.css";
 import { useStore } from "@/store/store";
 
 function createPromptLabAdapter(

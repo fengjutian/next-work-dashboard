@@ -1,4 +1,4 @@
-﻿import { contextBridge, ipcRenderer, clipboard, webUtils } from "electron";
+import { contextBridge, ipcRenderer, clipboard, webUtils } from "electron";
 import type { ElectronAPI, MemoryFile } from "./types/electron";
 import { workBrowserBridge } from "./preload/work-browser";
 import { securityAuditBridge } from "./preload/security-audit";
@@ -254,7 +254,7 @@ const electronAPI: ElectronAPI = {
   generateImage: (payload) => ipcRenderer.invoke("image:generate", payload),
   videoGeneration: {
     create: (
-      payload: import("@next-work/video-generation").VideoGenerationRequest,
+      payload: import("@next-work-dashboard/video-generation").VideoGenerationRequest,
     ) => ipcRenderer.invoke("video-generation:create", payload),
     query: (payload: {
       baseUrl?: string;

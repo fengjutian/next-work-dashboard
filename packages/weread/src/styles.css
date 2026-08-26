@@ -1,8 +1,8 @@
 /**
- * @next-work/weread host stylesheet
+ * @next-work-dashboard/weread host stylesheet
  *
  * Hosts should import this once before mounting the panel:
- *   import "@next-work/weread/styles.css";
+ *   import "@next-work-dashboard/weread/styles.css";
  *
  * CSS variables — utility classes are produced by the host's Tailwind config
  * (which should include the prompt-lab preset if migrating from that host).

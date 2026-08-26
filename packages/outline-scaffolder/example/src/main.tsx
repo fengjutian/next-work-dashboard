@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { OutlineScaffolderPanel, type OutlineScaffolderAdapter } from "@next-work/outline-scaffolder/react";
-import "@next-work/outline-scaffolder/styles.css";
+import { OutlineScaffolderPanel, type OutlineScaffolderAdapter } from "@next-work-dashboard/outline-scaffolder/react";
+import "@next-work-dashboard/outline-scaffolder/styles.css";
 
 const unsupported = (name: string) => async () => ({ success: false, error: `${name} is unavailable in the browser demo` });
 const group = (name: string) => new Proxy({}, { get: (_, key) => unsupported(`${name}.${String(key)}`) });

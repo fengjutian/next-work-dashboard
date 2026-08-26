@@ -1,16 +1,16 @@
 /**
- * prompt-lab wrapper for @next-work/rss-reader.
+ * prompt-lab wrapper for @next-work-dashboard/rss-reader.
  *
- * Hosts in @next-work/rss-reader are host-agnostic; this file wires the
+ * Hosts in @next-work-dashboard/rss-reader are host-agnostic; this file wires the
  * published panel to prompt-lab's `window.electronAPI` preload bridge.
  *
  * Keep this file thin. The main-process IPC service, SQLite schema, and
- * background refresh live in `@next-work/rss-reader/main`.
+ * background refresh live in `@next-work-dashboard/rss-reader/main`.
  */
 
 import React, { useMemo } from "react";
-import { RssReaderPanel as PublishedRssReaderPanel, type RssReaderAdapter } from "@next-work/rss-reader/react";
-import "@next-work/rss-reader/styles.css";
+import { RssReaderPanel as PublishedRssReaderPanel, type RssReaderAdapter } from "@next-work-dashboard/rss-reader/react";
+import "@next-work-dashboard/rss-reader/styles.css";
 
 function createPromptLabAdapter(): RssReaderAdapter {
   return {

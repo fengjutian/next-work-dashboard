@@ -1,4 +1,4 @@
-# @next-work/rss-reader
+# @next-work-dashboard/rss-reader
 
 Reusable RSS reader core, main-process IPC service, and React host boundary for next-work-dashboard.
 
@@ -7,7 +7,7 @@ article readability extractor, and OS-level notifications are supplied through a
 
 ```ts
 // main process
-import { registerRssIpc } from '@next-work/rss-reader/main';
+import { registerRssIpc } from '@next-work-dashboard/rss-reader/main';
 import Database from 'better-sqlite3';
 
 registerRssIpc({
@@ -19,7 +19,7 @@ registerRssIpc({
 
 ```tsx
 // renderer
-import { RssReaderPanel } from '@next-work/rss-reader/react';
+import { RssReaderPanel } from '@next-work-dashboard/rss-reader/react';
 
 <RssReaderPanel adapter={adapter} />;
 ```

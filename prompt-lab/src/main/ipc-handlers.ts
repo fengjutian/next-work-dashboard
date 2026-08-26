@@ -21,7 +21,7 @@ import {
 import { redactGitSecrets } from './git/security';
 import { parseGitLog } from './git/history';
 import { classifyGitError } from './git/diagnostics';
-import { parseLitterboxUploadUrl } from '@next-work/video-generation/core';
+import { parseLitterboxUploadUrl } from '@next-work-dashboard/video-generation/core';
 import { parseGitBranches } from './git/overview';
 import { findSemanticMatches, type SemanticMatch } from './semantic-search';
 import { parseWorkspaceTasks, type WorkspaceTaskDefinition } from './workspace/tasks';
@@ -44,7 +44,7 @@ import {
 } from './lancedb-memory';
 import { mcpManager } from './mcp/mcp-manager';
 import { findMediaBinary } from './ai-video-reader/ipc';
-import { analyzeStitchFrames, stitchPasses } from '@next-work/video-generation/core';
+import { analyzeStitchFrames, stitchPasses } from '@next-work-dashboard/video-generation/core';
 import type { McpServerConfig } from '../types/mcp';
 import { createAgentWorktree, discardAgentWorktree, getAgentWorktreeStatus, getAgentWorktreeConflictVersions, mergeAgentWorktree, previewAgentWorktreeMerge } from './agent/worktree';
 import { agentTaskService } from './agent/task-service';
@@ -53,8 +53,8 @@ import type { AgentTaskConfig } from './agent/task-types';
 import { loadPackageScripts, runAgentPackageScript } from './agent/script-runner';
 import { registerOfficeIpc } from '../plugins/office-studio/backend/office-ipc';
 import { registerMarkdownToWordIpc } from '../plugins/markdown-to-word/backend/ipc';
-import { registerRssIpc } from '@next-work/rss-reader/main';
-import { registerWereadIpc } from '@next-work/weread/main';
+import { registerRssIpc } from '@next-work-dashboard/rss-reader/main';
+import { registerWereadIpc } from '@next-work-dashboard/weread/main';
 import Database from 'better-sqlite3';
 import { Notification as ElectronNotification } from 'electron';
 import { extractReadability } from '../core/work-browser/parser';
@@ -695,9 +695,9 @@ export function setupIPC(webviewPreloadPath: string) {
     }
   };
 
-  ipcMain.handle('video-generation:create', async (_event, payload: import('@next-work/video-generation').VideoGenerationRequest) => {
+  ipcMain.handle('video-generation:create', async (_event, payload: import('@next-work-dashboard/video-generation').VideoGenerationRequest) => {
     try {
-      const apiModule = await import('@next-work/video-generation/core');
+      const apiModule = await import('@next-work-dashboard/video-generation/core');
       const normalized = apiModule.normalizeRequest(payload);
       if (normalized.ok !== true) {
         return { success: false, error: normalized.error };
@@ -731,7 +731,7 @@ export function setupIPC(webviewPreloadPath: string) {
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
       if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
       if (!taskId) return { success: false, error: 'taskId 不能为空' };
-      const apiModule = await import('@next-work/video-generation/core');
+      const apiModule = await import('@next-work-dashboard/video-generation/core');
       const { endpoint, init } = apiModule.buildQueryRequest(baseUrl, apiKey, taskId, payload.model);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -772,7 +772,7 @@ export function setupIPC(webviewPreloadPath: string) {
       const baseUrl = String(payload?.baseUrl || 'https://api.minimaxi.com').replace(/\/+$/, '');
       if (!apiKey) return { success: false, error: '请填写 MiniMax API Key' };
       if (!taskId) return { success: false, error: 'taskId 不能为空' };
-      const { buildCancelRequest, usesH3Protocol } = await import('@next-work/video-generation/core');
+      const { buildCancelRequest, usesH3Protocol } = await import('@next-work-dashboard/video-generation/core');
       if (!usesH3Protocol(payload.model)) {
         return { success: true, baseResp: { statusCode: 0, statusMsg: 'Hailuo v1 不支持取消上游任务，已停止本地轮询' } };
       }

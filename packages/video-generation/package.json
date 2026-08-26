@@ -1,5 +1,5 @@
 {
-  "name": "@next-work/video-generation",
+  "name": "@next-work-dashboard/video-generation",
   "version": "0.1.0",
   "description": "Reusable MiniMax (H3 / Hailuo) video generation core and React host boundary",
   "type": "module",

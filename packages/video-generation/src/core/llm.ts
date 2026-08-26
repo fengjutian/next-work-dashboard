@@ -1,7 +1,7 @@
 /**
  * 视频生成面板用的极简 OpenAI 兼容 Chat provider。
  *
- * 与 @next-work/outline-scaffolder 内的同名实现保持一致：支持流式 + 非流式，
+ * 与 @next-work-dashboard/outline-scaffolder 内的同名实现保持一致：支持流式 + 非流式，
  * 主进程环境下走 host 提供的 chatProxy 走 IPC 转发（避免 renderer 直接暴露 API Key）。
  */
 

@@ -1,4 +1,4 @@
-﻿export interface InjectPayload {
+export interface InjectPayload {
   webviewId: number;
   text: string;
   inputSelector: string;
@@ -151,17 +151,17 @@ export interface ElectronAPI {
     pagesStatus: (remoteUrl: string) => Promise<{ success: boolean; data?: { state: string; conclusion?: string; url?: string; updatedAt?: string; branch?: string }; error?: string }>;
   };
   rss: {
-    fetch: (url: string) => Promise<import('@next-work/rss-reader').RssFeed>;
-    loadState: () => Promise<{ subscriptions: import('@next-work/rss-reader').RssSubscription[]; articles: import('@next-work/rss-reader').RssArticle[] }>;
-    saveState: (state: { subscriptions: import('@next-work/rss-reader').RssSubscription[]; articles: import('@next-work/rss-reader').RssArticle[] }) => Promise<void>;
-    refreshAll: () => Promise<{ subscriptions: import('@next-work/rss-reader').RssSubscription[]; articles: import('@next-work/rss-reader').RssArticle[] }>;
+    fetch: (url: string) => Promise<import('@next-work-dashboard/rss-reader').RssFeed>;
+    loadState: () => Promise<{ subscriptions: import('@next-work-dashboard/rss-reader').RssSubscription[]; articles: import('@next-work-dashboard/rss-reader').RssArticle[] }>;
+    saveState: (state: { subscriptions: import('@next-work-dashboard/rss-reader').RssSubscription[]; articles: import('@next-work-dashboard/rss-reader').RssArticle[] }) => Promise<void>;
+    refreshAll: () => Promise<{ subscriptions: import('@next-work-dashboard/rss-reader').RssSubscription[]; articles: import('@next-work-dashboard/rss-reader').RssArticle[] }>;
     setRefreshMinutes: (minutes: number) => Promise<void>;
     setRetentionDays: (days: number) => Promise<number>;
     setNotificationsEnabled: (enabled: boolean) => Promise<void>;
     extractArticle: (feedId: string, articleId: string, url: string) => Promise<{ text: string; markdown: string; wordCount: number }>;
     search: (query: string) => Promise<Array<{ feedId: string; articleId: string }>>;
-    listRules: () => Promise<import('@next-work/rss-reader').RssKeywordRule[]>;
-    saveRule: (rule: import('@next-work/rss-reader').RssKeywordRule) => Promise<void>;
+    listRules: () => Promise<import('@next-work-dashboard/rss-reader').RssKeywordRule[]>;
+    saveRule: (rule: import('@next-work-dashboard/rss-reader').RssKeywordRule) => Promise<void>;
     deleteRule: (id: string) => Promise<void>;
   };
   plugins: {
@@ -218,11 +218,11 @@ export interface ElectronAPI {
   llmChat: (payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => Promise<{ ok: boolean; status: number; data?: any; error?: string }>;
   generateImage: (payload: import('../plugins/style-image/types').StyleImageRequest) => Promise<import('../plugins/style-image/types').StyleImageResult>;
   videoGeneration: {
-    create: (payload: import('@next-work/video-generation').VideoGenerationRequest) => Promise<{ success: boolean; taskId?: string; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
-    query: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => Promise<{ success: boolean; info?: import('@next-work/video-generation').VideoTaskInfo; error?: string }>;
+    create: (payload: import('@next-work-dashboard/video-generation').VideoGenerationRequest) => Promise<{ success: boolean; taskId?: string; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
+    query: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => Promise<{ success: boolean; info?: import('@next-work-dashboard/video-generation').VideoTaskInfo; error?: string }>;
     download: (payload: { taskId: string; videoUrl: string; recordId: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; bytes?: number; mimeType?: string; error?: string }>;
     extractLastFrame: (payload: { filePath: string; recordId: string }) => Promise<{ success: boolean; filePath?: string; name?: string; mimeType?: string; data?: ArrayBuffer; error?: string }>;
-    inspectStitch: (payload: { previousPath: string; nextPath: string; threshold?: number }) => Promise<{ success: boolean; score?: number; passed?: boolean; threshold?: number; metrics?: import('@next-work/video-generation').StitchMetrics; error?: string }>;
+    inspectStitch: (payload: { previousPath: string; nextPath: string; threshold?: number }) => Promise<{ success: boolean; score?: number; passed?: boolean; threshold?: number; metrics?: import('@next-work-dashboard/video-generation').StitchMetrics; error?: string }>;
     concat: (payload: { filePaths: string[]; outputId: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; bytes?: number; error?: string }>;
     cancel: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => Promise<{ success: boolean; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
     uploadReference: (payload: { name: string; mimeType: string; data: ArrayBuffer; ttlHours?: number }) => Promise<{ success: boolean; url?: string; ttlHours?: number; bytes?: number; error?: string }>;

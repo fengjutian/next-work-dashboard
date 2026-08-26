@@ -1,4 +1,4 @@
-# @next-work/weread
+# @next-work-dashboard/weread
 
 Reusable WeRead (微信读书) reader core and React host boundary for next-work-dashboard.
 
@@ -6,7 +6,7 @@ The package is host-neutral. SQLite persistence, the WeRead HTTP gateway, and AI
 providers are supplied through `WereadAdapter`.
 
 ```tsx
-import { WereadPanel } from '@next-work/weread/react';
+import { WereadPanel } from '@next-work-dashboard/weread/react';
 
 <WereadPanel adapter={adapter} />;
 ```

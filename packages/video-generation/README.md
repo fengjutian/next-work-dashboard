@@ -1,4 +1,4 @@
-# @next-work/video-generation
+# @next-work-dashboard/video-generation
 
 Reusable TypeScript core and React host boundary for MiniMax (H3 / Hailuo) video generation.
 
@@ -6,7 +6,7 @@ The package is host-neutral. Electron preload/IPC, SQLite storage, and LLM provi
 supplied through `VideoGenerationAdapter`.
 
 ```tsx
-import { VideoGenerationPanel } from "@next-work/video-generation/react";
+import { VideoGenerationPanel } from "@next-work-dashboard/video-generation/react";
 
 <VideoGenerationPanel adapter={adapter} />;
 ```

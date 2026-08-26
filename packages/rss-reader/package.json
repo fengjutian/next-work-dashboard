@@ -1,5 +1,5 @@
 {
-  "name": "@next-work/rss-reader",
+  "name": "@next-work-dashboard/rss-reader",
   "version": "0.1.0",
   "description": "Reusable RSS reader core, main-process IPC service, and React host boundary",
   "type": "module",

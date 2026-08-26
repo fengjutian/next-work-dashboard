@@ -1,20 +1,20 @@
 /**
- * prompt-lab wrapper for @next-work/weread.
+ * prompt-lab wrapper for @next-work-dashboard/weread.
  *
- * Hosts in @next-work/weread are host-agnostic; this file wires the
+ * Hosts in @next-work-dashboard/weread are host-agnostic; this file wires the
  * published panel to prompt-lab's concrete:
  *  - SQLite-backed weread cache (`db*Weread*` from `@/db`)
  *  - Electron preload bridge (`window.electronAPI`)
  *  - Zustand AI config (`@/store/store`)
  *
  * Keep this file thin. The main-process IPC service lives in
- * `@next-work/weread/main` and is wired in `src/main/ipc-handlers.ts`
+ * `@next-work-dashboard/weread/main` and is wired in `src/main/ipc-handlers.ts`
  * via `registerWereadIpc({ ipcMain })`.
  */
 
 import React, { useMemo } from "react";
-import { WereadPanel as PublishedWereadPanel, WereadProvider, type WereadAdapter, type WereadAiConfig, type WereadTaskRepository } from "@next-work/weread/react";
-import "@next-work/weread/styles.css";
+import { WereadPanel as PublishedWereadPanel, WereadProvider, type WereadAdapter, type WereadAiConfig, type WereadTaskRepository } from "@next-work-dashboard/weread/react";
+import "@next-work-dashboard/weread/styles.css";
 import {
   dbLoadWereadActions,
   dbLoadWereadCache,

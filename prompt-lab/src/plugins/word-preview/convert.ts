@@ -2,7 +2,7 @@
  * Word Preview 模块 — mammoth.js 转换逻辑
  *
  * 纯函数，不依赖 React / DOM。
- * 后续可独立抽取为 @next-work/word-converter。
+ * 后续可独立抽取为 @next-work-dashboard/word-converter。
  */
 
 import type { PreviewState } from './types';
