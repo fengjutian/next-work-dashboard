@@ -218,11 +218,11 @@ export interface ElectronAPI {
   llmChat: (payload: { baseUrl: string; apiKey: string; body: Record<string, unknown> }) => Promise<{ ok: boolean; status: number; data?: any; error?: string }>;
   generateImage: (payload: import('../plugins/style-image/types').StyleImageRequest) => Promise<import('../plugins/style-image/types').StyleImageResult>;
   videoGeneration: {
-    create: (payload: import('../plugins/video-generation/types').VideoGenerationRequest) => Promise<{ success: boolean; taskId?: string; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
-    query: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => Promise<{ success: boolean; info?: import('../plugins/video-generation/types').VideoTaskInfo; error?: string }>;
+    create: (payload: import('@next-work/video-generation').VideoGenerationRequest) => Promise<{ success: boolean; taskId?: string; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
+    query: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => Promise<{ success: boolean; info?: import('@next-work/video-generation').VideoTaskInfo; error?: string }>;
     download: (payload: { taskId: string; videoUrl: string; recordId: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; bytes?: number; mimeType?: string; error?: string }>;
     extractLastFrame: (payload: { filePath: string; recordId: string }) => Promise<{ success: boolean; filePath?: string; name?: string; mimeType?: string; data?: ArrayBuffer; error?: string }>;
-    inspectStitch: (payload: { previousPath: string; nextPath: string; threshold?: number }) => Promise<{ success: boolean; score?: number; passed?: boolean; threshold?: number; metrics?: import('../plugins/video-generation/core/continuity').StitchMetrics; error?: string }>;
+    inspectStitch: (payload: { previousPath: string; nextPath: string; threshold?: number }) => Promise<{ success: boolean; score?: number; passed?: boolean; threshold?: number; metrics?: import('@next-work/video-generation').StitchMetrics; error?: string }>;
     concat: (payload: { filePaths: string[]; outputId: string }) => Promise<{ success: boolean; filePath?: string; fileName?: string; bytes?: number; error?: string }>;
     cancel: (payload: { baseUrl?: string; apiKey: string; taskId: string; model?: string }) => Promise<{ success: boolean; baseResp?: { statusCode?: number; statusMsg?: string }; error?: string }>;
     uploadReference: (payload: { name: string; mimeType: string; data: ArrayBuffer; ttlHours?: number }) => Promise<{ success: boolean; url?: string; ttlHours?: number; bytes?: number; error?: string }>;

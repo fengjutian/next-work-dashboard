@@ -254,7 +254,7 @@ const electronAPI: ElectronAPI = {
   generateImage: (payload) => ipcRenderer.invoke("image:generate", payload),
   videoGeneration: {
     create: (
-      payload: import("./plugins/video-generation/types").VideoGenerationRequest,
+      payload: import("@next-work/video-generation").VideoGenerationRequest,
     ) => ipcRenderer.invoke("video-generation:create", payload),
     query: (payload: {
       baseUrl?: string;
