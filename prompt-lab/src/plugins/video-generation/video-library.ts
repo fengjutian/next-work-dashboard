@@ -32,6 +32,8 @@ function recordToStored(row: DbVideoTaskRecord): StoredVideoRecord {
     bytes: row.bytes,
     status: (row.status || 'processing') as VideoTaskStatus,
     createdAt: row.createdAt,
+    batchId: row.batchId || undefined,
+    batchIndex: row.batchIndex ?? undefined,
   };
 }
 
@@ -48,6 +50,8 @@ export async function createTask(input: {
   duration: number;
   resolution: VideoResolution;
   ratio: VideoRatio;
+  batchId?: string;
+  batchIndex?: number;
 }): Promise<void> {
   await dbUpsertVideoTask({
     id: input.id,
@@ -64,6 +68,8 @@ export async function createTask(input: {
     status: 'processing',
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    batchId: input.batchId || '',
+    batchIndex: input.batchIndex ?? -1,
   });
 }
 

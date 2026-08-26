@@ -111,6 +111,10 @@ export interface StoredVideoRecord {
   bytes: number;
   status: VideoTaskStatus;
   createdAt: number;
+  /** 同一次多段生成共享的批次 id；普通单条任务为空。 */
+  batchId?: string;
+  /** 批次内的展示顺序；最终拼接成片排在所有分段之后。 */
+  batchIndex?: number;
 }
 
 export interface VideoLibraryQuery {

@@ -350,6 +350,8 @@ function ensureSchema(): void {
       file_path TEXT NOT NULL DEFAULT '',
       bytes INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'processing',
+      batch_id TEXT NOT NULL DEFAULT '',
+      batch_index INTEGER NOT NULL DEFAULT -1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -495,6 +497,9 @@ function ensureSchema(): void {
   if (!documentColumns.has('cached_file_path')) _sqlDb.run('ALTER TABLE document_knowledge_records ADD COLUMN cached_file_path TEXT');
   const hanyuColumns = new Set((_sqlDb.exec('PRAGMA table_info(hanyu_jinjie_executions)')[0]?.values ?? []).map((row) => String(row[1])));
   if (!hanyuColumns.has('explanation')) _sqlDb.run("ALTER TABLE hanyu_jinjie_executions ADD COLUMN explanation TEXT NOT NULL DEFAULT ''");
+  const videoTaskColumns = new Set((_sqlDb.exec('PRAGMA table_info(video_generation_tasks)')[0]?.values ?? []).map((row) => String(row[1])));
+  if (!videoTaskColumns.has('batch_id')) _sqlDb.run("ALTER TABLE video_generation_tasks ADD COLUMN batch_id TEXT NOT NULL DEFAULT ''");
+  if (!videoTaskColumns.has('batch_index')) _sqlDb.run('ALTER TABLE video_generation_tasks ADD COLUMN batch_index INTEGER NOT NULL DEFAULT -1');
 }
 
 // ═══════════════════════════════════════════
@@ -1071,6 +1076,8 @@ export interface ZodiacRunRecord {
   model: string;
   createdAt: number;
   updatedAt: number;
+  batchId: string;
+  batchIndex: number;
 }
 
 interface ZodiacRunRow {
@@ -1332,10 +1339,10 @@ export interface DbVideoTaskRecord {
 export async function dbUpsertVideoTask(record: DbVideoTaskRecord): Promise<void> {
   if (!_sqlDb) throw new Error('DB not initialized');
   _sqlDb.run(`INSERT OR REPLACE INTO video_generation_tasks
-    (id, task_id, prompt, model, mode, duration, resolution, ratio, file_name, file_path, bytes, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+    (id, task_id, prompt, model, mode, duration, resolution, ratio, file_name, file_path, bytes, status, batch_id, batch_index, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
     record.id, record.taskId, record.prompt, record.model, record.mode, record.duration, record.resolution, record.ratio,
-    record.fileName, record.filePath, record.bytes, record.status, record.createdAt, record.updatedAt,
+    record.fileName, record.filePath, record.bytes, record.status, record.batchId, record.batchIndex, record.createdAt, record.updatedAt,
   ]);
   await flushDbToDisk();
 }
@@ -1377,6 +1384,8 @@ export function dbListVideoTasks(limit = 100, status?: string): DbVideoTaskRecor
       status: String(row.status),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
+      batchId: String(row.batch_id || ''),
+      batchIndex: Number(row.batch_index ?? -1),
     });
   }
   statement.free();
@@ -1405,6 +1414,8 @@ export function dbGetVideoTask(id: string): DbVideoTaskRecord | null {
     status: String(row.status),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    batchId: String(row.batch_id || ''),
+    batchIndex: Number(row.batch_index ?? -1),
   };
 }
 
