@@ -25,6 +25,7 @@ import {
   dbMarkWereadReviewed,
   dbReplaceWereadCache,
   dbSaveWereadAction,
+  dbSearchWereadNotes,
   flushDbToDisk,
   isDbReady,
 } from "@/db";
@@ -41,6 +42,7 @@ function createPromptLabAdapter(aiConfig: WereadAiConfig): WereadAdapter {
     loadActions: () => dbLoadWereadActions(),
     saveAction: (action) => dbSaveWereadAction(action),
     loadSyncHistory: () => dbLoadWereadSyncHistory(),
+    searchNotes: (query, limit) => dbSearchWereadNotes(query, limit),
     flush: async () => { await flushDbToDisk(); },
     isReady: () => isDbReady(),
   };
