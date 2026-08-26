@@ -415,6 +415,7 @@ export const VideoGenerationPanel: React.FC = () => {
   const [model, setModel] = useState<string>(DEFAULT_MODEL);
   const [prompt, setPrompt] = useState<string>('');
   const [storyboardMode, setStoryboardMode] = useState(false);
+  const [storyboardDialogOpen, setStoryboardDialogOpen] = useState(false);
   const [stitchThreshold, setStitchThreshold] = useState(() => Math.max(0.4, Math.min(0.95, Number(localStorage.getItem(STITCH_THRESHOLD_STORAGE)) || 0.65)));
   const [continuityBible, setContinuityBible] = useState('');
   const [segments, setSegments] = useState<VideoStoryboardSegment[]>(() => Array.from({ length: MIN_STORYBOARD_SEGMENTS }, (_, index) => createStoryboardSegment(index)));
@@ -506,7 +507,7 @@ export const VideoGenerationPanel: React.FC = () => {
       if (!result.success || !result.filePath) throw new Error(result.error || '多段视频拼接失败');
       await createTask({ id: outputId, taskId: outputId, prompt: run.requests[0].prompt, model: run.model,
         mode: 'text-to-video', duration: run.requests.reduce((sum, item) => sum + (item.duration || 6), 0),
-        resolution: run.requests[0].resolution || '768P', ratio: run.requests[0].ratio || '16:9' });
+        resolution: run.requests[0].resolution || '768P', ratio: run.requests[0].ratio || '16:9', batchId: run.id, batchIndex: run.requests.length });
       await attachFile(outputId, result.fileName || '', result.filePath, result.bytes || 0);
       await updateStatus(outputId, 'succeeded');
       setStoryboardRuns((current) => current.filter((item) => item.id !== run.id));
@@ -525,7 +526,8 @@ export const VideoGenerationPanel: React.FC = () => {
     const taskId = response.taskId;
     const recordId = makeId();
     await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: payload.model || DEFAULT_MODEL,
-      mode: 'image-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+      mode: 'image-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9',
+      batchId: run.id, batchIndex: nextIndex });
     setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, filePaths: completedPaths, status: 'running', error: undefined, pendingFilePath: undefined } : item));
     setActivePolls((current) => [...current, { recordId, taskId, attempts: 0, apiKey: run.apiKey,
       baseUrl: run.baseUrl, model: run.model, storyboardRunId: run.id, segmentIndex: nextIndex }]);
@@ -830,7 +832,8 @@ export const VideoGenerationPanel: React.FC = () => {
         baseUrl: payload.baseUrl || baseUrl, model: payload.model || DEFAULT_MODEL };
       setStoryboardRuns((current) => [...current, run]);
       await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: run.model,
-        mode: 'text-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+        mode: 'text-to-video', duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9',
+        batchId: runId, batchIndex: 0 });
       startPolling({ recordId, taskId: response.taskId, attempts: 0, apiKey: run.apiKey, baseUrl: run.baseUrl,
         model: run.model, storyboardRunId: runId, segmentIndex: 0 });
       refreshLibrary();
@@ -894,7 +897,8 @@ export const VideoGenerationPanel: React.FC = () => {
       if (!response.success || !response.taskId) throw new Error(response.error || `第 ${index + 1} 段重新提交失败`);
       const recordId = makeId();
       await createTask({ id: recordId, taskId: response.taskId, prompt: payload.prompt, model: run.model, mode: payload.mode || 'text-to-video',
-        duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9' });
+        duration: payload.duration || 6, resolution: payload.resolution || '768P', ratio: payload.ratio || '16:9',
+        batchId: run.id, batchIndex: index });
       setStoryboardRuns((current) => current.map((item) => item.id === run.id ? { ...item, status: 'running', error: undefined } : item));
       startPolling({ recordId, taskId: response.taskId, attempts: 0, apiKey: run.apiKey, baseUrl: run.baseUrl, model: run.model,
         storyboardRunId: run.id, segmentIndex: index });
@@ -949,6 +953,19 @@ export const VideoGenerationPanel: React.FC = () => {
 
   const totalActive = activePolls.length;
   const visibleTasks = tasks.slice(0, HISTORY_PAGE_SIZE);
+  const historyGroups = useMemo(() => {
+    const groups = new Map<string, { id: string; batch: boolean; items: StoredVideoRecord[] }>();
+    visibleTasks.forEach((task) => {
+      const key = task.batchId ? `batch:${task.batchId}` : `task:${task.id}`;
+      const group = groups.get(key) || { id: key, batch: Boolean(task.batchId), items: [] };
+      group.items.push(task);
+      groups.set(key, group);
+    });
+    return [...groups.values()].map((group) => ({
+      ...group,
+      items: group.batch ? group.items.sort((a, b) => (a.batchIndex ?? -1) - (b.batchIndex ?? -1)) : group.items,
+    }));
+  }, [visibleTasks]);
 
   return (
     <div className="flex h-full min-h-0 bg-background text-foreground">
@@ -1013,12 +1030,29 @@ export const VideoGenerationPanel: React.FC = () => {
         />
         <p className="mb-4 text-right text-[10px] text-muted-foreground">{prompt.length}/{MAX_PROMPT_LENGTH}</p>
 
-        <label className="mb-4 flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-xs">
-          <span><span className="block font-medium">多段连续视频</span><span className="text-[10px] text-muted-foreground">3 段起，可继续添加；统一角色、场景和镜头状态</span></span>
-          <input type="checkbox" checked={storyboardMode} onChange={(event) => { setStoryboardMode(event.target.checked); if (event.target.checked) setMode('text-to-video'); }} />
-        </label>
-        {storyboardMode && (
-          <div className="mb-4 space-y-3 rounded-lg border p-3">
+        <div className="mb-4 rounded-md border bg-muted/20 px-3 py-2 text-xs">
+          <label className="flex items-center justify-between gap-3">
+            <span><span className="block font-medium">多段连续视频</span><span className="text-[10px] text-muted-foreground">3 段起，可继续添加；统一角色、场景和镜头状态</span></span>
+            <input type="checkbox" checked={storyboardMode} onChange={(event) => {
+              setStoryboardMode(event.target.checked);
+              if (event.target.checked) { setMode('text-to-video'); setStoryboardDialogOpen(true); }
+            }} />
+          </label>
+          {storyboardMode && (
+            <button type="button" className="mt-2 flex w-full items-center justify-between rounded border bg-background px-2 py-1.5 text-left hover:border-primary/50" onClick={() => setStoryboardDialogOpen(true)}>
+              <span>{segments.length} 个分段 · 接缝阈值 {Math.round(stitchThreshold * 100)}%</span>
+              <span className="text-primary">编辑设置</span>
+            </button>
+          )}
+        </div>
+        {storyboardMode && storyboardDialogOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-6" role="dialog" aria-modal="true" aria-labelledby="storyboard-dialog-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setStoryboardDialogOpen(false); }}>
+            <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border bg-background shadow-2xl">
+              <div className="flex items-center justify-between border-b px-5 py-4">
+                <div><h2 id="storyboard-dialog-title" className="text-base font-semibold">多段连续视频设置</h2><p className="mt-0.5 text-xs text-muted-foreground">设置全局连续性与每个视频分段</p></div>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setStoryboardDialogOpen(false)} aria-label="关闭"><X className="h-4 w-4" /></Button>
+              </div>
+              <div className="space-y-3 overflow-y-auto p-5">
             <label className="block text-xs font-medium">接缝质量阈值：{Math.round(stitchThreshold * 100)}%
               <input type="range" min={40} max={95} step={1} value={Math.round(stitchThreshold * 100)} className="mt-1 w-full"
                 onChange={(event) => setStitchThreshold(Number(event.target.value) / 100)} />
@@ -1047,6 +1081,9 @@ export const VideoGenerationPanel: React.FC = () => {
             <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => setSegments((current) => [...current, createStoryboardSegment(current.length)])}>
               <Plus className="mr-1 h-3.5 w-3.5" />添加第 {segments.length + 1} 段
             </Button>
+              </div>
+              <div className="flex justify-end border-t px-5 py-3"><Button type="button" onClick={() => setStoryboardDialogOpen(false)}>完成</Button></div>
+            </div>
           </div>
         )}
 
@@ -1271,7 +1308,16 @@ export const VideoGenerationPanel: React.FC = () => {
           <p className="text-[11px] text-muted-foreground">本地已保存 {tasks.length} 条 · 显示最近 {Math.min(visibleTasks.length, HISTORY_PAGE_SIZE)} 条</p>
         </div>
         <div className="space-y-3">
-          {visibleTasks.map((item) => (
+          {historyGroups.map((group) => (
+            <div key={group.id} className={group.batch ? 'overflow-hidden rounded-xl border border-primary/25 bg-primary/[0.025] p-2' : ''}>
+              {group.batch && (
+                <div className="mb-2 flex items-center justify-between px-1 text-[10px]">
+                  <span className="font-medium text-foreground">本次连续生成</span>
+                  <span className="text-muted-foreground">{group.items.length} 个视频</span>
+                </div>
+              )}
+              <div className={group.batch ? 'space-y-2' : ''}>
+              {group.items.map((item) => (
             <button
               type="button"
               key={item.id}
@@ -1292,11 +1338,15 @@ export const VideoGenerationPanel: React.FC = () => {
                 )}
               </div>
               <div className="p-2">
+                {group.batch && <span className="mb-1 block text-[10px] font-medium text-primary">{item.id === `storyboard-${item.batchId}` ? '完整成片' : `第 ${(item.batchIndex ?? 0) + 1} 段`}</span>}
                 <span className="block truncate text-xs font-medium">{item.prompt || `任务 ${item.id}`}</span>
                 <span className="mt-1 block text-[10px] text-muted-foreground">{item.model} · {item.resolution} · {item.duration}s · {item.ratio}</span>
                 <span className="block text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span>
               </div>
             </button>
+              ))}
+              </div>
+            </div>
           ))}
         </div>
         {!visibleTasks.length && (

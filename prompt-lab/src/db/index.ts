@@ -1076,8 +1076,6 @@ export interface ZodiacRunRecord {
   model: string;
   createdAt: number;
   updatedAt: number;
-  batchId: string;
-  batchIndex: number;
 }
 
 interface ZodiacRunRow {
@@ -1334,6 +1332,8 @@ export interface DbVideoTaskRecord {
   status: string;
   createdAt: number;
   updatedAt: number;
+  batchId: string;
+  batchIndex: number;
 }
 
 export async function dbUpsertVideoTask(record: DbVideoTaskRecord): Promise<void> {
