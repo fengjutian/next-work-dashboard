@@ -15,42 +15,38 @@ import { ScreenCapturePanel as PublishedScreenCapturePanel, ScreenCaptureProvide
 import type { CaptureMode } from "@next-work-dashboard/screen-capture/core";
 import "@next-work-dashboard/screen-capture/styles.css";
 
-function createPromptLabAdapter(): ScreenCaptureAdapter {
+/** Build the host half of the adapter (everything except `notify`,
+ *  which needs a live React-aware API). */
+function createPromptLabHost(): ScreenCaptureAdapter["electronAPI"] {
   return {
-    electronAPI: {
-      screenCapture: {
-        getPrimaryScreenSourceId: () => window.electronAPI.screenCapture.getPrimaryScreenSourceId(),
-        setTarget: (target, systemAudio) => window.electronAPI.screenCapture.setTarget(target, systemAudio),
-        setRecordingState: (state) => window.electronAPI.screenCapture.setRecordingState(state),
-      },
-      hide: () => window.electronAPI.hide(),
-      show: () => window.electronAPI.show(),
+    screenCapture: {
+      getPrimaryScreenSourceId: () => window.electronAPI.screenCapture.getPrimaryScreenSourceId(),
+      setTarget: (target, systemAudio) => window.electronAPI.screenCapture.setTarget(target, systemAudio),
+      setRecordingState: (state) => window.electronAPI.screenCapture.setRecordingState(state),
     },
-    // The static `notification` is fine for the immutable adapter skeleton.
-    // The live `notice` from `useNotification` is plugged in below so
-    // toasts share the React lifecycle (so unmounting the panel cleans up
-    // the open toasts).
-    notify: createAntdNotify(notification as unknown as Parameters<typeof createAntdNotify>[0]),
+    hide: () => window.electronAPI.hide(),
+    show: () => window.electronAPI.show(),
   };
 }
 
 export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> = ({ initialMode = "screenshot" }) => {
+  // useNotification returns [api, contextHolder]. We mount the holder as a
+  // sibling so the toasts share the React lifecycle — the static
+  // `notification` global is a singleton and would leak toasts across
+  // panel remounts.
   const [api, contextHolder] = notification.useNotification();
-  const baseAdapter = useMemo(() => createPromptLabAdapter(), []);
-  // Replace the static notify factory with the live API from
-  // useNotification so toasts survive React's lifecycle (the static
-  // `notification` is a singleton and can leak toasts across mounts).
-  const liveAdapter: ScreenCaptureAdapter = useMemo(
+  const electronAPI = useMemo(() => createPromptLabHost(), []);
+  const adapter: ScreenCaptureAdapter = useMemo(
     () => ({
-      ...baseAdapter,
+      electronAPI,
       notify: createAntdNotify(api as unknown as Parameters<typeof createAntdNotify>[0]),
     }),
-    [baseAdapter, api],
+    [electronAPI, api],
   );
   return (
     <>
       {contextHolder}
-      <ScreenCaptureProvider adapter={liveAdapter}>
+      <ScreenCaptureProvider adapter={adapter}>
         <PublishedScreenCapturePanel initialMode={initialMode} />
       </ScreenCaptureProvider>
     </>
