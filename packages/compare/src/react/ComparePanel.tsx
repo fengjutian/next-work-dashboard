@@ -180,8 +180,12 @@ export const ComparePanel: React.FC = () => {
       setActiveChange(-1);
       setStatus(`正在比较 ${detail.left.label} 与 ${detail.right.label}`);
     };
-    const openComparison = (detail: { left?: CompareDocument; right?: CompareDocument }) => {
-      applyComparison(detail);
+    const openComparison = (detail: { left?: { name: string; path: string; text?: string; content?: string; encoding?: WorkspaceEncoding; lineEnding?: 'LF' | 'CRLF'; modifiedAt?: number; readOnly?: boolean; size?: number }; right?: { name: string; path: string; text?: string; content?: string; encoding?: WorkspaceEncoding; lineEnding?: 'LF' | 'CRLF'; modifiedAt?: number; readOnly?: boolean; size?: number } }) => {
+      if (!detail.left || !detail.right) return;
+      applyComparison({
+        left: { ...documentFromFile(detail.left), readOnly: true },
+        right: { ...documentFromFile(detail.right), readOnly: true },
+      });
       try { sessionStorage.removeItem('compare.pending.v1'); } catch { /* ignore */ }
     };
     try {
@@ -377,7 +381,7 @@ export const ComparePanel: React.FC = () => {
     const file = Array.isArray(result) ? result[0] : result;
     if (!file) return;
     try {
-      const patch = parseUnifiedPatch(file.text ?? monaco.decodeBase64Utf8(file.content));
+      const patch = parseUnifiedPatch(file.text ?? monaco.decodeBase64Utf8(file.content ?? ''));
       setPatchSession({ name: file.name, patch, reverse: false });
       setStatus(`已解析 ${file.name}：${patch.hunks.length} 个变更块`);
     } catch (error) {
@@ -415,7 +419,7 @@ export const ComparePanel: React.FC = () => {
     const file = Array.isArray(result) ? result[0] : result;
     if (!file) return;
     try {
-      const operations = JSON.parse(file.text ?? monaco.decodeBase64Utf8(file.content)) as JsonPatchOperation[];
+      const operations = JSON.parse(file.text ?? monaco.decodeBase64Utf8(file.content ?? '')) as JsonPatchOperation[];
       if (!Array.isArray(operations) || operations.some((item) => !item || !['add', 'remove', 'replace'].includes(item.op) || typeof item.path !== 'string')) throw new Error('JSON_PATCH_INVALID');
       const preview = applyJsonPatch(JSON.parse(left.content) as unknown, operations);
       setRight({ label: 'JSON Patch 预览.json', content: `${JSON.stringify(preview, null, 2)}\n` });

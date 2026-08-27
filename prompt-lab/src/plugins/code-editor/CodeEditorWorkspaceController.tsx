@@ -37,7 +37,7 @@ import {
 import { requestEditorNavigation, subscribeEditorNavigation } from '@/services/editor-navigation';
 import { activeKnowledgeWorkspace } from '@/services/knowledge-workspace';
 import { configureMonaco } from '@/lib/monaco-setup';
-import { computeTextDiffHunks } from '@/lib/text-diff';
+import { computeTextDiffHunks } from '@next-work-dashboard/compare/core';
 import {
   type BottomPanelTab,
   type EditorPreferences,

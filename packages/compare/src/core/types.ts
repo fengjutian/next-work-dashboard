@@ -5,7 +5,7 @@
  * contract.
  */
 
-export type WorkspaceEncoding = 'utf8' | 'utf8-bom' | 'gbk' | 'big5';
+export type WorkspaceEncoding = 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk';
 
 export interface FilePickResult {
   name: string;
