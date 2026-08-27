@@ -1,17 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  FileText,
-  Globe,
-  History,
-  Loader2,
-  RefreshCw,
-  Sparkles,
-  Trash2,
-} from "@/components/icons";
-import { Button } from "@/components/ui/button";
-import { createOpenAIProvider } from "@/core/llm";
-import { useStore } from "@/store/store";
-import { normalizeWord } from "./model";
+import { FileText, Globe, History, Loader2, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { Button } from "./Button";
+import { useEnglishLookupAdapter } from "./context";
+import { normalizeWord } from "../core/model";
+import type { EnglishLookupChatMessage, EnglishLookupChatOptions } from "./adapter";
 
 interface ArticleResult {
   title: string;
@@ -39,15 +31,23 @@ interface LeveledWord {
 }
 type VocabularyGroups = Record<VocabularyLevel, LeveledWord[]>;
 
+/** Minimal Electron-style webview surface used by the article reader.
+ *  Hosts that ship a real `Electron.WebviewTag` (or compatible polyfill)
+ *  can assign it directly to the ref. */
+interface EnglishLookupWebviewElement {
+  src: string;
+  partition: string;
+  executeJavaScript(code: string): Promise<unknown>;
+  addEventListener(name: "did-start-loading" | "did-stop-loading" | "did-fail-load", handler: () => void): void;
+  removeEventListener(name: string, handler: () => void): void;
+}
+
 function parseVocabularyGroups(raw: string): VocabularyGroups {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? raw;
   const start = fenced.indexOf("{");
   const end = fenced.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("AI 没有返回可识别的分级词汇");
-  const value = JSON.parse(fenced.slice(start, end + 1)) as Record<
-    string,
-    unknown
-  >;
+  const value = JSON.parse(fenced.slice(start, end + 1)) as Record<string, unknown>;
   return Object.fromEntries(
     VOCABULARY_LEVELS.map((level) => {
       const entries = value[level];
@@ -84,9 +84,7 @@ function parseArticle(raw: string): ArticleResult {
   const start = fenced.indexOf("{");
   const end = fenced.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("AI 没有返回可识别的文章翻译");
-  const value = JSON.parse(
-    fenced.slice(start, end + 1),
-  ) as Partial<ArticleResult>;
+  const value = JSON.parse(fenced.slice(start, end + 1)) as Partial<ArticleResult>;
   const paragraphs = Array.isArray(value.paragraphs)
     ? value.paragraphs
         .filter(
@@ -115,16 +113,18 @@ const EXTRACT_PAGE_SCRIPT = `(() => {
   return { title: document.title || location.hostname, text: text.slice(0, 30000), blocked };
 })()`;
 
-export function ArticleReader({
-  onBack,
-  onLookup,
-  speak,
-}: {
+export interface ArticleReaderProps {
   onBack: () => void;
   onLookup: (word: string, context: string) => void;
   speak: (text: string) => void;
-}) {
-  const aiApi = useStore((state) => state.aiApi);
+  /** AI config: apiKey, baseUrl, model, optional provider tag (e.g. "qwen").
+   *  The host decides how to use the provider tag when wiring its chat
+   *  factory (e.g. inject a chatProxy for certain upstream endpoints). */
+  ai: { apiKey: string; baseUrl: string; model: string; provider?: string };
+}
+
+export function ArticleReader({ onBack, onLookup, speak, ai }: ArticleReaderProps) {
+  const { ai: aiAdapter } = useEnglishLookupAdapter();
   const [mode, setMode] = useState<"website" | "paste">("website");
   const [article, setArticle] = useState("");
   const [result, setResult] = useState<ArticleResult | null>(null);
@@ -153,7 +153,7 @@ export function ArticleReader({
   const [extractingWords, setExtractingWords] = useState(false);
   const [vocabulary, setVocabulary] = useState<VocabularyGroups | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const webviewRef = useRef<Electron.WebviewTag>(null);
+  const webviewRef = useRef<EnglishLookupWebviewElement | null>(null);
   const extractRef = useRef<() => Promise<void>>(async () => undefined);
   const wordCount = useMemo(
     () => (article.trim() ? article.trim().split(/\s+/).length : 0),
@@ -176,9 +176,9 @@ export function ArticleReader({
       return;
     }
     if (
-      !aiApi.apiKey?.trim() ||
-      !aiApi.baseUrl?.trim() ||
-      !aiApi.model?.trim()
+      !ai.apiKey?.trim() ||
+      !ai.baseUrl?.trim() ||
+      !ai.model?.trim()
     ) {
       setError("请先在设置中配置 AI 服务");
       return;
@@ -189,30 +189,24 @@ export function ArticleReader({
     setLoading(true);
     setResult(null);
     try {
-      const provider = createOpenAIProvider({
-        apiKey: aiApi.apiKey,
-        baseUrl: aiApi.baseUrl,
-        chatProxy:
-          aiApi.provider === "qwen" ? window.electronAPI.llmChat : undefined,
-      });
-      let raw = "";
-      const prompt =
-        'Translate the article into natural Chinese. Preserve paragraph boundaries and factual meaning. Return JSON only: {"title":"Chinese title","summary":"concise Chinese summary","paragraphs":[{"original":"exact source paragraph","translation":"Chinese translation"}]}. Do not omit content.';
-      const content = `${title ? `Page title: ${title}\n\n` : ""}${input.slice(0, 30_000)}`;
-      for await (const chunk of provider.chat(
-        [
-          { role: "system", content: prompt },
-          { role: "user", content },
-        ],
+      const provider = aiAdapter.createChatProvider({ apiKey: ai.apiKey, baseUrl: ai.baseUrl, model: ai.model, provider: ai.provider });
+      const messages: EnglishLookupChatMessage[] = [
         {
-          model: aiApi.model,
-          temperature: 0.15,
-          maxTokens: 8000,
-          stream: true,
-          signal: controller.signal,
+          role: "system",
+          content:
+            'Translate the article into natural Chinese. Preserve paragraph boundaries and factual meaning. Return JSON only: {"title":"Chinese title","summary":"concise Chinese summary","paragraphs":[{"original":"exact source paragraph","translation":"Chinese translation"}]}. Do not omit content.',
         },
-      ))
-        raw += chunk.delta ?? "";
+        { role: "user", content: `${title ? `Page title: ${title}\n\n` : ""}${input.slice(0, 30_000)}` },
+      ];
+      const options: EnglishLookupChatOptions = {
+        model: ai.model,
+        temperature: 0.15,
+        maxTokens: 8000,
+        stream: true,
+        signal: controller.signal,
+      };
+      let raw = "";
+      for await (const chunk of provider.chat(messages, options)) raw += chunk.delta ?? "";
       setResult(parseArticle(raw));
     } catch (reason) {
       setError(
@@ -234,9 +228,9 @@ export function ArticleReader({
       return;
     }
     if (
-      !aiApi.apiKey?.trim() ||
-      !aiApi.baseUrl?.trim() ||
-      !aiApi.model?.trim()
+      !ai.apiKey?.trim() ||
+      !ai.baseUrl?.trim() ||
+      !ai.model?.trim()
     ) {
       setError("请先在设置中配置 AI 服务");
       return;
@@ -244,22 +238,16 @@ export function ArticleReader({
     setError("");
     setExtractingWords(true);
     try {
-      const provider = createOpenAIProvider({
-        apiKey: aiApi.apiKey,
-        baseUrl: aiApi.baseUrl,
-        chatProxy:
-          aiApi.provider === "qwen" ? window.electronAPI.llmChat : undefined,
-      });
-      const prompt = `Extract useful English vocabulary that actually appears in the supplied article. Assign every word to exactly one best-fit Chinese exam level: 高中, 大学4级, 大学6级, 英专8级, 托福, 雅思. Prefer dictionary headwords, exclude names and very basic words, deduplicate case-insensitively. Return JSON only with exactly these six keys. Each value is an array of {"word":"English headword","meaning":"concise Chinese meaning in this context"}. Use an empty array when none.`;
+      const provider = aiAdapter.createChatProvider({ apiKey: ai.apiKey, baseUrl: ai.baseUrl, model: ai.model, provider: ai.provider });
+      const messages: EnglishLookupChatMessage[] = [
+        {
+          role: "system",
+          content: `Extract useful English vocabulary that actually appears in the supplied article. Assign every word to exactly one best-fit Chinese exam level: 高中, 大学4级, 大学6级, 英专8级, 托福, 雅思. Prefer dictionary headwords, exclude names and very basic words, deduplicate case-insensitively. Return JSON only with exactly these six keys. Each value is an array of {"word":"English headword","meaning":"concise Chinese meaning in this context"}. Use an empty array when none.`,
+        },
+        { role: "user", content: article.slice(0, 30_000) },
+      ];
       let raw = "";
-      for await (const chunk of provider.chat(
-        [
-          { role: "system", content: prompt },
-          { role: "user", content: article.slice(0, 30_000) },
-        ],
-        { model: aiApi.model, temperature: 0.1, maxTokens: 5000, stream: true },
-      ))
-        raw += chunk.delta ?? "";
+      for await (const chunk of provider.chat(messages, { model: ai.model, temperature: 0.1, maxTokens: 5000, stream: true })) raw += chunk.delta ?? "";
       setVocabulary(parseVocabularyGroups(raw));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "分级词汇提取失败");
@@ -273,9 +261,7 @@ export function ArticleReader({
     if (!webview) return;
     setError("");
     try {
-      const extracted = (await webview.executeJavaScript(
-        EXTRACT_PAGE_SCRIPT,
-      )) as ExtractedPage;
+      const extracted = (await webview.executeJavaScript(EXTRACT_PAGE_SCRIPT)) as ExtractedPage;
       setArticle(extracted.text || "");
       setPageTitle(extracted.title || "");
       if (extracted.blocked) {
@@ -308,10 +294,7 @@ export function ArticleReader({
       setUrlInput(normalized);
       setPageUrl(normalized);
       setUrlHistory((current) =>
-        [normalized, ...current.filter((item) => item !== normalized)].slice(
-          0,
-          20,
-        ),
+        [normalized, ...current.filter((item) => item !== normalized)].slice(0, 20),
       );
       setHistoryOpen(false);
       setPageLoading(true);
@@ -329,9 +312,7 @@ export function ArticleReader({
     };
     const failed = () => {
       setPageLoading(false);
-      setError(
-        "网站加载失败。请检查网址或网络；若网站限制访问，可改用“粘贴文本”。",
-      );
+      setError("网站加载失败。请检查网址或网络；若网站限制访问，可改用“粘贴文本”。");
     };
     webview.addEventListener("did-start-loading", started);
     webview.addEventListener("did-stop-loading", stopped);
@@ -353,11 +334,7 @@ export function ArticleReader({
         <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
           <Loader2 className="h-7 w-7 animate-spin text-primary" />
           <span>正在翻译正文…</span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => abortRef.current?.abort()}
-          >
+          <Button variant="outline" size="sm" onClick={() => abortRef.current?.abort()}>
             取消
           </Button>
         </div>
@@ -379,29 +356,14 @@ export function ArticleReader({
           <section className="rounded-xl border bg-primary/5 p-4">
             <h1 className="text-lg font-semibold">{result.title}</h1>
             {result.summary && (
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {result.summary}
-              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{result.summary}</p>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowOriginal((value) => !value)}
-              >
+              <Button size="sm" variant="outline" onClick={() => setShowOriginal((value) => !value)}>
                 {showOriginal ? "仅中文" : "显示原文"}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={extractingWords}
-                onClick={() => void extractVocabulary()}
-              >
-                {extractingWords ? (
-                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-3.5 w-3.5" />
-                )}
+              <Button size="sm" variant="outline" disabled={extractingWords} onClick={() => void extractVocabulary()}>
+                {extractingWords ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
                 提取分级词汇
               </Button>
             </div>
@@ -411,11 +373,7 @@ export function ArticleReader({
               <div className="mb-3 flex items-center">
                 <h2 className="text-sm font-semibold">本文分级词汇</h2>
                 <span className="ml-auto text-xs text-muted-foreground">
-                  {VOCABULARY_LEVELS.reduce(
-                    (sum, level) => sum + vocabulary[level].length,
-                    0,
-                  )}{" "}
-                  词
+                  {VOCABULARY_LEVELS.reduce((sum, level) => sum + vocabulary[level].length, 0)} 词
                 </span>
               </div>
               <div className="grid gap-3 xl:grid-cols-2">
@@ -434,16 +392,12 @@ export function ArticleReader({
                             className="rounded-md border bg-background px-2 py-1 text-left text-xs hover:border-primary/40 hover:bg-primary/5"
                           >
                             <b>{item.word}</b>
-                            <span className="ml-1 text-muted-foreground">
-                              {item.meaning}
-                            </span>
+                            <span className="ml-1 text-muted-foreground">{item.meaning}</span>
                           </button>
                         ))}
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        本文无对应词汇
-                      </span>
+                      <span className="text-xs text-muted-foreground">本文无对应词汇</span>
                     )}
                   </div>
                 ))}
@@ -455,21 +409,12 @@ export function ArticleReader({
               {showOriginal && (
                 <div onMouseUp={() => lookupSelection(item.original)}>
                   <div className="flex items-center">
-                    <span className="text-[10px] text-muted-foreground">
-                      原文 · 选中文字可查询
-                    </span>
-                    <Button
-                      className="ml-auto"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => speak(item.original)}
-                    >
+                    <span className="text-[10px] text-muted-foreground">原文 · 选中文字可查询</span>
+                    <Button className="ml-auto" size="sm" variant="ghost" onClick={() => speak(item.original)}>
                       朗读
                     </Button>
                   </div>
-                  <p className="mt-2 select-text text-sm leading-7">
-                    {item.original}
-                  </p>
+                  <p className="mt-2 select-text text-sm leading-7">{item.original}</p>
                   <div className="my-3 border-t" />
                 </div>
               )}
@@ -513,9 +458,7 @@ export function ArticleReader({
                 aria-label="网站地址"
                 value={urlInput}
                 onFocus={() => setHistoryOpen(true)}
-                onBlur={() =>
-                  window.setTimeout(() => setHistoryOpen(false), 120)
-                }
+                onBlur={() => window.setTimeout(() => setHistoryOpen(false), 120)}
                 onChange={(event) => {
                   setUrlInput(event.target.value);
                   setHistoryOpen(true);
@@ -543,10 +486,7 @@ export function ArticleReader({
                     </button>
                   </div>
                   {urlHistory.map((url) => (
-                    <div
-                      key={url}
-                      className="group flex items-center rounded-md hover:bg-muted"
-                    >
+                    <div key={url} className="group flex items-center rounded-md hover:bg-muted">
                       <button
                         type="button"
                         title={url}
@@ -560,11 +500,7 @@ export function ArticleReader({
                         type="button"
                         aria-label={`删除 ${url}`}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() =>
-                          setUrlHistory((current) =>
-                            current.filter((item) => item !== url),
-                          )
-                        }
+                        onClick={() => setUrlHistory((current) => current.filter((item) => item !== url))}
                         className="mr-1 rounded p-1 text-muted-foreground opacity-60 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -584,11 +520,7 @@ export function ArticleReader({
             <span className="order-3 w-full text-xs text-muted-foreground sm:order-none sm:ml-auto sm:w-auto">
               {wordCount} 词 · {article.length}/30000 字符
             </span>
-            <Button
-              className="ml-auto sm:ml-0"
-              disabled={loading}
-              onClick={() => void translateText(article)}
-            >
+            <Button className="ml-auto sm:ml-0" disabled={loading} onClick={() => void translateText(article)}>
               <Sparkles className="mr-2 h-4 w-4" />
               翻译文章
             </Button>
@@ -596,10 +528,7 @@ export function ArticleReader({
         )}
       </div>
       {error && (
-        <div
-          role="alert"
-          className="break-words border-b border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:px-4 sm:text-sm"
-        >
+        <div role="alert" className="break-words border-b border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:px-4 sm:text-sm">
           {error}
         </div>
       )}
@@ -609,33 +538,22 @@ export function ArticleReader({
             {pageUrl ? (
               <>
                 <div className="absolute left-2 right-2 top-2 z-10 flex items-center gap-2 rounded-lg border bg-background/95 px-2 py-1 shadow sm:left-auto sm:right-3 sm:top-3">
-                  <span
-                    className="min-w-0 flex-1 truncate text-xs sm:max-w-56"
-                    title={pageTitle}
-                  >
-                    {pageLoading
-                      ? "正在加载网站…"
-                      : pageTitle || new URL(pageUrl).hostname}
+                  <span className="min-w-0 flex-1 truncate text-xs sm:max-w-56" title={pageTitle}>
+                    {pageLoading ? "正在加载网站…" : pageTitle || new URL(pageUrl).hostname}
                   </span>
-                  <button
-                    title="重新读取并翻译"
-                    onClick={() => void extractAndTranslate()}
-                    className="rounded p-1 hover:bg-muted"
-                  >
+                  <button title="重新读取并翻译" onClick={() => void extractAndTranslate()} className="rounded p-1 hover:bg-muted">
                     <RefreshCw className="h-3.5 w-3.5" />
                   </button>
                 </div>
                 <webview
-                  ref={webviewRef}
+                  ref={webviewRef as unknown as React.Ref<HTMLWebViewElement>}
                   src={pageUrl}
                   partition="persist:english-translation"
                   style={{ width: "100%", height: "100%", border: 0 }}
                 />
               </>
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                网站将在这里打开
-              </div>
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">网站将在这里打开</div>
             )}
           </div>
           {translationPane}

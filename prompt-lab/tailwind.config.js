@@ -6,6 +6,7 @@ module.exports = {
     '../packages/pdf-preview/src/**/*.{ts,tsx}',
     '../packages/rss-reader/src/**/*.{ts,tsx}',
     '../packages/compare/src/**/*.{ts,tsx}',
+    '../packages/english-lookup/src/**/*.{ts,tsx}',
     '../packages/video-generation/src/**/*.{ts,tsx}',
     '../packages/windy/src/**/*.{ts,tsx}',
   ],

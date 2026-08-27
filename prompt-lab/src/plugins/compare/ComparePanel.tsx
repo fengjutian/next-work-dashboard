@@ -21,18 +21,19 @@ import {
 } from "@next-work-dashboard/compare/react";
 import type { TextDiffWorkerRequest, TextDiffWorkerResponse } from "@next-work-dashboard/compare/core";
 // eslint-disable-next-line import/default
-import TextDiffWorker from "@/lib/text-diff.worker?worker";
+import TextDiffWorker from "@next-work-dashboard/compare/core/text-diff.worker?worker";
 import { useStore } from "@/store/store";
 import { configureMonaco } from "@/lib/monaco-setup";
 import { decodeBase64Utf8, languageIdFromName } from "@/plugins/code-editor/editor-utils";
 
 function createPromptLabAdapter(): CompareAdapter {
+  let requestSequence = 0;
   const hostWorker: CompareHostWorker = {
     spawnDiffWorker: () => new TextDiffWorker() as unknown as Worker,
     requestDiff: (request, signal, timeoutMs = 5000) => {
       return new Promise<TextDiffWorkerResponse>((resolve, reject) => {
         const worker = new TextDiffWorker();
-        const id = Math.floor(Math.random() * 1_000_000) + 1;
+        const id = ++requestSequence;
         let settled = false;
         const finish = (callback: () => void) => {
           if (settled) return;

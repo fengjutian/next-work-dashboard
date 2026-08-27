@@ -1,1 +1,1 @@
-export { EnglishLookupPanel } from './EnglishLookupPanel';
+export { EnglishLookupPanel } from "./EnglishLookupPanel";
