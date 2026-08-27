@@ -89,6 +89,7 @@
     "@next-work-dashboard/pdf-preview": "file:../packages/pdf-preview",
     "@next-work-dashboard/rss-reader": "file:../packages/rss-reader",
     "@next-work-dashboard/video-generation": "file:../packages/video-generation",
+    "@next-work-dashboard/windy": "file:../packages/windy",
     "@next-work-dashboard/weread": "file:../packages/weread",
     "@radix-ui/react-scroll-area": "^1.2.15",
     "@radix-ui/react-separator": "^1.1.12",

@@ -9,7 +9,7 @@
  * prompt-lab. Hosts must wrap it in `<PdfPreviewProvider adapter={...}>`.
  */
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { INITIAL_PDF_STATE } from '../core/types';
 import { loadPdfFirstPage, renderPageToImage, type PdfDocumentProxy } from '../core/convert';
@@ -17,15 +17,47 @@ import type { PdfPreviewState } from '../core/types';
 import { usePdfPreviewAdapter } from './context';
 import { ScrollArea } from './ScrollArea';
 
+/**
+ * Release any prior pdfjs document. Safe to call when there is none.
+ * pdfjs-dist documents hold onto a worker handle and large ArrayBuffers
+ * — without `destroy()` the worker pool keeps the old document alive
+ * every time a new file is opened.
+ */
+function releasePdfDoc(doc: PdfDocumentProxy | null): void {
+  if (!doc) return;
+  const result = doc.destroy?.();
+  if (result && typeof (result as Promise<unknown>).then === 'function') {
+    (result as Promise<unknown>).catch(() => {
+      /* destroy() may reject if the worker is already gone; ignore. */
+    });
+  }
+}
+
 export const PdfPreviewPanel: React.FC = () => {
   const { getPdfJs } = usePdfPreviewAdapter();
   const [state, setState] = useState<PdfPreviewState>(INITIAL_PDF_STATE);
   const [dragOver, setDragOver] = useState(false);
   const [pdfDoc, setPdfDoc] = useState<PdfDocumentProxy | null>(null);
+  // Mirror the latest pdfDoc so the unmount cleanup always sees the
+  // current value instead of the one captured at first render.
+  const pdfDocRef = useRef<PdfDocumentProxy | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Tear down the underlying pdfjs document on unmount.
+  useEffect(() => {
+    return () => {
+      releasePdfDoc(pdfDocRef.current);
+      pdfDocRef.current = null;
+    };
+  }, []);
 
   const loadPdf = useCallback(
     async (file: File) => {
+      // Release the previous document before allocating a new one.
+      releasePdfDoc(pdfDocRef.current);
+      pdfDocRef.current = null;
+      setPdfDoc(null);
+
       setState({
         status: 'loading',
         fileName: file.name,
@@ -35,11 +67,11 @@ export const PdfPreviewPanel: React.FC = () => {
         scale: 1,
         error: null,
       });
-      setPdfDoc(null);
 
       const result = await loadPdfFirstPage(file, getPdfJs, 1);
       setState(result.state);
       setPdfDoc(result.pdfDoc);
+      pdfDocRef.current = result.pdfDoc;
     },
     [getPdfJs],
   );
@@ -77,8 +109,10 @@ export const PdfPreviewPanel: React.FC = () => {
   );
 
   const clear = useCallback(() => {
-    setState(INITIAL_PDF_STATE);
+    releasePdfDoc(pdfDocRef.current);
+    pdfDocRef.current = null;
     setPdfDoc(null);
+    setState(INITIAL_PDF_STATE);
   }, []);
 
   // ── 翻页 ──
