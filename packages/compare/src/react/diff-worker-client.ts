@@ -8,6 +8,11 @@ import type { TextDiffHunk } from '../core/text-diff';
 import type { TextDiffWorkerRequest, TextDiffWorkerResponse } from '../core/text-diff-worker-protocol';
 import type { CompareHostWorker } from './adapter';
 
+/** Same shape as `TextDiffWorkerRequest` minus the `id` field. */
+type TextDiffWorkerRequestBody =
+  | { operation: 'hunks'; original: string; modified: string }
+  | { operation: 'patch'; original: string; modified: string; originalLabel: string; modifiedLabel: string; contextLines: number };
+
 export function createDiffClient(worker: CompareHostWorker) {
   return {
     computeTextDiffHunksAsync(original: string, modified: string, signal?: AbortSignal): Promise<TextDiffHunk[]> {
@@ -41,3 +46,4 @@ export type DiffClient = ReturnType<typeof createDiffClient>;
 /** Re-export the request/response types so consumers don't have to
  *  import them from the worker protocol file. */
 export type { TextDiffWorkerRequest, TextDiffWorkerResponse };
+

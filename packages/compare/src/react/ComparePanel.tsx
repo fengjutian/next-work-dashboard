@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import type { FilePickResult, WorkspaceEncoding, SaveFileOptions, SaveFileResult, WriteTextFileOptions, WriteTextFileResult } from '../core/types';
 import { useCompareAdapter } from './context';
 import { createDiffClient } from './diff-worker-client';
+import { Button } from './Button';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, Columns2, Copy, Download, FileDiff, FileText, Rows3, Save, Upload } from 'lucide-react';
 import { applyTextDiffHunk, createUnifiedDiff, prepareTextForComparison, type TextDiffHunk } from '../core/text-diff';
-import type { FilePickResult, WorkspaceEncoding } from '../core/types';
+import type { FilePickResult, WorkspaceEncoding, SaveFileOptions } from '../core/types';
 import { DIFF_WORKER_THRESHOLD, useTextDiffHunks } from './useTextDiffHunks';
 import { applyUnifiedPatch, parseUnifiedPatch, type UnifiedPatch } from '../core/unified-patch';
 import {
@@ -16,6 +16,34 @@ import {
   type CompareMode, type JsonPatchOperation,
 } from '../core/comparison-modes';
 import { UnifiedDiffView } from './UnifiedDiffView';
+
+interface CompareDocument {
+  label: string;
+  content: string;
+  savedContent?: string;
+  path?: string;
+  encoding?: WorkspaceEncoding;
+  lineEnding?: 'LF' | 'CRLF';
+  modifiedAt?: number;
+  readOnly?: boolean;
+}
+
+interface SaveConflict {
+  side: 'left' | 'right';
+  current: {
+    content: string;
+    encoding: WorkspaceEncoding;
+    lineEnding: 'LF' | 'CRLF';
+    mixedLineEndings: boolean;
+    modifiedAt: number;
+  };
+}
+
+interface PatchSession {
+  name: string;
+  patch: UnifiedPatch;
+  reverse: boolean;
+}
 
 
 interface CompareDocument {
@@ -169,10 +197,19 @@ export const ComparePanel: React.FC = () => {
     return unsubscribe;
   }, [events]);
 
-  const documentFromFile = (file: FilePickResult): CompareDocument => ({
+  const documentFromFile = (file: {
+    name: string;
+    path: string;
+    text?: string;
+    content?: string;
+    encoding?: WorkspaceEncoding;
+    lineEnding?: 'LF' | 'CRLF';
+    modifiedAt?: number;
+    readOnly?: boolean;
+  }): CompareDocument => ({
     label: file.name,
-    content: file.text ?? monaco.decodeBase64Utf8(file.content),
-    savedContent: file.text ?? monaco.decodeBase64Utf8(file.content),
+    content: file.text ?? monaco.decodeBase64Utf8(file.content ?? ''),
+    savedContent: file.text ?? monaco.decodeBase64Utf8(file.content ?? ''),
     path: file.path,
     encoding: file.encoding ?? 'utf8',
     lineEnding: file.lineEnding ?? 'LF',
@@ -184,7 +221,8 @@ export const ComparePanel: React.FC = () => {
     const result = await api.pickFile();
     const file = Array.isArray(result) ? result[0] : result;
     if (!file) return;
-    if (file.size > 20 * 1024 * 1024) {
+    const size = file.size ?? (file.text?.length ?? file.content?.length ?? 0);
+    if (size > 20 * 1024 * 1024) {
       setStatus('文件超过 20MB，已拒绝载入');
       return;
     }
@@ -204,7 +242,7 @@ export const ComparePanel: React.FC = () => {
       setStatus('请选择两个文本文件');
       return;
     }
-    if (files.some((file) => file.size > 20 * 1024 * 1024)) {
+    if (files.some((file) => (file.size ?? (file.text?.length ?? file.content?.length ?? 0)) > 20 * 1024 * 1024)) {
       setStatus('文件超过 20MB，已拒绝载入');
       return;
     }
@@ -224,12 +262,13 @@ export const ComparePanel: React.FC = () => {
       setStatus(`${document.label} 为只读文件，请使用另存为`);
       return;
     }
-    const options = { encoding: document.encoding ?? 'utf8', lineEnding: document.lineEnding ?? 'LF' };
-    let result: Awaited<ReturnType<typeof window.electronAPI.writeTextFile>>;
+    const options: SaveFileOptions = { encoding: document.encoding ?? 'utf8', lineEnding: document.lineEnding ?? 'LF' };
+    let result: { success: boolean; path?: string; error?: string; modifiedAt?: number; current?: SaveConflict['current'] };
     if (document.path && !saveAs) {
       result = await api.writeTextFile(document.path, document.content, { ...options, expectedModifiedAt: document.modifiedAt, force });
     } else {
-      result = await api.saveFile(document.content, document.label, options);
+      const saved = await api.saveFile(document.content, document.label, options);
+      result = { success: saved.success, path: saved.path, error: saved.error };
     }
     if (!result.success || !result.path) {
       const messages: Record<string, string> = {

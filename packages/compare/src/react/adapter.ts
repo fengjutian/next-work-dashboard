@@ -35,6 +35,7 @@ export type {
 export type CompareTheme = 'light' | 'dark' | 'system';
 
 export interface PickedFileSingle {
+  name: string;
   path: string;
   text?: string;
   content?: string;
@@ -70,7 +71,13 @@ export interface CompareHostWorker {
   /** Spawn a fresh Web Worker that speaks TextDiffWorkerRequest/Response. */
   spawnDiffWorker(): Worker;
   /** Send `request` to the worker and await a single matching response. */
-  requestDiff(request: Omit<TextDiffWorkerRequest, 'id'>, signal?: AbortSignal, timeoutMs?: number): Promise<TextDiffWorkerResponse>;
+  requestDiff(
+    request:
+      | { operation: 'hunks'; original: string; modified: string }
+      | { operation: 'patch'; original: string; modified: string; originalLabel: string; modifiedLabel: string; contextLines: number },
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<TextDiffWorkerResponse>;
 }
 
 export interface CompareHostEvents {
