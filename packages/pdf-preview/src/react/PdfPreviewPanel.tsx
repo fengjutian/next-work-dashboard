@@ -15,6 +15,7 @@ import { INITIAL_PDF_STATE } from '../core/types';
 import { loadPdfFirstPage, renderPageToImage, type PdfDocumentProxy } from '../core/convert';
 import type { PdfPreviewState } from '../core/types';
 import { usePdfPreviewAdapter } from './context';
+import { ScrollArea } from './ScrollArea';
 
 export const PdfPreviewPanel: React.FC = () => {
   const { getPdfJs } = usePdfPreviewAdapter();
@@ -329,7 +330,7 @@ export const PdfPreviewPanel: React.FC = () => {
 
         {/* 预览 */}
         {state.status === 'loaded' && state.pageImageUrl && (
-          <div className="h-full overflow-auto">
+          <ScrollArea className="h-full">
             <div className="flex flex-col items-center py-4 px-4 gap-4">
               <div
                 className="shadow-lg rounded-sm bg-white"
@@ -363,7 +364,7 @@ export const PdfPreviewPanel: React.FC = () => {
                 </button>
               </div>
             </div>
-          </div>
+          </ScrollArea>
         )}
       </div>
 
