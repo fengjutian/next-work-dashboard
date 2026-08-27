@@ -5,6 +5,7 @@ module.exports = {
     './index.html',
     '../packages/pdf-preview/src/**/*.{ts,tsx}',
     '../packages/ppt-preview/src/**/*.{ts,tsx}',
+    '../packages/screen-capture/src/**/*.{ts,tsx}',
     '../packages/rss-reader/src/**/*.{ts,tsx}',
     '../packages/compare/src/**/*.{ts,tsx}',
     '../packages/english-lookup/src/**/*.{ts,tsx}',

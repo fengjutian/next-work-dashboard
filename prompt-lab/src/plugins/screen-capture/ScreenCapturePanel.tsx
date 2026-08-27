@@ -1,163 +1,58 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Circle, Download, Loader2, Monitor, Pause, Play, Square, Video } from '@/components/icons';
-import { Button } from '@/components/ui/button';
-import { notification } from 'antd';
+/**
+ * prompt-lab wrapper for @next-work-dashboard/screen-capture.
+ *
+ * The package is host-agnostic. This file wires it to prompt-lab's:
+ *  - `window.electronAPI.screenCapture.*` (Electron main-process bridge)
+ *  - `window.electronAPI.hide()` / `show()` (window control)
+ *  - `notification` from antd (toast)
+ *
+ * Keep this file thin.
+ */
 
-export type CaptureMode = 'screenshot' | 'recording';
+import React, { useMemo } from "react";
+import { notification } from "antd";
+import { ScreenCapturePanel as PublishedScreenCapturePanel, ScreenCaptureProvider, createAntdNotify, type ScreenCaptureAdapter } from "@next-work-dashboard/screen-capture/react";
+import type { CaptureMode } from "@next-work-dashboard/screen-capture/core";
+import "@next-work-dashboard/screen-capture/styles.css";
 
-const timeLabel = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-const save = (url: string, name: string) => { const link = document.createElement('a'); link.href = url; link.download = name; link.click(); };
-const hideCapturePanel = async () => {
-  window.dispatchEvent(new CustomEvent('screen-capture:hide'));
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
-  await new Promise((resolve) => window.setTimeout(resolve, 420));
-};
-const recordingCountdown = async () => {
-  for (const value of [3, 2, 1]) {
-    window.dispatchEvent(new CustomEvent('screen-capture:countdown', { detail: value }));
-    await new Promise((resolve) => window.setTimeout(resolve, 1000));
-  }
-  window.dispatchEvent(new CustomEvent('screen-capture:countdown', { detail: 0 }));
-  await new Promise((resolve) => window.setTimeout(resolve, 240));
-};
-const displayStream = async (target: 'app' | 'screen', audio: boolean) => {
-  if (target === 'screen') {
-    const sourceId = await window.electronAPI.screenCapture.getPrimaryScreenSourceId();
-    const desktopConstraints = {
-      audio: audio ? { mandatory: { chromeMediaSource: 'desktop' } } : false,
-      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxFrameRate: 30 } },
-    } as unknown as MediaStreamConstraints;
-    return navigator.mediaDevices.getUserMedia(desktopConstraints);
-  }
-  const confirmed = await window.electronAPI.screenCapture.setTarget(target, audio);
-  if (confirmed.target !== target || confirmed.systemAudio !== audio) throw new Error('主进程未确认录屏声音配置');
-  return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio });
-};
-
-export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> = ({ initialMode = 'screenshot' }) => {
-  const [notice, holder] = notification.useNotification();
-  const [mode, setMode] = useState<CaptureMode>(initialMode);
-  const [busy, setBusy] = useState(false);
-  const [imageUrl, setImageUrl] = useState('');
-  const [videoUrl, setVideoUrl] = useState('');
-  const [recording, setRecording] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [seconds, setSeconds] = useState(0);
-  const [target, setTarget] = useState<'app' | 'screen'>('screen');
-  const [systemAudio, setSystemAudio] = useState(true);
-  const [microphone, setMicrophone] = useState(false);
-  const recorder = useRef<MediaRecorder>();
-  const stream = useRef<MediaStream>();
-  const audioContext = useRef<AudioContext>();
-  const chunks = useRef<Blob[]>([]);
-
-  useEffect(() => { if (initialMode && !recording) setMode(initialMode); }, [initialMode, recording]);
-  useEffect(() => {
-    if (!recording || paused) return;
-    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [paused, recording]);
-  useEffect(() => {
-    const state = { recording, paused, seconds };
-    window.electronAPI.screenCapture.setRecordingState(state);
-    window.dispatchEvent(new CustomEvent('screen-capture:state', { detail: state }));
-  }, [paused, recording, seconds]);
-  useEffect(() => () => {
-    stream.current?.getTracks().forEach((track) => track.stop());
-    void audioContext.current?.close();
-    if (imageUrl) URL.revokeObjectURL(imageUrl);
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-  }, [imageUrl, videoUrl]);
-
-  const screenshot = useCallback(async () => {
-    setBusy(true); let capture: MediaStream | undefined;
-    try {
-      await hideCapturePanel();
-      capture = await displayStream(target, false);
-      const preview = document.createElement('video'); preview.srcObject = capture; preview.muted = true; await preview.play();
-      await new Promise((resolve) => window.setTimeout(resolve, 160));
-      const canvas = document.createElement('canvas'); canvas.width = preview.videoWidth; canvas.height = preview.videoHeight;
-      canvas.getContext('2d')?.drawImage(preview, 0, 0);
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error('无法生成截图');
-      setImageUrl((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(blob); });
-      notice.success({ message: '截屏完成', description: `${canvas.width} × ${canvas.height} PNG`, placement: 'bottomRight' });
-    } catch (error) {
-      if (!(error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name))) notice.error({ message: '截屏失败', description: error instanceof Error ? error.message : String(error) });
-    } finally { capture?.getTracks().forEach((track) => track.stop()); setBusy(false); }
-  }, [notice, target]);
-
-  const stop = useCallback(() => { if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop(); }, []);
-  const start = useCallback(async () => {
-    setBusy(true);
-    try {
-      await hideCapturePanel();
-      await recordingCountdown();
-      await window.electronAPI.hide();
-      await new Promise((resolve) => window.setTimeout(resolve, 320));
-      const display = await displayStream(target, systemAudio);
-      const displayAudioTracks = display.getAudioTracks();
-      if (systemAudio && displayAudioTracks.length === 0) {
-        display.getTracks().forEach((track) => track.stop());
-        throw new Error('Windows/Electron 没有返回系统声音轨道。请检查扬声器输出设备，并确认使用“整个屏幕”模式。');
-      }
-      const inactiveSystemTrack = systemAudio && displayAudioTracks.find((track) => track.readyState !== 'live');
-      if (inactiveSystemTrack) {
-        display.getTracks().forEach((track) => track.stop());
-        throw new Error(`系统声音轨道不可用：${inactiveSystemTrack.readyState}`);
-      }
-      let mic: MediaStream | undefined;
-      try { if (microphone) mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
-      catch (error) { display.getTracks().forEach((track) => track.stop()); throw new Error(`无法使用麦克风：${error instanceof Error ? error.message : String(error)}`); }
-      const sourceAudioTracks = [...(systemAudio ? display.getAudioTracks() : []), ...(microphone ? (mic?.getAudioTracks() ?? []) : [])];
-      sourceAudioTracks.forEach((track) => { track.enabled = true; });
-      let mixedAudioTracks: MediaStreamTrack[] = sourceAudioTracks;
-      if (sourceAudioTracks.length > 1) {
-        const audioStreams = [display.getAudioTracks().length ? display : undefined, mic].filter((item): item is MediaStream => Boolean(item));
-        const context = new AudioContext(); audioContext.current = context;
-        const destination = context.createMediaStreamDestination();
-        audioStreams.forEach((audioStream) => context.createMediaStreamSource(audioStream).connect(destination));
-        await context.resume();
-        mixedAudioTracks = destination.stream.getAudioTracks();
-      }
-      if ((systemAudio || microphone) && mixedAudioTracks.length === 0) {
-        display.getTracks().forEach((track) => track.stop()); mic?.getTracks().forEach((track) => track.stop());
-        throw new Error(systemAudio ? '系统没有返回可录制的声音轨道，请确认 Windows 允许系统音频捕获' : '麦克风没有返回声音轨道');
-      }
-      const capture = new MediaStream([...display.getVideoTracks(), ...mixedAudioTracks]);
-      stream.current = capture;
-      const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(MediaRecorder.isTypeSupported);
-      const mediaRecorder = new MediaRecorder(capture, { ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: 192_000, videoBitsPerSecond: 6_000_000 });
-      recorder.current = mediaRecorder; chunks.current = []; setSeconds(0); setPaused(false);
-      mediaRecorder.ondataavailable = (event) => { if (event.data.size) chunks.current.push(event.data); };
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks.current, { type: mediaRecorder.mimeType || 'video/webm' });
-        setVideoUrl((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(blob); });
-        capture.getTracks().forEach((track) => track.stop()); display.getTracks().forEach((track) => track.stop()); mic?.getTracks().forEach((track) => track.stop());
-        void audioContext.current?.close(); audioContext.current = undefined; stream.current = undefined; recorder.current = undefined;
-        setRecording(false); setPaused(false); notice.success({ message: '录屏完成', description: '录像可以预览或下载。', placement: 'bottomRight' });
-        void window.electronAPI.show();
-      };
-      display.getVideoTracks()[0]?.addEventListener('ended', stop, { once: true });
-      mediaRecorder.start(1000); setRecording(true);
-      const trackDetails = mixedAudioTracks.map((track) => `${track.label || '音轨'} (${track.readyState}${track.muted ? '，静音' : ''})`).join('；');
-      notice.info({ message: '录屏已开始', description: mixedAudioTracks.length ? `声音已连接：${trackDetails}` : '本次录制不包含声音', placement: 'bottomRight', duration: 6 });
-    } catch (error) {
-      void window.electronAPI.show();
-      if (!(error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name))) notice.error({ message: '无法开始录屏', description: error instanceof Error ? error.message : String(error) });
-    } finally { setBusy(false); }
-  }, [microphone, notice, stop, systemAudio, target]);
-
-  const pause = () => {
-    if (recorder.current?.state === 'recording') { recorder.current.pause(); setPaused(true); }
-    else if (recorder.current?.state === 'paused') { recorder.current.resume(); setPaused(false); }
+function createPromptLabAdapter(): ScreenCaptureAdapter {
+  return {
+    electronAPI: {
+      screenCapture: {
+        getPrimaryScreenSourceId: () => window.electronAPI.screenCapture.getPrimaryScreenSourceId(),
+        setTarget: (target, systemAudio) => window.electronAPI.screenCapture.setTarget(target, systemAudio),
+        setRecordingState: (state) => window.electronAPI.screenCapture.setRecordingState(state),
+      },
+      hide: () => window.electronAPI.hide(),
+      show: () => window.electronAPI.show(),
+    },
+    // The static `notification` is fine for the immutable adapter skeleton.
+    // The live `notice` from `useNotification` is plugged in below so
+    // toasts share the React lifecycle (so unmounting the panel cleans up
+    // the open toasts).
+    notify: createAntdNotify(notification as unknown as Parameters<typeof createAntdNotify>[0]),
   };
-  const url = mode === 'screenshot' ? imageUrl : videoUrl;
-  return <div className="flex h-full flex-col bg-background">{holder}
-    <header className="flex h-14 items-center gap-3 border-b px-5"><Monitor className="h-5 w-5 text-primary" /><div><h2 className="text-sm font-semibold">{mode === 'screenshot' ? '截取屏幕' : recording ? '正在录屏' : '录制屏幕'}</h2><p className="text-[11px] text-muted-foreground">{mode === 'screenshot' ? '设置捕获范围，截屏时窗口会自动隐藏' : '设置捕获范围和声音，开始后窗口会自动隐藏'}</p></div></header>
-    <main className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-auto p-6">
-      <div className="flex flex-wrap items-center justify-center gap-4 rounded-lg border bg-card px-4 py-2 text-xs"><span className="font-medium">捕获范围</span><label className="flex items-center gap-1.5"><input type="radio" checked={target === 'screen'} disabled={recording} onChange={() => setTarget('screen')} />整个屏幕</label><label className="flex items-center gap-1.5"><input type="radio" checked={target === 'app'} disabled={recording} onChange={() => setTarget('app')} />当前应用</label>{mode === 'recording' && <><span className="mx-1 h-4 w-px bg-border" /><label className="flex items-center gap-1.5"><input type="checkbox" checked={systemAudio} disabled={recording} onChange={(event) => setSystemAudio(event.target.checked)} />系统声音</label><label className="flex items-center gap-1.5"><input type="checkbox" checked={microphone} disabled={recording} onChange={(event) => setMicrophone(event.target.checked)} />麦克风</label></>}</div>
-      {url ? mode === 'screenshot' ? <img src={url} className="max-h-[calc(100vh-300px)] max-w-full rounded-lg border bg-black object-contain shadow-lg" alt="屏幕截图" /> : <video src={url} controls className="max-h-[calc(100vh-300px)] max-w-full rounded-lg border bg-black shadow-lg" /> : <div className="flex min-h-64 w-full max-w-3xl flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 text-muted-foreground"><Monitor className="mb-4 h-16 w-16 opacity-20" /><p className="text-sm">准备{mode === 'screenshot' ? '截取' : '录制'}{target === 'screen' ? '整个屏幕' : '当前应用'}</p><p className="mt-1 text-xs">开始前请确认捕获范围和声音选项</p></div>}
-      <div className="flex items-center gap-3">{mode === 'screenshot' ? <Button disabled={busy || recording} onClick={() => void screenshot()}>{busy ? <Loader2 className="mr-2 h-4 w-4" /> : <Camera className="mr-2 h-4 w-4" />}截取屏幕</Button> : recording ? <><span className="flex gap-2 rounded-md border px-3 py-2 font-mono text-sm"><Circle className="h-3 w-3 fill-red-500 text-red-500" />{timeLabel(seconds)}</span><Button variant="outline" onClick={pause}>{paused ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />}{paused ? '继续' : '暂停'}</Button><Button variant="destructive" onClick={stop}><Square className="mr-2 h-4 w-4 fill-current" />停止录制</Button></> : <Button disabled={busy} onClick={() => void start()}>{busy ? <Loader2 className="mr-2 h-4 w-4" /> : <Video className="mr-2 h-4 w-4" />}开始录屏</Button>}{url && !recording && <Button variant="outline" onClick={() => save(url, `${mode}-${new Date().toISOString().replace(/[:.]/g, '-')}.${mode === 'screenshot' ? 'png' : 'webm'}`)}><Download className="mr-2 h-4 w-4" />下载</Button>}</div>
-    </main></div>;
+}
+
+export const ScreenCapturePanel: React.FC<{ initialMode?: CaptureMode | null }> = ({ initialMode = "screenshot" }) => {
+  const [api, contextHolder] = notification.useNotification();
+  const baseAdapter = useMemo(() => createPromptLabAdapter(), []);
+  // Replace the static notify factory with the live API from
+  // useNotification so toasts survive React's lifecycle (the static
+  // `notification` is a singleton and can leak toasts across mounts).
+  const liveAdapter: ScreenCaptureAdapter = useMemo(
+    () => ({
+      ...baseAdapter,
+      notify: createAntdNotify(api as unknown as Parameters<typeof createAntdNotify>[0]),
+    }),
+    [baseAdapter, api],
+  );
+  return (
+    <>
+      {contextHolder}
+      <ScreenCaptureProvider adapter={liveAdapter}>
+        <PublishedScreenCapturePanel initialMode={initialMode} />
+      </ScreenCaptureProvider>
+    </>
+  );
 };
