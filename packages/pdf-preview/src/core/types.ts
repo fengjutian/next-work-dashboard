@@ -1,7 +1,7 @@
 /**
- * PDF Preview 模块 — 类型定义
+ * PDF Preview module — type definitions.
  *
- * 独立于框架，后续可抽取为独立 package。
+ * Host-agnostic. Consumed by the React layer in `../react`.
  */
 
 export type PdfStatus = 'idle' | 'loading' | 'loaded' | 'error';
@@ -11,9 +11,9 @@ export interface PdfPreviewState {
   fileName: string | null;
   pageCount: number;
   currentPage: number;
-  /** 当前页渲染为 data URL（用于 <img> 显示） */
+  /** Current page rendered as a data URL (for `<img>` display). */
   pageImageUrl: string | null;
-  /** 缩放比例，1 = 100% */
+  /** Zoom scale, 1 = 100% */
   scale: number;
   error: string | null;
 }

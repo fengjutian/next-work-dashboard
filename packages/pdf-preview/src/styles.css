@@ -1,0 +1,10 @@
+/**
+ * @next-work/pdf-preview host stylesheet
+ *
+ * Hosts should import this once before mounting the panel:
+ *   import "@next-work/pdf-preview/styles.css";
+ *
+ * No additional styles needed — utility classes are produced by the
+ * host's Tailwind config. This file is a placeholder for future
+ * PDF-preview-specific styles.
+ */

@@ -3,6 +3,7 @@ module.exports = {
   content: [
     './src/**/*.{ts,tsx}',
     './index.html',
+    '../packages/pdf-preview/src/**/*.{ts,tsx}',
     '../packages/rss-reader/src/**/*.{ts,tsx}',
     '../packages/video-generation/src/**/*.{ts,tsx}',
   ],
