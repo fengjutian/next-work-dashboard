@@ -88,7 +88,7 @@ async function parseExcel(file: File): Promise<DocumentSection[]> {
 }
 
 async function parsePowerPoint(file: File): Promise<DocumentSection[]> {
-  const [{ parsePptxFile }, JSZipModule] = await Promise.all([import('@/plugins/ppt-preview/convert'), import('jszip')]);
+  const [{ parsePptxFile }, JSZipModule] = await Promise.all([import('@next-work-dashboard/ppt-preview/core'), import('jszip')]);
   const [result, zip] = await Promise.all([parsePptxFile(file), new JSZipModule.default().loadAsync(await file.arrayBuffer())]);
   if (result.status === 'error' || !result.slides) throw new Error(result.error ?? 'PPTX 解析失败');
   return Promise.all(result.slides.map(async (slide) => {

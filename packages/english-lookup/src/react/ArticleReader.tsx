@@ -124,7 +124,7 @@ export interface ArticleReaderProps {
 }
 
 export function ArticleReader({ onBack, onLookup, speak, ai }: ArticleReaderProps) {
-  const { ai: aiAdapter } = useEnglishLookupAdapter();
+  const { ai: aiAdapter, storage } = useEnglishLookupAdapter();
   const [mode, setMode] = useState<"website" | "paste">("website");
   const [article, setArticle] = useState("");
   const [result, setResult] = useState<ArticleResult | null>(null);
@@ -132,7 +132,7 @@ export function ArticleReader({ onBack, onLookup, speak, ai }: ArticleReaderProp
   const [urlHistory, setUrlHistory] = useState<string[]>(() => {
     try {
       const value = JSON.parse(
-        localStorage.getItem(URL_HISTORY_KEY) || "[]",
+        storage.getItem(URL_HISTORY_KEY) || "[]",
       ) as unknown;
       return Array.isArray(value)
         ? value
@@ -161,11 +161,11 @@ export function ArticleReader({ onBack, onLookup, speak, ai }: ArticleReaderProp
   );
   useEffect(() => {
     try {
-      localStorage.setItem(URL_HISTORY_KEY, JSON.stringify(urlHistory));
+      storage.setItem(URL_HISTORY_KEY, JSON.stringify(urlHistory));
     } catch {
       /* Storage may be unavailable in a restricted renderer. */
     }
-  }, [urlHistory]);
+  }, [storage, urlHistory]);
 
   const translateText = async (input: string, title = "") => {
     setError("");

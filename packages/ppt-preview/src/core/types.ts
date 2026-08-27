@@ -1,7 +1,7 @@
 /**
  * PPT Preview 模块 — 类型定义
  *
- * 独立于框架，后续可抽取为独立 package。
+ * 独立于框架。
  */
 
 export type PptMode = 'generate' | 'preview';
@@ -49,7 +49,7 @@ export const INITIAL_PREVIEW_STATE: PptPreviewState = {
 
 export const INITIAL_GENERATE_STATE: PptGenerateState = {
   slides: [
-    { id: crypto.randomUUID?.() ?? '1', title: '', content: '' },
+    { id: globalThis.crypto?.randomUUID?.() ?? '1', title: '', content: '' },
   ],
   title: '',
   author: '',

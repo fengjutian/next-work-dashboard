@@ -1,0 +1,8 @@
+/**
+ * @next-work-dashboard/ppt-preview host stylesheet
+ *
+ * Hosts should import this once before mounting the panel:
+ *   import "@next-work-dashboard/ppt-preview/styles.css";
+ *
+ * CSS variables — utility classes are produced by the host's Tailwind config.
+ */

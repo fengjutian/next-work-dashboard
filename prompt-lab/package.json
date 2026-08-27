@@ -89,6 +89,7 @@
     "@next-work-dashboard/compare": "file:../packages/compare",
     "@next-work-dashboard/english-lookup": "file:../packages/english-lookup",
     "@next-work-dashboard/pdf-preview": "file:../packages/pdf-preview",
+    "@next-work-dashboard/ppt-preview": "file:../packages/ppt-preview",
     "@next-work-dashboard/rss-reader": "file:../packages/rss-reader",
     "@next-work-dashboard/video-generation": "file:../packages/video-generation",
     "@next-work-dashboard/windy": "file:../packages/windy",

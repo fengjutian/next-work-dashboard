@@ -50,7 +50,7 @@ async function parseSpreadsheet(file: File): Promise<string> {
 }
 
 async function parsePptx(file: File): Promise<string> {
-  const { parsePptxFile } = await import('@/plugins/ppt-preview/convert');
+  const { parsePptxFile } = await import('@next-work-dashboard/ppt-preview/core');
   const result = await parsePptxFile(file);
   if (result.status === 'error' || !result.slides) {
     throw new Error(result.error ?? 'PPTX 解析失败');
