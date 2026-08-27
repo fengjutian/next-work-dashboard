@@ -18,9 +18,8 @@ import {
   CompareProvider,
   type CompareAdapter,
   type CompareHostWorker,
-  type TextDiffWorkerRequest,
-  type TextDiffWorkerResponse,
 } from "@next-work-dashboard/compare/react";
+import type { TextDiffWorkerRequest, TextDiffWorkerResponse } from "@next-work-dashboard/compare/core";
 // eslint-disable-next-line import/default
 import TextDiffWorker from "@/lib/text-diff.worker?worker";
 import { useStore } from "@/store/store";
