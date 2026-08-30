@@ -9,7 +9,11 @@
  */
 
 import React, { useMemo } from "react";
-import { RssReaderPanel as PublishedRssReaderPanel, type RssReaderAdapter } from "@next-work-dashboard/rss-reader/react";
+import {
+  RssReaderPanel as PublishedRssReaderPanel,
+  RssReaderProvider,
+  type RssReaderAdapter,
+} from "@next-work-dashboard/rss-reader/react";
 import "@next-work-dashboard/rss-reader/styles.css";
 
 function createPromptLabAdapter(): RssReaderAdapter {
@@ -33,5 +37,9 @@ function createPromptLabAdapter(): RssReaderAdapter {
 
 export const RssReaderPanel: React.FC = () => {
   const adapter = useMemo(() => createPromptLabAdapter(), []);
-  return <PublishedRssReaderPanel adapter={adapter} />;
+  return (
+    <RssReaderProvider adapter={adapter}>
+      <PublishedRssReaderPanel />
+    </RssReaderProvider>
+  );
 };
