@@ -1,6 +1,6 @@
 {
   "name": "@next-work-dashboard/outline-scaffolder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reusable outline scaffolding, editorial analysis, and publishing UI foundations",
   "type": "module",
   "license": "MIT",
