@@ -1,7 +1,66 @@
 import { describe, expect, it } from 'vitest';
 import { buildRegenerationSkeleton, calculateClaimCoverage, chapterStateAfterSave, compactTextDiff, createChapterDocuments, createReadme, isChapterArticle, normalizeGeneratedMarkdown, parseOutline, sortChapterPaths } from '../src/core';
+import { createTransportOutlineScaffolderAdapter } from '../src/platform/transport';
+import { createHttpOutlineScaffolderTransport } from '../src/web';
+import { createTauriOutlineScaffolderTransport, type TauriInvoke } from '../src/tauri';
 
 describe('outline scaffolder', () => {
+  it('maps host calls onto the shared web and Tauri transport protocol', async () => {
+    const calls: Array<{ operation: string; args: unknown[] }> = [];
+    const adapter = createTransportOutlineScaffolderAdapter(async (operation, args) => {
+      calls.push({ operation, args });
+      return { success: true };
+    }, { model: 'test-model' });
+
+    await adapter.files.writeText('book', '01-intro.md', '# Intro');
+    await adapter.api.outlineResearch.search(['primary sources']);
+    await adapter.api.workBrowser.search.run({ query: 'timeline' });
+
+    expect(adapter.aiConfig).toMatchObject({ apiKey: '', baseUrl: '', model: 'test-model' });
+    expect(calls).toEqual([
+      { operation: 'workspace.writeTextFile', args: ['book', '01-intro.md', '# Intro'] },
+      { operation: 'outlineResearch.search', args: [['primary sources']] },
+      { operation: 'workBrowser.search.run', args: [{ query: 'timeline' }] },
+    ]);
+  });
+
+  it('posts Web host operations using the shared protocol', async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const transport = createHttpOutlineScaffolderTransport({
+      endpoint: '/api/outline',
+      fetch: async (input, init) => {
+        requests.push({ input, init });
+        return new Response(JSON.stringify({ result: { success: true } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    });
+
+    await expect(transport('workspace.listFiles', ['book'])).resolves.toEqual({ success: true });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].input).toBe('/api/outline');
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      operation: 'workspace.listFiles',
+      args: ['book'],
+    });
+  });
+
+  it('invokes a Tauri command using the shared protocol', async () => {
+    const calls: unknown[] = [];
+    const invoke: TauriInvoke = async <T>(command: string, args?: Record<string, unknown>) => {
+      calls.push({ command, args });
+      return { success: true } as T;
+    };
+    const transport = createTauriOutlineScaffolderTransport(invoke, 'chapter_host');
+
+    await transport('shell.openExternal', ['https://example.com']);
+    expect(calls).toEqual([{
+      command: 'chapter_host',
+      args: { operation: 'shell.openExternal', args: ['https://example.com'] },
+    }]);
+  });
+
   it('parses markdown and creates one document per chapter', () => {
     const nodes = parseOutline('# 第一篇 基础\n## 第一章 开始\n### 1.1 准备\n## 第二章 使用');
     const documents = createChapterDocuments(nodes, 'docs');
