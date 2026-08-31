@@ -49,7 +49,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           banner={banner}
           navbar={navbar}
           pageMap={await getPageMap()}
-          docsRepositoryBase="https://github.com/your-org/next-work-dashboard/tree/main/packages/docs-site"
+          docsRepositoryBase="https://github.com/your-org/next-work-dashboard/tree/main/docs-site"
           footer={footer}
           feedback={{ content: '有问题？提交反馈' }}
           editLink="在 GitHub 上编辑此页"

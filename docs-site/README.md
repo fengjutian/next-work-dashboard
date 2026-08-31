@@ -4,7 +4,8 @@
 
 ```bash
 npm install
-npm run dev --workspace @next-work-dashboard/docs-site
+cd docs-site
+npm run dev
 ```
 
 打开 <http://localhost:3000>。生产构建输出到 `out/`，仓库根目录的 `netlify.toml` 已配置 Netlify 部署。
