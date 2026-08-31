@@ -20,13 +20,14 @@ if (manifest.id !== pluginId || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(mani
 const zip = new JSZip();
 zip.file('plugin.json', `${JSON.stringify(manifest, null, 2)}\n`, { date: archiveDate });
 
-async function addDirectory(directory, archivePrefix) {
+async function addDirectory(directory, archivePrefix, skipNestedNodeModules = false) {
   const entries = await fs.readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (skipNestedNodeModules && entry.isDirectory() && entry.name === 'node_modules') continue;
     const absolute = path.join(directory, entry.name);
     const relative = `${archivePrefix}/${entry.name}`.replace(/\\/g, '/');
     if (entry.isSymbolicLink()) throw new Error(`Symbolic links are not allowed: ${absolute}`);
-    if (entry.isDirectory()) await addDirectory(absolute, relative);
+    if (entry.isDirectory()) await addDirectory(absolute, relative, skipNestedNodeModules);
     else if (entry.isFile()) zip.file(relative, await fs.readFile(absolute), { date: archiveDate });
   }
 }
@@ -42,7 +43,7 @@ async function addProductionDependency(name) {
     if (error.code === 'ENOENT') throw new Error(`Required plugin dependency is missing: ${name}`);
     throw error;
   }
-  await addDirectory(source, `node_modules/${name}`);
+  await addDirectory(source, `node_modules/${name}`, true);
   for (const dependency of Object.keys(packageJson.dependencies ?? {}).sort()) await addProductionDependency(dependency);
 }
 
