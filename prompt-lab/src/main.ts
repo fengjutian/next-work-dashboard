@@ -23,6 +23,9 @@ import { setupCodeVisualizerIPC } from './main/code-visualizer';
 import { setupAiVideoReaderIPC } from './main/ai-video-reader';
 import { resolveUserDataPath } from './main/user-data-path';
 import { registerPluginRuntimeHook } from './main/plugin-runtime-hooks';
+import { getWindowsAppIconPath } from './main/app-icon';
+
+const WINDOWS_APP_USER_MODEL_ID = 'com.fengjutian.next-work-dashboard';
 
 function configureUserDataPath(): void {
   const isolatedPath = resolveUserDataPath(app.getPath('appData'), app.getName(), app.isPackaged);
@@ -68,15 +71,17 @@ function configureWindowsJumpList(): void {
     {
       program: process.execPath,
       arguments: arguments_,
-      iconPath: process.execPath,
+      iconPath: getWindowsAppIconPath(),
       iconIndex: 0,
-      title: 'New Window',
-      description: 'Open a new next-work-dashboard window',
+      title: '新建窗口',
+      description: '打开新的 next-work-dashboard 窗口',
     },
   ]);
 }
 
 configureUserDataPath();
+app.setName('next-work-dashboard');
+if (process.platform === 'win32') app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
 protocol.registerSchemesAsPrivileged([
   { scheme: 'nwd-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);

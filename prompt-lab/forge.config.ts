@@ -123,7 +123,9 @@ const config: ForgeConfig = {
     onlyModules: ['node-pty', '@lancedb/lancedb', 'better-sqlite3'],
   },
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      setupIcon: windowsIcon,
+    }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),
