@@ -16,6 +16,8 @@
     "fetch:mpv": "node scripts/fetch-mpv.mjs",
     "plugin:pack": "node scripts/pack-plugin.mjs",
     "plugin:catalog": "node scripts/build-plugin-catalog.mjs",
+    "size:report": "node scripts/report-package-size.mjs",
+    "size:check": "node scripts/report-package-size.mjs --check",
     "start": "npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && npm run build:mycast && npm run build:voice-engine && electron-forge start",
     "package": "npm run prepare:package-output && npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && npm run build:mycast && npm run build:voice-engine && node scripts/run-forge.mjs package",
     "make": "npm run prepare:package-output && npm run prepare:native && npm run build:rag-worker && npm run build:disk-scanner && npm run build:net-probe && npm run build:mycast && npm run build:voice-engine && node scripts/run-forge.mjs make",

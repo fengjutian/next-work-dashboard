@@ -78,6 +78,60 @@ function lancedbNativePackage(): string {
   return `@lancedb/lancedb-linux-${process.arch}-gnu`;
 }
 
+function removePath(target: string): void {
+  if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
+}
+
+function keepOnlyFiles(directory: string, names: Set<string>): void {
+  if (!fs.existsSync(directory)) return;
+  for (const entry of fs.readdirSync(directory)) {
+    if (!names.has(entry)) removePath(path.join(directory, entry));
+  }
+}
+
+/**
+ * electron-rebuild needs the native package sources earlier in packaging, but
+ * the shipped application only needs JavaScript plus the rebuilt binaries.
+ * Trim compiler output, symbols, sources and foreign-architecture prebuilds
+ * after Forge has pruned/rebuilt the application.
+ */
+function pruneNativeBuildArtifacts(buildPath: string): void {
+  const nodeModules = path.join(buildPath, 'node_modules');
+  const nodePty = path.join(nodeModules, 'node-pty');
+  if (fs.existsSync(nodePty)) {
+    for (const entry of ['deps', 'node-addon-api', 'prebuilds', 'scripts', 'src', 'third_party', 'typings']) {
+      removePath(path.join(nodePty, entry));
+    }
+    const release = path.join(nodePty, 'build', 'Release');
+    keepOnlyFiles(release, new Set([
+      'conpty.node',
+      'conpty_console_list.node',
+      'pty.node',
+      'winpty-agent.exe',
+      'winpty.dll',
+      // Unix rebuilds produce the helper next to pty.node.
+      'spawn-helper',
+    ]));
+    if (fs.existsSync(path.join(nodePty, 'build'))) {
+      for (const entry of fs.readdirSync(path.join(nodePty, 'build'))) {
+        if (entry !== 'Release') removePath(path.join(nodePty, 'build', entry));
+      }
+    }
+  }
+
+  const betterSqlite = path.join(nodeModules, 'better-sqlite3');
+  if (fs.existsSync(betterSqlite)) {
+    for (const entry of ['deps', 'src']) removePath(path.join(betterSqlite, entry));
+    const release = path.join(betterSqlite, 'build', 'Release');
+    keepOnlyFiles(release, new Set(['better_sqlite3.node']));
+    if (fs.existsSync(path.join(betterSqlite, 'build'))) {
+      for (const entry of fs.readdirSync(path.join(betterSqlite, 'build'))) {
+        if (entry !== 'Release') removePath(path.join(betterSqlite, 'build', entry));
+      }
+    }
+  }
+}
+
 const config: ForgeConfig = {
   hooks: {
     packageAfterCopy: async (_forgeConfig, buildPath) => {
@@ -92,6 +146,9 @@ const config: ForgeConfig = {
       copyProductionDependencyTree('better-sqlite3', buildPath, projectRoot, copied);
       copyProductionDependencyTree('ws', buildPath, projectRoot, copied);
     },
+    packageAfterPrune: async (_forgeConfig, buildPath) => {
+      pruneNativeBuildArtifacts(buildPath);
+    },
   },
   packagerConfig: {
     ...(process.platform === 'win32' && fs.existsSync(windowsIcon) ? { icon: windowsIcon } : {}),
@@ -105,7 +162,7 @@ const config: ForgeConfig = {
       ...(fs.existsSync(mycastResource) ? [mycastResource] : []),
       ...(process.env.NWD_BUNDLE_NET_PROBE === '1' && fs.existsSync(netProbeResource) ? [netProbeResource] : []),
       ...(process.env.NWD_BUNDLE_VOICE_ENGINE === '1' && fs.existsSync(voiceEngineResource) ? [voiceEngineResource] : []),
-      ...(fs.existsSync(ffmpegResource) && fs.readdirSync(ffmpegResource, { recursive: true }).some((entry) => /ffmpeg(?:\.exe)?$/i.test(String(entry))) ? [ffmpegResource] : []),
+      ...(process.env.NWD_BUNDLE_FFMPEG === '1' && fs.existsSync(ffmpegResource) && fs.readdirSync(ffmpegResource, { recursive: true }).some((entry) => /ffmpeg(?:\.exe)?$/i.test(String(entry))) ? [ffmpegResource] : []),
     ],
     asar: {
       // The work-browser webview cleaner runs inside an <webview> whose
