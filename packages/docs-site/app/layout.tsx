@@ -41,7 +41,9 @@ const footer = (
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" dir="ltr" suppressHydrationWarning>
-      <Head />
+      <Head>
+        <meta name="theme-color" content="#111827" />
+      </Head>
       <body>
         <Layout
           banner={banner}
