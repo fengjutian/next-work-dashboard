@@ -1,5 +1,5 @@
 import React from 'react';
-import { Puzzle, Plus, Blocks, Trash2, Code, Download, Upload } from '@/components/icons';
+import { Puzzle, Plus, Blocks, Trash2, Code, Download, Upload, Search } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { isDbReady, dbSetSetting, flushDbToDisk } from '@/db';
 import { loadUserPlugins, saveUserPlugins } from './user-plugin-store';
@@ -10,33 +10,8 @@ import { usePluginRegistryVersion } from '../usePluginRegistry';
 import { pluginStorage } from '../plugin-storage';
 import type { InstalledPluginState, MarketplaceCatalog, MarketplacePlugin, PluginInstallProgress } from '@/types/electron';
 import { availableUpdates, getMarketplaceUrl, installOnlinePlugin, loadMarketplace, marketplacePluginVersion, setMarketplaceUrl } from './marketplace';
-
-type PluginCategoryId = 'ai' | 'knowledge' | 'office' | 'development' | 'productivity' | 'system' | 'custom';
-
-const PLUGIN_CATEGORIES: Array<{ id: PluginCategoryId; label: string; description: string }> = [
-  { id: 'ai', label: 'AI 与创作', description: 'AI 会话、提示词和内容创作' },
-  { id: 'knowledge', label: '知识管理', description: '知识库、图谱、阅读和文档检索' },
-  { id: 'office', label: '办公文档', description: 'Office、PDF、白板与文本处理' },
-  { id: 'development', label: '开发工具', description: '代码、终端、数据库与系统分析' },
-  { id: 'productivity', label: '效率服务', description: '便签、翻译、天气和语言学习' },
-  { id: 'system', label: '系统组件', description: '工作台自身的管理能力' },
-  { id: 'custom', label: '自定义插件', description: '导入或创建的 Sandbox 插件' },
-];
-
-const BUILT_IN_CATEGORY: Record<string, PluginCategoryId> = {
-  ai: 'ai', chat: 'ai', prompts: 'ai', 'style-image': 'ai',
-  history: 'knowledge', graph: 'knowledge', weread: 'knowledge', 'document-knowledge': 'knowledge', 'product-spec': 'knowledge',
-  'office-studio': 'office', 'word-preview': 'office', 'excel-preview': 'office', 'ppt-preview': 'office',
-  'pdf-preview': 'office', excalidraw: 'office', compare: 'office',
-  'code-editor': 'development', terminal: 'development', database: 'development', 'disk-space': 'development',
-  'screen-capture': 'productivity', notes: 'productivity', translator: 'productivity', windy: 'productivity',
-  'hanyu-jinjie': 'productivity', lingohut: 'productivity',
-  'plugin-manager': 'system',
-};
-
-function pluginCategory(id: string, isUserPlugin: boolean): PluginCategoryId {
-  return isUserPlugin ? 'custom' : BUILT_IN_CATEGORY[id] ?? 'system';
-}
+import { categorizePlugins, filterPluginCategories, PLUGIN_CATEGORIES } from './model';
+import type { PluginCategoryId, PluginStatusFilter } from './model';
 
 // ── 主面板 ──
 
@@ -48,6 +23,8 @@ export const PluginManagerPanel: React.FC = () => {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [safeMode, setSafeMode] = React.useState(() => pluginStorage.isSafeMode());
   const [activeCategory, setActiveCategory] = React.useState<'all' | PluginCategoryId>('all');
+  const [statusFilter, setStatusFilter] = React.useState<PluginStatusFilter>('all');
+  const [query, setQuery] = React.useState('');
   const [onlineMode, setOnlineMode] = React.useState(false);
   const [catalog, setCatalog] = React.useState<MarketplaceCatalog | null>(null);
   const [marketplaceBusy, setMarketplaceBusy] = React.useState(false);
@@ -76,21 +53,25 @@ export const PluginManagerPanel: React.FC = () => {
 
   // 已存在的用户插件 ID 集合（每次渲染重新计算以保持同步）
   const userDefs = loadUserPlugins();
-  const userPluginIds = new Set(userDefs.map((d) => d.id));
-  const categorizedPlugins = PLUGIN_CATEGORIES.map((category) => ({
-    ...category,
-    plugins: allPlugins.filter((plugin) => pluginCategory(plugin.id, userPluginIds.has(plugin.id)) === category.id),
-  })).filter((category) => category.plugins.length > 0);
-  const visibleCategories = activeCategory === 'all'
-    ? categorizedPlugins
-    : categorizedPlugins.filter((category) => category.id === activeCategory);
+  const userPluginIds = React.useMemo(() => new Set(userDefs.map((definition) => definition.id)), [userDefs]);
+  const userDefsById = React.useMemo(() => new Map(userDefs.map((definition) => [definition.id, definition])), [userDefs]);
+  const categorizedPlugins = React.useMemo(
+    () => categorizePlugins(allPlugins, userPluginIds),
+    [allPlugins, userPluginIds],
+  );
+  const visibleCategories = React.useMemo(
+    () => filterPluginCategories(categorizedPlugins, { category: activeCategory, status: statusFilter, query }),
+    [activeCategory, categorizedPlugins, query, statusFilter],
+  );
+  const visibleCount = visibleCategories.reduce((count, category) => count + category.plugins.length, 0);
 
   // ── 删除用户插件 ──
   const handleDelete = (id: string) => {
+    const plugin = pluginRegistry.get(id);
+    if (!plugin || !window.confirm(`确定删除插件“${plugin.name}”吗？此操作不会删除插件产生的数据。`)) return;
     pluginRegistry.unregister(id);
     const defs = loadUserPlugins().filter((d) => d.id !== id);
     saveUserPlugins(defs);
-    userPluginIds.delete(id);
   };
 
   return (
@@ -167,6 +148,37 @@ export const PluginManagerPanel: React.FC = () => {
       ) : <>
       {/* 分类筛选 */}
       <div className="shrink-0 border-b bg-muted/20 px-4 py-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <label className="relative min-w-52 flex-1 sm:max-w-sm">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <span className="sr-only">搜索插件</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索名称或插件 ID"
+              className="h-8 w-full rounded-lg border border-input bg-background pl-8 pr-3 text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
+          <div className="flex rounded-lg border bg-background p-0.5" aria-label="插件状态筛选">
+            {([
+              ['all', '全部状态'],
+              ['enabled', '已启用'],
+              ['disabled', '已禁用'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={statusFilter === value}
+                onClick={() => setStatusFilter(value)}
+                className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${statusFilter === value ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">显示 {visibleCount}/{allPlugins.length}</span>
+        </div>
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5" role="tablist" aria-label="插件分类">
           <button
             type="button"
@@ -198,6 +210,19 @@ export const PluginManagerPanel: React.FC = () => {
           <p className="text-sm text-muted-foreground text-center py-16">
             暂无已注册的插件，点击"新建插件"开始
           </p>
+        ) : visibleCategories.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <Search className="mb-3 h-8 w-8 text-muted-foreground/50" />
+            <p className="text-sm font-medium text-foreground">没有匹配的插件</p>
+            <p className="mt-1 text-xs text-muted-foreground">尝试更换关键词、分类或启用状态</p>
+            <button
+              type="button"
+              className="mt-4 rounded-lg border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => { setQuery(''); setActiveCategory('all'); setStatusFilter('all'); }}
+            >
+              清除筛选
+            </button>
+          </div>
         ) : (
           <div className="space-y-7">
             {visibleCategories.map((category) => (
@@ -215,7 +240,7 @@ export const PluginManagerPanel: React.FC = () => {
                   {category.plugins.map((plugin) => {
                     const Icon = plugin.icon;
                     const isUserPlugin = userPluginIds.has(plugin.id);
-                    const def = userDefs.find((item) => item.id === plugin.id);
+                    const def = userDefsById.get(plugin.id);
                     const isScriptPlugin = def?.script != null && def.script.length > 0;
                     return (
                       <PluginCard
@@ -392,18 +417,20 @@ const PluginCard: React.FC<PluginCardProps> = ({
     {isUserPlugin && (
       <>
         <button
-          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+          className="absolute left-2 top-2 opacity-0 transition-all group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-destructive"
           onClick={() => onDelete(plugin.id)}
           title="删除插件"
+          aria-label={`删除 ${plugin.name}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
-        <button className="absolute top-2 left-14 opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-primary" onClick={() => onRollback(plugin.id)} title="回滚上一版本">回滚</button>
-        <button className="absolute top-2 left-24 opacity-0 group-hover:opacity-100 text-[10px] text-muted-foreground hover:text-primary" onClick={() => onLogs(plugin.id)} title="查看运行日志">日志</button>
+        <button className="absolute left-14 top-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-[10px] text-muted-foreground hover:text-primary" onClick={() => onRollback(plugin.id)} title="回滚上一版本">回滚</button>
+        <button className="absolute left-24 top-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-[10px] text-muted-foreground hover:text-primary" onClick={() => onLogs(plugin.id)} title="查看运行日志">日志</button>
         <button
-          className="absolute top-2 left-8 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all"
+          className="absolute left-8 top-2 opacity-0 transition-all group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-primary"
           onClick={() => onExport(plugin.id)}
           title="导出 .nwd 插件"
+          aria-label={`导出 ${plugin.name}`}
         >
           <Download className="h-3.5 w-3.5" />
         </button>
@@ -418,6 +445,9 @@ const PluginCard: React.FC<PluginCardProps> = ({
         }`}
         onClick={() => onToggle(plugin.id)}
         title={plugin.enabled ? '点击禁用' : '点击启用'}
+        role="switch"
+        aria-checked={plugin.enabled}
+        aria-label={`${plugin.enabled ? '禁用' : '启用'} ${plugin.name}`}
       >
         <span
           className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -430,8 +460,8 @@ const PluginCard: React.FC<PluginCardProps> = ({
     {/* 图标 */}
     <div className={`p-3 rounded-xl ${
       plugin.enabled
-        ? isUserPlugin
-          ? 'bg-success/10 bg-success/10 text-success text-success'
+          ? isUserPlugin
+          ? 'bg-success/10 text-success'
           : 'bg-primary-light text-primary'
         : 'bg-muted text-muted-foreground'
     }`}>
@@ -464,7 +494,7 @@ const PluginCard: React.FC<PluginCardProps> = ({
         </span>
       )}
       {isUserPlugin && !isScriptPlugin && (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 bg-success/10 text-success text-success font-medium">
+        <span className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
           自定义
         </span>
       )}
