@@ -3,6 +3,7 @@ import path from 'node:path';
 import { setMainWindow, removeMainWindow, getTray } from './globals';
 import { getWebviewCleanerPreloadPath, WORK_BROWSER_PARTITION } from './work-browser/cleaner';
 import { isSafeWebNavigation } from '../core/work-browser/security/url-policy';
+import { getAppIconPath } from './app-icon';
 
 export function createWindow(preloadPath: string) {
   const win = new BrowserWindow({
@@ -11,6 +12,7 @@ export function createWindow(preloadPath: string) {
     minWidth: 800,
     minHeight: 500,
     title: 'next-work-dashboard',
+    icon: getAppIconPath(),
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#ffffff',

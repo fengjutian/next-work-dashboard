@@ -25,6 +25,8 @@ const mycastResource = path.join(projectRoot, 'resources', 'mycast');
 const netProbeResource = path.join(projectRoot, 'resources', 'net-probe');
 const voiceEngineResource = path.join(projectRoot, 'resources', 'voice-engine');
 const ffmpegResource = path.join(projectRoot, 'resources', 'ffmpeg');
+const iconsResource = path.join(projectRoot, 'resources', 'icons');
+const windowsIcon = path.join(iconsResource, 'next-work-dashboard-app-icon-v2-colorful.ico');
 
 function resolveInstalledPackage(name: string, fromDirectory: string): string | null {
   const segments = name.split('/');
@@ -92,7 +94,9 @@ const config: ForgeConfig = {
     },
   },
   packagerConfig: {
+    ...(process.platform === 'win32' && fs.existsSync(windowsIcon) ? { icon: windowsIcon } : {}),
     extraResource: [
+      ...(fs.existsSync(iconsResource) ? [iconsResource] : []),
       ...(fs.existsSync(path.join(projectRoot, 'resources', 'plugin-marketplace-public.pem')) ? [path.join(projectRoot, 'resources', 'plugin-marketplace-public.pem')] : []),
       ...(process.env.NWD_BUNDLE_OFFICECLI === '1' && fs.existsSync(path.join(projectRoot, 'resources', 'officecli')) ? [path.join(projectRoot, 'resources', 'officecli')] : []),
       ...(fs.existsSync(diskScannerResource) ? [diskScannerResource] : []),

@@ -1,9 +1,11 @@
 import { Tray, Menu, Notification, app, nativeImage } from 'electron';
 import { getMainWindow, getMainWindows, setTray, getTray } from './globals';
+import { getAppIconPath } from './app-icon';
 
-const idleIcon = nativeImage.createEmpty();
+let idleIcon = nativeImage.createEmpty();
 
 export function createTray() {
+  idleIcon = nativeImage.createFromPath(getAppIconPath()).resize({ width: 16, height: 16 });
   const t = new Tray(idleIcon.resize({ width: 16, height: 16 }));
   setTray(t);
 
