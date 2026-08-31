@@ -7,25 +7,54 @@ pagination: false
 ---
 
 <div className="hero">
-  <h1>工作的下一站，已经打开</h1>
-  <p>Next Work Dashboard 是一个面向知识工作者的可扩展桌面工作台。这里收录产品指南、插件手册和开发文档。</p>
+  <div className="heroEyebrow">LOCAL-FIRST · AI-NATIVE · EXTENSIBLE</div>
+  <h1>让复杂工作，回到一个清晰的工作空间</h1>
+  <p>Next Work Dashboard 将浏览、知识、媒体与自动化能力组合成可扩展的桌面工作台。</p>
   <div className="heroActions">
-    <a href="/docs/getting-started/">开始使用 →</a>
-    <a href="/docs/plugins/">浏览插件</a>
+    <a className="primaryAction" href="/docs/getting-started/">快速开始 <span>→</span></a>
+    <a className="secondaryAction" href="/docs/plugins/">浏览插件</a>
+  </div>
+  <div className="heroMeta">
+    <span>Electron + React</span><span>Nextra 文档</span><span>本地优先</span>
   </div>
 </div>
 
-<div className="featureGrid">
-  <div className="featureCard">
-    <h3>模块化工作台</h3>
-    <p>通过插件组合浏览器、知识库、媒体和自动化能力。</p>
+<section className="homeSection">
+  <div className="sectionHeading">
+    <span>核心能力</span>
+    <h2>为真实工作流而设计</h2>
+    <p>每项能力都可以独立使用，也可以通过插件和上下文协同工作。</p>
   </div>
-  <div className="featureCard">
-    <h3>本地优先</h3>
-    <p>核心数据留在设备上，同时保留灵活的同步与集成选择。</p>
+  <div className="featureGrid">
+    <a className="featureCard" href="/docs/plugins/">
+      <span className="featureIcon">⌘</span>
+      <h3>模块化工作台</h3>
+      <p>通过插件组合浏览器、知识库、媒体工具与自动化能力。</p>
+      <span className="cardLink">查看插件 →</span>
+    </a>
+    <a className="featureCard" href="/docs/getting-started/">
+      <span className="featureIcon">◇</span>
+      <h3>本地优先</h3>
+      <p>核心数据保留在设备上，同时提供灵活的同步与集成选择。</p>
+      <span className="cardLink">开始使用 →</span>
+    </a>
+    <a className="featureCard" href="/docs/">
+      <span className="featureIcon">✦</span>
+      <h3>为 AI 而生</h3>
+      <p>让模型在上下文中检索、总结和执行，不止停留在聊天窗口。</p>
+      <span className="cardLink">了解产品 →</span>
+    </a>
   </div>
-  <div className="featureCard">
-    <h3>为 AI 而生</h3>
-    <p>让模型在上下文中检索、总结和执行，而不是停留在聊天窗口。</p>
+</section>
+
+<section className="explorePanel">
+  <div>
+    <span className="panelLabel">开发者入口</span>
+    <h2>从文档到贡献，只需要几步</h2>
+    <p>了解项目结构、插件契约、构建流程与部署方式。</p>
   </div>
-</div>
+  <div className="exploreLinks">
+    <a href="/docs/development/"><strong>开发与贡献</strong><span>环境、架构和验证流程 →</span></a>
+    <a href="/docs/deployment/"><strong>部署文档站</strong><span>构建并发布到 Netlify →</span></a>
+  </div>
+</section>

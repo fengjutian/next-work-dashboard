@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileSearch, LockKeyhole, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
 import { analyzeContract, buildMarkdownReport, type ContractAnalysis, type PartyRole, type Severity } from './core';
-import { parseContractFile } from './parser';
-import './styles.css';
+import { parseContractFile as parseContractFileDefault } from './parser';
+
+export interface ContractGuardPanelProps {
+  parseContractFile?: (file: File) => Promise<string>;
+}
 
 const roles: PartyRole[] = ['甲方', '乙方', '买方', '卖方', '服务商', '客户'];
 const labels: Record<Severity, string> = { high: '高风险', medium: '中风险', low: '低风险' };
 function download(name: string, content: string, type: string) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 500); }
 
-export function ContractGuardPanel() {
+export function ContractGuardPanel({ parseContractFile = parseContractFileDefault }: ContractGuardPanelProps) {
   const picker = useRef<HTMLInputElement>(null); const [role, setRole] = useState<PartyRole>('乙方');
   const [result, setResult] = useState<ContractAnalysis>(); const [selected, setSelected] = useState<string>();
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');

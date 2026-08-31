@@ -69,7 +69,7 @@ const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default:
 const rssReader = preloadable(() => import('../rss-reader').then((m) => ({ default: m.RssReaderPanel })));
 const outlineScaffolder = preloadable(() => import('../outline-scaffolder').then((m) => ({ default: m.OutlineScaffolderPanel })));
 const classicalReading = preloadable(() => import('../classical-reading').then((m) => ({ default: m.ClassicalReadingPanel })));
-const contractGuard = preloadable(() => import('@next-work-dashboard/contract-guard').then((m) => ({ default: m.ContractGuardPanel })));
+const contractGuard = preloadable(() => import('../contract-guard').then((m) => ({ default: m.ContractGuardPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;

@@ -11,10 +11,11 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./core": { "types": "./dist/core.d.ts", "import": "./dist/core.js" }
+    "./core": { "types": "./dist/core.d.ts", "import": "./dist/core.js" },
+    "./styles.css": "./dist/styles.css"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').copyFileSync('src/styles.css','dist/styles.css')\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -29,8 +29,18 @@ body {
 }
 
 .hero {
-  padding: 5rem 0 2.5rem;
+  padding: 6.5rem 0 4rem;
   text-align: center;
+}
+
+.heroEyebrow,
+.panelLabel,
+.sectionHeading > span {
+  color: #7c3aed;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .hero h1 {
@@ -68,10 +78,31 @@ body {
   text-decoration: none;
 }
 
-.heroActions a:first-child {
-  background: #111827;
+.heroActions .primaryAction {
+  background: linear-gradient(135deg, #111827, #312e81);
   color: white;
+  box-shadow: 0 12px 32px rgba(49, 46, 129, 0.22);
 }
+
+.heroActions a:hover { transform: translateY(-1px); }
+
+.heroMeta {
+  color: #94a3b8;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: 1.2rem;
+  justify-content: center;
+  margin-top: 2.25rem;
+}
+
+.heroMeta span { align-items: center; display: inline-flex; gap: 0.4rem; }
+.heroMeta span::before { background: #8b5cf6; border-radius: 50%; content: ''; height: 0.3rem; width: 0.3rem; }
+
+.homeSection { padding: 2rem 0 5rem; }
+.sectionHeading { margin-bottom: 2rem; max-width: 650px; }
+.sectionHeading h2, .explorePanel h2 { font-size: clamp(1.8rem, 4vw, 2.6rem); letter-spacing: -0.04em; margin: 0.55rem 0 0.7rem; }
+.sectionHeading p, .explorePanel p { color: #64748b; margin: 0; }
 
 .featureGrid {
   display: grid;
@@ -85,7 +116,13 @@ body {
   border: 1px solid rgba(100, 116, 139, 0.18);
   border-radius: 1.25rem;
   padding: 1.4rem;
+  text-decoration: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
+
+.featureCard:hover { border-color: rgba(124, 58, 237, 0.35); box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08); transform: translateY(-3px); }
+.featureIcon { align-items: center; background: rgba(124, 58, 237, 0.1); border-radius: 0.75rem; color: #7c3aed; display: inline-flex; font-size: 1.1rem; height: 2.5rem; justify-content: center; width: 2.5rem; }
+.cardLink { color: #7c3aed; display: inline-block; font-size: 0.84rem; font-weight: 650; margin-top: 1.2rem; }
 
 .featureCard h3 { margin: 0 0 0.5rem; }
 .featureCard p { color: #64748b; margin: 0; }
@@ -96,7 +133,15 @@ html.dark .hero h1 {
 
 html.dark .featureCard { background: rgba(15, 23, 42, 0.5); }
 
+.explorePanel { align-items: center; background: linear-gradient(135deg, #0f172a, #1e1b4b); border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 1.5rem; color: white; display: grid; gap: 3rem; grid-template-columns: 1fr 1fr; margin: 0 0 5rem; padding: clamp(1.5rem, 5vw, 3rem); }
+.explorePanel p { color: #cbd5e1; }
+.exploreLinks { display: grid; gap: 0.75rem; }
+.exploreLinks a { background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0.9rem; color: white; display: flex; flex-direction: column; gap: 0.25rem; padding: 1rem 1.1rem; text-decoration: none; transition: background 160ms ease, transform 160ms ease; }
+.exploreLinks a:hover { background: rgba(255, 255, 255, 0.12); transform: translateX(3px); }
+.exploreLinks span { color: #cbd5e1; font-size: 0.82rem; }
+
 @media (max-width: 760px) {
   .featureGrid { grid-template-columns: 1fr; }
   .hero { padding-top: 3rem; }
+  .explorePanel { grid-template-columns: 1fr; }
 }
