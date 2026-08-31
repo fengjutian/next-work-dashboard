@@ -49,52 +49,9 @@ export async function initializeUserPlugins(): Promise<void> {
   }
 }
 
-/** 重新注册所有用户插件（启动时调用，幂等） */
-export function rehydrateUserPlugins(): void {
-  const defs = loadUserPlugins();
-  const nextOrder = pluginRegistry.getAll().length;
-  defs.forEach((def, i) => {
-    if (def.bundle) return;
-    if (pluginRegistry.get(def.id)) return;
-    const BoundPlugin: React.FC = () => (
-      <DynamicPlugin
-        pluginName={def.name}
-        content={def.content}
-        script={def.script}
-        style={def.style}
-        pluginId={def.id}
-        permissions={def.permissions}
-      />
-    );
-    const commands = def.manifest?.config
-      ? def.manifest.config.map((c) => ({
-          id: `${def.id}.setConfig.${c.key}`,
-          title: `设置 ${c.label ?? c.key}`,
-          category: def.name,
-        }))
-      : undefined;
-    const settings = def.manifest?.config?.map((item) => ({
-      key: item.key, label: item.label ?? item.key, type: item.type ?? 'string',
-      default: item.default, description: item.description,
-    }));
-    pluginRegistry.register({
-      id: def.id,
-      source: 'user',
-      name: def.name,
-      icon: Blocks,
-      component: BoundPlugin,
-      enabled: !pluginStorage.isSafeMode() && !pluginStorage.isCrashDisabled(def.id) && getUserPluginDefaultEnabled(def),
-      order: nextOrder + i,
-      contributions: { commands, settings },
-    });
-  });
-}
+function registerDefinition(def: UserPluginDef, order: number): void {
+  if (def.bundle) throw new Error('User Kernel plugins are disabled');
 
-/** 注册单个用户插件（用于新建/导入后即时注册） */
-export function registerUserPlugin(def: UserPluginDef): void {
-  if (def.bundle) {
-    throw new Error('User Kernel plugins are disabled');
-  }
   const BoundPlugin: React.FC = () => (
     <DynamicPlugin
       pluginName={def.name}
@@ -105,17 +62,19 @@ export function registerUserPlugin(def: UserPluginDef): void {
       permissions={def.permissions}
     />
   );
-  const commands = def.manifest?.config
-    ? def.manifest.config.map((c) => ({
-        id: `${def.id}.setConfig.${c.key}`,
-        title: `设置 ${c.label ?? c.key}`,
-        category: def.name,
-      }))
-    : undefined;
-  const settings = def.manifest?.config?.map((item) => ({
-    key: item.key, label: item.label ?? item.key, type: item.type ?? 'string',
-    default: item.default, description: item.description,
+  const commands = def.manifest?.config?.map((item) => ({
+    id: `${def.id}.setConfig.${item.key}`,
+    title: `设置 ${item.label ?? item.key}`,
+    category: def.name,
   }));
+  const settings = def.manifest?.config?.map((item) => ({
+    key: item.key,
+    label: item.label ?? item.key,
+    type: item.type ?? 'string',
+    default: item.default,
+    description: item.description,
+  }));
+
   pluginRegistry.register({
     id: def.id,
     source: 'user',
@@ -123,7 +82,23 @@ export function registerUserPlugin(def: UserPluginDef): void {
     icon: Blocks,
     component: BoundPlugin,
     enabled: !pluginStorage.isSafeMode() && !pluginStorage.isCrashDisabled(def.id) && getUserPluginDefaultEnabled(def),
-    order: pluginRegistry.getAll().length,
+    order,
     contributions: { commands, settings },
   });
+}
+
+/** 重新注册所有用户插件（启动时调用，幂等） */
+export function rehydrateUserPlugins(): void {
+  const defs = loadUserPlugins();
+  const nextOrder = pluginRegistry.getAll().length;
+  defs.forEach((def, i) => {
+    if (def.bundle) return;
+    if (pluginRegistry.get(def.id)) return;
+    registerDefinition(def, nextOrder + i);
+  });
+}
+
+/** 注册单个用户插件（用于新建/导入后即时注册） */
+export function registerUserPlugin(def: UserPluginDef): void {
+  registerDefinition(def, pluginRegistry.getAll().length);
 }

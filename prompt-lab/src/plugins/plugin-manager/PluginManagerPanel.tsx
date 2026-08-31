@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Puzzle, Plus, Blocks, Trash2, Code, Download, Upload, Search } from '@/components/icons';
 import { pluginRegistry } from '../registry';
 import { isDbReady, dbSetSetting, flushDbToDisk } from '@/db';
@@ -10,7 +10,7 @@ import { usePluginRegistryVersion } from '../usePluginRegistry';
 import { pluginStorage } from '../plugin-storage';
 import type { InstalledPluginState, MarketplaceCatalog, MarketplacePlugin, PluginInstallProgress } from '@/types/electron';
 import { availableUpdates, getMarketplaceUrl, installOnlinePlugin, loadMarketplace, marketplacePluginVersion, setMarketplaceUrl } from './marketplace';
-import { categorizePlugins, filterPluginCategories, PLUGIN_CATEGORIES } from './model';
+import { categorizePlugins, filterPluginCategories } from './model';
 import type { PluginCategoryId, PluginStatusFilter } from './model';
 
 // ── 主面板 ──
@@ -20,14 +20,14 @@ export const PluginManagerPanel: React.FC = () => {
 
   // 启动时从 localStorage 恢复用户插件
   // 弹层状态
-  const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [safeMode, setSafeMode] = React.useState(() => pluginStorage.isSafeMode());
-  const [activeCategory, setActiveCategory] = React.useState<'all' | PluginCategoryId>('all');
-  const [statusFilter, setStatusFilter] = React.useState<PluginStatusFilter>('all');
-  const [query, setQuery] = React.useState('');
-  const [onlineMode, setOnlineMode] = React.useState(false);
-  const [catalog, setCatalog] = React.useState<MarketplaceCatalog | null>(null);
-  const [marketplaceBusy, setMarketplaceBusy] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [safeMode, setSafeMode] = useState(() => pluginStorage.isSafeMode());
+  const [activeCategory, setActiveCategory] = useState<'all' | PluginCategoryId>('all');
+  const [statusFilter, setStatusFilter] = useState<PluginStatusFilter>('all');
+  const [query, setQuery] = useState('');
+  const [onlineMode, setOnlineMode] = useState(false);
+  const [catalog, setCatalog] = useState<MarketplaceCatalog | null>(null);
+  const [marketplaceBusy, setMarketplaceBusy] = useState(false);
 
   const refreshMarketplace = async () => {
     setMarketplaceBusy(true);
@@ -46,20 +46,20 @@ export const PluginManagerPanel: React.FC = () => {
     }
   };
 
-  React.useEffect(() => { void loadMarketplace().then(setCatalog).catch(() => undefined); }, []);
+  useEffect(() => { void loadMarketplace().then(setCatalog).catch(() => undefined); }, []);
 
   const allPlugins = pluginRegistry.getAll();
   const enabledCount = pluginRegistry.getEnabled().length;
 
   // 已存在的用户插件 ID 集合（每次渲染重新计算以保持同步）
   const userDefs = loadUserPlugins();
-  const userPluginIds = React.useMemo(() => new Set(userDefs.map((definition) => definition.id)), [userDefs]);
-  const userDefsById = React.useMemo(() => new Map(userDefs.map((definition) => [definition.id, definition])), [userDefs]);
-  const categorizedPlugins = React.useMemo(
+  const userPluginIds = useMemo(() => new Set(userDefs.map((definition) => definition.id)), [userDefs]);
+  const userDefsById = useMemo(() => new Map(userDefs.map((definition) => [definition.id, definition])), [userDefs]);
+  const categorizedPlugins = useMemo(
     () => categorizePlugins(allPlugins, userPluginIds),
     [allPlugins, userPluginIds],
   );
-  const visibleCategories = React.useMemo(
+  const visibleCategories = useMemo(
     () => filterPluginCategories(categorizedPlugins, { category: activeCategory, status: statusFilter, query }),
     [activeCategory, categorizedPlugins, query, statusFilter],
   );
@@ -328,12 +328,12 @@ const OnlinePluginList: React.FC<{
   busy: boolean;
   onRefresh: () => Promise<void>;
 }> = ({ catalog, busy, onRefresh }) => {
-  const [installing, setInstalling] = React.useState<string | null>(null);
-  const [installedPackages, setInstalledPackages] = React.useState<InstalledPluginState[]>([]);
-  const [selectedVersions, setSelectedVersions] = React.useState<Record<string, string>>({});
-  const [progress, setProgress] = React.useState<Record<string, PluginInstallProgress>>({});
-  const reloadInstalled = React.useCallback(async () => setInstalledPackages(await window.electronAPI.plugins.listInstalled()), []);
-  React.useEffect(() => {
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installedPackages, setInstalledPackages] = useState<InstalledPluginState[]>([]);
+  const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
+  const [progress, setProgress] = useState<Record<string, PluginInstallProgress>>({});
+  const reloadInstalled = useCallback(async () => setInstalledPackages(await window.electronAPI.plugins.listInstalled()), []);
+  useEffect(() => {
     void reloadInstalled().catch((error) => {
       console.error('[PluginManager] Failed to load installed packages', error);
     });
