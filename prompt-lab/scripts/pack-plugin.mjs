@@ -31,9 +31,35 @@ async function addDirectory(directory, archivePrefix) {
   }
 }
 
+const copiedDependencies = new Set();
+async function addProductionDependency(name) {
+  if (copiedDependencies.has(name)) return;
+  copiedDependencies.add(name);
+  const source = path.join(projectRoot, 'node_modules', ...name.split('/'));
+  let packageJson;
+  try { packageJson = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8')); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`Required plugin dependency is missing: ${name}`);
+    throw error;
+  }
+  await addDirectory(source, `node_modules/${name}`);
+  for (const dependency of Object.keys(packageJson.dependencies ?? {}).sort()) await addProductionDependency(dependency);
+}
+
+const packageDependencies = (manifest.packageDependencies ?? []).filter((dependency) => (
+  (!dependency.platforms?.length || dependency.platforms.includes(process.platform))
+  && (!dependency.architectures?.length || dependency.architectures.includes(process.arch))
+));
+if (manifest.packageDependencies?.length && packageDependencies.length === 0) {
+  throw new Error(`Plugin ${pluginId} has no dependencies for ${process.platform}-${process.arch}`);
+}
+for (const dependency of packageDependencies) await addProductionDependency(dependency.name);
+
 const declaredResources = manifest.packageResources?.length
   ? manifest.packageResources
-  : [{ from: `resources/${pluginId}`, to: 'resources' }];
+  : manifest.packageDependencies?.length
+    ? []
+    : [{ from: `resources/${pluginId}`, to: 'resources' }];
 const packageResources = declaredResources.filter((resource) => (
   (!resource.platforms?.length || resource.platforms.includes(process.platform))
   && (!resource.architectures?.length || resource.architectures.includes(process.arch))

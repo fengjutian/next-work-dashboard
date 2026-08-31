@@ -562,7 +562,8 @@ const builtInPlugins: Plugin[] = [
     name: '代码接口地图',
     icon: Code,
     component: CodeVisualizerPanel,
-    enabled: true,
+    // LanceDB is installed as the shared vector-runtime on first enable.
+    enabled: false,
     order: 9.1,
     keepAlive: true,
     preload: () => import('../code-visualizer'),

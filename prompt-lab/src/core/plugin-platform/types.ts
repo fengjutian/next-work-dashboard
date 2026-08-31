@@ -21,6 +21,12 @@ export interface PluginPackageManifest {
     platforms?: NodeJS.Platform[];
     architectures?: string[];
   }>;
+  /** Production dependency trees copied into node_modules inside a resource package. */
+  packageDependencies?: Array<{
+    name: string;
+    platforms?: NodeJS.Platform[];
+    architectures?: string[];
+  }>;
 }
 
 export type PluginDataMigrationOperation =

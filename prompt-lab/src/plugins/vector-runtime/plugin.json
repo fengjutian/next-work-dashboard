@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "vector-runtime",
+  "name": "Vector Runtime",
+  "description": "LanceDB shared runtime for semantic memory and document search",
+  "version": "1.0.0",
+  "pluginApiVersion": 1,
+  "engines": { "app": ">=0.5.0 <1.0.0" },
+  "resources": { "lancedb": { "version": "0.31.0" } },
+  "permissions": ["storage:vector-index"],
+  "packageDependencies": [
+    { "name": "@lancedb/lancedb" },
+    { "name": "apache-arrow" },
+    { "name": "@lancedb/lancedb-win32-x64-msvc", "platforms": ["win32"], "architectures": ["x64"] },
+    { "name": "@lancedb/lancedb-win32-arm64-msvc", "platforms": ["win32"], "architectures": ["arm64"] },
+    { "name": "@lancedb/lancedb-darwin-x64", "platforms": ["darwin"], "architectures": ["x64"] },
+    { "name": "@lancedb/lancedb-darwin-arm64", "platforms": ["darwin"], "architectures": ["arm64"] },
+    { "name": "@lancedb/lancedb-linux-x64-gnu", "platforms": ["linux"], "architectures": ["x64"] },
+    { "name": "@lancedb/lancedb-linux-arm64-gnu", "platforms": ["linux"], "architectures": ["arm64"] }
+  ]
+}

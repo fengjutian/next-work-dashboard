@@ -23,7 +23,14 @@ const statePath = (id: string) => path.join(packageRoot(id), 'state.json');
 const versionPath = (id: string, version: string) => path.join(packageRoot(id), 'versions', version);
 const downloadPath = (id: string, version: string) => path.join(root(), 'downloads', `${id}-${version}.zip.part`);
 const activeDownloads = new Map<string, AbortController>();
-const RESOURCE_PLUGIN_IDS = new Set(['video-player', 'office-studio', 'voice-input', 'network-observatory']);
+const RESOURCE_PACKAGE_BY_FEATURE = new Map([
+  ['video-player', 'video-player'],
+  ['office-studio', 'office-studio'],
+  ['voice-input', 'voice-input'],
+  ['network-observatory', 'network-observatory'],
+  ['document-knowledge', 'vector-runtime'],
+  ['work-browser', 'vector-runtime'],
+]);
 
 async function atomicWrite(filePath: string, data: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -385,11 +392,12 @@ export async function installCatalogPlugin(pluginId: string, version: string, ac
 
 export async function getPluginResourceRequirement(pluginId: string): Promise<import('../core/plugin-platform/types').PluginResourceRequirement> {
   safeId(pluginId);
-  if (!RESOURCE_PLUGIN_IDS.has(pluginId)) return { pluginId, required: false, installed: true };
-  const state = await loadState(pluginId);
-  if ((state.enabled && state.activeVersion) || hasBundledPluginResource(pluginId)) return { pluginId, required: true, installed: true, version: state.activeVersion ?? 'bundled' };
+  const packageId = RESOURCE_PACKAGE_BY_FEATURE.get(pluginId);
+  if (!packageId) return { pluginId, required: false, installed: true };
+  const state = await loadState(packageId);
+  if ((state.enabled && state.activeVersion) || hasBundledPluginResource(packageId)) return { pluginId, required: true, installed: true, version: state.activeVersion ?? 'bundled' };
   const catalog = await loadCachedCatalog();
-  const plugin = catalog?.plugins.find((item) => item.id === pluginId);
+  const plugin = catalog?.plugins.find((item) => item.id === packageId);
   const release = plugin?.versions
     ?.filter((item) => (item.channel ?? 'stable') === 'stable')
     .sort((left, right) => compareVersions(right.version, left.version))[0];
@@ -405,15 +413,31 @@ function hasBundledPluginResource(pluginId: string): boolean {
     'office-studio': [path.join(resourceRoot, 'officecli', `${process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'darwin' : 'linux'}-${process.arch === 'arm64' ? 'arm64' : 'x64'}`, `officecli${executable}`)],
     'voice-input': [path.join(resourceRoot, 'voice-engine', `nwd-voice-engine${executable}`)],
     'network-observatory': [path.join(resourceRoot, 'net-probe', `nwd-net-probe${executable}`)],
+    'vector-runtime': [
+      path.join(resourceRoot, 'app.asar.unpacked', 'node_modules', lancedbNativePackageName(), lancedbNativeFilename()),
+      ...(!app.isPackaged ? [path.join(app.getAppPath(), 'node_modules', lancedbNativePackageName(), lancedbNativeFilename())] : []),
+    ],
   };
   return (candidates[pluginId] ?? []).some((candidate) => fsSync.existsSync(candidate));
+}
+
+function lancedbNativePackageName(): string {
+  if (process.platform === 'win32') return `@lancedb/lancedb-win32-${process.arch}-msvc`;
+  if (process.platform === 'darwin') return `@lancedb/lancedb-darwin-${process.arch}`;
+  return `@lancedb/lancedb-linux-${process.arch}-gnu`;
+}
+
+function lancedbNativeFilename(): string {
+  if (process.platform === 'win32') return `lancedb.win32-${process.arch}-msvc.node`;
+  if (process.platform === 'darwin') return `lancedb.darwin-${process.arch}.node`;
+  return `lancedb.linux-${process.arch}-gnu.node`;
 }
 
 export async function ensurePluginResource(pluginId: string, report?: (progress: PluginInstallProgress) => void): Promise<InstalledPluginVersion | null> {
   const requirement = await getPluginResourceRequirement(pluginId);
   if (!requirement.required || requirement.installed) return null;
   if (!requirement.version) throw new Error('PLUGIN_RESOURCE_RELEASE_NOT_FOUND');
-  return installCatalogPlugin(pluginId, requirement.version, true, report);
+  return installCatalogPlugin(RESOURCE_PACKAGE_BY_FEATURE.get(pluginId) ?? pluginId, requirement.version, true, report);
 }
 
 export async function listInstalledPlugins(): Promise<InstalledPluginState[]> {

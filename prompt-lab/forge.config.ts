@@ -140,9 +140,11 @@ const config: ForgeConfig = {
       // The package declares every platform binary plus optional ML stacks.
       // This app uses only the core database API, so package the host binary and
       // peer Arrow runtime without copying ONNX, Sharp, macOS and Linux payloads.
-      copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied, false);
-      copyProductionDependencyTree(lancedbNativePackage(), buildPath, projectRoot, copied, false);
-      copyProductionDependencyTree('apache-arrow', buildPath, projectRoot, copied, false);
+      if (process.env.NWD_BUNDLE_VECTOR_RUNTIME === '1') {
+        copyProductionDependencyTree('@lancedb/lancedb', buildPath, projectRoot, copied, false);
+        copyProductionDependencyTree(lancedbNativePackage(), buildPath, projectRoot, copied, false);
+        copyProductionDependencyTree('apache-arrow', buildPath, projectRoot, copied, false);
+      }
       copyProductionDependencyTree('better-sqlite3', buildPath, projectRoot, copied);
       copyProductionDependencyTree('ws', buildPath, projectRoot, copied);
     },
@@ -177,7 +179,7 @@ const config: ForgeConfig = {
     },
   },
   rebuildConfig: {
-    onlyModules: ['node-pty', '@lancedb/lancedb', 'better-sqlite3'],
+    onlyModules: ['node-pty', 'better-sqlite3', ...(process.env.NWD_BUNDLE_VECTOR_RUNTIME === '1' ? ['@lancedb/lancedb'] : [])],
   },
   makers: [
     new MakerSquirrel({

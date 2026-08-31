@@ -1,5 +1,7 @@
 import { app } from 'electron';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import { resolveActivePluginPathSync } from './plugin-marketplace';
 
 export interface LanceMemoryChunk {
   id: string;
@@ -31,11 +33,19 @@ let databasePromise: Promise<any> | null = null;
 
 async function getDatabase(): Promise<any> {
   if (!databasePromise) {
-    databasePromise = import('@lancedb/lancedb').then(({ connect }) =>
-      connect(path.join(app.getPath('userData'), 'memory.lancedb')));
+    databasePromise = loadLanceDb().then(({ connect }) => connect(path.join(app.getPath('userData'), 'memory.lancedb')));
     databasePromise.catch(() => { databasePromise = null; });
   }
   return databasePromise;
+}
+
+async function loadLanceDb(): Promise<{ connect: (uri: string) => Promise<any> }> {
+  const installedManifest = resolveActivePluginPathSync('vector-runtime', 'plugin.json');
+  if (installedManifest) {
+    return createRequire(installedManifest)('@lancedb/lancedb') as { connect: (uri: string) => Promise<any> };
+  }
+  try { return await import('@lancedb/lancedb'); }
+  catch { throw new Error('VECTOR_RUNTIME_NOT_INSTALLED'); }
 }
 
 export async function replaceLanceMemoryIndex(chunks: LanceMemoryChunk[]): Promise<void> {
