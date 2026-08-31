@@ -1,0 +1,21 @@
+---
+title: 开发与贡献
+description: 为 Next Work Dashboard 创建功能与插件。
+---
+
+# 开发与贡献
+
+新增产品能力时优先实现为插件。插件接口位于 `prompt-lab/src/plugins/types.ts`，内置插件在 `prompt-lab/src/plugins/built-in/index.ts` 注册。
+
+## 常用命令
+
+```bash
+cd prompt-lab
+npm run typecheck
+npm run lint
+npm test
+```
+
+## IPC 约定
+
+新增 IPC channel 时，需要同步主进程 handler、preload bridge 和 `electron.d.ts` 类型声明，并运行 `npm run check:ipc`。

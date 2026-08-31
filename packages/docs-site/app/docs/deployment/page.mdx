@@ -1,0 +1,24 @@
+---
+title: 部署文档站
+description: 将 Nextra 文档发布到 Netlify。
+---
+
+# 部署文档站
+
+本站使用 Next.js 静态导出。构建后生成 `packages/docs-site/out`，可直接由 Netlify CDN 托管。
+
+## 本地构建
+
+```bash
+npm install
+npm run build --workspace @next-work-dashboard/docs-site
+```
+
+## 连接 Netlify
+
+1. 在 Netlify 中导入本 Git 仓库。
+2. Netlify 会读取仓库根目录的 `netlify.toml`。
+3. 提交到生产分支后会自动重新构建与发布。
+
+> [!NOTE]
+> 当前站点为纯静态输出，因此不需要配置 Next.js Serverless Functions。
