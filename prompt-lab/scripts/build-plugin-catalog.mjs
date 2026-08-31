@@ -17,7 +17,7 @@ async function collect(directory) {
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
     if (entry.isDirectory()) await collect(target);
-    else if (entry.name === 'artifact.json') metadataFiles.push(target);
+    else if (/^artifact(?:\.[a-z0-9-]+)?\.json$/i.test(entry.name)) metadataFiles.push(target);
   }
 }
 await collect(artifactRoot);

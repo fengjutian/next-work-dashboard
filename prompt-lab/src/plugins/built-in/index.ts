@@ -724,7 +724,8 @@ const builtInPlugins: Plugin[] = [
     name: '语音输入',
     icon: AudioLines,
     component: VoiceInputPanel,
-    enabled: true,
+    // The native voice runtime is installed from the marketplace on first enable.
+    enabled: false,
     order: 29,
     keepAlive: true,
     contributions: {

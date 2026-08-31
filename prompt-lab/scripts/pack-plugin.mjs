@@ -69,5 +69,7 @@ const metadata = {
   size: bytes.length,
   sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
 };
-await fs.writeFile(path.join(outputDirectory, 'artifact.json'), `${JSON.stringify(metadata, null, 2)}\n`);
+// Keep one metadata file per target so building another OS/architecture does
+// not erase artifacts already prepared for the same plugin version.
+await fs.writeFile(path.join(outputDirectory, `artifact.${process.platform}-${process.arch}.json`), `${JSON.stringify(metadata, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(metadata, null, 2)}\n`);
