@@ -31,18 +31,28 @@ async function addDirectory(directory, archivePrefix) {
   }
 }
 
-const packageResources = manifest.packageResources?.length
+const declaredResources = manifest.packageResources?.length
   ? manifest.packageResources
   : [{ from: `resources/${pluginId}`, to: 'resources' }];
+const packageResources = declaredResources.filter((resource) => (
+  (!resource.platforms?.length || resource.platforms.includes(process.platform))
+  && (!resource.architectures?.length || resource.architectures.includes(process.arch))
+));
+if (manifest.packageResources?.length && packageResources.length === 0) {
+  throw new Error(`Plugin ${pluginId} has no resources for ${process.platform}-${process.arch}`);
+}
 for (const resource of packageResources) {
   const source = path.resolve(projectRoot, resource.from);
   if (source !== projectRoot && !source.startsWith(`${projectRoot}${path.sep}`)) throw new Error(`Resource escapes project: ${resource.from}`);
-  try {
-    const stat = await fs.stat(source);
-    if (stat.isDirectory()) await addDirectory(source, resource.to || 'resources');
-    else if (stat.isFile()) zip.file(resource.to || `resources/${path.basename(source)}`, await fs.readFile(source), { date: archiveDate });
+  let stat;
+  try { stat = await fs.stat(source); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`Required plugin resource is missing: ${resource.from}`);
+    throw error;
   }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (stat.isDirectory()) await addDirectory(source, resource.to || 'resources');
+  else if (stat.isFile()) zip.file(resource.to || `resources/${path.basename(source)}`, await fs.readFile(source), { date: archiveDate });
+  else throw new Error(`Plugin resource is not a file or directory: ${resource.from}`);
 }
 
 const outputDirectory = path.join(projectRoot, '_artifacts', 'plugins', pluginId, manifest.version);

@@ -4,10 +4,15 @@
   "name": "语音输入",
   "version": "1.0.0",
   "pluginApiVersion": 1,
-  "engines": { "app": ">=0.2.0 <0.4.0" },
+  "engines": { "app": ">=0.5.0 <1.0.0" },
   "resources": {
     "voice-engine": { "version": "1.0.0", "executable": "resources/nwd-voice-engine.exe" }
   },
   "permissions": ["microphone", "process:voice-engine"],
-  "packageResources": [{ "from": "resources/voice-engine/nwd-voice-engine.exe", "to": "resources/nwd-voice-engine.exe" }]
+  "packageResources": [{
+    "from": "resources/voice-engine/nwd-voice-engine.exe",
+    "to": "resources/nwd-voice-engine.exe",
+    "platforms": ["win32"],
+    "architectures": ["x64"]
+  }]
 }

@@ -4,10 +4,15 @@
   "name": "网络观测台",
   "version": "1.0.0",
   "pluginApiVersion": 1,
-  "engines": { "app": ">=0.2.0 <0.4.0" },
+  "engines": { "app": ">=0.5.0 <1.0.0" },
   "resources": {
     "net-probe": { "version": "1.0.0", "executable": "resources/nwd-net-probe.exe" }
   },
   "permissions": ["network:probe", "process:net-probe"],
-  "packageResources": [{ "from": "resources/net-probe/nwd-net-probe.exe", "to": "resources/nwd-net-probe.exe" }]
+  "packageResources": [{
+    "from": "resources/net-probe/nwd-net-probe.exe",
+    "to": "resources/nwd-net-probe.exe",
+    "platforms": ["win32"],
+    "architectures": ["x64"]
+  }]
 }

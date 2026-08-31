@@ -14,7 +14,13 @@ export interface PluginPackageManifest {
   permissions?: string[];
   dataVersion?: number;
   migrations?: PluginDataMigration[];
-  packageResources?: Array<{ from: string; to?: string }>;
+  packageResources?: Array<{
+    from: string;
+    to?: string;
+    /** Optional target selectors used by the package builder. */
+    platforms?: NodeJS.Platform[];
+    architectures?: string[];
+  }>;
 }
 
 export type PluginDataMigrationOperation =
