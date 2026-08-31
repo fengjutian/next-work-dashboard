@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"], "jsx": "react-jsx", "strict": true,
+    "esModuleInterop": true, "skipLibCheck": true, "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "lucide-react": ["../../prompt-lab/node_modules/lucide-react/dist/lucide-react.d.ts"],
+      "mammoth": ["../../prompt-lab/node_modules/mammoth/lib/index.d.ts"],
+      "pdfjs-dist/*": ["../../prompt-lab/node_modules/pdfjs-dist/*"]
+    }
+  },
+  "include": ["src", "tests"]
+}

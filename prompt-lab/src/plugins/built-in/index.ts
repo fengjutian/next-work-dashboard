@@ -2,7 +2,7 @@
  * 内置插件注册 — 将现有面板组件包装为 Plugin 并注册到 registry。
  * 在 App 初始化时调用 registerBuiltInPlugins() 即可。
  */
-import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines, WorkBrowser, ShieldAudit } from '@/components/icons';
+import { Sparkles, Blocks, Network, StickyNote, Puzzle, BookOpen, Globe, Terminal, Database, Robot, Word, Excel, Ppt, Draw, Pdf, Code, FileText, FileSearch, Weread, HanyuJinjie, Languages, Image, HardDrive, Video, Phone, AudioLines, WorkBrowser, ShieldAudit, ShieldCheck } from '@/components/icons';
 import { lazy, type ComponentType } from 'react';
 import { pluginRegistry } from '../registry';
 import type { Plugin } from '../types';
@@ -69,6 +69,7 @@ const calcPath = preloadable(() => import('../calcpath').then((m) => ({ default:
 const rssReader = preloadable(() => import('../rss-reader').then((m) => ({ default: m.RssReaderPanel })));
 const outlineScaffolder = preloadable(() => import('../outline-scaffolder').then((m) => ({ default: m.OutlineScaffolderPanel })));
 const classicalReading = preloadable(() => import('../classical-reading').then((m) => ({ default: m.ClassicalReadingPanel })));
+const contractGuard = preloadable(() => import('@next-work-dashboard/contract-guard').then((m) => ({ default: m.ContractGuardPanel })));
 const WordPreviewPanel = wordPreview.component;
 const ExcelPreviewPanel = excelPreview.component;
 const PptPreviewPanel = pptPreview.component;
@@ -111,8 +112,26 @@ const CalcPathPanel = calcPath.component;
 const RssReaderPanel = rssReader.component;
 const OutlineScaffolderPanel = outlineScaffolder.component;
 const ClassicalReadingPanel = classicalReading.component;
+const ContractGuardPanel = contractGuard.component;
 
 const builtInPlugins: Plugin[] = [
+  {
+    id: 'contract-guard',
+    name: '合同风险分析',
+    icon: ShieldCheck,
+    component: ContractGuardPanel,
+    preload: contractGuard.preload,
+    enabled: false,
+    order: 9.3,
+    keepAlive: true,
+    activate: (context) => context.commands.register('contract-guard.import', () => {
+      window.dispatchEvent(new CustomEvent('contract-guard:import'));
+    }),
+    contributions: {
+      commands: [{ id: 'contract-guard.import', title: '导入合同并审查', category: '合同风险分析' }],
+      views: [{ id: 'contract-guard.main', title: '合同风险分析', component: ContractGuardPanel, location: 'main' }],
+    },
+  },
   {
     id: 'markdown-to-word',
     name: 'Markdown 转 Word',

@@ -89,6 +89,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@next-work-dashboard/outline-scaffolder": "file:../packages/outline-scaffolder",
     "@next-work-dashboard/compare": "file:../packages/compare",
+    "@next-work-dashboard/contract-guard": "file:../packages/contract-guard",
     "@next-work-dashboard/english-lookup": "file:../packages/english-lookup",
     "@next-work-dashboard/pdf-preview": "file:../packages/pdf-preview",
     "@next-work-dashboard/ppt-preview": "file:../packages/ppt-preview",
