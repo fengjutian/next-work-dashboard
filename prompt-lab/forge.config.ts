@@ -170,7 +170,7 @@ const config: ForgeConfig = {
       // The work-browser webview cleaner runs inside an <webview> whose
       // preload attribute can't read files from inside app.asar. Keep the
       // bundle accessible at the resolved path used by `cleaner.ts`.
-      unpack: '**/node_modules/{node-pty,@lancedb,better-sqlite3}/**\n**/.vite/build/webview-cleaner-preload.js\n**/.vite/build/webview-preload.js',
+      unpack: '**/{*.node,winpty-agent.exe,winpty.dll,webview-cleaner-preload.js,webview-preload.js}',
     },
     download: {
       mirrorOptions: {
