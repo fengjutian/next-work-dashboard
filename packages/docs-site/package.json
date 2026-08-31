@@ -9,11 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "^15.5.2",
+    "next": "16.0.7",
     "nextra": "^4.6.0",
     "nextra-theme-docs": "^4.6.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
