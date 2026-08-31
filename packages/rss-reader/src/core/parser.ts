@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { DOMParser, type Element as XmlElement } from '@xmldom/xmldom';
 import type { RssFeed, RssFeedItem } from './types';
 
@@ -42,7 +41,18 @@ function cleanMarkup(value: string): string {
 }
 
 function itemId(link: string, guid: string, title: string): string {
-  return crypto.createHash('sha256').update(guid || link || title).digest('hex').slice(0, 24);
+  // Keep the parser synchronous and browser-safe. Multiple seeded FNV-1a passes
+  // provide a stable 96-bit identifier without importing Node's crypto module.
+  const value = guid || link || title;
+  const seeds = [2166136261, 0x9e3779b9, 0x85ebca6b];
+  return seeds.map((seed) => {
+    let hash = seed >>> 0;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }).join('');
 }
 
 export function parseRssFeed(xml: string, feedUrl: string): RssFeed {
