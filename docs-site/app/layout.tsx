@@ -19,7 +19,7 @@ const banner = <Banner storageKey="nwd-docs-banner">文档站已支持 Netlify �
 const navbar = (
   <Navbar
     logo={<span className="brand"><span className="brandMark">N</span><strong>Next Work Dashboard</strong></span>}
-    projectLink="https://github.com/"
+    projectLink="https://github.com/fengjutian/next-work-dashboard"
   />
 )
 
@@ -34,7 +34,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           banner={banner}
           navbar={navbar}
           pageMap={await getPageMap()}
-          docsRepositoryBase="https://github.com/your-org/next-work-dashboard/tree/main/docs-site"
+          docsRepositoryBase="https://github.com/fengjutian/next-work-dashboard/tree/main/docs-site"
           footer={footer}
           feedback={{ content: '有问题？提交反馈' }}
           editLink="在 GitHub 上编辑此页"
